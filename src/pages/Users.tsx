@@ -136,7 +136,7 @@ export default function Users() {
                     {user.is_banned ? (
                       <Badge variant="destructive" className="text-xs">Bloqueado</Badge>
                     ) : (
-                      <Badge className="text-xs bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100">Ativo</Badge>
+                      <Badge className="text-xs bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">Ativo</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
