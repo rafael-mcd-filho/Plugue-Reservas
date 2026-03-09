@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { subDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -32,7 +33,16 @@ const PIE_COLORS = [
 ];
 
 export default function Dashboard() {
+  const { slug } = useParams<{ slug: string }>();
   const companies = getMockCompanies();
+  const isCompanyContext = !!slug;
+
+  // In company context, find the matching company and lock to it
+  const companyFromSlug = isCompanyContext
+    ? companies.find(c => c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') === slug
+        || c.id === slug) || companies[0]
+    : null;
+
   const [companyId, setCompanyId] = useState<string>('all');
   const [period, setPeriod] = useState('30');
   const [customStart, setCustomStart] = useState<Date | undefined>();
@@ -46,9 +56,11 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
+  const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+
   const data = useMemo(
-    () => getMockDashboardData(companyId, startDate, endDate),
-    [companyId, startDate, endDate],
+    () => getMockDashboardData(effectiveCompanyId, startDate, endDate),
+    [effectiveCompanyId, startDate, endDate],
   );
 
   const totals = useMemo(() => {
@@ -93,17 +105,19 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1">Análise de reservas, visitas e fila de espera</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Select value={companyId} onValueChange={setCompanyId}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Todas as unidades" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as unidades</SelectItem>
-              {companies.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {!isCompanyContext && (
+            <Select value={companyId} onValueChange={setCompanyId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Todas as unidades" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as unidades</SelectItem>
+                {companies.map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-[180px]">
