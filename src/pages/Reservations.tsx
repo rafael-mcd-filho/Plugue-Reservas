@@ -373,7 +373,6 @@ export default function Reservations() {
               <Select value={editStatus} onValueChange={v => setEditStatus(v as ReservationStatus)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pending">Pendente</SelectItem>
                   <SelectItem value="confirmed">Confirmada</SelectItem>
                   <SelectItem value="cancelled">Cancelada</SelectItem>
                   <SelectItem value="completed">Concluída</SelectItem>

@@ -1,4 +1,4 @@
-export type ReservationStatus = 'confirmed' | 'pending' | 'cancelled' | 'completed' | 'no-show';
+export type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'no-show';
 
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 
