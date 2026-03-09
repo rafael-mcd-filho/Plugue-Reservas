@@ -525,6 +525,57 @@ export type Database = {
           },
         ]
       }
+      whatsapp_message_logs: {
+        Row: {
+          company_id: string
+          created_at: string
+          error_details: string | null
+          id: string
+          message: string
+          phone: string
+          reservation_id: string | null
+          status: string
+          type: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          error_details?: string | null
+          id?: string
+          message: string
+          phone: string
+          reservation_id?: string | null
+          status?: string
+          type?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          error_details?: string | null
+          id?: string
+          message?: string
+          phone?: string
+          reservation_id?: string | null
+          status?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_message_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_message_logs_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: false
+            referencedRelation: "reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

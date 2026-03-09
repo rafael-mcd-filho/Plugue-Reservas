@@ -138,6 +138,18 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ number: phone, text: message }),
         });
         const data = await res.json();
+        const status = res.ok ? 'sent' : 'error';
+
+        // Log message
+        await supabaseAdmin.from('whatsapp_message_logs').insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: 'reminder_1h',
+          status,
+          error_details: res.ok ? null : JSON.stringify(data),
+        });
 
         if (res.ok) {
           sent++;
@@ -149,6 +161,15 @@ Deno.serve(async (req) => {
       } catch (err) {
         errors.push(`${reservation.id}: ${err}`);
         console.error(`Error sending reminder for ${reservation.id}:`, err);
+        await supabaseAdmin.from('whatsapp_message_logs').insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: 'reminder_1h',
+          status: 'error',
+          error_details: String(err),
+        });
       }
     }
 
