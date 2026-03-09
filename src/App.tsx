@@ -136,6 +136,9 @@ const App = () => (
               </ProtectedRoute>
             } />
 
+            {/* Public company page */}
+            <Route path="/:slug/p" element={<CompanyPublicPage />} />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
