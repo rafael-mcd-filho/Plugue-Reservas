@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
+import ReservationModal from '@/components/ReservationModal';
 
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: 'Dinheiro',
