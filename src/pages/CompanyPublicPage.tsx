@@ -32,6 +32,27 @@ export default function CompanyPublicPage() {
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
+  const { data: company, isLoading, error } = useQuery({
+    queryKey: ['company-public', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies' as any)
+        .select('*')
+        .eq('slug', slug!)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as Company | null;
+    },
+    enabled: !!slug,
+  });
+
+  const { trackStep } = useFunnelTracking(company?.id);
+
+  // Track page view
+  useEffect(() => {
+    if (company?.id) trackStep('page_view');
+  }, [company?.id, trackStep]);
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
