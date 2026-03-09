@@ -1,28 +1,39 @@
 import { ReactNode, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, X, Building2 } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 
 const navItems = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/' },
-  { label: 'Reservas', icon: CalendarDays, path: '/reservas' },
-  { label: 'Mesas', icon: Grid3X3, path: '/mesas' },
-  { label: 'Calendário', icon: CalendarDays, path: '/calendario' },
-  { label: 'Empresas', icon: Building2, path: '/empresas' },
+  { label: 'Dashboard', icon: LayoutDashboard, path: '/', roles: [] as string[] },
+  { label: 'Reservas', icon: CalendarDays, path: '/reservas', roles: [] },
+  { label: 'Mesas', icon: Grid3X3, path: '/mesas', roles: [] },
+  { label: 'Calendário', icon: CalendarDays, path: '/calendario', roles: [] },
+  { label: 'Empresas', icon: Building2, path: '/empresas', roles: ['superadmin'] },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { profile, roles, signOut } = useAuth();
+
+  const visibleNavItems = navItems.filter(item =>
+    item.roles.length === 0 || item.roles.some(r => roles.includes(r as any))
+  );
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
-      {/* Sidebar */}
       <aside className={cn(
         "fixed inset-y-0 left-0 z-50 w-64 bg-sidebar text-sidebar-foreground flex flex-col transition-transform duration-300 lg:relative lg:translate-x-0",
         mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -35,7 +46,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map(item => {
+          {visibleNavItems.map(item => {
             const isActive = location.pathname === item.path;
             return (
               <Link
@@ -56,13 +67,31 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="p-4 mx-3 mb-4 rounded-lg bg-sidebar-accent">
-          <p className="text-xs text-sidebar-foreground/60">Sistema de Gestão</p>
-          <p className="text-sm font-semibold text-sidebar-primary">ReservaFácil v1.0</p>
+        <div className="p-3 space-y-3">
+          {profile && (
+            <div className="flex items-center gap-3 px-4 py-2">
+              <div className="p-2 rounded-lg bg-sidebar-accent">
+                <User className="h-4 w-4 text-sidebar-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{profile.full_name || profile.email}</p>
+                <p className="text-xs text-sidebar-foreground/50 capitalize">
+                  {roles.length > 0 ? roles.join(', ') : 'Sem role'}
+                </p>
+              </div>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-4 w-4" />
+            Sair
+          </Button>
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="flex items-center gap-4 px-6 py-4 border-b border-border bg-card lg:hidden">
           <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg hover:bg-muted">
