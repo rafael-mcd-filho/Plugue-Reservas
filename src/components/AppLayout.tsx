@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
   { label: 'Reservas', icon: CalendarDays, path: '/reservas', showFor: 'all-except-superadmin' },
   { label: 'Mesas', icon: Grid3X3, path: '/mesas', showFor: 'all-except-superadmin' },
   { label: 'Calendário', icon: CalendarDays, path: '/calendario', showFor: 'all-except-superadmin' },
+  { label: 'Dashboard', icon: BarChart3, path: '/dashboard', showFor: ['superadmin'] },
   { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
   { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
   { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
