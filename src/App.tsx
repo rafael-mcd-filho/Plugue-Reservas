@@ -103,8 +103,6 @@ const App = () => (
             {/* Public company page: /:slug */}
             <Route path="/:slug" element={<CompanyPublicPage />} />
 
-            {/* Company login: /:slug/login */}
-            <Route path="/:slug/login" element={<CompanyLogin />} />
 
             {/* Company admin routes: /:slug/admin/* */}
             <Route path="/:slug/admin" element={

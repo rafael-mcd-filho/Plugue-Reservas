@@ -18,9 +18,6 @@ export default function DevToolbar() {
       <Link to="/sushi-zen-house" className="hover:underline text-primary">Sushi (público)</Link>
       <Link to="/sabor-arte" className="hover:underline text-primary">Sabor&Arte (público)</Link>
 
-      <span className="text-muted-foreground ml-2">Login empresa:</span>
-      <Link to="/bistro-do-chef/login" className="hover:underline text-primary">Bistrô login</Link>
-
       <span className="text-muted-foreground ml-2">Admin empresa:</span>
       <Link to="/bistro-do-chef/admin" className="hover:underline text-primary">Bistrô admin</Link>
       <Link to="/sushi-zen-house/admin" className="hover:underline text-primary">Sushi admin</Link>
