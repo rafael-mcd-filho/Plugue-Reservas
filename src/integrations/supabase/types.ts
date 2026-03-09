@@ -63,6 +63,7 @@ export type Database = {
           payment_methods: Json | null
           phone: string | null
           razao_social: string | null
+          reservation_duration: number
           responsible_email: string | null
           responsible_name: string | null
           responsible_phone: string | null
@@ -86,6 +87,7 @@ export type Database = {
           payment_methods?: Json | null
           phone?: string | null
           razao_social?: string | null
+          reservation_duration?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
@@ -109,6 +111,7 @@ export type Database = {
           payment_methods?: Json | null
           phone?: string | null
           razao_social?: string | null
+          reservation_duration?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
@@ -194,6 +197,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      restaurant_tables: {
+        Row: {
+          capacity: number
+          company_id: string
+          created_at: string
+          id: string
+          number: number
+          section: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          capacity?: number
+          company_id: string
+          created_at?: string
+          id?: string
+          number: number
+          section?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          capacity?: number
+          company_id?: string
+          created_at?: string
+          id?: string
+          number?: number
+          section?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "restaurant_tables_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
