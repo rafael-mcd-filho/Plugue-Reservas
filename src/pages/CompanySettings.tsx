@@ -185,6 +185,25 @@ export default function CompanySettings() {
                   </div>
                 ))}
               </div>
+
+              {/* Reservation Duration */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <Label className="text-sm font-medium">Duração de cada reserva (minutos)</Label>
+                <p className="text-xs text-muted-foreground mb-2">Define o intervalo entre os horários disponíveis para reserva</p>
+                <Select value={String(reservationDuration)} onValueChange={v => setReservationDuration(Number(v))}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 min</SelectItem>
+                    <SelectItem value="30">30 min</SelectItem>
+                    <SelectItem value="45">45 min</SelectItem>
+                    <SelectItem value="60">1 hora</SelectItem>
+                    <SelectItem value="90">1h30</SelectItem>
+                    <SelectItem value="120">2 horas</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
