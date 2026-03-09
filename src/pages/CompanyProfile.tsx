@@ -17,7 +17,7 @@ import { ptBR } from 'date-fns/locale';
 import { useState } from 'react';
 
 const statusConfig: Record<CompanyStatus, { label: string; className: string }> = {
-  active: { label: 'Ativa', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  active: { label: 'Ativa', className: 'bg-primary/15 text-primary border-primary/30' },
   paused: { label: 'Pausada', className: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
 

@@ -158,7 +158,7 @@ export default function Users() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-8 w-8 ${user.is_banned ? 'text-emerald-600 hover:text-emerald-700' : 'text-destructive hover:text-destructive'}`}
+                            className={`h-8 w-8 ${user.is_banned ? 'text-primary hover:text-accent' : 'text-destructive hover:text-destructive'}`}
                             title={user.is_banned ? 'Desbloquear' : 'Bloquear'}
                           >
                             {user.is_banned ? <Shield className="h-4 w-4" /> : <ShieldOff className="h-4 w-4" />}

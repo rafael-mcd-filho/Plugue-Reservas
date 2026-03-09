@@ -206,7 +206,7 @@ export default function CompanyPublicPage() {
                   {Object.entries(paymentMethods).map(([key, accepted]) => (
                     <div key={key} className="flex items-center gap-2 text-sm">
                       {accepted ? (
-                        <Check className="h-4 w-4 text-emerald-500" />
+                        <Check className="h-4 w-4 text-primary" />
                       ) : (
                         <X className="h-4 w-4 text-destructive" />
                       )}

@@ -279,7 +279,7 @@ function NotificationsTab() {
                     </TableCell>
                     <TableCell>
                       {n.is_read ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
                           <CheckCircle2 className="h-3.5 w-3.5" /> Lida
                           {n.read_at && (
                             <span className="text-muted-foreground ml-1">
