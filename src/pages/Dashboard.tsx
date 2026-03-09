@@ -238,7 +238,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-sm">
+            <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Distribuição</CardTitle>
                 <CardDescription>Status das reservas</CardDescription>
