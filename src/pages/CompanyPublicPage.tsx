@@ -1,9 +1,13 @@
-import { useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck } from 'lucide-react';
+import { Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
 
 export default function CompanyPublicPage() {
