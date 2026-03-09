@@ -41,6 +41,7 @@ interface ReservationModalProps {
   companyName: string;
   openingHours: OpeningHour[];
   reservationDuration?: number;
+  onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
 }
 
 const OCCASIONS = [
@@ -77,7 +78,7 @@ function generateTimeSlots(open: string, close: string, interval: number = 30): 
   return slots;
 }
 
-export default function ReservationModal({ open, onOpenChange, companyName, openingHours, reservationDuration = 30 }: ReservationModalProps) {
+export default function ReservationModal({ open, onOpenChange, companyName, openingHours, reservationDuration = 30, onStepChange }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
@@ -128,6 +129,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
       toast.error('Preencha nome e WhatsApp');
       return;
     }
+    onStepChange?.('completed');
     toast.success('Reserva solicitada com sucesso! Entraremos em contato para confirmar.');
     handleClose(false);
   };
@@ -225,7 +227,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
             <Button
               className="w-full"
               disabled={!selectedDate}
-              onClick={() => setStep(2)}
+              onClick={() => { setStep(2); onStepChange?.('time_select'); }}
             >
               Continuar <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
@@ -270,7 +272,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
             <Button
               className="w-full"
               disabled={!selectedTime}
-              onClick={() => setStep(3)}
+              onClick={() => { setStep(3); onStepChange?.('form_fill'); }}
             >
               Continuar <ArrowRight className="h-4 w-4 ml-2" />
             </Button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
 import ReservationModal from '@/components/ReservationModal';
+import { useFunnelTracking } from '@/hooks/useFunnelTracking';
 
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: 'Dinheiro',
@@ -31,18 +32,6 @@ export default function CompanyPublicPage() {
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoginLoading(false);
-    if (error) {
-      toast.error('Email ou senha inválidos');
-      return;
-    }
-    navigate(`/${slug}/admin`);
-  };
-
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
     queryFn: async () => {
@@ -57,6 +46,24 @@ export default function CompanyPublicPage() {
     },
     enabled: !!slug,
   });
+
+  const { trackStep } = useFunnelTracking(company?.id);
+
+  // Track page view
+  useEffect(() => {
+    if (company?.id) trackStep('page_view');
+  }, [company?.id, trackStep]);
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+    setLoginLoading(false);
+    if (loginErr) {
+      toast.error('Email ou senha inválidos');
+      return;
+    }
+    navigate(`/${slug}/admin`);
+  };
 
   if (isLoading) {
     return (
@@ -286,10 +293,14 @@ export default function CompanyPublicPage() {
 
       <ReservationModal
         open={showReservation}
-        onOpenChange={setShowReservation}
+        onOpenChange={(v) => {
+          setShowReservation(v);
+          if (v) trackStep('date_select');
+        }}
         companyName={company.name}
         openingHours={openingHours}
         reservationDuration={(company as any).reservation_duration ?? 30}
+        onStepChange={(step) => trackStep(step)}
       />
     </div>
   );

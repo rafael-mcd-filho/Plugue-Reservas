@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { subDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -16,6 +17,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { getMockDashboardData, getMockCompanies, type DailyStats } from '@/data/dashboardMock';
+import { supabase } from '@/integrations/supabase/client';
+import { useFunnelData } from '@/hooks/useFunnelData';
+import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 
 const PERIOD_OPTIONS = [
   { value: '7', label: 'Últimos 7 dias' },
@@ -48,6 +52,21 @@ export default function Dashboard() {
   const [customStart, setCustomStart] = useState<Date | undefined>();
   const [customEnd, setCustomEnd] = useState<Date | undefined>();
 
+  // Fetch real company ID from slug for funnel data
+  const { data: realCompany } = useQuery({
+    queryKey: ['company-id-from-slug', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies' as any)
+        .select('id')
+        .eq('slug', slug!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: !!slug,
+  });
+
   const { startDate, endDate } = useMemo(() => {
     if (period === 'custom' && customStart && customEnd) {
       return { startDate: customStart, endDate: customEnd };
@@ -57,6 +76,10 @@ export default function Dashboard() {
   }, [period, customStart, customEnd]);
 
   const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+
+  // Funnel data - use real company ID for company context, or 'all' for superadmin
+  const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
+  const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
 
   const data = useMemo(
     () => getMockDashboardData(effectiveCompanyId, startDate, endDate),
@@ -312,6 +335,13 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Funnel Chart */}
+      <ReservationFunnelChart
+        data={funnelData}
+        title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
+        description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
+      />
     </div>
   );
 }
