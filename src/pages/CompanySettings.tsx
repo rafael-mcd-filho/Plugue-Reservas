@@ -67,6 +67,7 @@ export default function CompanySettings() {
   const [instagram, setInstagram] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
+  const [reservationDuration, setReservationDuration] = useState(30);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
