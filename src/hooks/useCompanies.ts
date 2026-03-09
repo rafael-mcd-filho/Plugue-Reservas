@@ -77,12 +77,6 @@ export function useCreateCompany() {
     },
   });
 }
-      } else {
-        toast.error(`Erro ao criar empresa: ${err.message}`);
-      }
-    },
-  });
-}
 
 export function useUpdateCompany() {
   const qc = useQueryClient();
