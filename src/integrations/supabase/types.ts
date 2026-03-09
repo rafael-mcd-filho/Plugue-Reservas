@@ -17,32 +17,50 @@ export type Database = {
       companies: {
         Row: {
           address: string | null
+          cnpj: string | null
           created_at: string
           email: string | null
           id: string
           name: string
           phone: string | null
+          razao_social: string | null
+          responsible_email: string | null
+          responsible_name: string | null
+          responsible_phone: string | null
           slug: string
+          status: string
           updated_at: string
         }
         Insert: {
           address?: string | null
+          cnpj?: string | null
           created_at?: string
           email?: string | null
           id?: string
           name: string
           phone?: string | null
+          razao_social?: string | null
+          responsible_email?: string | null
+          responsible_name?: string | null
+          responsible_phone?: string | null
           slug: string
+          status?: string
           updated_at?: string
         }
         Update: {
           address?: string | null
+          cnpj?: string | null
           created_at?: string
           email?: string | null
           id?: string
           name?: string
           phone?: string | null
+          razao_social?: string | null
+          responsible_email?: string | null
+          responsible_name?: string | null
+          responsible_phone?: string | null
           slug?: string
+          status?: string
           updated_at?: string
         }
         Relationships: []

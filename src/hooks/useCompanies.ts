@@ -2,13 +2,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
+export type CompanyStatus = 'active' | 'paused' | 'defaulting';
+
 export interface Company {
   id: string;
   name: string;
   slug: string;
+  razao_social: string | null;
+  cnpj: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;
+  responsible_name: string | null;
+  responsible_email: string | null;
+  responsible_phone: string | null;
+  status: CompanyStatus;
   created_at: string;
   updated_at: string;
 }
@@ -46,7 +54,13 @@ export function useCreateCompany() {
       toast.success('Empresa criada com sucesso!');
     },
     onError: (err: any) => {
-      toast.error(`Erro ao criar empresa: ${err.message}`);
+      if (err.message?.includes('companies_cnpj_key')) {
+        toast.error('Já existe uma empresa com este CNPJ');
+      } else if (err.message?.includes('companies_slug_key')) {
+        toast.error('Já existe uma empresa com este slug');
+      } else {
+        toast.error(`Erro ao criar empresa: ${err.message}`);
+      }
     },
   });
 }

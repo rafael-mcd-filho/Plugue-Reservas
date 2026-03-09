@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ReservationProvider } from "@/contexts/ReservationContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
@@ -19,6 +19,17 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+function HomeRedirect() {
+  const { roles, loading } = useAuth();
+  if (loading) return null;
+  if (roles.includes('superadmin')) return <Navigate to="/empresas" replace />;
+  return (
+    <ReservationProvider>
+      <AppLayout><Dashboard /></AppLayout>
+    </ReservationProvider>
+  );
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -27,45 +38,31 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Signup />} />
             <Route path="/acesso-negado" element={<AccessDenied />} />
 
-            {/* Protected routes */}
             <Route path="/" element={
-              <ProtectedRoute>
-                <ReservationProvider>
-                  <AppLayout><Dashboard /></AppLayout>
-                </ReservationProvider>
-              </ProtectedRoute>
+              <ProtectedRoute><HomeRedirect /></ProtectedRoute>
             } />
             <Route path="/reservas" element={
-              <ProtectedRoute>
-                <ReservationProvider>
-                  <AppLayout><Reservations /></AppLayout>
-                </ReservationProvider>
+              <ProtectedRoute allowedRoles={['admin', 'operator']}>
+                <ReservationProvider><AppLayout><Reservations /></AppLayout></ReservationProvider>
               </ProtectedRoute>
             } />
             <Route path="/mesas" element={
-              <ProtectedRoute>
-                <ReservationProvider>
-                  <AppLayout><TableMap /></AppLayout>
-                </ReservationProvider>
+              <ProtectedRoute allowedRoles={['admin', 'operator']}>
+                <ReservationProvider><AppLayout><TableMap /></AppLayout></ReservationProvider>
               </ProtectedRoute>
             } />
             <Route path="/calendario" element={
-              <ProtectedRoute>
-                <ReservationProvider>
-                  <AppLayout><CalendarView /></AppLayout>
-                </ReservationProvider>
+              <ProtectedRoute allowedRoles={['admin', 'operator']}>
+                <ReservationProvider><AppLayout><CalendarView /></AppLayout></ReservationProvider>
               </ProtectedRoute>
             } />
             <Route path="/empresas" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
-                <ReservationProvider>
-                  <AppLayout><Companies /></AppLayout>
-                </ReservationProvider>
+                <AppLayout><Companies /></AppLayout>
               </ProtectedRoute>
             } />
 
