@@ -1,13 +1,34 @@
-import { useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck } from 'lucide-react';
+import { Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
 
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const [showLogin, setShowLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoginLoading(false);
+    if (error) {
+      toast.error('Email ou senha inválidos');
+      return;
+    }
+    navigate(`/${slug}/admin`);
+  };
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
@@ -83,6 +104,13 @@ export default function CompanyPublicPage() {
               )}
             </div>
           </div>
+          <button
+            onClick={() => setShowLogin(!showLogin)}
+            className="ml-auto text-sidebar-foreground/50 hover:text-sidebar-primary transition-colors"
+            title="Login administrativo"
+          >
+            <LogIn className="h-5 w-5" />
+          </button>
         </div>
       </div>
 
@@ -154,6 +182,29 @@ export default function CompanyPublicPage() {
                 referrerPolicy="no-referrer-when-downgrade"
                 title="Localização"
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Admin Login */}
+        {showLogin && (
+          <Card className="border-none shadow-sm">
+            <CardContent className="pt-5">
+              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h2>
+              <form onSubmit={handleLogin} className="space-y-3">
+                <div>
+                  <Label className="text-xs">Email</Label>
+                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@empresa.com" required />
+                </div>
+                <div>
+                  <Label className="text-xs">Senha</Label>
+                  <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                </div>
+                <Button type="submit" className="w-full" disabled={loginLoading}>
+                  {loginLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Entrar
+                </Button>
+              </form>
             </CardContent>
           </Card>
         )}
