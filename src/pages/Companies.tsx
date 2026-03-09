@@ -218,7 +218,7 @@ export default function Companies() {
           <Input placeholder="Buscar por nome, CNPJ ou responsável..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
         </div>
         <div className="flex gap-2 flex-wrap">
-          {(['all', 'active', 'paused', 'defaulting'] as const).map(s => (
+          {(['all', 'active', 'paused'] as const).map(s => (
             <Button
               key={s}
               variant={statusFilter === s ? 'default' : 'outline'}
