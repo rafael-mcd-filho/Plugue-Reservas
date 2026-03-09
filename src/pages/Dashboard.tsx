@@ -87,7 +87,7 @@ export default function Dashboard() {
   const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
   // Real dashboard data
-  const { dailyStats, totals, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const { dailyStats, totals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
   // Funnel data
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
