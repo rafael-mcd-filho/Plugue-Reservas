@@ -297,6 +297,7 @@ export default function CompanyPublicPage() {
           setShowReservation(v);
           if (v) trackStep('date_select');
         }}
+        companyId={company.id}
         companyName={company.name}
         openingHours={openingHours}
         reservationDuration={(company as any).reservation_duration ?? 30}
