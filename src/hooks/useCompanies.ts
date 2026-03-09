@@ -21,6 +21,8 @@ export interface Company {
   google_maps_url: string | null;
   description: string | null;
   logo_url: string | null;
+  opening_hours: any[] | null;
+  payment_methods: Record<string, boolean> | null;
   status: CompanyStatus;
   created_at: string;
   updated_at: string;
