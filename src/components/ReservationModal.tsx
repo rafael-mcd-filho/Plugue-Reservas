@@ -78,7 +78,7 @@ function generateTimeSlots(open: string, close: string, interval: number = 30): 
   return slots;
 }
 
-export default function ReservationModal({ open, onOpenChange, companyName, openingHours, reservationDuration = 30 }: ReservationModalProps) {
+export default function ReservationModal({ open, onOpenChange, companyName, openingHours, reservationDuration = 30, onStepChange }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
