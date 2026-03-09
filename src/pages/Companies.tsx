@@ -204,6 +204,28 @@ export default function Companies() {
                 )}
               </div>
 
+              <div className="space-y-1 pt-2">
+                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Redes Sociais e Mapa</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Instagram</Label>
+                  <Input value={form.instagram || ''} onChange={e => setForm({ ...form, instagram: e.target.value })} placeholder="@restaurante" />
+                </div>
+                <div>
+                  <Label>WhatsApp</Label>
+                  <Input value={form.whatsapp || ''} onChange={e => setForm({ ...form, whatsapp: e.target.value })} placeholder="5511999999999" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Link do Google Maps (embed)</Label>
+                  <Input value={form.google_maps_url || ''} onChange={e => setForm({ ...form, google_maps_url: e.target.value })} placeholder="https://www.google.com/maps/embed?pb=..." />
+                </div>
+                <div className="col-span-2">
+                  <Label>Descrição (visível na página pública)</Label>
+                  <Textarea value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Breve descrição do restaurante" rows={3} />
+                </div>
+              </div>
+
               <div className="flex justify-end gap-3 pt-2">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
                 <Button type="submit" disabled={createCompany.isPending || updateCompany.isPending}>
