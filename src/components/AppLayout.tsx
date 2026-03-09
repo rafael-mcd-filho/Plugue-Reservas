@@ -26,11 +26,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { profile, roles, signOut } = useAuth();
+  const { profile, roles, loading, signOut } = useAuth();
 
   const isSuperadmin = roles.includes('superadmin');
+  const rolesLoaded = !loading && roles.length > 0;
 
   const visibleNavItems = navItems.filter(item => {
+    if (!rolesLoaded) return false;
     if (item.showFor === 'all-except-superadmin') {
       return !isSuperadmin;
     }
