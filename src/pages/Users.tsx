@@ -136,7 +136,7 @@ export default function Users() {
                     {user.is_banned ? (
                       <Badge variant="destructive" className="text-xs">Bloqueado</Badge>
                     ) : (
-                      <Badge className="text-xs bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100">Ativo</Badge>
+                      <Badge className="text-xs bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">Ativo</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
@@ -158,7 +158,7 @@ export default function Users() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-8 w-8 ${user.is_banned ? 'text-emerald-600 hover:text-emerald-700' : 'text-destructive hover:text-destructive'}`}
+                            className={`h-8 w-8 ${user.is_banned ? 'text-primary hover:text-accent' : 'text-destructive hover:text-destructive'}`}
                             title={user.is_banned ? 'Desbloquear' : 'Bloquear'}
                           >
                             {user.is_banned ? <Shield className="h-4 w-4" /> : <ShieldOff className="h-4 w-4" />}

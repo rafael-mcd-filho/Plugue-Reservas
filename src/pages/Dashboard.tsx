@@ -31,11 +31,11 @@ const PERIOD_OPTIONS = [
 ];
 
 const PIE_COLORS = [
-  'hsl(145, 45%, 42%)',  // completed
-  'hsl(15, 80%, 50%)',   // confirmed
-  'hsl(38, 92%, 50%)',   // pending
+  'hsl(28, 90%, 27%)',   // completed (dark brown)
+  'hsl(28, 85%, 55%)',   // confirmed (orange)
+  'hsl(38, 80%, 55%)',   // pending (amber)
   'hsl(0, 72%, 51%)',    // cancelled
-  'hsl(20, 10%, 48%)',   // no-show
+  'hsl(0, 0%, 35%)',     // no-show
 ];
 
 export default function Dashboard() {
@@ -210,28 +210,28 @@ export default function Dashboard() {
                     <AreaChart data={dailyStats}>
                       <defs>
                         <linearGradient id="colorRes" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0} />
+                          <stop offset="5%" stopColor="hsl(28, 85%, 55%)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(28, 85%, 55%)" stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="colorComp" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0} />
+                          <stop offset="5%" stopColor="hsl(28, 90%, 27%)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(28, 90%, 27%)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: 'hsl(30, 20%, 99%)',
-                          border: '1px solid hsl(30, 15%, 88%)',
+                          backgroundColor: 'hsl(0, 0%, 100%)',
+                          border: '1px solid hsl(0, 0%, 88%)',
                           borderRadius: '0.5rem',
                           fontSize: '0.875rem',
                         }}
                       />
                       <Legend />
-                      <Area type="monotone" dataKey="reservations" name="Total" stroke="hsl(15, 80%, 50%)" fill="url(#colorRes)" strokeWidth={2} />
-                      <Area type="monotone" dataKey="completed" name="Concluídas" stroke="hsl(145, 45%, 42%)" fill="url(#colorComp)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="reservations" name="Total" stroke="hsl(28, 85%, 55%)" fill="url(#colorRes)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="completed" name="Concluídas" stroke="hsl(28, 90%, 27%)" fill="url(#colorComp)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -285,20 +285,20 @@ export default function Dashboard() {
                 <div className="h-[260px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: 'hsl(30, 20%, 99%)',
-                          border: '1px solid hsl(30, 15%, 88%)',
+                          backgroundColor: 'hsl(0, 0%, 100%)',
+                          border: '1px solid hsl(0, 0%, 88%)',
                           borderRadius: '0.5rem',
                           fontSize: '0.875rem',
                         }}
                       />
                       <Legend />
-                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(145, 45%, 42%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 92%, 50%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 80%, 55%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -314,20 +314,20 @@ export default function Dashboard() {
                 <div className="h-[260px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: 'hsl(30, 20%, 99%)',
-                          border: '1px solid hsl(30, 15%, 88%)',
+                          backgroundColor: 'hsl(0, 0%, 100%)',
+                          border: '1px solid hsl(0, 0%, 88%)',
                           borderRadius: '0.5rem',
                           fontSize: '0.875rem',
                         }}
                       />
                       <Legend />
                       <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="noShows" name="No-Shows" fill="hsl(20, 10%, 48%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="noShows" name="No-Shows" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

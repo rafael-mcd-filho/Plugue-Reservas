@@ -25,7 +25,7 @@ import { ptBR } from 'date-fns/locale';
 const notifTypeConfig: Record<string, { label: string; className: string }> = {
   info: { label: 'Informação', className: 'bg-blue-100 text-blue-700 border-blue-200' },
   warning: { label: 'Aviso', className: 'bg-amber-100 text-amber-700 border-amber-200' },
-  success: { label: 'Sucesso', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  success: { label: 'Sucesso', className: 'bg-primary/15 text-primary border-primary/30' },
   error: { label: 'Erro', className: 'bg-red-100 text-red-700 border-red-200' },
 };
 
@@ -279,7 +279,7 @@ function NotificationsTab() {
                     </TableCell>
                     <TableCell>
                       {n.is_read ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
                           <CheckCircle2 className="h-3.5 w-3.5" /> Lida
                           {n.read_at && (
                             <span className="text-muted-foreground ml-1">
