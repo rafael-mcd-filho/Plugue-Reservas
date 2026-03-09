@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { label: 'Mesas', icon: Grid3X3, path: '/mesas', showFor: 'all-except-superadmin' },
   { label: 'Calendário', icon: CalendarDays, path: '/calendario', showFor: 'all-except-superadmin' },
   { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
+  { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {

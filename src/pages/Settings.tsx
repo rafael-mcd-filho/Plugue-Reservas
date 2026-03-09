@@ -1,0 +1,343 @@
+import { useState } from 'react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import {
+  useSystemSettings, useUpdateSetting,
+  useAuditLogs,
+  useNotifications, useCreateNotification, useDeleteNotification,
+} from '@/hooks/useSettings';
+import { useCompanies } from '@/hooks/useCompanies';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
+const notifTypeConfig: Record<string, { label: string; className: string }> = {
+  info: { label: 'Informação', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+  warning: { label: 'Aviso', className: 'bg-amber-100 text-amber-700 border-amber-200' },
+  success: { label: 'Sucesso', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  error: { label: 'Erro', className: 'bg-red-100 text-red-700 border-red-200' },
+};
+
+const actionLabels: Record<string, string> = {
+  create_company: 'Criou empresa',
+  update_company: 'Atualizou empresa',
+  delete_company: 'Removeu empresa',
+  pause_company: 'Pausou empresa',
+  activate_company: 'Ativou empresa',
+  send_notification: 'Enviou notificação',
+  update_settings: 'Atualizou configurações',
+};
+
+export default function Settings() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <p className="text-muted-foreground mt-1">Configurações gerais do sistema</p>
+      </div>
+
+      <Tabs defaultValue="general" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="general" className="gap-2">
+            <SettingsIcon className="h-4 w-4" /> Geral
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className="gap-2">
+            <Bell className="h-4 w-4" /> Notificações
+          </TabsTrigger>
+          <TabsTrigger value="logs" className="gap-2">
+            <ScrollText className="h-4 w-4" /> Logs de Ações
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general"><GeneralTab /></TabsContent>
+        <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+        <TabsContent value="logs"><LogsTab /></TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function GeneralTab() {
+  const { data: settings = [], isLoading } = useSystemSettings();
+  const updateSetting = useUpdateSetting();
+
+  const getSetting = (key: string) => settings.find(s => s.key === key)?.value || '';
+
+  const [systemName, setSystemName] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [initialized, setInitialized] = useState(false);
+
+  if (!initialized && settings.length > 0) {
+    setSystemName(getSetting('system_name'));
+    setLogoUrl(getSetting('system_logo_url'));
+    setInitialized(true);
+  }
+
+  const handleSave = async () => {
+    await updateSetting.mutateAsync({ key: 'system_name', value: systemName });
+    await updateSetting.mutateAsync({ key: 'system_logo_url', value: logoUrl || null });
+  };
+
+  if (isLoading) {
+    return <Card className="border-none shadow-sm"><CardContent className="p-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>;
+  }
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base">Configurações Gerais</CardTitle>
+        <CardDescription>Nome e logo exibidos no sistema</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 max-w-md">
+          <div>
+            <Label>Nome do Sistema</Label>
+            <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="ReservaFácil" />
+          </div>
+          <div>
+            <Label>URL do Logo</Label>
+            <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
+            {logoUrl && (
+              <div className="mt-2 p-4 bg-muted rounded-lg">
+                <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+              </div>
+            )}
+          </div>
+          <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2 w-fit">
+            <Save className="h-4 w-4" /> Salvar Configurações
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function NotificationsTab() {
+  const { data: notifications = [], isLoading } = useNotifications();
+  const { data: companies = [] } = useCompanies();
+  const createNotification = useCreateNotification();
+  const deleteNotification = useDeleteNotification();
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm] = useState({ company_id: '' as string, title: '', message: '', type: 'info' });
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.title || !form.message) return;
+    await createNotification.mutateAsync({
+      company_id: form.company_id || null,
+      title: form.title,
+      message: form.message,
+      type: form.type,
+    });
+    setForm({ company_id: '', title: '', message: '', type: 'info' });
+    setDialogOpen(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Notificações</h2>
+          <p className="text-sm text-muted-foreground">Envie avisos para empresas específicas ou para todas</p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="gap-2"><Send className="h-4 w-4" /> Nova Notificação</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Enviar Notificação</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSend} className="space-y-4 mt-4">
+              <div>
+                <Label>Empresa (deixe vazio para todas)</Label>
+                <Select value={form.company_id} onValueChange={v => setForm({ ...form, company_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Todas as empresas" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as empresas</SelectItem>
+                    {companies.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Tipo</Label>
+                <Select value={form.type} onValueChange={v => setForm({ ...form, type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="info">Informação</SelectItem>
+                    <SelectItem value="warning">Aviso</SelectItem>
+                    <SelectItem value="success">Sucesso</SelectItem>
+                    <SelectItem value="error">Erro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Título *</Label>
+                <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Título da notificação" />
+              </div>
+              <div>
+                <Label>Mensagem *</Label>
+                <Textarea value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Mensagem..." rows={3} />
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={createNotification.isPending} className="gap-2">
+                  <Send className="h-4 w-4" /> Enviar
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <Card className="border-none shadow-sm"><CardContent className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</CardContent></Card>
+      ) : notifications.length === 0 ? (
+        <Card className="border-none shadow-sm">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <Bell className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            Nenhuma notificação enviada ainda.
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-none shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Tipo</TableHead>
+                <TableHead>Título</TableHead>
+                <TableHead>Empresa</TableHead>
+                <TableHead>Data</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {notifications.map(n => {
+                const tc = notifTypeConfig[n.type] || notifTypeConfig.info;
+                const company = companies.find(c => c.id === n.company_id);
+                return (
+                  <TableRow key={n.id}>
+                    <TableCell>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${tc.className}`}>
+                        {tc.label}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-sm">{n.title}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[300px]">{n.message}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {company ? (
+                        <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3" /> {company.name}</span>
+                      ) : 'Todas'}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {format(new Date(n.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Remover notificação?</AlertDialogTitle>
+                            <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => deleteNotification.mutate(n.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                              Remover
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function LogsTab() {
+  const { data: logs = [], isLoading } = useAuditLogs(100);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Logs de Ações</h2>
+        <p className="text-sm text-muted-foreground">Histórico de ações realizadas pelo superadmin</p>
+      </div>
+
+      {isLoading ? (
+        <Card className="border-none shadow-sm"><CardContent className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</CardContent></Card>
+      ) : logs.length === 0 ? (
+        <Card className="border-none shadow-sm">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <ScrollText className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            Nenhum log registrado ainda.
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-none shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Data/Hora</TableHead>
+                <TableHead>Ação</TableHead>
+                <TableHead>Entidade</TableHead>
+                <TableHead>IP</TableHead>
+                <TableHead>Detalhes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.map(log => (
+                <TableRow key={log.id}>
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-xs">
+                      {actionLabels[log.action] || log.action}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {log.entity_type || '—'}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground font-mono">
+                    {log.ip_address || '—'}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+                    {log.details && Object.keys(log.details).length > 0 ? JSON.stringify(log.details) : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </div>
+  );
+}
