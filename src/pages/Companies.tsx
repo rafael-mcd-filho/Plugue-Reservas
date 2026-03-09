@@ -304,14 +304,6 @@ export default function Companies() {
                         >
                           {company.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                         </Button>
-                        <Button
-                          variant="ghost" size="icon"
-                          className={`h-8 w-8 ${company.status === 'defaulting' ? 'text-destructive' : ''}`}
-                          onClick={(e) => toggleDefaulting(company, e)}
-                          title={company.status === 'defaulting' ? 'Regularizar' : 'Marcar inadimplente'}
-                        >
-                          <AlertTriangle className="h-4 w-4" />
-                        </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir">
