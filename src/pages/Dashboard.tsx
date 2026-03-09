@@ -105,17 +105,19 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1">Análise de reservas, visitas e fila de espera</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Select value={companyId} onValueChange={setCompanyId}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Todas as unidades" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as unidades</SelectItem>
-              {companies.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {!isCompanyContext && (
+            <Select value={companyId} onValueChange={setCompanyId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Todas as unidades" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as unidades</SelectItem>
+                {companies.map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-[180px]">
