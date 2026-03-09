@@ -118,14 +118,6 @@ export default function CompanyProfile() {
           >
             {company.status === 'paused' ? <><Play className="h-4 w-4" /> Ativar</> : <><Pause className="h-4 w-4" /> Pausar</>}
           </Button>
-          <Button
-            variant={company.status === 'defaulting' ? 'destructive' : 'outline'}
-            size="sm" className="gap-2"
-            onClick={toggleDefaulting}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            {company.status === 'defaulting' ? 'Regularizar' : 'Inadimplente'}
-          </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" className="gap-2">
