@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Pencil, Trash2, Pause, Play, ArrowUpDown, Building2, Circle } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Pause, Play, ArrowUpDown, Building2, Circle, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -294,6 +294,9 @@ export default function Companies() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary" onClick={() => navigate(`/${company.slug}`)} title="Acessar painel">
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => openEdit(company, e)} title="Editar">
                           <Pencil className="h-4 w-4" />
                         </Button>
