@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { Users, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
 type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 
@@ -22,6 +23,16 @@ interface RestaurantTable {
   capacity: number;
   section: string;
   status: TableStatus;
+}
+
+interface TodayReservation {
+  id: string;
+  table_id: string;
+  guest_name: string;
+  time: string;
+  duration_minutes: number;
+  party_size: number;
+  status: string;
 }
 
 const STATUS_COLORS: Record<TableStatus, string> = {
@@ -84,6 +95,80 @@ export default function TableMap() {
     },
     enabled: !!company?.id,
   });
+
+  // Fetch today's reservations for real-time status
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const { data: todayReservations = [] } = useQuery({
+    queryKey: ['today-reservations', company?.id, today],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservations' as any)
+        .select('id, table_id, guest_name, time, duration_minutes, party_size, status')
+        .eq('company_id', company.id)
+        .eq('date', today)
+        .in('status', ['confirmed', 'pending']);
+      if (error) throw error;
+      return (data as any[]) as TodayReservation[];
+    },
+    enabled: !!company?.id,
+    refetchInterval: 30000, // refresh every 30s
+  });
+
+  // Compute real-time status based on current time + reservations
+  const tableStatusMap = useMemo(() => {
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const map: Record<string, { status: TableStatus; reservation?: TodayReservation }> = {};
+
+    for (const table of tables) {
+      // Check if table is in maintenance (from DB status)
+      if (table.status === 'maintenance') {
+        map[table.id] = { status: 'maintenance' };
+        continue;
+      }
+
+      const tableRes = todayReservations.filter(r => r.table_id === table.id);
+
+      // Find currently active reservation (occupied)
+      const activeRes = tableRes.find(r => {
+        const [h, m] = r.time.split(':').map(Number);
+        const startMin = h * 60 + m;
+        const endMin = startMin + (r.duration_minutes || 30);
+        return nowMinutes >= startMin && nowMinutes < endMin;
+      });
+
+      if (activeRes) {
+        map[table.id] = { status: 'occupied', reservation: activeRes };
+        continue;
+      }
+
+      // Find upcoming reservation within next 60 min (reserved)
+      const upcomingRes = tableRes.find(r => {
+        const [h, m] = r.time.split(':').map(Number);
+        const startMin = h * 60 + m;
+        return startMin > nowMinutes && startMin <= nowMinutes + 60;
+      });
+
+      if (upcomingRes) {
+        map[table.id] = { status: 'reserved', reservation: upcomingRes };
+        continue;
+      }
+
+      map[table.id] = { status: 'available' };
+    }
+
+    return map;
+  }, [tables, todayReservations]);
+
+  // Use computed status for tables
+  const enrichedTables = useMemo(() =>
+    tables.map(t => ({
+      ...t,
+      status: tableStatusMap[t.id]?.status ?? t.status,
+      reservation: tableStatusMap[t.id]?.reservation,
+    })),
+    [tables, tableStatusMap]
+  );
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -156,10 +241,10 @@ export default function TableMap() {
   };
 
   const summary = {
-    available: tables.filter(t => t.status === 'available').length,
-    occupied: tables.filter(t => t.status === 'occupied').length,
-    reserved: tables.filter(t => t.status === 'reserved').length,
-    maintenance: tables.filter(t => t.status === 'maintenance').length,
+    available: enrichedTables.filter(t => t.status === 'available').length,
+    occupied: enrichedTables.filter(t => t.status === 'occupied').length,
+    reserved: enrichedTables.filter(t => t.status === 'reserved').length,
+    maintenance: enrichedTables.filter(t => t.status === 'maintenance').length,
   };
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[300px] w-full" /></div>;
@@ -185,11 +270,11 @@ export default function TableMap() {
             <span className="text-muted-foreground">({count})</span>
           </div>
         ))}
-        <span className="text-sm font-medium text-foreground ml-auto">Total: {tables.length} mesas</span>
+        <span className="text-sm font-medium text-foreground ml-auto">Total: {enrichedTables.length} mesas</span>
       </div>
 
       {/* Sections */}
-      {tables.length === 0 ? (
+      {enrichedTables.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-muted-foreground mb-4">Nenhuma mesa cadastrada ainda.</p>
@@ -200,7 +285,7 @@ export default function TableMap() {
         </Card>
       ) : (
         SECTIONS.map(section => {
-          const sectionTables = tables.filter(t => t.section === section);
+          const sectionTables = enrichedTables.filter(t => t.section === section);
           if (sectionTables.length === 0) return null;
           return (
             <Card key={section} className="border-none shadow-sm">
@@ -224,12 +309,23 @@ export default function TableMap() {
                       <span className={cn(
                         'inline-block text-xs px-2 py-0.5 rounded-full font-medium',
                         table.status === 'available' && 'bg-accent/20 text-accent-foreground',
-                        table.status === 'occupied' && 'bg-primary/20 text-primary',
+                        table.status === 'occupied' && 'bg-primary/20 text-primary-foreground',
                         table.status === 'reserved' && 'bg-yellow-500/20 text-yellow-700',
                         table.status === 'maintenance' && 'bg-muted text-muted-foreground',
                       )}>
                         {STATUS_LABELS[table.status]}
                       </span>
+                      {/* Reservation info */}
+                      {table.reservation && (
+                        <div className="mt-2 pt-2 border-t border-border/50 space-y-0.5">
+                          <p className="text-xs font-medium text-foreground truncate">{table.reservation.guest_name}</p>
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            <span className="text-xs">{table.reservation.time.slice(0, 5)}</span>
+                            <span className="text-xs">· {table.reservation.party_size}p</span>
+                          </div>
+                        </div>
+                      )}
                       {/* Actions */}
                       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => openEdit(table)} className="p-1 rounded hover:bg-background/80">
