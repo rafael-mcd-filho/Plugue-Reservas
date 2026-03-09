@@ -1,23 +1,159 @@
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useReservations } from '@/contexts/ReservationContext';
-import { TableStatusBadge } from '@/components/StatusBadge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { TableStatus } from '@/types/restaurant';
-import { Users } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-const statusColors: Record<TableStatus, string> = {
-  available: 'border-accent bg-accent/10 hover:bg-accent/20',
-  occupied: 'border-primary bg-primary/10 hover:bg-primary/20',
-  reserved: 'border-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20',
+type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
+
+interface RestaurantTable {
+  id: string;
+  company_id: string;
+  number: number;
+  capacity: number;
+  section: string;
+  status: TableStatus;
+}
+
+const STATUS_COLORS: Record<TableStatus, string> = {
+  available: 'border-accent bg-accent/10',
+  occupied: 'border-primary bg-primary/10',
+  reserved: 'border-yellow-500 bg-yellow-500/10',
   maintenance: 'border-muted-foreground/30 bg-muted opacity-60',
 };
 
-export default function TableMap() {
-  const { tables, reservations } = useReservations();
-  const today = new Date().toISOString().split('T')[0];
+const STATUS_LABELS: Record<TableStatus, string> = {
+  available: 'Disponível',
+  occupied: 'Ocupada',
+  reserved: 'Reservada',
+  maintenance: 'Manutenção',
+};
 
-  const sections = ['salão', 'varanda', 'privativo'] as const;
-  const sectionLabels = { salão: 'Salão Principal', varanda: 'Varanda', privativo: 'Área Privativa' };
+const STATUS_DOT: Record<TableStatus, string> = {
+  available: 'bg-accent',
+  occupied: 'bg-primary',
+  reserved: 'bg-yellow-500',
+  maintenance: 'bg-muted-foreground/40',
+};
+
+const SECTIONS = ['salão', 'varanda', 'privativo'] as const;
+const SECTION_LABELS: Record<string, string> = { salão: 'Salão Principal', varanda: 'Varanda', privativo: 'Área Privativa' };
+
+export default function TableMap() {
+  const { slug } = useParams<{ slug: string }>();
+  const qc = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
+  const [form, setForm] = useState({ number: '', capacity: '2', section: 'salão' as string });
+
+  // Fetch company
+  const { data: company } = useQuery({
+    queryKey: ['company-for-tables', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies' as any)
+        .select('id, name')
+        .eq('slug', slug!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: !!slug,
+  });
+
+  // Fetch tables
+  const { data: tables = [], isLoading } = useQuery({
+    queryKey: ['restaurant-tables', company?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('restaurant_tables' as any)
+        .select('*')
+        .eq('company_id', company.id)
+        .order('number', { ascending: true });
+      if (error) throw error;
+      return (data as any[]) as RestaurantTable[];
+    },
+    enabled: !!company?.id,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        company_id: company.id,
+        number: parseInt(form.number),
+        capacity: parseInt(form.capacity),
+        section: form.section,
+        status: 'available',
+        updated_at: new Date().toISOString(),
+      };
+      if (editingTable) {
+        const { error } = await supabase
+          .from('restaurant_tables' as any)
+          .update(payload as any)
+          .eq('id', editingTable.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('restaurant_tables' as any)
+          .insert(payload as any);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['restaurant-tables', company?.id] });
+      toast.success(editingTable ? 'Mesa atualizada!' : 'Mesa criada!');
+      closeModal();
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('restaurant_tables' as any)
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['restaurant-tables', company?.id] });
+      toast.success('Mesa removida!');
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const openCreate = () => {
+    const nextNumber = tables.length > 0 ? Math.max(...tables.map(t => t.number)) + 1 : 1;
+    setEditingTable(null);
+    setForm({ number: String(nextNumber), capacity: '2', section: 'salão' });
+    setModalOpen(true);
+  };
+
+  const openEdit = (table: RestaurantTable) => {
+    setEditingTable(table);
+    setForm({ number: String(table.number), capacity: String(table.capacity), section: table.section });
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditingTable(null);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.number || !form.capacity) { toast.error('Preencha todos os campos'); return; }
+    saveMutation.mutate();
+  };
 
   const summary = {
     available: tables.filter(t => t.status === 'available').length,
@@ -26,47 +162,57 @@ export default function TableMap() {
     maintenance: tables.filter(t => t.status === 'maintenance').length,
   };
 
+  if (isLoading) return <div className="space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[300px] w-full" /></div>;
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Mapa de Mesas</h1>
-        <p className="text-muted-foreground mt-1">Visualização do salão e status das mesas</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Mapa de Mesas</h1>
+          <p className="text-muted-foreground mt-1">Gerencie as mesas da unidade</p>
+        </div>
+        <Button onClick={openCreate} className="gap-2">
+          <Plus className="h-4 w-4" /> Nova Mesa
+        </Button>
       </div>
 
+      {/* Summary */}
       <div className="flex flex-wrap gap-4">
-        {Object.entries(summary).map(([status, count]) => (
+        {(Object.entries(summary) as [TableStatus, number][]).map(([status, count]) => (
           <div key={status} className="flex items-center gap-2 text-sm">
-            <div className={cn('w-3 h-3 rounded-full', {
-              'bg-accent': status === 'available',
-              'bg-primary': status === 'occupied',
-              'bg-yellow-500': status === 'reserved',
-              'bg-muted-foreground/40': status === 'maintenance',
-            })} />
-            <TableStatusBadge status={status as TableStatus} />
+            <div className={cn('w-3 h-3 rounded-full', STATUS_DOT[status])} />
+            <span className="text-muted-foreground">{STATUS_LABELS[status]}</span>
             <span className="text-muted-foreground">({count})</span>
           </div>
         ))}
+        <span className="text-sm font-medium text-foreground ml-auto">Total: {tables.length} mesas</span>
       </div>
 
-      {sections.map(section => {
-        const sectionTables = tables.filter(t => t.section === section);
-        if (sectionTables.length === 0) return null;
-        return (
-          <Card key={section} className="border-none shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">{sectionLabels[section]}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {sectionTables.map(table => {
-                  const tableReservation = reservations.find(r => r.tableId === table.id && r.date === today && (r.status === 'confirmed' || r.status === 'pending'));
-                  return (
+      {/* Sections */}
+      {tables.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-muted-foreground mb-4">Nenhuma mesa cadastrada ainda.</p>
+            <Button onClick={openCreate} variant="outline" className="gap-2">
+              <Plus className="h-4 w-4" /> Cadastrar primeira mesa
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        SECTIONS.map(section => {
+          const sectionTables = tables.filter(t => t.section === section);
+          if (sectionTables.length === 0) return null;
+          return (
+            <Card key={section} className="border-none shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-lg">{SECTION_LABELS[section]}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {sectionTables.map(table => (
                     <div
                       key={table.id}
-                      className={cn(
-                        'relative p-4 rounded-xl border-2 transition-all cursor-default',
-                        statusColors[table.status]
-                      )}
+                      className={cn('relative p-4 rounded-xl border-2 transition-all group', STATUS_COLORS[table.status])}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-lg font-bold">Mesa {table.number}</span>
@@ -75,21 +221,63 @@ export default function TableMap() {
                           <span className="text-xs">{table.capacity}</span>
                         </div>
                       </div>
-                      <TableStatusBadge status={table.status} />
-                      {tableReservation && (
-                        <div className="mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground">
-                          <div className="font-medium text-foreground">{tableReservation.guestName}</div>
-                          <div>{tableReservation.time} · {tableReservation.partySize} pessoas</div>
-                        </div>
-                      )}
+                      <span className={cn(
+                        'inline-block text-xs px-2 py-0.5 rounded-full font-medium',
+                        table.status === 'available' && 'bg-accent/20 text-accent-foreground',
+                        table.status === 'occupied' && 'bg-primary/20 text-primary',
+                        table.status === 'reserved' && 'bg-yellow-500/20 text-yellow-700',
+                        table.status === 'maintenance' && 'bg-muted text-muted-foreground',
+                      )}>
+                        {STATUS_LABELS[table.status]}
+                      </span>
+                      {/* Actions */}
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openEdit(table)} className="p-1 rounded hover:bg-background/80">
+                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                        <button onClick={() => deleteMutation.mutate(table.id)} className="p-1 rounded hover:bg-background/80">
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </button>
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })}
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })
+      )}
+
+      {/* Create/Edit Modal */}
+      <Dialog open={modalOpen} onOpenChange={v => { if (!v) closeModal(); else setModalOpen(true); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingTable ? 'Editar Mesa' : 'Nova Mesa'}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+            <div>
+              <Label>Número da Mesa</Label>
+              <Input type="number" min={1} value={form.number} onChange={e => setForm(f => ({ ...f, number: e.target.value }))} required />
+            </div>
+            <div>
+              <Label>Capacidade (pessoas)</Label>
+              <Input type="number" min={1} max={50} value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} required />
+            </div>
+            <div>
+              <Label>Seção</Label>
+              <Select value={form.section} onValueChange={v => setForm(f => ({ ...f, section: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SECTIONS.map(s => <SelectItem key={s} value={s}>{SECTION_LABELS[s]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" className="w-full" disabled={saveMutation.isPending}>
+              {editingTable ? 'Salvar Alterações' : 'Criar Mesa'}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

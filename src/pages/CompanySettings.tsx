@@ -99,6 +99,7 @@ export default function CompanySettings() {
           instagram,
           whatsapp,
           google_maps_url: googleMapsUrl,
+          reservation_duration: reservationDuration,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', company.id);
