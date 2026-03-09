@@ -20,10 +20,9 @@ function slugify(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 }
 
-const statusConfig: Record<CompanyStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
-  active: { label: 'Ativa', variant: 'default' },
-  paused: { label: 'Pausada', variant: 'secondary' },
-  defaulting: { label: 'Inadimplente', variant: 'destructive' },
+const statusConfig: Record<CompanyStatus, { label: string; className: string }> = {
+  active: { label: 'Ativa', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  paused: { label: 'Pausada', className: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
 
 const emptyForm: CompanyInsert = {
