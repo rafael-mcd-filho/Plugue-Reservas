@@ -353,7 +353,7 @@ export default function ReservationModal({
 
         {/* Step 3: Personal Info */}
         {step === 3 && (
-          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2" ref={(el) => { if (el) onStepChange?.('form_fill'); }}>
             <Button variant="ghost" size="sm" type="button" onClick={() => setStep(2)}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
