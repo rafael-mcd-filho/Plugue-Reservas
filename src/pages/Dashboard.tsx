@@ -285,20 +285,20 @@ export default function Dashboard() {
                 <div className="h-[260px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: 'hsl(30, 20%, 99%)',
-                          border: '1px solid hsl(30, 15%, 88%)',
+                          backgroundColor: 'hsl(0, 0%, 100%)',
+                          border: '1px solid hsl(0, 0%, 88%)',
                           borderRadius: '0.5rem',
                           fontSize: '0.875rem',
                         }}
                       />
                       <Legend />
-                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(145, 45%, 42%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 92%, 50%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 80%, 55%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
