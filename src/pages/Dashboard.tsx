@@ -33,7 +33,6 @@ const PERIOD_OPTIONS = [
 const PIE_COLORS = [
   'hsl(28, 90%, 27%)',   // completed (dark brown)
   'hsl(28, 85%, 55%)',   // confirmed (orange)
-  'hsl(38, 80%, 55%)',   // pending (amber)
   'hsl(0, 72%, 51%)',    // cancelled
   'hsl(0, 0%, 35%)',     // no-show
 ];
