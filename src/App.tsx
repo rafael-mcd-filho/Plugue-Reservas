@@ -21,7 +21,6 @@ import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
 import CompanyPublicPage from "@/pages/CompanyPublicPage";
 import DevToolbar from "@/components/DevToolbar";
-import DevToolbar from "@/components/DevToolbar";
 import NotFound from "./pages/NotFound";
 import { supabase } from "@/integrations/supabase/client";
 
