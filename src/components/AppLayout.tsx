@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, X } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, X, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
