@@ -62,7 +62,7 @@ const DAY_MAP: Record<string, number> = {
   'Sáb': 6,
 };
 
-function generateTimeSlots(open: string, close: string): string[] {
+function generateTimeSlots(open: string, close: string, interval: number = 30): string[] {
   const slots: string[] = [];
   const [openH, openM] = open.split(':').map(Number);
   const [closeH, closeM] = close.split(':').map(Number);
@@ -72,7 +72,7 @@ function generateTimeSlots(open: string, close: string): string[] {
     const h = Math.floor(current / 60);
     const m = current % 60;
     slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    current += 30;
+    current += interval;
   }
   return slots;
 }
