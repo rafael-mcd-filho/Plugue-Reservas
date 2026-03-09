@@ -56,29 +56,14 @@ export default function CompanyPublicPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
     setLoginLoading(false);
-    if (error) {
+    if (loginErr) {
       toast.error('Email ou senha inválidos');
       return;
     }
     navigate(`/${slug}/admin`);
   };
-
-  const { data: company, isLoading, error } = useQuery({
-    queryKey: ['company-public', slug],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies' as any)
-        .select('*')
-        .eq('slug', slug!)
-        .eq('status', 'active')
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as Company | null;
-    },
-    enabled: !!slug,
-  });
 
   if (isLoading) {
     return (
