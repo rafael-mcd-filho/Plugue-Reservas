@@ -335,12 +335,15 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* Funnel Chart */}
-          <ReservationFunnelChart
-            data={funnelData}
-            title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
-            description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
-          />
+          {/* Heatmap + Funnel */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ReservationHeatmap {...heatmapData} />
+            <ReservationFunnelChart
+              data={funnelData}
+              title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
+              description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
+            />
+          </div>
         </>
       )}
     </div>
