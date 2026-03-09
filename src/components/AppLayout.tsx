@@ -11,7 +11,7 @@ interface NavItem {
   label: string;
   icon: any;
   path: string;
-  showFor: AppRole[] | 'all-except-superadmin';
+  showFor: AppRole[];
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
