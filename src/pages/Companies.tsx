@@ -194,7 +194,6 @@ export default function Companies() {
                       <SelectContent>
                         <SelectItem value="active">Ativa</SelectItem>
                         <SelectItem value="paused">Pausada</SelectItem>
-                        <SelectItem value="defaulting">Inadimplente</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
