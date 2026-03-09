@@ -16,6 +16,11 @@ export interface Company {
   responsible_name: string | null;
   responsible_email: string | null;
   responsible_phone: string | null;
+  instagram: string | null;
+  whatsapp: string | null;
+  google_maps_url: string | null;
+  description: string | null;
+  logo_url: string | null;
   status: CompanyStatus;
   created_at: string;
   updated_at: string;

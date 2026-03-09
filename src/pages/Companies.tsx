@@ -27,7 +27,9 @@ const statusConfig: Record<CompanyStatus, { label: string; className: string }> 
 
 const emptyForm: CompanyInsert = {
   name: '', slug: '', razao_social: '', cnpj: '', phone: '', email: '',
-  address: '', responsible_name: '', responsible_email: '', responsible_phone: '', status: 'active',
+  address: '', responsible_name: '', responsible_email: '', responsible_phone: '',
+  instagram: '', whatsapp: '', google_maps_url: '', description: '', logo_url: '',
+  status: 'active',
 };
 
 type SortField = 'name' | 'cnpj' | 'status' | 'created_at';
@@ -81,6 +83,8 @@ export default function Companies() {
       phone: c.phone || '', email: c.email || '', address: c.address || '',
       responsible_name: c.responsible_name || '', responsible_email: c.responsible_email || '',
       responsible_phone: c.responsible_phone || '', status: c.status,
+      instagram: c.instagram || '', whatsapp: c.whatsapp || '', google_maps_url: c.google_maps_url || '',
+      description: c.description || '', logo_url: c.logo_url || '',
     });
     setDialogOpen(true);
   };
@@ -198,6 +202,28 @@ export default function Companies() {
                     </Select>
                   </div>
                 )}
+              </div>
+
+              <div className="space-y-1 pt-2">
+                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Redes Sociais e Mapa</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Instagram</Label>
+                  <Input value={form.instagram || ''} onChange={e => setForm({ ...form, instagram: e.target.value })} placeholder="@restaurante" />
+                </div>
+                <div>
+                  <Label>WhatsApp</Label>
+                  <Input value={form.whatsapp || ''} onChange={e => setForm({ ...form, whatsapp: e.target.value })} placeholder="5511999999999" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Link do Google Maps (embed)</Label>
+                  <Input value={form.google_maps_url || ''} onChange={e => setForm({ ...form, google_maps_url: e.target.value })} placeholder="https://www.google.com/maps/embed?pb=..." />
+                </div>
+                <div className="col-span-2">
+                  <Label>Descrição (visível na página pública)</Label>
+                  <Textarea value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Breve descrição do restaurante" rows={3} />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-2">
