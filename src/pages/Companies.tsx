@@ -27,7 +27,9 @@ const statusConfig: Record<CompanyStatus, { label: string; className: string }> 
 
 const emptyForm: CompanyInsert = {
   name: '', slug: '', razao_social: '', cnpj: '', phone: '', email: '',
-  address: '', responsible_name: '', responsible_email: '', responsible_phone: '', status: 'active',
+  address: '', responsible_name: '', responsible_email: '', responsible_phone: '',
+  instagram: '', whatsapp: '', google_maps_url: '', description: '', logo_url: '',
+  status: 'active',
 };
 
 type SortField = 'name' | 'cnpj' | 'status' | 'created_at';
