@@ -14,6 +14,7 @@ import CalendarView from "@/pages/CalendarView";
 import Companies from "@/pages/Companies";
 import CompanyProfile from "@/pages/CompanyProfile";
 import SettingsPage from "@/pages/Settings";
+import Users from "@/pages/Users";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
