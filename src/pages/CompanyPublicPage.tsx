@@ -186,6 +186,29 @@ export default function CompanyPublicPage() {
           </Card>
         )}
 
+        {/* Admin Login */}
+        {showLogin && (
+          <Card className="border-none shadow-sm">
+            <CardContent className="pt-5">
+              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h2>
+              <form onSubmit={handleLogin} className="space-y-3">
+                <div>
+                  <Label className="text-xs">Email</Label>
+                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@empresa.com" required />
+                </div>
+                <div>
+                  <Label className="text-xs">Senha</Label>
+                  <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                </div>
+                <Button type="submit" className="w-full" disabled={loginLoading}>
+                  {loginLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Entrar
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Footer */}
         <p className="text-center text-xs text-muted-foreground pt-4">
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
