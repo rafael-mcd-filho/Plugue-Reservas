@@ -90,16 +90,25 @@ export default function Reservations() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: ReservationStatus }) => {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('reservations' as any)
         .update({ status, updated_at: new Date().toISOString() } as any)
-        .eq('id', id);
+        .eq('id', id)
+        .select('*')
+        .single();
       if (error) throw error;
+      return updated;
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['reservations', company?.id] });
       toast.success('Status atualizado!');
       setEditDialog(false);
+
+      // Fire webhook events - fire and forget
+      const event = (updated as any).status === 'cancelled' ? 'reservation_cancelled' : 'status_changed';
+      supabase.functions.invoke('reservation-events', {
+        body: { event, reservation: updated },
+      }).catch(err => console.warn('Reservation events error:', err));
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
