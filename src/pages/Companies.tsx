@@ -320,7 +320,7 @@ export default function Companies() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary" onClick={() => navigate(`/${company.slug}`)} title="Acessar painel">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary" onClick={() => navigate(`/${company.slug}/admin`)} title="Acessar painel">
                           <ExternalLink className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => openEdit(company, e)} title="Editar">

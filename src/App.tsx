@@ -20,6 +20,8 @@ import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
 import CompanyPublicPage from "@/pages/CompanyPublicPage";
+import CompanyLogin from "@/pages/CompanyLogin";
+import DevToolbar from "@/components/DevToolbar";
 import NotFound from "./pages/NotFound";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -40,17 +42,17 @@ function CompanySlugRedirect({ companyId }: { companyId: string }) {
     queryKey: ['company-slug-redirect', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('companies')
+        .from('companies' as any)
         .select('slug')
         .eq('id', companyId)
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      return data;
+      return data as any;
     },
   });
   if (isLoading) return null;
   if (!company) return <Navigate to="/acesso-negado" replace />;
-  return <Navigate to={`/${company.slug}`} replace />;
+  return <Navigate to={`/${company.slug}/admin`} replace />;
 }
 
 const App = () => (
@@ -60,7 +62,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <DevToolbar />
           <Routes>
+            {/* Global auth */}
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Signup />} />
             <Route path="/acesso-negado" element={<AccessDenied />} />
@@ -96,19 +100,23 @@ const App = () => (
               </ProtectedRoute>
             } />
 
-            {/* Company slug routes (admin/operator) */}
-            <Route path="/:slug" element={
+            {/* Public company page: /:slug */}
+            <Route path="/:slug" element={<CompanyPublicPage />} />
+
+            {/* Company login: /:slug/login */}
+            <Route path="/:slug/login" element={<CompanyLogin />} />
+
+            {/* Company admin routes: /:slug/admin/* */}
+            <Route path="/:slug/admin" element={
               <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
                 <CompanySlugProvider>
                   <ReservationProvider>
-                    <AppLayout>
-                      <Dashboard />
-                    </AppLayout>
+                    <AppLayout><Dashboard /></AppLayout>
                   </ReservationProvider>
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
-            <Route path="/:slug/reservas" element={
+            <Route path="/:slug/admin/reservas" element={
               <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
                 <CompanySlugProvider>
                   <ReservationProvider>
@@ -117,7 +125,7 @@ const App = () => (
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
-            <Route path="/:slug/mesas" element={
+            <Route path="/:slug/admin/mesas" element={
               <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
                 <CompanySlugProvider>
                   <ReservationProvider>
@@ -126,7 +134,7 @@ const App = () => (
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
-            <Route path="/:slug/calendario" element={
+            <Route path="/:slug/admin/calendario" element={
               <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
                 <CompanySlugProvider>
                   <ReservationProvider>
@@ -135,9 +143,6 @@ const App = () => (
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
-
-            {/* Public company page */}
-            <Route path="/:slug/p" element={<CompanyPublicPage />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

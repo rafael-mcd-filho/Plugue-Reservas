@@ -27,10 +27,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   // Build nav items dynamically based on whether we're in a slug context
   const companyNavItems: NavItem[] = slug
     ? [
-        { label: 'Dashboard', icon: LayoutDashboard, path: `/${slug}`, showFor: 'all-except-superadmin' },
-        { label: 'Reservas', icon: CalendarDays, path: `/${slug}/reservas`, showFor: 'all-except-superadmin' },
-        { label: 'Mesas', icon: Grid3X3, path: `/${slug}/mesas`, showFor: 'all-except-superadmin' },
-        { label: 'Calendário', icon: CalendarDays, path: `/${slug}/calendario`, showFor: 'all-except-superadmin' },
+        { label: 'Dashboard', icon: LayoutDashboard, path: `/${slug}/admin`, showFor: 'all-except-superadmin' },
+        { label: 'Reservas', icon: CalendarDays, path: `/${slug}/admin/reservas`, showFor: 'all-except-superadmin' },
+        { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: 'all-except-superadmin' },
+        { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: 'all-except-superadmin' },
       ]
     : [];
 
