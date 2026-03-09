@@ -25,30 +25,30 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const rolesLoaded = !loading && roles.length > 0;
 
   // Build nav items dynamically based on whether we're in a slug context
+  // In slug context: only show company items. Outside: only superadmin items.
   const companyNavItems: NavItem[] = slug
     ? [
-        { label: 'Dashboard', icon: LayoutDashboard, path: `/${slug}/admin`, showFor: 'all-except-superadmin' },
-        { label: 'Reservas', icon: CalendarDays, path: `/${slug}/admin/reservas`, showFor: 'all-except-superadmin' },
-        { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: 'all-except-superadmin' },
-        { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: 'all-except-superadmin' },
+        { label: 'Dashboard', icon: LayoutDashboard, path: `/${slug}/admin`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Reservas', icon: CalendarDays, path: `/${slug}/admin/reservas`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Configurações', icon: Settings, path: `/${slug}/admin/configuracoes`, showFor: ['admin'] },
       ]
     : [];
 
-  const superadminNavItems: NavItem[] = [
-    { label: 'Dashboard', icon: BarChart3, path: '/dashboard', showFor: ['superadmin'] },
-    { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
-    { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
-    { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
-  ];
+  const superadminNavItems: NavItem[] = !slug
+    ? [
+        { label: 'Dashboard', icon: BarChart3, path: '/dashboard', showFor: ['superadmin'] },
+        { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
+        { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
+        { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
+      ]
+    : [];
 
   const allNavItems = [...companyNavItems, ...superadminNavItems];
 
   const visibleNavItems = allNavItems.filter(item => {
     if (!rolesLoaded) return false;
-    if (item.showFor === 'all-except-superadmin') {
-      // Show company items for admin/operator, and also for superadmin when viewing a company via slug
-      return !isSuperadmin || !!slug;
-    }
     return (item.showFor as AppRole[]).some(r => roles.includes(r));
   });
 
