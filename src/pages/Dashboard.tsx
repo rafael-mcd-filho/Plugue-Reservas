@@ -97,7 +97,6 @@ export default function Dashboard() {
   const pieData = [
     { name: 'Concluídas', value: totals.completed },
     { name: 'Confirmadas', value: totals.confirmed },
-    { name: 'Pendentes', value: totals.pending },
     { name: 'Cancelamentos', value: totals.cancellations },
     { name: 'No-shows', value: totals.noShows },
   ].filter(d => d.value > 0);
