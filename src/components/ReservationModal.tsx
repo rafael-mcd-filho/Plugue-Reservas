@@ -106,8 +106,8 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
 
   const timeSlots = useMemo(() => {
     if (!selectedDayHours || selectedDayHours.closed) return [];
-    return generateTimeSlots(selectedDayHours.open, selectedDayHours.close);
-  }, [selectedDayHours]);
+    return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
+  }, [selectedDayHours, reservationDuration]);
 
   const handleReset = () => {
     setStep(1);
