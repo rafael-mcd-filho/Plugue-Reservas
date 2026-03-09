@@ -23,7 +23,7 @@ export const mockReservations: Reservation[] = [
   { id: 'r2', guestName: 'João Santos', guestPhone: '(11) 98888-5678', date: today, time: '20:00', partySize: 4, tableId: 't3', status: 'confirmed', createdAt: today },
   { id: 'r3', guestName: 'Ana Oliveira', guestPhone: '(11) 97777-9012', date: today, time: '20:30', partySize: 6, tableId: 't5', status: 'confirmed', createdAt: today },
   { id: 'r4', guestName: 'Carlos Ferreira', guestPhone: '(11) 96666-3456', date: today, time: '21:00', partySize: 4, tableId: 't8', status: 'confirmed', createdAt: today },
-  { id: 'r5', guestName: 'Lucia Mendes', guestPhone: '(11) 95555-7890', date: tomorrow, time: '19:30', partySize: 2, tableId: 't1', status: 'pending', createdAt: today },
+  { id: 'r5', guestName: 'Lucia Mendes', guestPhone: '(11) 95555-7890', date: tomorrow, time: '19:30', partySize: 2, tableId: 't1', status: 'confirmed', createdAt: today },
   { id: 'r6', guestName: 'Pedro Costa', guestPhone: '(11) 94444-2345', date: tomorrow, time: '20:00', partySize: 8, tableId: 't10', status: 'confirmed', createdAt: today, notes: 'Reunião de negócios' },
   { id: 'r7', guestName: 'Fernanda Lima', guestPhone: '(11) 93333-6789', date: today, time: '18:30', partySize: 2, tableId: 't1', status: 'completed', createdAt: today },
   { id: 'r8', guestName: 'Roberto Alves', guestPhone: '(11) 92222-0123', date: today, time: '19:00', partySize: 4, tableId: 't4', status: 'no-show', createdAt: today },
