@@ -58,11 +58,15 @@ export default function Settings() {
           <TabsTrigger value="logs" className="gap-2">
             <ScrollText className="h-4 w-4" /> Logs de Ações
           </TabsTrigger>
+          <TabsTrigger value="integrations" className="gap-2">
+            <Plug className="h-4 w-4" /> Integrações
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general"><GeneralTab /></TabsContent>
         <TabsContent value="notifications"><NotificationsTab /></TabsContent>
         <TabsContent value="logs"><LogsTab /></TabsContent>
+        <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
       </Tabs>
     </div>
   );
