@@ -38,14 +38,21 @@ const PIE_COLORS = [
 
 export default function Dashboard() {
   const { slug } = useParams<{ slug: string }>();
-  const companies = getMockCompanies();
   const isCompanyContext = !!slug;
 
-  // In company context, find the matching company and lock to it
-  const companyFromSlug = isCompanyContext
-    ? companies.find(c => c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') === slug
-        || c.id === slug) || companies[0]
-    : null;
+  // Fetch real companies for superadmin filter
+  const { data: companies = [] } = useQuery({
+    queryKey: ['dashboard-companies'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies' as any)
+        .select('id, name, status')
+        .order('name');
+      if (error) throw error;
+      return (data as any[]).filter((c: any) => c.status === 'active') as { id: string; name: string }[];
+    },
+    enabled: !isCompanyContext,
+  });
 
   const [companyId, setCompanyId] = useState<string>('all');
   const [period, setPeriod] = useState('30');
@@ -75,7 +82,7 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
-  const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+  const effectiveCompanyId = isCompanyContext && realCompany?.id ? realCompany.id : companyId;
 
   // Funnel data - use real company ID for company context, or 'all' for superadmin
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
