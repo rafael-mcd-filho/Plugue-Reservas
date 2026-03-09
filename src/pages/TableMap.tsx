@@ -241,10 +241,10 @@ export default function TableMap() {
   };
 
   const summary = {
-    available: tables.filter(t => t.status === 'available').length,
-    occupied: tables.filter(t => t.status === 'occupied').length,
-    reserved: tables.filter(t => t.status === 'reserved').length,
-    maintenance: tables.filter(t => t.status === 'maintenance').length,
+    available: enrichedTables.filter(t => t.status === 'available').length,
+    occupied: enrichedTables.filter(t => t.status === 'occupied').length,
+    reserved: enrichedTables.filter(t => t.status === 'reserved').length,
+    maintenance: enrichedTables.filter(t => t.status === 'maintenance').length,
   };
 
   if (isLoading) return <div className="space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[300px] w-full" /></div>;
