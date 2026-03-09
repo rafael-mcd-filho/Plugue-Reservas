@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import Reservations from "@/pages/Reservations";
 import TableMap from "@/pages/TableMap";
 import CalendarView from "@/pages/CalendarView";
+import Companies from "@/pages/Companies";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ const App = () => (
               <Route path="/reservas" element={<Reservations />} />
               <Route path="/mesas" element={<TableMap />} />
               <Route path="/calendario" element={<CalendarView />} />
+              <Route path="/empresas" element={<Companies />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AppLayout>

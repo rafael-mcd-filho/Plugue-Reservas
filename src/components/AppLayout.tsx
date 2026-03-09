@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, X } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, X, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { label: 'Reservas', icon: CalendarDays, path: '/reservas' },
   { label: 'Mesas', icon: Grid3X3, path: '/mesas' },
   { label: 'Calendário', icon: CalendarDays, path: '/calendario' },
+  { label: 'Empresas', icon: Building2, path: '/empresas' },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
