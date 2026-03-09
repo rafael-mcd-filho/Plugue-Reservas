@@ -2,3 +2,6 @@ project_id = "hdpxqqiudiotanrybvcf"
 
 [functions.create-company]
 verify_jwt = false
+
+[functions.manage-user]
+verify_jwt = false
