@@ -392,3 +392,53 @@ function LogsTab() {
     </div>
   );
 }
+
+function IntegrationsTab() {
+  const { data: settings = [], isLoading } = useSystemSettings();
+  const updateSetting = useUpdateSetting();
+
+  const getSetting = (key: string) => settings.find(s => s.key === key)?.value || '';
+
+  const [evolutionUrl, setEvolutionUrl] = useState('');
+  const [evolutionToken, setEvolutionToken] = useState('');
+  const [initialized, setInitialized] = useState(false);
+
+  if (!initialized && settings.length > 0) {
+    setEvolutionUrl(getSetting('evolution_api_url'));
+    setEvolutionToken(getSetting('evolution_api_token'));
+    setInitialized(true);
+  }
+
+  const handleSave = async () => {
+    await updateSetting.mutateAsync({ key: 'evolution_api_url', value: evolutionUrl || null });
+    await updateSetting.mutateAsync({ key: 'evolution_api_token', value: evolutionToken || null });
+  };
+
+  if (isLoading) {
+    return <Card className="border-none shadow-sm"><CardContent className="p-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>;
+  }
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><Plug className="h-5 w-5 text-primary" /> Evolution API</CardTitle>
+        <CardDescription>Configure a conexão com a Evolution API para integração WhatsApp</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 max-w-lg">
+        <div>
+          <Label>URL da Evolution API</Label>
+          <Input value={evolutionUrl} onChange={e => setEvolutionUrl(e.target.value)} placeholder="https://evolution.seudominio.com" />
+          <p className="text-xs text-muted-foreground mt-1">Endereço base da sua instância Evolution API</p>
+        </div>
+        <div>
+          <Label>Token Global (API Key)</Label>
+          <Input type="password" value={evolutionToken} onChange={e => setEvolutionToken(e.target.value)} placeholder="Seu token global da Evolution API" />
+          <p className="text-xs text-muted-foreground mt-1">Encontrado nas configurações da sua Evolution API</p>
+        </div>
+        <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2">
+          <Save className="h-4 w-4" /> Salvar Integrações
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
