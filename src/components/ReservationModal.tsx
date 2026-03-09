@@ -271,7 +271,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
             <Button
               className="w-full"
               disabled={!selectedTime}
-              onClick={() => setStep(3)}
+              onClick={() => { setStep(3); onStepChange?.('form_fill'); }}
             >
               Continuar <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
