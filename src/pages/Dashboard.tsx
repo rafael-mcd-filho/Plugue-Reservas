@@ -56,9 +56,11 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
+  const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+
   const data = useMemo(
-    () => getMockDashboardData(companyId, startDate, endDate),
-    [companyId, startDate, endDate],
+    () => getMockDashboardData(effectiveCompanyId, startDate, endDate),
+    [effectiveCompanyId, startDate, endDate],
   );
 
   const totals = useMemo(() => {
