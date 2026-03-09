@@ -17,9 +17,9 @@ export default function CompanyPublicPage() {
         .select('*')
         .eq('slug', slug!)
         .eq('status', 'active')
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      return data as unknown as Company;
+      return data as unknown as Company | null;
     },
     enabled: !!slug,
   });
