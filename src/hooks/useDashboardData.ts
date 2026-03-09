@@ -34,7 +34,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, status')
+        .select('date, time, status')
         .gte('date', startStr)
         .lte('date', endStr);
 
