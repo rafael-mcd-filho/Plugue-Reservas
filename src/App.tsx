@@ -66,6 +66,11 @@ const App = () => (
                 <AppLayout><Companies /></AppLayout>
               </ProtectedRoute>
             } />
+            <Route path="/empresas/:id" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><CompanyProfile /></AppLayout>
+              </ProtectedRoute>
+            } />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
