@@ -335,6 +335,13 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Funnel Chart */}
+      <ReservationFunnelChart
+        data={funnelData}
+        title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
+        description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
+      />
     </div>
   );
 }
