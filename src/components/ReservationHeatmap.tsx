@@ -21,7 +21,7 @@ function getIntensity(count: number, max: number): string {
 export default function ReservationHeatmap({ counts, maxCount, hours, dayNames }: HeatmapProps) {
   if (hours.length === 0) {
     return (
-      <Card className="border-none shadow-sm">
+      <Card className="border border-border shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Horários Mais Reservados</CardTitle>
           <CardDescription>Sem dados no período selecionado</CardDescription>
