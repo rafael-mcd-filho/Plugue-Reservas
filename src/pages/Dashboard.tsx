@@ -199,7 +199,7 @@ export default function Dashboard() {
 
           {/* Charts Row 1 */}
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="border-none shadow-sm lg:col-span-2">
+            <Card className="border border-border shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Reservas por Dia</CardTitle>
                 <CardDescription>Total de reservas no período selecionado</CardDescription>
