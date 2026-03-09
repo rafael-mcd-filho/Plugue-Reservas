@@ -17,6 +17,7 @@ export interface DailyStats {
 
 interface RawReservation {
   date: string;
+  time: string;
   status: string;
 }
 
@@ -33,7 +34,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, status')
+        .select('date, time, status')
         .gte('date', startStr)
         .lte('date', endStr);
 
@@ -85,5 +86,26 @@ export function useDashboardData(
     );
   }, [dailyStats]);
 
-  return { dailyStats, totals, isLoading };
+  // Heatmap: count reservations by day-of-week × hour
+  const heatmapData = useMemo(() => {
+    const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const counts: Record<string, number> = {};
+    let maxCount = 0;
+
+    for (const r of rawReservations) {
+      if (r.status === 'cancelled') continue;
+      const dayOfWeek = new Date(r.date + 'T12:00:00').getDay();
+      const hour = r.time?.slice(0, 5) || '00:00';
+      const key = `${dayOfWeek}_${hour}`;
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] > maxCount) maxCount = counts[key];
+    }
+
+    // Collect unique hours, sorted
+    const hours = [...new Set(rawReservations.map(r => r.time?.slice(0, 5)).filter(Boolean))].sort();
+
+    return { counts, maxCount, hours, dayNames: DAY_NAMES };
+  }, [rawReservations]);
+
+  return { dailyStats, totals, heatmapData, isLoading };
 }

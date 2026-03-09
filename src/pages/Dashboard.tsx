@@ -20,6 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
+import ReservationHeatmap from '@/components/ReservationHeatmap';
 
 const PERIOD_OPTIONS = [
   { value: '7', label: 'Últimos 7 dias' },
@@ -86,7 +87,7 @@ export default function Dashboard() {
   const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
   // Real dashboard data
-  const { dailyStats, totals, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const { dailyStats, totals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
   // Funnel data
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
@@ -334,12 +335,15 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* Funnel Chart */}
-          <ReservationFunnelChart
-            data={funnelData}
-            title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
-            description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
-          />
+          {/* Heatmap + Funnel */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ReservationHeatmap {...heatmapData} />
+            <ReservationFunnelChart
+              data={funnelData}
+              title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
+              description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
+            />
+          </div>
         </>
       )}
     </div>
