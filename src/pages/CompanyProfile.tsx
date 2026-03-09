@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, Phone, MapPin, Pencil, Pause, Play, AlertTriangle, Trash2, Calendar, User } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, Phone, MapPin, Pencil, Pause, Play, Trash2, Calendar, User, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
