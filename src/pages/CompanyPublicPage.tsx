@@ -133,7 +133,7 @@ export default function CompanyPublicPage() {
       <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
         {/* CTA Buttons */}
         <div className="space-y-3">
-          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg">
+          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg" onClick={() => setShowReservation(true)}>
             <CalendarCheck className="h-5 w-5" />
             Reservar Mesa
           </Button>
