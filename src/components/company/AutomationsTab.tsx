@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
 import WhatsAppConnection from './WhatsAppConnection';
+import WhatsAppMessageHistory from './WhatsAppMessageHistory';
 
 interface Props {
   companyId: string;
