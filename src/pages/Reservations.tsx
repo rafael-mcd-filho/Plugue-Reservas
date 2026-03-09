@@ -263,7 +263,6 @@ export default function Reservations() {
               <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os status</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
                 <SelectItem value="confirmed">Confirmada</SelectItem>
                 <SelectItem value="cancelled">Cancelada</SelectItem>
                 <SelectItem value="completed">Concluída</SelectItem>
