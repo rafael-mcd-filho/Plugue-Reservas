@@ -73,6 +73,12 @@ const App = () => (
               </ProtectedRoute>
             } />
 
+            <Route path="/configuracoes" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><SettingsPage /></AppLayout>
+              </ProtectedRoute>
+            } />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
