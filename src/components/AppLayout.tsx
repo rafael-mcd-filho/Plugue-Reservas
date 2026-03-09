@@ -26,7 +26,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { profile, roles, loading } = useAuth();
+  const { profile, roles, loading, signOut } = useAuth();
 
   const isSuperadmin = roles.includes('superadmin');
 
