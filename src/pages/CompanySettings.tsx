@@ -80,6 +80,7 @@ export default function CompanySettings() {
       setInstagram(company.instagram || '');
       setWhatsapp(company.whatsapp || '');
       setGoogleMapsUrl(company.google_maps_url || '');
+      setReservationDuration((company as any).reservation_duration ?? 30);
       setInitialized(true);
     }
   }, [company, initialized]);
