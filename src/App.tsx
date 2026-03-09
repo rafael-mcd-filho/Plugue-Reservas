@@ -27,6 +27,7 @@ const App = () => (
               <Route path="/reservas" element={<Reservations />} />
               <Route path="/mesas" element={<TableMap />} />
               <Route path="/calendario" element={<CalendarView />} />
+              <Route path="/empresas" element={<Companies />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AppLayout>

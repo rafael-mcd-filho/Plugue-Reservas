@@ -8,6 +8,7 @@ const navItems = [
   { label: 'Reservas', icon: CalendarDays, path: '/reservas' },
   { label: 'Mesas', icon: Grid3X3, path: '/mesas' },
   { label: 'Calendário', icon: CalendarDays, path: '/calendario' },
+  { label: 'Empresas', icon: Building2, path: '/empresas' },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
