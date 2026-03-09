@@ -105,11 +105,32 @@ Deno.serve(async (req) => {
                 body: JSON.stringify({ number: phone, text: message }),
               });
               const data = await res.json();
-              results.whatsapp = res.ok ? 'sent' : `error: ${JSON.stringify(data)}`;
+              const status = res.ok ? 'sent' : 'error';
+              results.whatsapp = status;
               console.log('WhatsApp confirmation sent:', res.ok, data);
+
+              // Log message
+              await supabaseAdmin.from('whatsapp_message_logs').insert({
+                company_id: reservation.company_id,
+                reservation_id: reservation.id,
+                phone,
+                message,
+                type: 'confirmation',
+                status,
+                error_details: res.ok ? null : JSON.stringify(data),
+              });
             } catch (err) {
               console.error('WhatsApp send error:', err);
               results.whatsapp = 'error';
+              await supabaseAdmin.from('whatsapp_message_logs').insert({
+                company_id: reservation.company_id,
+                reservation_id: reservation.id,
+                phone,
+                message,
+                type: 'confirmation',
+                status: 'error',
+                error_details: String(err),
+              });
             }
           } else {
             results.whatsapp = 'instance_not_connected';
