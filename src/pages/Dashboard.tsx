@@ -20,6 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
+import ReservationHeatmap from '@/components/ReservationHeatmap';
 
 const PERIOD_OPTIONS = [
   { value: '7', label: 'Últimos 7 dias' },
