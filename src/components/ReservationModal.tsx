@@ -135,7 +135,8 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
     const dayIndex = date.getDay();
     const dayName = Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0];
     const hours = openingHours.find(h => h.day === dayName);
-    return hours?.closed ?? true;
+    if (!hours) return true;
+    return hours.closed === true;
   };
 
   return (
