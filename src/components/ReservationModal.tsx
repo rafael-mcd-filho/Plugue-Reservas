@@ -40,6 +40,7 @@ interface ReservationModalProps {
   onOpenChange: (open: boolean) => void;
   companyName: string;
   openingHours: OpeningHour[];
+  reservationDuration?: number;
 }
 
 const OCCASIONS = [
