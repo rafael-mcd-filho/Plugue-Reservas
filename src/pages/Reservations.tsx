@@ -17,7 +17,7 @@ import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type ReservationStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no-show';
+type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'no-show';
 
 interface Reservation {
   id: string;
