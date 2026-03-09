@@ -82,7 +82,7 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
-  const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+  const effectiveCompanyId = isCompanyContext && realCompany?.id ? realCompany.id : companyId;
 
   // Funnel data - use real company ID for company context, or 'all' for superadmin
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
