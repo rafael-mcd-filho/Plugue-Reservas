@@ -169,29 +169,38 @@ export default function ReservationModal({
     setSubmitting(true);
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const { error } = await supabase
+      const reservationData = {
+        company_id: companyId,
+        table_id: selectedTableId || null,
+        guest_name: form.name,
+        guest_phone: form.whatsapp,
+        guest_email: form.email || null,
+        guest_birthdate: form.birthdate || null,
+        date: dateStr,
+        time: selectedTime + ':00',
+        party_size: selectedPartySize,
+        duration_minutes: reservationDuration,
+        occasion: form.occasion || null,
+        notes: form.observation || null,
+        visitor_id: getVisitorId(),
+        status: 'confirmed',
+      };
+
+      const { data: inserted, error } = await supabase
         .from('reservations' as any)
-        .insert({
-          company_id: companyId,
-          table_id: selectedTableId || null,
-          guest_name: form.name,
-          guest_phone: form.whatsapp,
-          guest_email: form.email || null,
-          guest_birthdate: form.birthdate || null,
-          date: dateStr,
-          time: selectedTime + ':00',
-          party_size: selectedPartySize,
-          duration_minutes: reservationDuration,
-          occasion: form.occasion || null,
-          notes: form.observation || null,
-          visitor_id: getVisitorId(),
-          status: 'confirmed',
-        } as any);
+        .insert(reservationData as any)
+        .select('*')
+        .single();
       
       if (error) throw error;
       
+      // Fire reservation events (WhatsApp confirmation + webhooks) - fire and forget
+      supabase.functions.invoke('reservation-events', {
+        body: { event: 'reservation_created', reservation: inserted },
+      }).catch(err => console.warn('Reservation events error:', err));
+
       onStepChange?.('completed');
-      toast.success('Reserva solicitada com sucesso! Entraremos em contato para confirmar.');
+      toast.success('Reserva confirmada com sucesso!');
       handleClose(false);
     } catch (err: any) {
       toast.error(`Erro ao criar reserva: ${err.message}`);
