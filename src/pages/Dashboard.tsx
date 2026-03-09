@@ -276,7 +276,7 @@ export default function Dashboard() {
 
           {/* Charts Row 2 */}
           <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="border-none shadow-sm">
+            <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Confirmadas vs Pendentes</CardTitle>
                 <CardDescription>Comparativo diário</CardDescription>
