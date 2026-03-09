@@ -31,11 +31,11 @@ const PERIOD_OPTIONS = [
 ];
 
 const PIE_COLORS = [
-  'hsl(145, 45%, 42%)',  // completed
-  'hsl(15, 80%, 50%)',   // confirmed
-  'hsl(38, 92%, 50%)',   // pending
+  'hsl(28, 90%, 27%)',   // completed (dark brown)
+  'hsl(28, 85%, 55%)',   // confirmed (orange)
+  'hsl(38, 80%, 55%)',   // pending (amber)
   'hsl(0, 72%, 51%)',    // cancelled
-  'hsl(20, 10%, 48%)',   // no-show
+  'hsl(0, 0%, 35%)',     // no-show
 ];
 
 export default function Dashboard() {

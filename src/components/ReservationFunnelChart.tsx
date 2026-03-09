@@ -15,11 +15,11 @@ interface ReservationFunnelChartProps {
 }
 
 const FUNNEL_COLORS = [
-  'hsl(15, 80%, 50%)',
-  'hsl(25, 75%, 50%)',
-  'hsl(38, 92%, 50%)',
-  'hsl(145, 45%, 42%)',
-  'hsl(160, 50%, 38%)',
+  'hsl(28, 85%, 55%)',
+  'hsl(28, 90%, 27%)',
+  'hsl(38, 80%, 55%)',
+  'hsl(0, 0%, 25%)',
+  'hsl(0, 0%, 50%)',
 ];
 
 export default function ReservationFunnelChart({
