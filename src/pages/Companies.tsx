@@ -67,6 +67,9 @@ export default function Companies() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.slug) return;
+    if (!editing && !form.responsible_email) {
+      return;
+    }
     if (editing) {
       await updateCompany.mutateAsync({ id: editing.id, ...form });
     } else {
