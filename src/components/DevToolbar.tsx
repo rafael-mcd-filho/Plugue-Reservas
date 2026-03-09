@@ -14,12 +14,9 @@ export default function DevToolbar() {
 
       {/* Public pages */}
       <span className="text-muted-foreground">Público:</span>
-      <Link to="/bistro-do-chef" className="hover:underline text-primary">Bistrô (público)</Link>
       <Link to="/sushi-zen-house" className="hover:underline text-primary">Sushi (público)</Link>
-      <Link to="/sabor-arte" className="hover:underline text-primary">Sabor&Arte (público)</Link>
 
       <span className="text-muted-foreground ml-2">Admin empresa:</span>
-      <Link to="/bistro-do-chef/admin" className="hover:underline text-primary">Bistrô admin</Link>
       <Link to="/sushi-zen-house/admin" className="hover:underline text-primary">Sushi admin</Link>
 
       <span className="text-muted-foreground ml-2">Superadmin:</span>
