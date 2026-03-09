@@ -96,6 +96,80 @@ export default function TableMap() {
     enabled: !!company?.id,
   });
 
+  // Fetch today's reservations for real-time status
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const { data: todayReservations = [] } = useQuery({
+    queryKey: ['today-reservations', company?.id, today],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservations' as any)
+        .select('id, table_id, guest_name, time, duration_minutes, party_size, status')
+        .eq('company_id', company.id)
+        .eq('date', today)
+        .in('status', ['confirmed', 'pending']);
+      if (error) throw error;
+      return (data as any[]) as TodayReservation[];
+    },
+    enabled: !!company?.id,
+    refetchInterval: 30000, // refresh every 30s
+  });
+
+  // Compute real-time status based on current time + reservations
+  const tableStatusMap = useMemo(() => {
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const map: Record<string, { status: TableStatus; reservation?: TodayReservation }> = {};
+
+    for (const table of tables) {
+      // Check if table is in maintenance (from DB status)
+      if (table.status === 'maintenance') {
+        map[table.id] = { status: 'maintenance' };
+        continue;
+      }
+
+      const tableRes = todayReservations.filter(r => r.table_id === table.id);
+
+      // Find currently active reservation (occupied)
+      const activeRes = tableRes.find(r => {
+        const [h, m] = r.time.split(':').map(Number);
+        const startMin = h * 60 + m;
+        const endMin = startMin + (r.duration_minutes || 30);
+        return nowMinutes >= startMin && nowMinutes < endMin;
+      });
+
+      if (activeRes) {
+        map[table.id] = { status: 'occupied', reservation: activeRes };
+        continue;
+      }
+
+      // Find upcoming reservation within next 60 min (reserved)
+      const upcomingRes = tableRes.find(r => {
+        const [h, m] = r.time.split(':').map(Number);
+        const startMin = h * 60 + m;
+        return startMin > nowMinutes && startMin <= nowMinutes + 60;
+      });
+
+      if (upcomingRes) {
+        map[table.id] = { status: 'reserved', reservation: upcomingRes };
+        continue;
+      }
+
+      map[table.id] = { status: 'available' };
+    }
+
+    return map;
+  }, [tables, todayReservations]);
+
+  // Use computed status for tables
+  const enrichedTables = useMemo(() =>
+    tables.map(t => ({
+      ...t,
+      status: tableStatusMap[t.id]?.status ?? t.status,
+      reservation: tableStatusMap[t.id]?.reservation,
+    })),
+    [tables, tableStatusMap]
+  );
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
