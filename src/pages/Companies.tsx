@@ -29,6 +29,7 @@ const emptyForm: CompanyInsert = {
   name: '', slug: '', razao_social: '', cnpj: '', phone: '', email: '',
   address: '', responsible_name: '', responsible_email: '', responsible_phone: '',
   instagram: '', whatsapp: '', google_maps_url: '', description: '', logo_url: '',
+  opening_hours: null, payment_methods: null,
   status: 'active',
 };
 
