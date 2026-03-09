@@ -21,7 +21,7 @@ const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 export const mockReservations: Reservation[] = [
   { id: 'r1', guestName: 'Maria Silva', guestPhone: '(11) 99999-1234', date: today, time: '19:00', partySize: 2, tableId: 't2', status: 'confirmed', createdAt: today, notes: 'Aniversário' },
   { id: 'r2', guestName: 'João Santos', guestPhone: '(11) 98888-5678', date: today, time: '20:00', partySize: 4, tableId: 't3', status: 'confirmed', createdAt: today },
-  { id: 'r3', guestName: 'Ana Oliveira', guestPhone: '(11) 97777-9012', date: today, time: '20:30', partySize: 6, tableId: 't5', status: 'pending', createdAt: today },
+  { id: 'r3', guestName: 'Ana Oliveira', guestPhone: '(11) 97777-9012', date: today, time: '20:30', partySize: 6, tableId: 't5', status: 'confirmed', createdAt: today },
   { id: 'r4', guestName: 'Carlos Ferreira', guestPhone: '(11) 96666-3456', date: today, time: '21:00', partySize: 4, tableId: 't8', status: 'confirmed', createdAt: today },
   { id: 'r5', guestName: 'Lucia Mendes', guestPhone: '(11) 95555-7890', date: tomorrow, time: '19:30', partySize: 2, tableId: 't1', status: 'pending', createdAt: today },
   { id: 'r6', guestName: 'Pedro Costa', guestPhone: '(11) 94444-2345', date: tomorrow, time: '20:00', partySize: 8, tableId: 't10', status: 'confirmed', createdAt: today, notes: 'Reunião de negócios' },
