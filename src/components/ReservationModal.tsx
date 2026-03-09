@@ -52,13 +52,13 @@ const OCCASIONS = [
 ];
 
 const DAY_MAP: Record<string, number> = {
-  'Domingo': 0,
-  'Segunda': 1,
-  'Terça': 2,
-  'Quarta': 3,
-  'Quinta': 4,
-  'Sexta': 5,
-  'Sábado': 6,
+  'Dom': 0,
+  'Seg': 1,
+  'Ter': 2,
+  'Qua': 3,
+  'Qui': 4,
+  'Sex': 5,
+  'Sáb': 6,
 };
 
 function generateTimeSlots(open: string, close: string): string[] {
