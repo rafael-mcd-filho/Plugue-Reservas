@@ -270,11 +270,11 @@ export default function TableMap() {
             <span className="text-muted-foreground">({count})</span>
           </div>
         ))}
-        <span className="text-sm font-medium text-foreground ml-auto">Total: {tables.length} mesas</span>
+        <span className="text-sm font-medium text-foreground ml-auto">Total: {enrichedTables.length} mesas</span>
       </div>
 
       {/* Sections */}
-      {tables.length === 0 ? (
+      {enrichedTables.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-muted-foreground mb-4">Nenhuma mesa cadastrada ainda.</p>
@@ -285,7 +285,7 @@ export default function TableMap() {
         </Card>
       ) : (
         SECTIONS.map(section => {
-          const sectionTables = tables.filter(t => t.section === section);
+          const sectionTables = enrichedTables.filter(t => t.section === section);
           if (sectionTables.length === 0) return null;
           return (
             <Card key={section} className="border-none shadow-sm">
@@ -309,12 +309,23 @@ export default function TableMap() {
                       <span className={cn(
                         'inline-block text-xs px-2 py-0.5 rounded-full font-medium',
                         table.status === 'available' && 'bg-accent/20 text-accent-foreground',
-                        table.status === 'occupied' && 'bg-primary/20 text-primary',
+                        table.status === 'occupied' && 'bg-primary/20 text-primary-foreground',
                         table.status === 'reserved' && 'bg-yellow-500/20 text-yellow-700',
                         table.status === 'maintenance' && 'bg-muted text-muted-foreground',
                       )}>
                         {STATUS_LABELS[table.status]}
                       </span>
+                      {/* Reservation info */}
+                      {table.reservation && (
+                        <div className="mt-2 pt-2 border-t border-border/50 space-y-0.5">
+                          <p className="text-xs font-medium text-foreground truncate">{table.reservation.guest_name}</p>
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            <span className="text-xs">{table.reservation.time.slice(0, 5)}</span>
+                            <span className="text-xs">· {table.reservation.party_size}p</span>
+                          </div>
+                        </div>
+                      )}
                       {/* Actions */}
                       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => openEdit(table)} className="p-1 rounded hover:bg-background/80">
