@@ -63,6 +63,11 @@ const App = () => (
                 <ReservationProvider><AppLayout><CalendarView /></AppLayout></ReservationProvider>
               </ProtectedRoute>
             } />
+            <Route path="/dashboard" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><Dashboard /></AppLayout>
+              </ProtectedRoute>
+            } />
             <Route path="/empresas" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><Companies /></AppLayout>
