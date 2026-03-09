@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -20,6 +20,7 @@ import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
 import NotFound from "./pages/NotFound";
+import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
 
@@ -27,7 +28,6 @@ function HomeRedirect() {
   const { profile, roles, loading } = useAuth();
   if (loading) return null;
   if (roles.includes('superadmin')) return <Navigate to="/dashboard" replace />;
-  // For admin/operator, redirect to their company slug
   if (profile?.company_id) {
     return <CompanySlugRedirect companyId={profile.company_id} />;
   }
@@ -35,10 +35,9 @@ function HomeRedirect() {
 }
 
 function CompanySlugRedirect({ companyId }: { companyId: string }) {
-  const { data: company, isLoading } = require("@tanstack/react-query").useQuery({
+  const { data: company, isLoading } = useQuery({
     queryKey: ['company-slug-redirect', companyId],
     queryFn: async () => {
-      const { supabase } = await import("@/integrations/supabase/client");
       const { data, error } = await supabase
         .from('companies')
         .select('slug')
