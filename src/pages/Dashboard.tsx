@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon,
+  CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle, Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,9 +16,9 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import { getMockDashboardData, getMockCompanies, type DailyStats } from '@/data/dashboardMock';
 import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
+import { useDashboardData } from '@/hooks/useDashboardData';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 
 const PERIOD_OPTIONS = [
@@ -30,15 +30,21 @@ const PERIOD_OPTIONS = [
 ];
 
 const PIE_COLORS = [
-  'hsl(15, 80%, 50%)',   // primary
-  'hsl(145, 45%, 42%)',  // accent/success
-  'hsl(38, 92%, 50%)',   // warning
-  'hsl(0, 72%, 51%)',    // destructive
+  'hsl(145, 45%, 42%)',  // completed
+  'hsl(15, 80%, 50%)',   // confirmed
+  'hsl(38, 92%, 50%)',   // pending
+  'hsl(0, 72%, 51%)',    // cancelled
+  'hsl(20, 10%, 48%)',   // no-show
 ];
 
 export default function Dashboard() {
   const { slug } = useParams<{ slug: string }>();
   const isCompanyContext = !!slug;
+
+  const [companyId, setCompanyId] = useState<string>('all');
+  const [period, setPeriod] = useState('30');
+  const [customStart, setCustomStart] = useState<Date | undefined>();
+  const [customEnd, setCustomEnd] = useState<Date | undefined>();
 
   // Fetch real companies for superadmin filter
   const { data: companies = [] } = useQuery({
@@ -54,12 +60,7 @@ export default function Dashboard() {
     enabled: !isCompanyContext,
   });
 
-  const [companyId, setCompanyId] = useState<string>('all');
-  const [period, setPeriod] = useState('30');
-  const [customStart, setCustomStart] = useState<Date | undefined>();
-  const [customEnd, setCustomEnd] = useState<Date | undefined>();
-
-  // Fetch real company ID from slug for funnel data
+  // Fetch real company ID from slug
   const { data: realCompany } = useQuery({
     queryKey: ['company-id-from-slug', slug],
     queryFn: async () => {
@@ -82,48 +83,31 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
-  const effectiveCompanyId = isCompanyContext && realCompany?.id ? realCompany.id : companyId;
+  const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
-  // Funnel data - use real company ID for company context, or 'all' for superadmin
+  // Real dashboard data
+  const { dailyStats, totals, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+
+  // Funnel data
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
   const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
 
-  const data = useMemo(
-    () => getMockDashboardData(effectiveCompanyId, startDate, endDate),
-    [effectiveCompanyId, startDate, endDate],
-  );
-
-  const totals = useMemo(() => {
-    return data.reduce(
-      (acc, d) => ({
-        reservations: acc.reservations + d.reservations,
-        visits: acc.visits + d.visits,
-        waitlist: acc.waitlist + d.waitlist,
-        cancellations: acc.cancellations + d.cancellations,
-        noShows: acc.noShows + d.noShows,
-      }),
-      { reservations: 0, visits: 0, waitlist: 0, cancellations: 0, noShows: 0 },
-    );
-  }, [data]);
-
-  const avgPerDay = data.length > 0 ? Math.round(totals.reservations / data.length) : 0;
-  const conversionRate = totals.reservations > 0
-    ? Math.round((totals.visits / totals.reservations) * 100)
-    : 0;
+  const avgPerDay = dailyStats.length > 0 ? Math.round(totals.reservations / dailyStats.length) : 0;
 
   const pieData = [
-    { name: 'Visitas', value: totals.visits },
-    { name: 'Fila de espera', value: totals.waitlist },
+    { name: 'Concluídas', value: totals.completed },
+    { name: 'Confirmadas', value: totals.confirmed },
+    { name: 'Pendentes', value: totals.pending },
     { name: 'Cancelamentos', value: totals.cancellations },
     { name: 'No-shows', value: totals.noShows },
   ].filter(d => d.value > 0);
 
   const stats = [
     { label: 'Total Reservas', value: totals.reservations, icon: CalendarCheck, color: 'text-primary' },
-    { label: 'Visitas Realizadas', value: totals.visits, icon: Users, color: 'text-accent' },
-    { label: 'Fila de Espera', value: totals.waitlist, icon: Clock, color: 'text-[hsl(var(--warning))]' },
+    { label: 'Confirmadas', value: totals.confirmed, icon: CheckCircle, color: 'text-accent' },
+    { label: 'Concluídas', value: totals.completed, icon: Users, color: 'text-accent' },
+    { label: 'Pendentes', value: totals.pending, icon: Clock, color: 'text-[hsl(var(--warning))]' },
     { label: 'Cancelamentos', value: totals.cancellations, icon: XCircle, color: 'text-destructive' },
-    { label: 'No-Shows', value: totals.noShows, icon: UserX, color: 'text-muted-foreground' },
     { label: 'Média/Dia', value: avgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
 
@@ -132,7 +116,7 @@ export default function Dashboard() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Análise de reservas, visitas e fila de espera</p>
+          <p className="text-muted-foreground mt-1">Análise de reservas em tempo real</p>
         </div>
         <div className="flex flex-wrap gap-3">
           {!isCompanyContext && (
@@ -189,166 +173,175 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {stats.map(stat => (
-          <Card key={stat.label} className="border-none shadow-sm">
-            <CardContent className="flex items-center gap-3 pt-5 pb-4">
-              <div className={`p-2.5 rounded-xl bg-muted ${stat.color}`}>
-                <stat.icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {dashLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {stats.map(stat => (
+              <Card key={stat.label} className="border-none shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className={`p-2.5 rounded-xl bg-muted ${stat.color}`}>
+                    <stat.icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
+                    <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-      {/* Charts Row 1 */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="border-none shadow-sm lg:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Reservas vs Visitas</CardTitle>
-            <CardDescription>Comparativo diário no período selecionado</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data}>
-                  <defs>
-                    <linearGradient id="colorRes" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorVis" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(30, 20%, 99%)',
-                      border: '1px solid hsl(30, 15%, 88%)',
-                      borderRadius: '0.5rem',
-                      fontSize: '0.875rem',
-                    }}
-                  />
-                  <Legend />
-                  <Area type="monotone" dataKey="reservations" name="Reservas" stroke="hsl(15, 80%, 50%)" fill="url(#colorRes)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="visits" name="Visitas" stroke="hsl(145, 45%, 42%)" fill="url(#colorVis)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Charts Row 1 */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Card className="border-none shadow-sm lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Reservas por Dia</CardTitle>
+                <CardDescription>Total de reservas no período selecionado</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={dailyStats}>
+                      <defs>
+                        <linearGradient id="colorRes" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(15, 80%, 50%)" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorComp" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(145, 45%, 42%)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(30, 20%, 99%)',
+                          border: '1px solid hsl(30, 15%, 88%)',
+                          borderRadius: '0.5rem',
+                          fontSize: '0.875rem',
+                        }}
+                      />
+                      <Legend />
+                      <Area type="monotone" dataKey="reservations" name="Total" stroke="hsl(15, 80%, 50%)" fill="url(#colorRes)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="completed" name="Concluídas" stroke="hsl(145, 45%, 42%)" fill="url(#colorComp)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card className="border-none shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Distribuição</CardTitle>
-            <CardDescription>Resultado das reservas</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px] flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={3}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-2 text-center">
-              <p className="text-sm text-muted-foreground">
-                Taxa de conversão: <span className="font-semibold text-foreground">{conversionRate}%</span>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Distribuição</CardTitle>
+                <CardDescription>Status das reservas</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px] flex items-center justify-center">
+                  {pieData.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Sem dados no período</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={100}
+                          paddingAngle={3}
+                          dataKey="value"
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          labelLine={false}
+                        >
+                          {pieData.map((_, i) => (
+                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Charts Row 2 */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-none shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Fila de Espera</CardTitle>
-            <CardDescription>Quantidade diária de clientes na fila</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(30, 20%, 99%)',
-                      border: '1px solid hsl(30, 15%, 88%)',
-                      borderRadius: '0.5rem',
-                      fontSize: '0.875rem',
-                    }}
-                  />
-                  <Bar dataKey="waitlist" name="Fila de Espera" fill="hsl(38, 92%, 50%)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Charts Row 2 */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Confirmadas vs Pendentes</CardTitle>
+                <CardDescription>Comparativo diário</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dailyStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(30, 20%, 99%)',
+                          border: '1px solid hsl(30, 15%, 88%)',
+                          borderRadius: '0.5rem',
+                          fontSize: '0.875rem',
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(145, 45%, 42%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 92%, 50%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card className="border-none shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Cancelamentos e No-Shows</CardTitle>
-            <CardDescription>Acompanhamento diário de perdas</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(30, 20%, 99%)',
-                      border: '1px solid hsl(30, 15%, 88%)',
-                      borderRadius: '0.5rem',
-                      fontSize: '0.875rem',
-                    }}
-                  />
-                  <Legend />
-                  <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="noShows" name="No-Shows" fill="hsl(20, 10%, 48%)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Cancelamentos e No-Shows</CardTitle>
+                <CardDescription>Acompanhamento diário de perdas</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dailyStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(20, 10%, 48%)" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(30, 20%, 99%)',
+                          border: '1px solid hsl(30, 15%, 88%)',
+                          borderRadius: '0.5rem',
+                          fontSize: '0.875rem',
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="noShows" name="No-Shows" fill="hsl(20, 10%, 48%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Funnel Chart */}
-      <ReservationFunnelChart
-        data={funnelData}
-        title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
-        description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
-      />
+          {/* Funnel Chart */}
+          <ReservationFunnelChart
+            data={funnelData}
+            title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
+            description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
+          />
+        </>
+      )}
     </div>
   );
 }
