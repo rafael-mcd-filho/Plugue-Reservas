@@ -25,7 +25,7 @@ const queryClient = new QueryClient();
 function HomeRedirect() {
   const { roles, loading } = useAuth();
   if (loading) return null;
-  if (roles.includes('superadmin')) return <Navigate to="/empresas" replace />;
+  if (roles.includes('superadmin')) return <Navigate to="/dashboard" replace />;
   return (
     <ReservationProvider>
       <AppLayout><Dashboard /></AppLayout>
@@ -61,6 +61,11 @@ const App = () => (
             <Route path="/calendario" element={
               <ProtectedRoute allowedRoles={['admin', 'operator']}>
                 <ReservationProvider><AppLayout><CalendarView /></AppLayout></ReservationProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><Dashboard /></AppLayout>
               </ProtectedRoute>
             } />
             <Route path="/empresas" element={
