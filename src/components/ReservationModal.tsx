@@ -226,7 +226,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
             <Button
               className="w-full"
               disabled={!selectedDate}
-              onClick={() => setStep(2)}
+              onClick={() => { setStep(2); onStepChange?.('time_select'); }}
             >
               Continuar <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
