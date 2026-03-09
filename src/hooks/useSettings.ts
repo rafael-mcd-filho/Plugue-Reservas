@@ -27,6 +27,7 @@ export interface Notification {
   message: string;
   type: string;
   is_read: boolean;
+  read_at: string | null;
   created_by: string | null;
   created_at: string;
 }
