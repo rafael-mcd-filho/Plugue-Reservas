@@ -185,7 +185,7 @@ export default function ReservationModal({
           occasion: form.occasion || null,
           notes: form.observation || null,
           visitor_id: getVisitorId(),
-          status: 'pending',
+          status: 'confirmed',
         } as any);
       
       if (error) throw error;

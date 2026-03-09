@@ -106,7 +106,7 @@ export default function TableMap() {
         .select('id, table_id, guest_name, time, duration_minutes, party_size, status')
         .eq('company_id', company.id)
         .eq('date', today)
-        .in('status', ['confirmed', 'pending']);
+        .in('status', ['confirmed']);
       if (error) throw error;
       return (data as any[]) as TodayReservation[];
     },

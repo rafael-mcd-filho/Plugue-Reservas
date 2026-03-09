@@ -17,7 +17,7 @@ import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type ReservationStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no-show';
+type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'no-show';
 
 interface Reservation {
   id: string;
@@ -44,7 +44,7 @@ export default function Reservations() {
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [editDialog, setEditDialog] = useState(false);
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
-  const [editStatus, setEditStatus] = useState<ReservationStatus>('pending');
+  const [editStatus, setEditStatus] = useState<ReservationStatus>('confirmed');
   const [dayModal, setDayModal] = useState<string | null>(null);
 
   const { data: company } = useQuery({
@@ -263,7 +263,6 @@ export default function Reservations() {
               <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os status</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
                 <SelectItem value="confirmed">Confirmada</SelectItem>
                 <SelectItem value="cancelled">Cancelada</SelectItem>
                 <SelectItem value="completed">Concluída</SelectItem>
@@ -374,7 +373,6 @@ export default function Reservations() {
               <Select value={editStatus} onValueChange={v => setEditStatus(v as ReservationStatus)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pending">Pendente</SelectItem>
                   <SelectItem value="confirmed">Confirmada</SelectItem>
                   <SelectItem value="cancelled">Cancelada</SelectItem>
                   <SelectItem value="completed">Concluída</SelectItem>

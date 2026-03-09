@@ -33,7 +33,6 @@ const PERIOD_OPTIONS = [
 const PIE_COLORS = [
   'hsl(28, 90%, 27%)',   // completed (dark brown)
   'hsl(28, 85%, 55%)',   // confirmed (orange)
-  'hsl(38, 80%, 55%)',   // pending (amber)
   'hsl(0, 72%, 51%)',    // cancelled
   'hsl(0, 0%, 35%)',     // no-show
 ];
@@ -98,7 +97,6 @@ export default function Dashboard() {
   const pieData = [
     { name: 'Concluídas', value: totals.completed },
     { name: 'Confirmadas', value: totals.confirmed },
-    { name: 'Pendentes', value: totals.pending },
     { name: 'Cancelamentos', value: totals.cancellations },
     { name: 'No-shows', value: totals.noShows },
   ].filter(d => d.value > 0);
@@ -107,7 +105,6 @@ export default function Dashboard() {
     { label: 'Total Reservas', value: totals.reservations, icon: CalendarCheck, color: 'text-primary' },
     { label: 'Confirmadas', value: totals.confirmed, icon: CheckCircle, color: 'text-accent' },
     { label: 'Concluídas', value: totals.completed, icon: Users, color: 'text-accent' },
-    { label: 'Pendentes', value: totals.pending, icon: Clock, color: 'text-[hsl(var(--warning))]' },
     { label: 'Cancelamentos', value: totals.cancellations, icon: XCircle, color: 'text-destructive' },
     { label: 'Média/Dia', value: avgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
@@ -278,7 +275,7 @@ export default function Dashboard() {
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Confirmadas vs Pendentes</CardTitle>
+                <CardTitle className="text-base">Confirmadas vs Concluídas</CardTitle>
                 <CardDescription>Comparativo diário</CardDescription>
               </CardHeader>
               <CardContent>
@@ -298,7 +295,7 @@ export default function Dashboard() {
                       />
                       <Legend />
                       <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 80%, 55%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completed" name="Concluídas" fill="hsl(28, 90%, 27%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
