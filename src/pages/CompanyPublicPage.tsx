@@ -2,13 +2,24 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck, LogIn } from 'lucide-react';
+import {
+  Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck,
+  LogIn, Clock, CreditCard, Check, X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
+
+const PAYMENT_LABELS: Record<string, string> = {
+  dinheiro: 'Dinheiro',
+  credito: 'Cartão de crédito',
+  debito: 'Cartão de débito',
+  pix: 'Pix',
+  vale_refeicao: 'Vale refeição',
+};
 
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -70,27 +81,29 @@ export default function CompanyPublicPage() {
     ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
     : null;
 
-  // Extract Google Maps embed URL from a regular maps link
   const mapsEmbedUrl = company.google_maps_url
     ? company.google_maps_url.includes('/embed')
       ? company.google_maps_url
       : `https://www.google.com/maps?q=${encodeURIComponent(company.address || company.name)}&output=embed`
     : null;
 
+  const openingHours = (company.opening_hours as any[]) || [];
+  const paymentMethods = (company.payment_methods as Record<string, boolean>) || {};
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <div className="bg-sidebar text-sidebar-foreground">
-        <div className="max-w-lg mx-auto flex items-center gap-4 px-6 py-5">
+        <div className="max-w-2xl mx-auto flex items-center gap-4 px-6 py-5">
           {company.logo_url ? (
             <img src={company.logo_url} alt={company.name} className="h-16 w-16 rounded-full object-cover border-2 border-sidebar-border" />
           ) : (
-            <div className="h-16 w-16 rounded-full bg-sidebar-accent flex items-center justify-center text-2xl font-bold text-sidebar-primary">
+            <div className="h-16 w-16 rounded-full bg-sidebar-accent flex items-center justify-center text-2xl font-bold text-sidebar-primary shrink-0">
               {company.name.charAt(0)}
             </div>
           )}
-          <div>
-            <h1 className="text-xl font-bold">{company.name}</h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-bold truncate">{company.name}</h1>
             <div className="flex gap-3 mt-1">
               {instagramUrl && (
                 <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="text-sidebar-foreground/70 hover:text-sidebar-primary transition-colors">
@@ -106,7 +119,7 @@ export default function CompanyPublicPage() {
           </div>
           <button
             onClick={() => setShowLogin(!showLogin)}
-            className="ml-auto text-sidebar-foreground/50 hover:text-sidebar-primary transition-colors"
+            className="ml-auto text-sidebar-foreground/50 hover:text-sidebar-primary transition-colors shrink-0"
             title="Login administrativo"
           >
             <LogIn className="h-5 w-5" />
@@ -115,67 +128,121 @@ export default function CompanyPublicPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-lg mx-auto px-6 py-8 space-y-6">
-        {/* CTA: Reservar Mesa */}
-        <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg">
-          <CalendarCheck className="h-5 w-5" />
-          Reservar Mesa
-        </Button>
+      <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
+        {/* CTA Buttons */}
+        <div className="space-y-3">
+          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg">
+            <CalendarCheck className="h-5 w-5" />
+            Reservar Mesa
+          </Button>
 
-        {/* WhatsApp button */}
-        {whatsappUrl && (
-          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" className="w-full py-5 text-base gap-2 rounded-xl border-primary text-primary hover:bg-primary/5 mt-3">
-              <MessageCircle className="h-5 w-5" />
-              Falar pelo WhatsApp
-            </Button>
-          </a>
+          {whatsappUrl && (
+            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" className="w-full py-5 text-base gap-2 rounded-xl border-primary text-primary hover:bg-primary/5">
+                <MessageCircle className="h-5 w-5" />
+                Falar pelo WhatsApp
+              </Button>
+            </a>
+          )}
+        </div>
+
+        {/* Description + Opening Hours — side by side */}
+        {(company.description || openingHours.length > 0) && (
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Description */}
+            {company.description && (
+              <Card className="border-none shadow-sm">
+                <CardContent className="pt-5">
+                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">Descrição</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{company.description}</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Opening Hours */}
+            {openingHours.length > 0 && (
+              <Card className="border-none shadow-sm">
+                <CardContent className="pt-5">
+                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Clock className="h-4 w-4" />
+                    Horário de Funcionamento
+                  </h2>
+                  <div className="space-y-1.5">
+                    {openingHours.map((h: any) => (
+                      <div key={h.day} className="flex justify-between text-sm">
+                        <span className="font-medium text-foreground">{h.day}:</span>
+                        <span className="text-muted-foreground">
+                          {h.closed ? 'Fechado' : `${h.open} às ${h.close}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         )}
 
-        {/* Description */}
-        {company.description && (
-          <Card className="border-none shadow-sm">
-            <CardContent className="pt-5">
-              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Descrição</h2>
-              <p className="text-sm text-muted-foreground leading-relaxed">{company.description}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Contact info */}
-        {(company.phone || company.address) && (
-          <Card className="border-none shadow-sm">
-            <CardContent className="pt-5 space-y-3">
-              {company.phone && (
-                <div className="flex items-center gap-3">
-                  <Phone className="h-4 w-4 text-primary" />
-                  <a href={`tel:${company.phone}`} className="text-sm text-muted-foreground hover:text-foreground">
-                    {company.phone}
-                  </a>
+        {/* Payment Methods + Location — side by side */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Payment Methods */}
+          {Object.keys(paymentMethods).length > 0 && (
+            <Card className="border-none shadow-sm">
+              <CardContent className="pt-5">
+                <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4" />
+                  Formas de Pagamento
+                </h2>
+                <div className="space-y-2">
+                  {Object.entries(paymentMethods).map(([key, accepted]) => (
+                    <div key={key} className="flex items-center gap-2 text-sm">
+                      {accepted ? (
+                        <Check className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <X className="h-4 w-4 text-destructive" />
+                      )}
+                      <span className={accepted ? 'text-foreground' : 'text-muted-foreground line-through'}>
+                        {PAYMENT_LABELS[key] || key}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              )}
-              {company.address && (
-                <div className="flex items-start gap-3">
-                  <MapPin className="h-4 w-4 text-primary mt-0.5" />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Contact + Address */}
+          {(company.phone || company.address) && (
+            <Card className="border-none shadow-sm">
+              <CardContent className="pt-5 space-y-3">
+                <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4" />
+                  Localização
+                </h2>
+                {company.phone && (
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-4 w-4 text-primary" />
+                    <a href={`tel:${company.phone}`} className="text-sm text-muted-foreground hover:text-foreground">
+                      {company.phone}
+                    </a>
+                  </div>
+                )}
+                {company.address && (
                   <p className="text-sm text-muted-foreground">{company.address}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Google Maps */}
         {mapsEmbedUrl && (
           <Card className="border-none shadow-sm overflow-hidden">
             <CardContent className="p-0">
-              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider px-5 pt-5 mb-3">
-                <MapPin className="h-4 w-4 inline mr-1" />
-                Localização
-              </h2>
               <iframe
                 src={mapsEmbedUrl}
                 width="100%"
-                height="280"
+                height="300"
                 style={{ border: 0 }}
                 allowFullScreen
                 loading="lazy"
@@ -210,7 +277,7 @@ export default function CompanyPublicPage() {
         )}
 
         {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground pt-4">
+        <p className="text-center text-xs text-muted-foreground pt-4 pb-12">
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
       </div>

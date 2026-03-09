@@ -29,6 +29,7 @@ const emptyForm: CompanyInsert = {
   name: '', slug: '', razao_social: '', cnpj: '', phone: '', email: '',
   address: '', responsible_name: '', responsible_email: '', responsible_phone: '',
   instagram: '', whatsapp: '', google_maps_url: '', description: '', logo_url: '',
+  opening_hours: null, payment_methods: null,
   status: 'active',
 };
 
@@ -85,6 +86,7 @@ export default function Companies() {
       responsible_phone: c.responsible_phone || '', status: c.status,
       instagram: c.instagram || '', whatsapp: c.whatsapp || '', google_maps_url: c.google_maps_url || '',
       description: c.description || '', logo_url: c.logo_url || '',
+      opening_hours: c.opening_hours || null, payment_methods: c.payment_methods || null,
     });
     setDialogOpen(true);
   };
