@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
+import ReservationModal from '@/components/ReservationModal';
 
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: 'Dinheiro',
@@ -25,6 +26,7 @@ export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const [showLogin, setShowLogin] = useState(false);
+  const [showReservation, setShowReservation] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -131,7 +133,7 @@ export default function CompanyPublicPage() {
       <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
         {/* CTA Buttons */}
         <div className="space-y-3">
-          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg">
+          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg" onClick={() => setShowReservation(true)}>
             <CalendarCheck className="h-5 w-5" />
             Reservar Mesa
           </Button>
@@ -281,6 +283,13 @@ export default function CompanyPublicPage() {
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
       </div>
+
+      <ReservationModal
+        open={showReservation}
+        onOpenChange={setShowReservation}
+        companyName={company.name}
+        openingHours={openingHours}
+      />
     </div>
   );
 }
