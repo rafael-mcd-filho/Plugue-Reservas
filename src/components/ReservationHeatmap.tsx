@@ -31,7 +31,7 @@ export default function ReservationHeatmap({ counts, maxCount, hours, dayNames }
   }
 
   return (
-    <Card className="border-none shadow-sm">
+    <Card className="border border-border shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Horários Mais Reservados</CardTitle>
         <CardDescription>Distribuição por dia da semana e horário</CardDescription>
