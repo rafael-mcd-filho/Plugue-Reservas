@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ReservationProvider } from "@/contexts/ReservationContext";
+import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import Dashboard from "@/pages/Dashboard";
@@ -19,18 +20,36 @@ import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
 import NotFound from "./pages/NotFound";
+import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
 
 function HomeRedirect() {
-  const { roles, loading } = useAuth();
+  const { profile, roles, loading } = useAuth();
   if (loading) return null;
   if (roles.includes('superadmin')) return <Navigate to="/dashboard" replace />;
-  return (
-    <ReservationProvider>
-      <AppLayout><Dashboard /></AppLayout>
-    </ReservationProvider>
-  );
+  if (profile?.company_id) {
+    return <CompanySlugRedirect companyId={profile.company_id} />;
+  }
+  return <Navigate to="/acesso-negado" replace />;
+}
+
+function CompanySlugRedirect({ companyId }: { companyId: string }) {
+  const { data: company, isLoading } = useQuery({
+    queryKey: ['company-slug-redirect', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('slug')
+        .eq('id', companyId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+  if (isLoading) return null;
+  if (!company) return <Navigate to="/acesso-negado" replace />;
+  return <Navigate to={`/${company.slug}`} replace />;
 }
 
 const App = () => (
@@ -48,21 +67,8 @@ const App = () => (
             <Route path="/" element={
               <ProtectedRoute><HomeRedirect /></ProtectedRoute>
             } />
-            <Route path="/reservas" element={
-              <ProtectedRoute allowedRoles={['admin', 'operator']}>
-                <ReservationProvider><AppLayout><Reservations /></AppLayout></ReservationProvider>
-              </ProtectedRoute>
-            } />
-            <Route path="/mesas" element={
-              <ProtectedRoute allowedRoles={['admin', 'operator']}>
-                <ReservationProvider><AppLayout><TableMap /></AppLayout></ReservationProvider>
-              </ProtectedRoute>
-            } />
-            <Route path="/calendario" element={
-              <ProtectedRoute allowedRoles={['admin', 'operator']}>
-                <ReservationProvider><AppLayout><CalendarView /></AppLayout></ReservationProvider>
-              </ProtectedRoute>
-            } />
+
+            {/* Superadmin routes */}
             <Route path="/dashboard" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><Dashboard /></AppLayout>
@@ -78,7 +84,6 @@ const App = () => (
                 <AppLayout><CompanyProfile /></AppLayout>
               </ProtectedRoute>
             } />
-
             <Route path="/usuarios" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><Users /></AppLayout>
@@ -87,6 +92,46 @@ const App = () => (
             <Route path="/configuracoes" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><SettingsPage /></AppLayout>
+              </ProtectedRoute>
+            } />
+
+            {/* Company slug routes (admin/operator) */}
+            <Route path="/:slug" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <ReservationProvider>
+                    <AppLayout>
+                      <Dashboard />
+                    </AppLayout>
+                  </ReservationProvider>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/reservas" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <ReservationProvider>
+                    <AppLayout><Reservations /></AppLayout>
+                  </ReservationProvider>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/mesas" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <ReservationProvider>
+                    <AppLayout><TableMap /></AppLayout>
+                  </ReservationProvider>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/calendario" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <ReservationProvider>
+                    <AppLayout><CalendarView /></AppLayout>
+                  </ReservationProvider>
+                </CompanySlugProvider>
               </ProtectedRoute>
             } />
 

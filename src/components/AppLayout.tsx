@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,30 +14,40 @@ interface NavItem {
   showFor: AppRole[] | 'all-except-superadmin';
 }
 
-const navItems: NavItem[] = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/', showFor: 'all-except-superadmin' },
-  { label: 'Reservas', icon: CalendarDays, path: '/reservas', showFor: 'all-except-superadmin' },
-  { label: 'Mesas', icon: Grid3X3, path: '/mesas', showFor: 'all-except-superadmin' },
-  { label: 'Calendário', icon: CalendarDays, path: '/calendario', showFor: 'all-except-superadmin' },
-  { label: 'Dashboard', icon: BarChart3, path: '/dashboard', showFor: ['superadmin'] },
-  { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
-  { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
-  { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
-];
-
 export default function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { slug } = useParams<{ slug: string }>();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { profile, roles, loading, signOut } = useAuth();
 
   const isSuperadmin = roles.includes('superadmin');
   const rolesLoaded = !loading && roles.length > 0;
 
-  const visibleNavItems = navItems.filter(item => {
+  // Build nav items dynamically based on whether we're in a slug context
+  const companyNavItems: NavItem[] = slug
+    ? [
+        { label: 'Dashboard', icon: LayoutDashboard, path: `/${slug}`, showFor: 'all-except-superadmin' },
+        { label: 'Reservas', icon: CalendarDays, path: `/${slug}/reservas`, showFor: 'all-except-superadmin' },
+        { label: 'Mesas', icon: Grid3X3, path: `/${slug}/mesas`, showFor: 'all-except-superadmin' },
+        { label: 'Calendário', icon: CalendarDays, path: `/${slug}/calendario`, showFor: 'all-except-superadmin' },
+      ]
+    : [];
+
+  const superadminNavItems: NavItem[] = [
+    { label: 'Dashboard', icon: BarChart3, path: '/dashboard', showFor: ['superadmin'] },
+    { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
+    { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
+    { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
+  ];
+
+  const allNavItems = [...companyNavItems, ...superadminNavItems];
+
+  const visibleNavItems = allNavItems.filter(item => {
     if (!rolesLoaded) return false;
     if (item.showFor === 'all-except-superadmin') {
-      return !isSuperadmin;
+      // Show company items for admin/operator, and also for superadmin when viewing a company via slug
+      return !isSuperadmin || !!slug;
     }
     return (item.showFor as AppRole[]).some(r => roles.includes(r));
   });
@@ -63,6 +73,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             Reserva<span className="text-sidebar-primary">Fácil</span>
           </h1>
         </div>
+
+        {slug && (
+          <div className="px-6 py-3 border-b border-sidebar-border">
+            <p className="text-xs text-sidebar-foreground/50 uppercase tracking-wider">Unidade</p>
+            <p className="text-sm font-semibold text-sidebar-primary truncate">{slug}</p>
+          </div>
+        )}
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {visibleNavItems.map(item => {
