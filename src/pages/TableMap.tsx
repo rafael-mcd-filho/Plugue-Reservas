@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { Users, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
 type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 
@@ -22,6 +23,16 @@ interface RestaurantTable {
   capacity: number;
   section: string;
   status: TableStatus;
+}
+
+interface TodayReservation {
+  id: string;
+  table_id: string;
+  guest_name: string;
+  time: string;
+  duration_minutes: number;
+  party_size: number;
+  status: string;
 }
 
 const STATUS_COLORS: Record<TableStatus, string> = {
