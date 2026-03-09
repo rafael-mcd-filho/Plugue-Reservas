@@ -99,7 +99,10 @@ export default function CompanyProfile() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight truncate">{company.name}</h1>
-            <Badge variant={sc.variant}>{sc.label}</Badge>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
+              <Circle className="h-2 w-2 fill-current" />
+              {sc.label}
+            </span>
           </div>
           {company.razao_social && (
             <p className="text-sm text-muted-foreground mt-0.5">{company.razao_social}</p>
