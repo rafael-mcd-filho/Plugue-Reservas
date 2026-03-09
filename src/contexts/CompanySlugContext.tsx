@@ -21,12 +21,12 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
     queryKey: ['company-by-slug', slug],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('companies')
+        .from('companies' as any)
         .select('id, name, slug, status')
         .eq('slug', slug!)
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      return data;
+      return data as any;
     },
     enabled: !!slug,
   });
