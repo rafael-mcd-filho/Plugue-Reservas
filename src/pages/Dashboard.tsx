@@ -105,7 +105,6 @@ export default function Dashboard() {
     { label: 'Total Reservas', value: totals.reservations, icon: CalendarCheck, color: 'text-primary' },
     { label: 'Confirmadas', value: totals.confirmed, icon: CheckCircle, color: 'text-accent' },
     { label: 'Concluídas', value: totals.completed, icon: Users, color: 'text-accent' },
-    { label: 'Pendentes', value: totals.pending, icon: Clock, color: 'text-[hsl(var(--warning))]' },
     { label: 'Cancelamentos', value: totals.cancellations, icon: XCircle, color: 'text-destructive' },
     { label: 'Média/Dia', value: avgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
