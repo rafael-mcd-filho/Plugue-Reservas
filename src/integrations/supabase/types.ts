@@ -204,6 +204,41 @@ export type Database = {
           },
         ]
       }
+      reservation_funnel_logs: {
+        Row: {
+          company_id: string
+          created_at: string
+          date: string
+          id: string
+          step: string
+          visitor_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          date?: string
+          id?: string
+          step: string
+          visitor_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          date?: string
+          id?: string
+          step?: string
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_funnel_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       restaurant_tables: {
         Row: {
           capacity: number
