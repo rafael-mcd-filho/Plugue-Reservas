@@ -57,10 +57,6 @@ export default function CompanyProfile() {
     updateCompany.mutate({ id: company.id, status: company.status === 'paused' ? 'active' : 'paused' });
   };
 
-  const toggleDefaulting = () => {
-    if (!company) return;
-    updateCompany.mutate({ id: company.id, status: company.status === 'defaulting' ? 'active' : 'defaulting' });
-  };
 
   const handleDelete = () => {
     if (!company) return;
