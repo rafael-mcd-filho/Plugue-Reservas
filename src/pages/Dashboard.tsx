@@ -33,7 +33,16 @@ const PIE_COLORS = [
 ];
 
 export default function Dashboard() {
+  const { slug } = useParams<{ slug: string }>();
   const companies = getMockCompanies();
+  const isCompanyContext = !!slug;
+
+  // In company context, find the matching company and lock to it
+  const companyFromSlug = isCompanyContext
+    ? companies.find(c => c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') === slug
+        || c.id === slug) || companies[0]
+    : null;
+
   const [companyId, setCompanyId] = useState<string>('all');
   const [period, setPeriod] = useState('30');
   const [customStart, setCustomStart] = useState<Date | undefined>();
