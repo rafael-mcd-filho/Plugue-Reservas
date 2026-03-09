@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import Reservations from "@/pages/Reservations";
 import TableMap from "@/pages/TableMap";
 import CalendarView from "@/pages/CalendarView";
+import Companies from "@/pages/Companies";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
