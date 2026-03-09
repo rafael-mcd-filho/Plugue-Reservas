@@ -107,17 +107,10 @@ export default function Companies() {
     updateCompany.mutate({ id: c.id, status: newStatus });
   };
 
-  const toggleDefaulting = (c: Company, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newStatus: CompanyStatus = c.status === 'defaulting' ? 'active' : 'defaulting';
-    updateCompany.mutate({ id: c.id, status: newStatus });
-  };
-
   const counts = {
     all: companies.length,
     active: companies.filter(c => c.status === 'active').length,
     paused: companies.filter(c => c.status === 'paused').length,
-    defaulting: companies.filter(c => c.status === 'defaulting').length,
   };
 
   const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
