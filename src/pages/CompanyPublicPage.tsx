@@ -26,6 +26,7 @@ export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const [showLogin, setShowLogin] = useState(false);
+  const [showReservation, setShowReservation] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
