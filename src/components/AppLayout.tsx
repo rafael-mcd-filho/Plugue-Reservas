@@ -5,12 +5,21 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 
-const navItems = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/', roles: [] as string[] },
-  { label: 'Reservas', icon: CalendarDays, path: '/reservas', roles: [] },
-  { label: 'Mesas', icon: Grid3X3, path: '/mesas', roles: [] },
-  { label: 'Calendário', icon: CalendarDays, path: '/calendario', roles: [] },
-  { label: 'Empresas', icon: Building2, path: '/empresas', roles: ['superadmin'] },
+type AppRole = 'superadmin' | 'admin' | 'operator';
+
+interface NavItem {
+  label: string;
+  icon: any;
+  path: string;
+  showFor: AppRole[] | 'all-except-superadmin';
+}
+
+const navItems: NavItem[] = [
+  { label: 'Dashboard', icon: LayoutDashboard, path: '/', showFor: 'all-except-superadmin' },
+  { label: 'Reservas', icon: CalendarDays, path: '/reservas', showFor: 'all-except-superadmin' },
+  { label: 'Mesas', icon: Grid3X3, path: '/mesas', showFor: 'all-except-superadmin' },
+  { label: 'Calendário', icon: CalendarDays, path: '/calendario', showFor: 'all-except-superadmin' },
+  { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -19,9 +28,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { profile, roles, signOut } = useAuth();
 
-  const visibleNavItems = navItems.filter(item =>
-    item.roles.length === 0 || item.roles.some(r => roles.includes(r as any))
-  );
+  const isSuperadmin = roles.includes('superadmin');
+
+  const visibleNavItems = navItems.filter(item => {
+    if (item.showFor === 'all-except-superadmin') {
+      return !isSuperadmin;
+    }
+    return (item.showFor as AppRole[]).some(r => roles.includes(r));
+  });
 
   const handleSignOut = async () => {
     await signOut();
