@@ -41,23 +41,42 @@ export function useCreateCompany() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (company: CompanyInsert) => {
-      const { data, error } = await supabase
-        .from('companies' as any)
-        .insert(company as any)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as unknown as Company;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Não autenticado');
+
+      const response = await supabase.functions.invoke('create-company', {
+        body: company,
+      });
+
+      if (response.error) throw response.error;
+      const result = response.data;
+      if (result?.error) throw new Error(result.error);
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['companies'] });
-      toast.success('Empresa criada com sucesso!');
+      if (data?.admin_user?.temp_password) {
+        toast.success(`Empresa criada! Senha temporária do admin: ${data.admin_user.temp_password}`, {
+          duration: 15000,
+        });
+      } else {
+        toast.success('Empresa criada com sucesso!');
+      }
     },
     onError: (err: any) => {
-      if (err.message?.includes('companies_cnpj_key')) {
+      const msg = err.message || '';
+      if (msg.includes('companies_cnpj_key')) {
         toast.error('Já existe uma empresa com este CNPJ');
-      } else if (err.message?.includes('companies_slug_key')) {
+      } else if (msg.includes('companies_slug_key')) {
         toast.error('Já existe uma empresa com este slug');
+      } else if (msg.includes('already been registered')) {
+        toast.error('Este email já está cadastrado no sistema');
+      } else {
+        toast.error(`Erro ao criar empresa: ${msg}`);
+      }
+    },
+  });
+}
       } else {
         toast.error(`Erro ao criar empresa: ${err.message}`);
       }
