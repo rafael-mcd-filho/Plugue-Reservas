@@ -104,6 +104,13 @@ export default function CompanyPublicPage() {
               )}
             </div>
           </div>
+          <button
+            onClick={() => setShowLogin(!showLogin)}
+            className="ml-auto text-sidebar-foreground/50 hover:text-sidebar-primary transition-colors"
+            title="Login administrativo"
+          >
+            <LogIn className="h-5 w-5" />
+          </button>
         </div>
       </div>
 
