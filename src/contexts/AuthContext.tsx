@@ -48,7 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('user_roles' as any)
       .select('role')
       .eq('user_id', userId);
-    console.log('Fetched roles:', data, 'Error:', error);
     if (data && data.length > 0) {
       setRoles((data as any[]).map(r => r.role as AppRole));
     } else {
@@ -56,34 +55,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+  const loadUserData = async (currentSession: Session | null) => {
+    setSession(currentSession);
+    setUser(currentSession?.user ?? null);
 
-        if (session?.user) {
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-            fetchRoles(session.user.id);
-          }, 0);
-        } else {
-          setProfile(null);
-          setRoles([]);
+    if (currentSession?.user) {
+      await Promise.all([
+        fetchProfile(currentSession.user.id),
+        fetchRoles(currentSession.user.id),
+      ]);
+    } else {
+      setProfile(null);
+      setRoles([]);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    // Get initial session first
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      loadUserData(initialSession);
+    });
+
+    // Then listen for changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        // Only reload if session actually changed (login/logout)
+        if (_event === 'SIGNED_IN' || _event === 'SIGNED_OUT' || _event === 'TOKEN_REFRESHED') {
+          loadUserData(newSession);
         }
-        setLoading(false);
       }
     );
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-        fetchRoles(session.user.id);
-      }
-      setLoading(false);
-    });
 
     return () => subscription.unsubscribe();
   }, []);
