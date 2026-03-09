@@ -12,6 +12,7 @@ import Reservations from "@/pages/Reservations";
 import TableMap from "@/pages/TableMap";
 import CalendarView from "@/pages/CalendarView";
 import Companies from "@/pages/Companies";
+import CompanyProfile from "@/pages/CompanyProfile";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
@@ -63,6 +64,11 @@ const App = () => (
             <Route path="/empresas" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><Companies /></AppLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/empresas/:id" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><CompanyProfile /></AppLayout>
               </ProtectedRoute>
             } />
 

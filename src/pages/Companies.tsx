@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Plus, Search, Pencil, Trash2, Building2, Phone, Mail, MapPin, Pause, Play, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Pencil, Trash2, Pause, Play, AlertTriangle, ArrowUpDown, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,7 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, Company, CompanyInsert, CompanyStatus } from '@/hooks/useCompanies';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 function slugify(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
@@ -27,7 +31,11 @@ const emptyForm: CompanyInsert = {
   address: '', responsible_name: '', responsible_email: '', responsible_phone: '', status: 'active',
 };
 
+type SortField = 'name' | 'cnpj' | 'status' | 'created_at';
+type SortDir = 'asc' | 'desc';
+
 export default function Companies() {
+  const navigate = useNavigate();
   const { data: companies = [], isLoading } = useCompanies();
   const createCompany = useCreateCompany();
   const updateCompany = useUpdateCompany();
@@ -38,6 +46,17 @@ export default function Companies() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Company | null>(null);
   const [form, setForm] = useState<CompanyInsert>(emptyForm);
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
 
   const filtered = companies
     .filter(c => statusFilter === 'all' || c.status === statusFilter)
@@ -45,11 +64,18 @@ export default function Companies() {
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       (c.cnpj && c.cnpj.includes(search)) ||
       (c.responsible_name && c.responsible_name.toLowerCase().includes(search.toLowerCase()))
-    );
+    )
+    .sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      const valA = a[sortField] ?? '';
+      const valB = b[sortField] ?? '';
+      return valA < valB ? -dir : valA > valB ? dir : 0;
+    });
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setDialogOpen(true); };
 
-  const openEdit = (c: Company) => {
+  const openEdit = (c: Company, e: React.MouseEvent) => {
+    e.stopPropagation();
     setEditing(c);
     setForm({
       name: c.name, slug: c.slug, razao_social: c.razao_social || '', cnpj: c.cnpj || '',
@@ -67,9 +93,7 @@ export default function Companies() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.slug) return;
-    if (!editing && !form.responsible_email) {
-      return;
-    }
+    if (!editing && !form.responsible_email) return;
     if (editing) {
       await updateCompany.mutateAsync({ id: editing.id, ...form });
     } else {
@@ -78,12 +102,14 @@ export default function Companies() {
     setDialogOpen(false);
   };
 
-  const togglePause = (c: Company) => {
+  const togglePause = (c: Company, e: React.MouseEvent) => {
+    e.stopPropagation();
     const newStatus: CompanyStatus = c.status === 'paused' ? 'active' : 'paused';
     updateCompany.mutate({ id: c.id, status: newStatus });
   };
 
-  const toggleDefaulting = (c: Company) => {
+  const toggleDefaulting = (c: Company, e: React.MouseEvent) => {
+    e.stopPropagation();
     const newStatus: CompanyStatus = c.status === 'defaulting' ? 'active' : 'defaulting';
     updateCompany.mutate({ id: c.id, status: newStatus });
   };
@@ -94,6 +120,13 @@ export default function Companies() {
     paused: companies.filter(c => c.status === 'paused').length,
     defaulting: companies.filter(c => c.status === 'defaulting').length,
   };
+
+  const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <Button variant="ghost" size="sm" className="gap-1 -ml-3 h-auto py-1 font-medium" onClick={() => toggleSort(field)}>
+      {children}
+      <ArrowUpDown className="h-3.5 w-3.5 opacity-50" />
+    </Button>
+  );
 
   return (
     <div className="space-y-6">
@@ -154,7 +187,7 @@ export default function Companies() {
                   <Input value={form.responsible_name || ''} onChange={e => setForm({ ...form, responsible_name: e.target.value })} placeholder="Nome completo" />
                 </div>
                 <div>
-                  <Label>Email do Responsável (login)</Label>
+                  <Label>Email do Responsável (login) {!editing && '*'}</Label>
                   <Input type="email" value={form.responsible_email || ''} onChange={e => setForm({ ...form, responsible_email: e.target.value })} placeholder="admin@empresa.com" />
                 </div>
                 <div>
@@ -193,7 +226,7 @@ export default function Companies() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Buscar por nome, CNPJ ou responsável..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {(['all', 'active', 'paused', 'defaulting'] as const).map(s => (
             <Button
               key={s}
@@ -209,132 +242,114 @@ export default function Companies() {
         </div>
       </div>
 
-      {/* List */}
+      {/* Table */}
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => (
-            <Card key={i} className="border-none shadow-sm">
-              <CardContent className="pt-6 space-y-3">
-                <Skeleton className="h-5 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-                <Skeleton className="h-4 w-2/3" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card className="border-none shadow-sm">
+          <CardContent className="p-0">
+            <div className="space-y-3 p-6">
+              {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          </CardContent>
+        </Card>
       ) : filtered.length === 0 ? (
         <Card className="border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
+            <Building2 className="h-12 w-12 mx-auto mb-3 opacity-30" />
             {search || statusFilter !== 'all' ? 'Nenhuma empresa encontrada' : 'Nenhuma empresa cadastrada. Crie a primeira!'}
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(company => {
-            const sc = statusConfig[company.status];
-            return (
-              <Card key={company.id} className="border-none shadow-sm hover:shadow-md transition-shadow">
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="p-2.5 rounded-xl bg-primary/10 shrink-0">
-                        <Building2 className="h-5 w-5 text-primary" />
+        <Card className="border-none shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead><SortHeader field="name">Nome Fantasia</SortHeader></TableHead>
+                <TableHead><SortHeader field="cnpj">CNPJ</SortHeader></TableHead>
+                <TableHead><SortHeader field="status">Status</SortHeader></TableHead>
+                <TableHead>Plano</TableHead>
+                <TableHead><SortHeader field="created_at">Data de Cadastro</SortHeader></TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map(company => {
+                const sc = statusConfig[company.status];
+                return (
+                  <TableRow
+                    key={company.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/empresas/${company.id}`)}
+                  >
+                    <TableCell>
+                      <div>
+                        <p className="font-medium">{company.name}</p>
+                        {company.razao_social && (
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{company.razao_social}</p>
+                        )}
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="font-semibold text-base truncate">{company.name}</h3>
-                        {company.razao_social && <p className="text-xs text-muted-foreground truncate">{company.razao_social}</p>}
-                        {company.cnpj && <p className="text-xs text-muted-foreground font-mono">{company.cnpj}</p>}
-                      </div>
-                    </div>
-                    <Badge variant={sc.variant} className="shrink-0 ml-2">{sc.label}</Badge>
-                  </div>
-
-                  {(company.responsible_name || company.responsible_email) && (
-                    <div className="mb-3 p-2.5 rounded-lg bg-muted/50">
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Responsável</p>
-                      {company.responsible_name && <p className="text-sm font-medium">{company.responsible_name}</p>}
-                      {company.responsible_email && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          <span>{company.responsible_email}</span>
-                        </div>
-                      )}
-                      {company.responsible_phone && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          <span>{company.responsible_phone}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-1 text-sm text-muted-foreground mb-4">
-                    {company.phone && (
-                      <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /><span>{company.phone}</span></div>
-                    )}
-                    {company.email && (
-                      <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" /><span>{company.email}</span></div>
-                    )}
-                    {company.address && (
-                      <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /><span className="truncate">{company.address}</span></div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 pt-2 border-t border-border">
-                    <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={() => openEdit(company)}>
-                      <Pencil className="h-3.5 w-3.5" /> Editar
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1.5 text-xs"
-                      onClick={() => togglePause(company)}
-                    >
-                      {company.status === 'paused'
-                        ? <><Play className="h-3.5 w-3.5" /> Ativar</>
-                        : <><Pause className="h-3.5 w-3.5" /> Pausar</>
-                      }
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={`gap-1.5 text-xs ${company.status === 'defaulting' ? 'text-destructive' : ''}`}
-                      onClick={() => toggleDefaulting(company)}
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {company.status === 'defaulting' ? 'Regularizar' : 'Inadimplente'}
-                    </Button>
-                    <div className="flex-1" />
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
-                          <Trash2 className="h-4 w-4" />
+                    </TableCell>
+                    <TableCell className="font-mono text-sm text-muted-foreground">
+                      {company.cnpj || '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={sc.variant}>{sc.label}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">—</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {format(new Date(company.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => openEdit(company, e)} title="Editar">
+                          <Pencil className="h-4 w-4" />
                         </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Remover empresa?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Isso removerá "{company.name}" e todos os dados associados. Esta ação não pode ser desfeita.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => deleteCompany.mutate(company.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Remover
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8"
+                          onClick={(e) => togglePause(company, e)}
+                          title={company.status === 'paused' ? 'Ativar' : 'Pausar'}
+                        >
+                          {company.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          variant="ghost" size="icon"
+                          className={`h-8 w-8 ${company.status === 'defaulting' ? 'text-destructive' : ''}`}
+                          onClick={(e) => toggleDefaulting(company, e)}
+                          title={company.status === 'defaulting' ? 'Regularizar' : 'Marcar inadimplente'}
+                        >
+                          <AlertTriangle className="h-4 w-4" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Isso removerá "{company.name}" e todos os dados associados. <strong>Esta ação não pode ser desfeita.</strong>
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => deleteCompany.mutate(company.id)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Excluir permanentemente
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );
