@@ -183,7 +183,7 @@ export default function Dashboard() {
           {/* KPI Cards */}
           <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {stats.map(stat => (
-              <Card key={stat.label} className="border-none shadow-sm">
+              <Card key={stat.label} className="border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 pt-5 pb-4">
                   <div className={`p-2.5 rounded-xl bg-muted ${stat.color}`}>
                     <stat.icon className="h-5 w-5" />
@@ -199,7 +199,7 @@ export default function Dashboard() {
 
           {/* Charts Row 1 */}
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="border-none shadow-sm lg:col-span-2">
+            <Card className="border border-border shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Reservas por Dia</CardTitle>
                 <CardDescription>Total de reservas no período selecionado</CardDescription>
@@ -238,7 +238,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-sm">
+            <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Distribuição</CardTitle>
                 <CardDescription>Status das reservas</CardDescription>
@@ -276,7 +276,7 @@ export default function Dashboard() {
 
           {/* Charts Row 2 */}
           <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="border-none shadow-sm">
+            <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Confirmadas vs Pendentes</CardTitle>
                 <CardDescription>Comparativo diário</CardDescription>
@@ -305,7 +305,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-sm">
+            <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Cancelamentos e No-Shows</CardTitle>
                 <CardDescription>Acompanhamento diário de perdas</CardDescription>
