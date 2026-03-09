@@ -1,0 +1,6 @@
+INSERT INTO public.companies (name, slug, razao_social, cnpj, phone, email, address, responsible_name, responsible_email, responsible_phone, status)
+VALUES
+  ('Restaurante Sabor & Arte', 'sabor-arte', 'Sabor & Arte Alimentação Ltda', '12.345.678/0001-90', '(11) 3456-7890', 'contato@saborarte.com.br', 'Rua Augusta, 1200 - São Paulo/SP', 'Maria Silva', 'maria@saborarte.com.br', '(11) 99876-5432', 'active'),
+  ('Bistrô do Chef', 'bistro-do-chef', 'Chef Gourmet Restaurantes S.A.', '98.765.432/0001-10', '(21) 2345-6789', 'reservas@bistrodochef.com.br', 'Av. Atlântica, 500 - Rio de Janeiro/RJ', 'Carlos Oliveira', 'carlos@bistrodochef.com.br', '(21) 98765-4321', 'active'),
+  ('Cantina Bella Napoli', 'cantina-bella-napoli', 'Bella Napoli Gastronomia Eireli', '45.678.901/0001-23', '(31) 3333-4444', 'contato@bellanapoli.com.br', 'Rua da Bahia, 800 - Belo Horizonte/MG', 'Giuseppe Romano', 'giuseppe@bellanapoli.com.br', '(31) 97654-3210', 'paused'),
+  ('Sushi Zen House', 'sushi-zen-house', 'Zen House Culinária Japonesa Ltda', '67.890.123/0001-45', '(41) 4444-5555', 'contato@sushizen.com.br', 'Rua XV de Novembro, 300 - Curitiba/PR', 'Yuki Tanaka', 'yuki@sushizen.com.br', '(41) 96543-2109', 'defaulting');
