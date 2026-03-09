@@ -129,6 +129,7 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
       toast.error('Preencha nome e WhatsApp');
       return;
     }
+    onStepChange?.('completed');
     toast.success('Reserva solicitada com sucesso! Entraremos em contato para confirmar.');
     handleClose(false);
   };
