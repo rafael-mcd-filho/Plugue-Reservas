@@ -283,7 +283,10 @@ export default function Companies() {
                       {company.cnpj || '—'}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={sc.variant}>{sc.label}</Badge>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
+                        <Circle className={`h-2 w-2 fill-current`} />
+                        {sc.label}
+                      </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">—</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
