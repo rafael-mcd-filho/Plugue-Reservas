@@ -201,6 +201,48 @@ Deno.serve(async (req) => {
         );
       }
 
+      case "seed_users": {
+        const { users: seedUsers } = body;
+        if (!seedUsers || !Array.isArray(seedUsers)) throw new Error("users array required");
+        
+        const results = [];
+        for (const u of seedUsers) {
+          const tempPassword = crypto.randomUUID().slice(0, 12) + "Aa1!";
+          
+          const { data: newUser, error: userError } = await supabaseAdmin.auth.admin.createUser({
+            email: u.email,
+            password: tempPassword,
+            email_confirm: true,
+            user_metadata: { full_name: u.full_name },
+          });
+          
+          if (userError) {
+            results.push({ email: u.email, error: userError.message });
+            continue;
+          }
+          
+          // Update profile
+          await supabaseAdmin.from("profiles").update({
+            company_id: u.company_id,
+            phone: u.phone || null,
+            full_name: u.full_name,
+          }).eq("id", newUser.user.id);
+          
+          // Assign role
+          await supabaseAdmin.from("user_roles").insert({
+            user_id: newUser.user.id,
+            role: u.role || "admin",
+            company_id: u.company_id,
+          });
+          
+          results.push({ email: u.email, id: newUser.user.id, temp_password: tempPassword });
+        }
+        
+        return new Response(JSON.stringify({ results }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: "Ação inválida" }), {
           status: 400,
