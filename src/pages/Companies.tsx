@@ -83,6 +83,8 @@ export default function Companies() {
       phone: c.phone || '', email: c.email || '', address: c.address || '',
       responsible_name: c.responsible_name || '', responsible_email: c.responsible_email || '',
       responsible_phone: c.responsible_phone || '', status: c.status,
+      instagram: c.instagram || '', whatsapp: c.whatsapp || '', google_maps_url: c.google_maps_url || '',
+      description: c.description || '', logo_url: c.logo_url || '',
     });
     setDialogOpen(true);
   };
