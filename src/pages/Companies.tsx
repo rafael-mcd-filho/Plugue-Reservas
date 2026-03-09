@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Pencil, Trash2, Pause, Play, AlertTriangle, ArrowUpDown, Building2 } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Pause, Play, ArrowUpDown, Building2, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,10 +20,9 @@ function slugify(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 }
 
-const statusConfig: Record<CompanyStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
-  active: { label: 'Ativa', variant: 'default' },
-  paused: { label: 'Pausada', variant: 'secondary' },
-  defaulting: { label: 'Inadimplente', variant: 'destructive' },
+const statusConfig: Record<CompanyStatus, { label: string; className: string }> = {
+  active: { label: 'Ativa', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  paused: { label: 'Pausada', className: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
 
 const emptyForm: CompanyInsert = {
@@ -108,17 +107,10 @@ export default function Companies() {
     updateCompany.mutate({ id: c.id, status: newStatus });
   };
 
-  const toggleDefaulting = (c: Company, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newStatus: CompanyStatus = c.status === 'defaulting' ? 'active' : 'defaulting';
-    updateCompany.mutate({ id: c.id, status: newStatus });
-  };
-
   const counts = {
     all: companies.length,
     active: companies.filter(c => c.status === 'active').length,
     paused: companies.filter(c => c.status === 'paused').length,
-    defaulting: companies.filter(c => c.status === 'defaulting').length,
   };
 
   const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
@@ -202,7 +194,6 @@ export default function Companies() {
                       <SelectContent>
                         <SelectItem value="active">Ativa</SelectItem>
                         <SelectItem value="paused">Pausada</SelectItem>
-                        <SelectItem value="defaulting">Inadimplente</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -227,7 +218,7 @@ export default function Companies() {
           <Input placeholder="Buscar por nome, CNPJ ou responsável..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
         </div>
         <div className="flex gap-2 flex-wrap">
-          {(['all', 'active', 'paused', 'defaulting'] as const).map(s => (
+          {(['all', 'active', 'paused'] as const).map(s => (
             <Button
               key={s}
               variant={statusFilter === s ? 'default' : 'outline'}
@@ -292,7 +283,10 @@ export default function Companies() {
                       {company.cnpj || '—'}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={sc.variant}>{sc.label}</Badge>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
+                        <Circle className={`h-2 w-2 fill-current`} />
+                        {sc.label}
+                      </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">—</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -309,14 +303,6 @@ export default function Companies() {
                           title={company.status === 'paused' ? 'Ativar' : 'Pausar'}
                         >
                           {company.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                        </Button>
-                        <Button
-                          variant="ghost" size="icon"
-                          className={`h-8 w-8 ${company.status === 'defaulting' ? 'text-destructive' : ''}`}
-                          onClick={(e) => toggleDefaulting(company, e)}
-                          title={company.status === 'defaulting' ? 'Regularizar' : 'Marcar inadimplente'}
-                        >
-                          <AlertTriangle className="h-4 w-4" />
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>

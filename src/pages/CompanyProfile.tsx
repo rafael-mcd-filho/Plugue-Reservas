@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, Phone, MapPin, Pencil, Pause, Play, AlertTriangle, Trash2, Calendar, User } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, Phone, MapPin, Pencil, Pause, Play, Trash2, Calendar, User, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,10 +16,9 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useState } from 'react';
 
-const statusConfig: Record<CompanyStatus, { label: string; variant: 'default' | 'secondary' | 'destructive'; color: string }> = {
-  active: { label: 'Ativa', variant: 'default', color: 'text-green-600' },
-  paused: { label: 'Pausada', variant: 'secondary', color: 'text-muted-foreground' },
-  defaulting: { label: 'Inadimplente', variant: 'destructive', color: 'text-destructive' },
+const statusConfig: Record<CompanyStatus, { label: string; className: string }> = {
+  active: { label: 'Ativa', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  paused: { label: 'Pausada', className: 'bg-amber-100 text-amber-700 border-amber-200' },
 };
 
 export default function CompanyProfile() {
@@ -58,10 +57,6 @@ export default function CompanyProfile() {
     updateCompany.mutate({ id: company.id, status: company.status === 'paused' ? 'active' : 'paused' });
   };
 
-  const toggleDefaulting = () => {
-    if (!company) return;
-    updateCompany.mutate({ id: company.id, status: company.status === 'defaulting' ? 'active' : 'defaulting' });
-  };
 
   const handleDelete = () => {
     if (!company) return;
@@ -104,7 +99,10 @@ export default function CompanyProfile() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight truncate">{company.name}</h1>
-            <Badge variant={sc.variant}>{sc.label}</Badge>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
+              <Circle className="h-2 w-2 fill-current" />
+              {sc.label}
+            </span>
           </div>
           {company.razao_social && (
             <p className="text-sm text-muted-foreground mt-0.5">{company.razao_social}</p>
@@ -119,14 +117,6 @@ export default function CompanyProfile() {
             onClick={togglePause}
           >
             {company.status === 'paused' ? <><Play className="h-4 w-4" /> Ativar</> : <><Pause className="h-4 w-4" /> Pausar</>}
-          </Button>
-          <Button
-            variant={company.status === 'defaulting' ? 'destructive' : 'outline'}
-            size="sm" className="gap-2"
-            onClick={toggleDefaulting}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            {company.status === 'defaulting' ? 'Regularizar' : 'Inadimplente'}
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -286,7 +276,7 @@ export default function CompanyProfile() {
                   <SelectContent>
                     <SelectItem value="active">Ativa</SelectItem>
                     <SelectItem value="paused">Pausada</SelectItem>
-                    <SelectItem value="defaulting">Inadimplente</SelectItem>
+                    
                   </SelectContent>
                 </Select>
               </div>
