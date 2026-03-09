@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { subDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -16,6 +17,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { getMockDashboardData, getMockCompanies, type DailyStats } from '@/data/dashboardMock';
+import { supabase } from '@/integrations/supabase/client';
+import { useFunnelData } from '@/hooks/useFunnelData';
+import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 
 const PERIOD_OPTIONS = [
   { value: '7', label: 'Últimos 7 dias' },
