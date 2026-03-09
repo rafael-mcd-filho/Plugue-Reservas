@@ -19,6 +19,7 @@ import Users from "@/pages/Users";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
+import CompanyPublicPage from "@/pages/CompanyPublicPage";
 import NotFound from "./pages/NotFound";
 import { supabase } from "@/integrations/supabase/client";
 
