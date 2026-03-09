@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe } from 'lucide-react';
+import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe, Bot, Webhook } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
+import AutomationsTab from '@/components/company/AutomationsTab';
+import WebhooksTab from '@/components/company/WebhooksTab';
 
 interface OpeningHour {
   day: string;
@@ -146,6 +148,8 @@ export default function CompanySettings() {
           <TabsTrigger value="payments" className="gap-2"><CreditCard className="h-4 w-4" /> Pagamentos</TabsTrigger>
           <TabsTrigger value="info" className="gap-2"><Globe className="h-4 w-4" /> Informações</TabsTrigger>
           <TabsTrigger value="location" className="gap-2"><MapPin className="h-4 w-4" /> Localização</TabsTrigger>
+          <TabsTrigger value="automations" className="gap-2"><Bot className="h-4 w-4" /> Automações</TabsTrigger>
+          <TabsTrigger value="webhooks" className="gap-2"><Webhook className="h-4 w-4" /> Webhooks</TabsTrigger>
         </TabsList>
 
         {/* Opening Hours */}
@@ -295,6 +299,15 @@ export default function CompanySettings() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+        {/* Automations */}
+        <TabsContent value="automations">
+          {company && <AutomationsTab companyId={company.id} />}
+        </TabsContent>
+
+        {/* Webhooks */}
+        <TabsContent value="webhooks">
+          {company && <WebhooksTab companyId={company.id} />}
         </TabsContent>
       </Tabs>
     </div>

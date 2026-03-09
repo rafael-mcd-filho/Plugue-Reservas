@@ -1,0 +1,1 @@
+INSERT INTO public.system_settings (key, value) VALUES ('evolution_api_url', null), ('evolution_api_token', null) ON CONFLICT DO NOTHING;
