@@ -52,8 +52,12 @@ export type Database = {
           address: string | null
           cnpj: string | null
           created_at: string
+          description: string | null
           email: string | null
+          google_maps_url: string | null
           id: string
+          instagram: string | null
+          logo_url: string | null
           name: string
           phone: string | null
           razao_social: string | null
@@ -63,13 +67,18 @@ export type Database = {
           slug: string
           status: string
           updated_at: string
+          whatsapp: string | null
         }
         Insert: {
           address?: string | null
           cnpj?: string | null
           created_at?: string
+          description?: string | null
           email?: string | null
+          google_maps_url?: string | null
           id?: string
+          instagram?: string | null
+          logo_url?: string | null
           name: string
           phone?: string | null
           razao_social?: string | null
@@ -79,13 +88,18 @@ export type Database = {
           slug: string
           status?: string
           updated_at?: string
+          whatsapp?: string | null
         }
         Update: {
           address?: string | null
           cnpj?: string | null
           created_at?: string
+          description?: string | null
           email?: string | null
+          google_maps_url?: string | null
           id?: string
+          instagram?: string | null
+          logo_url?: string | null
           name?: string
           phone?: string | null
           razao_social?: string | null
@@ -95,6 +109,7 @@ export type Database = {
           slug?: string
           status?: string
           updated_at?: string
+          whatsapp?: string | null
         }
         Relationships: []
       }
