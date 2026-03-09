@@ -283,6 +283,13 @@ export default function CompanyPublicPage() {
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
       </div>
+
+      <ReservationModal
+        open={showReservation}
+        onOpenChange={setShowReservation}
+        companyName={company.name}
+        openingHours={openingHours}
+      />
     </div>
   );
 }
