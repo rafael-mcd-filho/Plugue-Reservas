@@ -17,6 +17,7 @@ export interface DailyStats {
 
 interface RawReservation {
   date: string;
+  time: string;
   status: string;
 }
 
