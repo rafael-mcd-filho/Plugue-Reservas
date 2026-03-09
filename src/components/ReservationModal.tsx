@@ -40,6 +40,7 @@ interface ReservationModalProps {
   onOpenChange: (open: boolean) => void;
   companyName: string;
   openingHours: OpeningHour[];
+  reservationDuration?: number;
 }
 
 const OCCASIONS = [
@@ -61,7 +62,7 @@ const DAY_MAP: Record<string, number> = {
   'Sáb': 6,
 };
 
-function generateTimeSlots(open: string, close: string): string[] {
+function generateTimeSlots(open: string, close: string, interval: number = 30): string[] {
   const slots: string[] = [];
   const [openH, openM] = open.split(':').map(Number);
   const [closeH, closeM] = close.split(':').map(Number);
@@ -71,12 +72,12 @@ function generateTimeSlots(open: string, close: string): string[] {
     const h = Math.floor(current / 60);
     const m = current % 60;
     slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    current += 30;
+    current += interval;
   }
   return slots;
 }
 
-export default function ReservationModal({ open, onOpenChange, companyName, openingHours }: ReservationModalProps) {
+export default function ReservationModal({ open, onOpenChange, companyName, openingHours, reservationDuration = 30 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
@@ -105,8 +106,8 @@ export default function ReservationModal({ open, onOpenChange, companyName, open
 
   const timeSlots = useMemo(() => {
     if (!selectedDayHours || selectedDayHours.closed) return [];
-    return generateTimeSlots(selectedDayHours.open, selectedDayHours.close);
-  }, [selectedDayHours]);
+    return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
+  }, [selectedDayHours, reservationDuration]);
 
   const handleReset = () => {
     setStep(1);

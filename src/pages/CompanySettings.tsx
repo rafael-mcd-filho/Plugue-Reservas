@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,6 +68,7 @@ export default function CompanySettings() {
   const [instagram, setInstagram] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
+  const [reservationDuration, setReservationDuration] = useState(30);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -79,6 +81,7 @@ export default function CompanySettings() {
       setInstagram(company.instagram || '');
       setWhatsapp(company.whatsapp || '');
       setGoogleMapsUrl(company.google_maps_url || '');
+      setReservationDuration((company as any).reservation_duration ?? 30);
       setInitialized(true);
     }
   }, [company, initialized]);
@@ -97,6 +100,7 @@ export default function CompanySettings() {
           instagram,
           whatsapp,
           google_maps_url: googleMapsUrl,
+          reservation_duration: reservationDuration,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', company.id);
@@ -181,6 +185,25 @@ export default function CompanySettings() {
                     )}
                   </div>
                 ))}
+              </div>
+
+              {/* Reservation Duration */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <Label className="text-sm font-medium">Duração de cada reserva (minutos)</Label>
+                <p className="text-xs text-muted-foreground mb-2">Define o intervalo entre os horários disponíveis para reserva</p>
+                <Select value={String(reservationDuration)} onValueChange={v => setReservationDuration(Number(v))}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 min</SelectItem>
+                    <SelectItem value="30">30 min</SelectItem>
+                    <SelectItem value="45">45 min</SelectItem>
+                    <SelectItem value="60">1 hora</SelectItem>
+                    <SelectItem value="90">1h30</SelectItem>
+                    <SelectItem value="120">2 horas</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>

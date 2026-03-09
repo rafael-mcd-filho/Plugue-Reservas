@@ -289,6 +289,7 @@ export default function CompanyPublicPage() {
         onOpenChange={setShowReservation}
         companyName={company.name}
         openingHours={openingHours}
+        reservationDuration={(company as any).reservation_duration ?? 30}
       />
     </div>
   );
