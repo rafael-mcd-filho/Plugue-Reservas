@@ -27,6 +27,7 @@ export interface Notification {
   message: string;
   type: string;
   is_read: boolean;
+  read_at: string | null;
   created_by: string | null;
   created_at: string;
 }
@@ -94,11 +95,18 @@ export function useNotifications() {
 export function useCreateNotification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (notification: { company_id: string | null; title: string; message: string; type: string }) => {
+    mutationFn: async (notification: { company_ids: string[]; title: string; message: string; type: string }) => {
       const { data: { session } } = await supabase.auth.getSession();
+      const { company_ids, ...rest } = notification;
+      
+      // If no companies selected, send to all (company_id = null)
+      const rows = company_ids.length === 0
+        ? [{ ...rest, company_id: null, created_by: session?.user?.id }]
+        : company_ids.map(cid => ({ ...rest, company_id: cid, created_by: session?.user?.id }));
+      
       const { error } = await supabase
         .from('notifications' as any)
-        .insert({ ...notification, created_by: session?.user?.id } as any);
+        .insert(rows as any);
       if (error) throw error;
     },
     onSuccess: () => {

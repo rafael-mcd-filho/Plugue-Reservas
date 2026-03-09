@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2 } from 'lucide-react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -129,18 +130,29 @@ function NotificationsTab() {
   const deleteNotification = useDeleteNotification();
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ company_id: '' as string, title: '', message: '', type: 'info' });
+  const [form, setForm] = useState({ company_ids: [] as string[], title: '', message: '', type: 'info' });
+  const [sendToAll, setSendToAll] = useState(true);
+
+  const toggleCompany = (id: string) => {
+    setForm(prev => ({
+      ...prev,
+      company_ids: prev.company_ids.includes(id)
+        ? prev.company_ids.filter(c => c !== id)
+        : [...prev.company_ids, id],
+    }));
+  };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title || !form.message) return;
     await createNotification.mutateAsync({
-      company_id: form.company_id || null,
+      company_ids: sendToAll ? [] : form.company_ids,
       title: form.title,
       message: form.message,
       type: form.type,
     });
-    setForm({ company_id: '', title: '', message: '', type: 'info' });
+    setForm({ company_ids: [], title: '', message: '', type: 'info' });
+    setSendToAll(true);
     setDialogOpen(false);
   };
 
@@ -155,22 +167,40 @@ function NotificationsTab() {
           <DialogTrigger asChild>
             <Button className="gap-2"><Send className="h-4 w-4" /> Nova Notificação</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Enviar Notificação</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSend} className="space-y-4 mt-4">
-              <div>
-                <Label>Empresa (deixe vazio para todas)</Label>
-                <Select value={form.company_id} onValueChange={v => setForm({ ...form, company_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Todas as empresas" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as empresas</SelectItem>
-                    {companies.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              <div className="space-y-3">
+                <Label>Destinatários</Label>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="send-all"
+                    checked={sendToAll}
+                    onCheckedChange={(checked) => {
+                      setSendToAll(!!checked);
+                      if (checked) setForm(prev => ({ ...prev, company_ids: [] }));
+                    }}
+                  />
+                  <label htmlFor="send-all" className="text-sm font-medium cursor-pointer">Todas as empresas</label>
+                </div>
+                {!sendToAll && (
+                  <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
+                    {companies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nenhuma empresa cadastrada</p>
+                    ) : companies.map(c => (
+                      <div key={c.id} className="flex items-center gap-2">
+                        <Checkbox
+                          id={`company-${c.id}`}
+                          checked={form.company_ids.includes(c.id)}
+                          onCheckedChange={() => toggleCompany(c.id)}
+                        />
+                        <label htmlFor={`company-${c.id}`} className="text-sm cursor-pointer">{c.name}</label>
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                )}
               </div>
               <div>
                 <Label>Tipo</Label>
@@ -194,7 +224,7 @@ function NotificationsTab() {
               </div>
               <div className="flex justify-end gap-3">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-                <Button type="submit" disabled={createNotification.isPending} className="gap-2">
+                <Button type="submit" disabled={createNotification.isPending || (!sendToAll && form.company_ids.length === 0)} className="gap-2">
                   <Send className="h-4 w-4" /> Enviar
                 </Button>
               </div>
@@ -220,6 +250,7 @@ function NotificationsTab() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>Título</TableHead>
                 <TableHead>Empresa</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Data</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -245,6 +276,22 @@ function NotificationsTab() {
                       {company ? (
                         <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3" /> {company.name}</span>
                       ) : 'Todas'}
+                    </TableCell>
+                    <TableCell>
+                      {n.is_read ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Lida
+                          {n.read_at && (
+                            <span className="text-muted-foreground ml-1">
+                              {format(new Date(n.read_at), "dd/MM HH:mm", { locale: ptBR })}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                          <Clock className="h-3.5 w-3.5" /> Não lida
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(n.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
