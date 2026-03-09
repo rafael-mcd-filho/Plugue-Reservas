@@ -293,10 +293,14 @@ export default function CompanyPublicPage() {
 
       <ReservationModal
         open={showReservation}
-        onOpenChange={setShowReservation}
+        onOpenChange={(v) => {
+          setShowReservation(v);
+          if (v) trackStep('date_select');
+        }}
         companyName={company.name}
         openingHours={openingHours}
         reservationDuration={(company as any).reservation_duration ?? 30}
+        onStepChange={(step) => trackStep(step)}
       />
     </div>
   );
