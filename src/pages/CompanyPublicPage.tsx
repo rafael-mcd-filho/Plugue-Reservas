@@ -12,6 +12,23 @@ import type { Company } from '@/hooks/useCompanies';
 
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const [showLogin, setShowLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoginLoading(false);
+    if (error) {
+      toast.error('Email ou senha inválidos');
+      return;
+    }
+    navigate(`/${slug}/admin`);
+  };
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
