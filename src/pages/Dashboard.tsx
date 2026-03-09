@@ -52,6 +52,21 @@ export default function Dashboard() {
   const [customStart, setCustomStart] = useState<Date | undefined>();
   const [customEnd, setCustomEnd] = useState<Date | undefined>();
 
+  // Fetch real company ID from slug for funnel data
+  const { data: realCompany } = useQuery({
+    queryKey: ['company-id-from-slug', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies' as any)
+        .select('id')
+        .eq('slug', slug!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: !!slug,
+  });
+
   const { startDate, endDate } = useMemo(() => {
     if (period === 'custom' && customStart && customEnd) {
       return { startDate: customStart, endDate: customEnd };
@@ -61,6 +76,10 @@ export default function Dashboard() {
   }, [period, customStart, customEnd]);
 
   const effectiveCompanyId = isCompanyContext && companyFromSlug ? companyFromSlug.id : companyId;
+
+  // Funnel data - use real company ID for company context, or 'all' for superadmin
+  const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
+  const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
 
   const data = useMemo(
     () => getMockDashboardData(effectiveCompanyId, startDate, endDate),
