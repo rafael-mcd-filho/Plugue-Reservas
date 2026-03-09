@@ -275,7 +275,7 @@ export default function Dashboard() {
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="border border-border shadow-sm">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Confirmadas vs Pendentes</CardTitle>
+                <CardTitle className="text-base">Confirmadas vs Concluídas</CardTitle>
                 <CardDescription>Comparativo diário</CardDescription>
               </CardHeader>
               <CardContent>
@@ -295,7 +295,7 @@ export default function Dashboard() {
                       />
                       <Legend />
                       <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pending" name="Pendentes" fill="hsl(38, 80%, 55%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completed" name="Concluídas" fill="hsl(28, 90%, 27%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
