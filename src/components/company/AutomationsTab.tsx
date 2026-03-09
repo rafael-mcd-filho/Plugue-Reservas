@@ -135,6 +135,8 @@ export default function AutomationsTab({ companyId }: Props) {
           );
         })}
       </div>
+
+      <WhatsAppMessageHistory companyId={companyId} />
     </div>
   );
 }
