@@ -44,7 +44,7 @@ export default function Reservations() {
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [editDialog, setEditDialog] = useState(false);
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
-  const [editStatus, setEditStatus] = useState<ReservationStatus>('pending');
+  const [editStatus, setEditStatus] = useState<ReservationStatus>('confirmed');
   const [dayModal, setDayModal] = useState<string | null>(null);
 
   const { data: company } = useQuery({
