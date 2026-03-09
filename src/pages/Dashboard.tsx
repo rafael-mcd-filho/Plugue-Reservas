@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { subDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
