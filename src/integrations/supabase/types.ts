@@ -59,6 +59,8 @@ export type Database = {
           instagram: string | null
           logo_url: string | null
           name: string
+          opening_hours: Json | null
+          payment_methods: Json | null
           phone: string | null
           razao_social: string | null
           responsible_email: string | null
@@ -80,6 +82,8 @@ export type Database = {
           instagram?: string | null
           logo_url?: string | null
           name: string
+          opening_hours?: Json | null
+          payment_methods?: Json | null
           phone?: string | null
           razao_social?: string | null
           responsible_email?: string | null
@@ -101,6 +105,8 @@ export type Database = {
           instagram?: string | null
           logo_url?: string | null
           name?: string
+          opening_hours?: Json | null
+          payment_methods?: Json | null
           phone?: string | null
           razao_social?: string | null
           responsible_email?: string | null
