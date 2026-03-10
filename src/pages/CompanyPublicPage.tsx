@@ -203,9 +203,9 @@ export default function CompanyPublicPage() {
           </div>
 
           {/* CTA Buttons */}
-          <div className="space-y-2.5 pt-2">
+          <div className="space-y-3 pt-2">
             <Button
-              className="w-full py-6 text-base gap-2 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-lg"
+              className="w-full py-6 text-base gap-2 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-lg shadow-primary/30"
               size="lg"
               onClick={() => setShowReservation(true)}
             >
@@ -216,10 +216,11 @@ export default function CompanyPublicPage() {
             {whatsappUrl && (
               <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
                 <Button
-                  variant="outline"
-                  className="w-full py-5 text-base gap-2 rounded-2xl border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 bg-transparent"
+                  variant="secondary"
+                  className="w-full py-6 text-base gap-2 rounded-full bg-background text-foreground hover:bg-background/90 font-semibold shadow-md border-none"
+                  size="lg"
                 >
-                  <MessageCircle className="h-5 w-5" />
+                  <MessageCircle className="h-5 w-5 text-green-600" />
                   Falar pelo WhatsApp
                 </Button>
               </a>
