@@ -141,8 +141,8 @@ export default function Dashboard() {
 
   const stats = [
     { label: 'Total Reservas', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
-    { label: 'Confirmadas', value: totals.confirmed, prev: prevTotals.confirmed, icon: CheckCircle, color: 'text-accent' },
-    { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: Users, color: 'text-accent' },
+    { label: 'Total Pessoas', value: totals.totalGuests, prev: prevTotals.totalGuests, icon: Users, color: 'text-primary' },
+    { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: CheckCircle, color: 'text-accent' },
     { label: 'Cancelamentos', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive' },
     { label: 'Média/Dia', value: avgPerDay, prev: prevAvgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
