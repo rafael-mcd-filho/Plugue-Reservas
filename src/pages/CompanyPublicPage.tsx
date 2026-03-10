@@ -129,7 +129,7 @@ export default function CompanyPublicPage() {
     <div className="min-h-screen bg-secondary pb-24 md:pb-0">
       {/* Top bar */}
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
+        <div className="max-w-lg md:max-w-5xl mx-auto flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             {company.logo_url ? (
               <img src={company.logo_url} alt={company.name} className="h-10 w-10 rounded-full object-cover border-2 border-primary" />
@@ -166,44 +166,47 @@ export default function CompanyPublicPage() {
 
       {/* Hero */}
       <div
-        className="relative text-primary-foreground px-4 pt-4 pb-8 rounded-b-3xl"
+        className="relative text-primary-foreground px-4 pt-4 pb-8 md:pb-12 md:rounded-none rounded-b-3xl"
         style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
       >
         {/* Radial glow overlay */}
         <div
-          className="absolute inset-0 rounded-b-3xl pointer-events-none"
+          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none"
           style={{ background: 'radial-gradient(circle, rgba(232,105,10,0.12) 0%, transparent 65%)' }}
         />
-        <div className="max-w-lg mx-auto space-y-4 relative z-10">
-          {/* Rating */}
-          <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1">
-            <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
-          </Badge>
+        <div className="max-w-lg md:max-w-5xl mx-auto relative z-10 md:flex md:items-center md:gap-12">
+          {/* Hero text */}
+          <div className="space-y-4 md:flex-1">
+            {/* Rating */}
+            <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1">
+              <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
+            </Badge>
 
-          <div>
-            <h2 className="text-2xl font-bold">{company.name}</h2>
-            {company.description && (
-              <p className="text-sm text-primary-foreground/70 mt-1 leading-relaxed">{company.description}</p>
-            )}
-          </div>
+            <div>
+              <h2 className="text-2xl md:text-4xl font-bold">{company.name}</h2>
+              {company.description && (
+                <p className="text-sm md:text-base text-primary-foreground/70 mt-1 leading-relaxed">{company.description}</p>
+              )}
+            </div>
 
-          {/* Tags */}
-          <div className="flex flex-wrap gap-2">
-            {company.address && (
+            {/* Tags */}
+            <div className="flex flex-wrap gap-2">
+              {company.address && (
+                <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
+                  <MapPin className="h-3 w-3" /> {company.address.split(',')[0]?.split(' – ')[0]?.split('-')[0]?.trim()}
+                </Badge>
+              )}
               <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
-                <MapPin className="h-3 w-3" /> {company.address.split(',')[0]?.split(' – ')[0]?.split('-')[0]?.trim()}
+                <Users className="h-3 w-3" /> Até 12 pessoas
               </Badge>
-            )}
-            <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
-              <Users className="h-3 w-3" /> Até 12 pessoas
-            </Badge>
-            <Badge variant="secondary" className="bg-primary text-primary-foreground border-none text-xs gap-1">
-              <CalendarCheck className="h-3 w-3" /> Confirmação imediata
-            </Badge>
+              <Badge variant="secondary" className="bg-primary text-primary-foreground border-none text-xs gap-1">
+                <CalendarCheck className="h-3 w-3" /> Confirmação imediata
+              </Badge>
+            </div>
           </div>
 
-          {/* CTA Buttons */}
-          <div className="space-y-3 pt-2">
+          {/* CTA Buttons — stacked on mobile, side panel on desktop */}
+          <div className="space-y-3 pt-4 md:pt-0 md:w-80 md:shrink-0">
             <Button
               className="w-full py-6 text-base gap-2 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-lg shadow-primary/30"
               size="lg"
@@ -230,137 +233,143 @@ export default function CompanyPublicPage() {
       </div>
 
       {/* Content cards */}
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
-        {/* About */}
-        {company.description && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <FileText className="h-4 w-4" /> Sobre o Restaurante
-              </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
-            </CardContent>
-          </Card>
-        )}
+      <div className="max-w-lg md:max-w-5xl mx-auto px-4 py-6 space-y-4 md:space-y-0 md:grid md:grid-cols-2 md:gap-6">
+        {/* Left column on desktop */}
+        <div className="space-y-4 md:space-y-6">
+          {/* About */}
+          {company.description && (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardContent className="pt-5 pb-5">
+                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <FileText className="h-4 w-4" /> Sobre o Restaurante
+                </h3>
+                <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Opening Hours */}
-        {openingHours.length > 0 && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                <Clock className="h-4 w-4" /> Horário de Funcionamento
-              </h3>
-              <div className="space-y-0">
-                {openingHours.map((h: any) => {
-                  const isToday = h.day === todayDayName;
-                  return (
-                    <div
-                      key={h.day}
-                      className={`flex items-center justify-between py-2.5 border-b border-border/50 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
-                    >
-                      <span className={`text-sm ${isToday ? 'text-primary font-bold' : ''}`}>{h.day}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm ${h.closed ? 'text-muted-foreground' : ''}`}>
-                          {h.closed ? 'Fechado' : `${h.open} – ${h.close}`}
-                        </span>
-                        {isToday && !h.closed && (
-                          <div className="flex items-center gap-1.5">
-                            <Badge className="bg-primary text-primary-foreground border-none text-[10px] px-1.5 py-0">HOJE</Badge>
-                            <Badge variant="outline" className="border-primary text-primary text-[10px] px-1.5 py-0">Aberto</Badge>
-                          </div>
-                        )}
-                        {isToday && h.closed && (
-                          <Badge variant="outline" className="border-destructive text-destructive text-[10px] px-1.5 py-0">Fechado</Badge>
-                        )}
+          {/* Opening Hours */}
+          {openingHours.length > 0 && (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardContent className="pt-5 pb-5">
+                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" /> Horário de Funcionamento
+                </h3>
+                <div className="space-y-0">
+                  {openingHours.map((h: any) => {
+                    const isToday = h.day === todayDayName;
+                    return (
+                      <div
+                        key={h.day}
+                        className={`flex items-center justify-between py-2.5 border-b border-border/50 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
+                      >
+                        <span className={`text-sm ${isToday ? 'text-primary font-bold' : ''}`}>{h.day}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm ${h.closed ? 'text-muted-foreground' : ''}`}>
+                            {h.closed ? 'Fechado' : `${h.open} – ${h.close}`}
+                          </span>
+                          {isToday && !h.closed && (
+                            <div className="flex items-center gap-1.5">
+                              <Badge className="bg-primary text-primary-foreground border-none text-[10px] px-1.5 py-0">HOJE</Badge>
+                              <Badge variant="outline" className="border-primary text-primary text-[10px] px-1.5 py-0">Aberto</Badge>
+                            </div>
+                          )}
+                          {isToday && h.closed && (
+                            <Badge variant="outline" className="border-destructive text-destructive text-[10px] px-1.5 py-0">Fechado</Badge>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Payment Methods */}
-        {acceptedPayments.length > 0 && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                <CreditCard className="h-4 w-4" /> Formas de Pagamento
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                {acceptedPayments.map(([key]) => {
-                  const pm = PAYMENT_LABELS[key];
-                  const Icon = pm?.icon || CreditCard;
-                  return (
-                    <div
-                      key={key}
-                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
-                    >
-                      <Icon className="h-4 w-4 text-primary shrink-0" />
-                      <span className="text-foreground">{pm?.label || key}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Location & Contact */}
-        {(company.phone || company.address) && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5 space-y-4">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <MapPin className="h-4 w-4" /> Localização & Contato
-              </h3>
-              {company.phone && (
-                <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground hover:text-primary transition-colors">
-                  <Phone className="h-5 w-5 text-primary" />
-                  <span className="text-base font-medium">{company.phone}</span>
-                </a>
-              )}
-              {company.address && (
-                <p className="text-sm text-muted-foreground leading-relaxed">{company.address}</p>
-              )}
-
-              {/* Map embed */}
-              {mapsEmbedUrl && (
-                <div className="rounded-xl overflow-hidden border border-border">
-                  <iframe
-                    src={mapsEmbedUrl}
-                    width="100%"
-                    height="180"
-                    style={{ border: 0 }}
-                    allowFullScreen
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    title="Localização"
-                  />
+                    );
+                  })}
                 </div>
-              )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-              {googleMapsSearchUrl && (
-                <a
-                  href={googleMapsSearchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between w-full py-2.5 px-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <MapPin className="h-4 w-4" /> Abrir no Google Maps
-                  </span>
-                  <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                </a>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {/* Right column on desktop */}
+        <div className="space-y-4 md:space-y-6">
+          {/* Payment Methods */}
+          {acceptedPayments.length > 0 && (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardContent className="pt-5 pb-5">
+                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4" /> Formas de Pagamento
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {acceptedPayments.map(([key]) => {
+                    const pm = PAYMENT_LABELS[key];
+                    const Icon = pm?.icon || CreditCard;
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
+                      >
+                        <Icon className="h-4 w-4 text-primary shrink-0" />
+                        <span className="text-foreground">{pm?.label || key}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Admin Login */}
+          {/* Location & Contact */}
+          {(company.phone || company.address) && (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardContent className="pt-5 pb-5 space-y-4">
+                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4" /> Localização & Contato
+                </h3>
+                {company.phone && (
+                  <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground hover:text-primary transition-colors">
+                    <Phone className="h-5 w-5 text-primary" />
+                    <span className="text-base font-medium">{company.phone}</span>
+                  </a>
+                )}
+                {company.address && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">{company.address}</p>
+                )}
+
+                {/* Map embed */}
+                {mapsEmbedUrl && (
+                  <div className="rounded-xl overflow-hidden border border-border">
+                    <iframe
+                      src={mapsEmbedUrl}
+                      width="100%"
+                      height="180"
+                      style={{ border: 0 }}
+                      allowFullScreen
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      title="Localização"
+                    />
+                  </div>
+                )}
+
+                {googleMapsSearchUrl && (
+                  <a
+                    href={googleMapsSearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between w-full py-2.5 px-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <MapPin className="h-4 w-4" /> Abrir no Google Maps
+                    </span>
+                    <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                  </a>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Admin Login — full width below grid */}
         {showLogin && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
+          <Card className="border-none shadow-sm rounded-2xl md:col-span-2">
+            <CardContent className="pt-5 pb-5 md:max-w-md md:mx-auto">
               <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h3>
               <form onSubmit={handleLogin} className="space-y-3">
                 <div>
@@ -381,12 +390,12 @@ export default function CompanyPublicPage() {
         )}
 
         {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground pt-2 pb-4">
+        <p className="text-center text-xs text-muted-foreground pt-2 pb-4 md:col-span-2">
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
       </div>
 
-      {/* Sticky bottom CTA */}
+      {/* Sticky bottom CTA — mobile only */}
       <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50 md:hidden">
         <div className="max-w-lg mx-auto">
           <Button
