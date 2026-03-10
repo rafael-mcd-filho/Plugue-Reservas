@@ -48,13 +48,29 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status')
+        .select('date, time, status, party_size')
         .gte('date', startStr)
         .lte('date', endStr);
       if (companyId) query = query.eq('company_id', companyId);
       const { data, error } = await query;
       if (error) throw error;
       return (data as any[]) as RawReservation[];
+    },
+  });
+
+  // Fetch waitlist data for the period
+  const { data: rawWaitlist = [] } = useQuery({
+    queryKey: ['dashboard-waitlist', companyId, startStr, endStr],
+    queryFn: async () => {
+      let query = supabase
+        .from('waitlist' as any)
+        .select('status, created_at, seated_at')
+        .gte('created_at', startStr + 'T00:00:00')
+        .lte('created_at', endStr + 'T23:59:59');
+      if (companyId) query = query.eq('company_id', companyId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data as any[]) as RawWaitlistEntry[];
     },
   });
 
