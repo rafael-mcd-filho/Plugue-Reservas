@@ -454,6 +454,7 @@ export default function CompanyPublicPage() {
         companyName={company.name}
         openingHours={openingHours}
         reservationDuration={(company as any).reservation_duration ?? 30}
+        maxGuestsPerSlot={(company as any).max_guests_per_slot ?? 0}
         onStepChange={(step) => trackStep(step)}
       />
     </div>
