@@ -1,26 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck,
-  LogIn, Clock, CreditCard, Check,
+  LogIn, Clock, CreditCard, Star, FileText, ExternalLink, Users,
+  Banknote, Smartphone, QrCode, Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
 import ReservationModal from '@/components/ReservationModal';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
-const PAYMENT_LABELS: Record<string, string> = {
-  dinheiro: 'Dinheiro',
-  credito: 'Cartão de crédito',
-  debito: 'Cartão de débito',
-  pix: 'Pix',
-  vale_refeicao: 'Vale refeição',
+const PAYMENT_LABELS: Record<string, { label: string; icon: typeof CreditCard }> = {
+  dinheiro: { label: 'Dinheiro', icon: Banknote },
+  credito: { label: 'Crédito', icon: CreditCard },
+  debito: { label: 'Débito', icon: CreditCard },
+  pix: { label: 'Pix', icon: QrCode },
+  vale_refeicao: { label: 'Vale Refeição', icon: Wallet },
+};
+
+const DAY_MAP: Record<string, number> = {
+  'Dom': 0, 'Seg': 1, 'Ter': 2, 'Qua': 3, 'Qui': 4, 'Sex': 5, 'Sáb': 6,
 };
 
 export default function CompanyPublicPage() {
@@ -65,6 +73,11 @@ export default function CompanyPublicPage() {
     navigate(`/${slug}/admin`);
   };
 
+  const todayDayName = useMemo(() => {
+    const dayIndex = new Date().getDay();
+    return Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0] || '';
+  }, []);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -100,47 +113,50 @@ export default function CompanyPublicPage() {
     ? company.google_maps_url.includes('/embed')
       ? company.google_maps_url
       : `https://www.google.com/maps?q=${encodeURIComponent(company.address || company.name)}&output=embed`
-    : null;
+    : company.address
+      ? `https://www.google.com/maps?q=${encodeURIComponent(company.address)}&output=embed`
+      : null;
 
   const openingHours = (company.opening_hours as any[]) || [];
   const paymentMethods = (company.payment_methods as Record<string, boolean>) || {};
-  // Only show accepted payment methods
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
 
+  // Check if today is open
+  const todayHours = openingHours.find(h => h.day === todayDayName);
+  const isOpenToday = todayHours && !todayHours.closed;
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="bg-sidebar text-sidebar-foreground">
-        <div className="max-w-2xl mx-auto flex items-center gap-4 px-6 py-5">
-          {company.logo_url ? (
-            <img src={company.logo_url} alt={company.name} className="h-16 w-16 rounded-full object-cover border-2 border-sidebar-border" />
-          ) : (
-            <div className="h-16 w-16 rounded-full bg-sidebar-accent flex items-center justify-center text-2xl font-bold text-sidebar-primary shrink-0">
-              {company.name.charAt(0)}
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold truncate">{company.name}</h1>
-            {company.description && (
-              <p className="text-sm text-sidebar-foreground/70 mt-0.5 line-clamp-2">{company.description}</p>
+    <div className="min-h-screen bg-secondary pb-24">
+      {/* Top bar */}
+      <div className="bg-foreground text-primary-foreground">
+        <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            {company.logo_url ? (
+              <img src={company.logo_url} alt={company.name} className="h-10 w-10 rounded-full object-cover border-2 border-primary" />
+            ) : (
+              <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-lg font-bold text-primary-foreground shrink-0">
+                {company.name.charAt(0)}
+              </div>
             )}
-            <div className="flex gap-3 mt-1">
-              {instagramUrl && (
-                <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="text-sidebar-foreground/70 hover:text-sidebar-primary transition-colors">
-                  <Instagram className="h-5 w-5" />
-                </a>
-              )}
-              {whatsappUrl && (
-                <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-sidebar-foreground/70 hover:text-sidebar-primary transition-colors">
-                  <MessageCircle className="h-5 w-5" />
-                </a>
-              )}
+            <div>
+              <h1 className="text-sm font-bold">{company.name}</h1>
+              <div className="flex gap-2 mt-0.5">
+                {instagramUrl && (
+                  <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="text-primary-foreground/60 hover:text-primary transition-colors">
+                    <Instagram className="h-4 w-4" />
+                  </a>
+                )}
+                {whatsappUrl && (
+                  <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-primary-foreground/60 hover:text-primary transition-colors">
+                    <MessageCircle className="h-4 w-4" />
+                  </a>
+                )}
+              </div>
             </div>
           </div>
-          {/* Hidden admin login — only shows icon on long press or triple-click, keeping it subtle */}
           <button
             onClick={() => setShowLogin(!showLogin)}
-            className="ml-auto text-sidebar-foreground/20 hover:text-sidebar-foreground/50 transition-colors shrink-0"
+            className="text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors"
             aria-label="Login administrativo"
           >
             <LogIn className="h-4 w-4" />
@@ -148,137 +164,195 @@ export default function CompanyPublicPage() {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
-        {/* CTA Buttons */}
-        <div className="space-y-3">
+      {/* Hero */}
+      <div className="bg-foreground text-primary-foreground px-4 pt-4 pb-8 rounded-b-3xl">
+        <div className="max-w-lg mx-auto space-y-4">
+          {/* Rating */}
+          <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1">
+            <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
+          </Badge>
+
           <div>
-            <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg" onClick={() => setShowReservation(true)}>
+            <h2 className="text-2xl font-bold">{company.name}</h2>
+            {company.description && (
+              <p className="text-sm text-primary-foreground/70 mt-1 leading-relaxed">{company.description}</p>
+            )}
+          </div>
+
+          {/* Tags */}
+          <div className="flex flex-wrap gap-2">
+            {company.address && (
+              <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
+                <MapPin className="h-3 w-3" /> {company.address.split(',')[0]?.split(' – ')[0]?.split('-')[0]?.trim()}
+              </Badge>
+            )}
+            <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
+              <Users className="h-3 w-3" /> Até 12 pessoas
+            </Badge>
+            <Badge variant="secondary" className="bg-primary text-primary-foreground border-none text-xs gap-1">
+              <CalendarCheck className="h-3 w-3" /> Confirmação imediata
+            </Badge>
+          </div>
+
+          {/* CTA Buttons */}
+          <div className="space-y-2.5 pt-2">
+            <Button
+              className="w-full py-6 text-base gap-2 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-lg"
+              size="lg"
+              onClick={() => setShowReservation(true)}
+            >
               <CalendarCheck className="h-5 w-5" />
               Reservar Mesa
             </Button>
-            <p className="text-xs text-muted-foreground text-center mt-1.5">Rápido e gratuito · Confirmação imediata</p>
-          </div>
 
-          {whatsappUrl && (
-            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-              <Button variant="outline" className="w-full py-5 text-base gap-2 rounded-xl border-primary text-primary hover:bg-primary/5">
-                <MessageCircle className="h-5 w-5" />
-                Falar pelo WhatsApp
-              </Button>
-            </a>
-          )}
+            {whatsappUrl && (
+              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
+                <Button
+                  variant="outline"
+                  className="w-full py-5 text-base gap-2 rounded-2xl border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 bg-transparent"
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  Falar pelo WhatsApp
+                </Button>
+              </a>
+            )}
+          </div>
         </div>
+      </div>
 
-        {/* Opening Hours + Payment — side by side */}
-        {(openingHours.length > 0 || acceptedPayments.length > 0) && (
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Opening Hours */}
-            {openingHours.length > 0 && (
-              <Card className="border-none shadow-sm">
-                <CardContent className="pt-5">
-                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    <Clock className="h-4 w-4" />
-                    Horário de Funcionamento
-                  </h2>
-                  <div className="space-y-1.5">
-                    {openingHours.map((h: any) => (
-                      <div key={h.day} className="flex justify-between text-sm">
-                        <span className="font-medium text-foreground">{h.day}:</span>
-                        <span className="text-muted-foreground">
-                          {h.closed ? 'Fechado' : `${h.open} às ${h.close}`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Payment Methods — only accepted */}
-            {acceptedPayments.length > 0 && (
-              <Card className="border-none shadow-sm">
-                <CardContent className="pt-5">
-                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    <CreditCard className="h-4 w-4" />
-                    Formas de Pagamento
-                  </h2>
-                  <div className="space-y-2">
-                    {acceptedPayments.map(([key]) => (
-                      <div key={key} className="flex items-center gap-2 text-sm">
-                        <Check className="h-4 w-4 text-primary" />
-                        <span className="text-foreground">
-                          {PAYMENT_LABELS[key] || key}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
-
-        {/* Contact + Address */}
-        {(company.phone || company.address) && (
-          <Card className="border-none shadow-sm">
-            <CardContent className="pt-5 space-y-3">
-              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <MapPin className="h-4 w-4" />
-                Localização
-              </h2>
-              {company.phone && (
-                <div className="flex items-center gap-3">
-                  <Phone className="h-4 w-4 text-primary" />
-                  <a href={`tel:${company.phone}`} className="text-sm text-muted-foreground hover:text-foreground">
-                    {company.phone}
-                  </a>
-                </div>
-              )}
-              {company.address && (
-                <div>
-                  {googleMapsSearchUrl ? (
-                    <a
-                      href={googleMapsSearchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline flex items-center gap-1.5"
-                    >
-                      <MapPin className="h-4 w-4 shrink-0" />
-                      {company.address}
-                    </a>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">{company.address}</p>
-                  )}
-                </div>
-              )}
+      {/* Content cards */}
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
+        {/* About */}
+        {company.description && (
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <FileText className="h-4 w-4" /> Sobre o Restaurante
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
             </CardContent>
           </Card>
         )}
 
-        {/* Google Maps */}
-        {mapsEmbedUrl && (
-          <Card className="border-none shadow-sm overflow-hidden">
-            <CardContent className="p-0">
-              <iframe
-                src={mapsEmbedUrl}
-                width="100%"
-                height="300"
-                style={{ border: 0 }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Localização"
-              />
+        {/* Opening Hours */}
+        {openingHours.length > 0 && (
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                <Clock className="h-4 w-4" /> Horário de Funcionamento
+              </h3>
+              <div className="space-y-0">
+                {openingHours.map((h: any) => {
+                  const isToday = h.day === todayDayName;
+                  return (
+                    <div
+                      key={h.day}
+                      className={`flex items-center justify-between py-2.5 border-b border-border/50 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
+                    >
+                      <span className={`text-sm ${isToday ? 'text-primary font-bold' : ''}`}>{h.day}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm ${h.closed ? 'text-muted-foreground' : ''}`}>
+                          {h.closed ? 'Fechado' : `${h.open} – ${h.close}`}
+                        </span>
+                        {isToday && !h.closed && (
+                          <div className="flex items-center gap-1.5">
+                            <Badge className="bg-primary text-primary-foreground border-none text-[10px] px-1.5 py-0">HOJE</Badge>
+                            <Badge variant="outline" className="border-primary text-primary text-[10px] px-1.5 py-0">Aberto</Badge>
+                          </div>
+                        )}
+                        {isToday && h.closed && (
+                          <Badge variant="outline" className="border-destructive text-destructive text-[10px] px-1.5 py-0">Fechado</Badge>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Payment Methods */}
+        {acceptedPayments.length > 0 && (
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                <CreditCard className="h-4 w-4" /> Formas de Pagamento
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {acceptedPayments.map(([key]) => {
+                  const pm = PAYMENT_LABELS[key];
+                  const Icon = pm?.icon || CreditCard;
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
+                    >
+                      <Icon className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-foreground">{pm?.label || key}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Location & Contact */}
+        {(company.phone || company.address) && (
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5 space-y-4">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <MapPin className="h-4 w-4" /> Localização & Contato
+              </h3>
+              {company.phone && (
+                <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground hover:text-primary transition-colors">
+                  <Phone className="h-5 w-5 text-primary" />
+                  <span className="text-base font-medium">{company.phone}</span>
+                </a>
+              )}
+              {company.address && (
+                <p className="text-sm text-muted-foreground leading-relaxed">{company.address}</p>
+              )}
+
+              {/* Map embed */}
+              {mapsEmbedUrl && (
+                <div className="rounded-xl overflow-hidden border border-border">
+                  <iframe
+                    src={mapsEmbedUrl}
+                    width="100%"
+                    height="180"
+                    style={{ border: 0 }}
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    title="Localização"
+                  />
+                </div>
+              )}
+
+              {googleMapsSearchUrl && (
+                <a
+                  href={googleMapsSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between w-full py-2.5 px-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <MapPin className="h-4 w-4" /> Abrir no Google Maps
+                  </span>
+                  <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                </a>
+              )}
             </CardContent>
           </Card>
         )}
 
         {/* Admin Login */}
         {showLogin && (
-          <Card className="border-none shadow-sm">
-            <CardContent className="pt-5">
-              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h2>
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h3>
               <form onSubmit={handleLogin} className="space-y-3">
                 <div>
                   <Label className="text-xs">Email</Label>
@@ -298,9 +372,23 @@ export default function CompanyPublicPage() {
         )}
 
         {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground pt-4 pb-12">
+        <p className="text-center text-xs text-muted-foreground pt-2 pb-4">
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
+      </div>
+
+      {/* Sticky bottom CTA */}
+      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50">
+        <div className="max-w-lg mx-auto">
+          <Button
+            className="w-full py-5 text-base gap-2 rounded-2xl font-semibold"
+            size="lg"
+            onClick={() => setShowReservation(true)}
+          >
+            <CalendarCheck className="h-5 w-5" />
+            Reservar Mesa
+          </Button>
+        </div>
       </div>
 
       <ReservationModal
