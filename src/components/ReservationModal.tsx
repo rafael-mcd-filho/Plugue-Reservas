@@ -317,7 +317,11 @@ export default function ReservationModal({
     const dayName = Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0];
     const hours = openingHours.find(h => h.day === dayName);
     if (!hours) return true;
-    return hours.closed === true;
+    if (hours.closed === true) return true;
+    // Check blocked dates (all_day only for calendar disable)
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const blocked = blockedDates.find((bd: any) => bd.date === dateStr && bd.all_day);
+    return !!blocked;
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
