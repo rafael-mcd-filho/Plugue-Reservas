@@ -166,13 +166,6 @@ const App = () => (
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
-            <Route path="/:slug/admin/relatorios" element={
-              <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
-                <CompanySlugProvider>
-                  <AppLayout><CompanyReports /></AppLayout>
-                </CompanySlugProvider>
-              </ProtectedRoute>
-            } />
             <Route path="/:slug/admin/leads" element={
               <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
                 <CompanySlugProvider>
