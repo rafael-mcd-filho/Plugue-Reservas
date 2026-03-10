@@ -233,21 +233,21 @@ export default function CompanyPublicPage() {
       </div>
 
       {/* Content cards */}
-      <div className="max-w-lg md:max-w-5xl mx-auto px-4 py-6 space-y-4 md:space-y-0 md:grid md:grid-cols-2 md:gap-6">
-        {/* Left column on desktop */}
-        <div className="space-y-4 md:space-y-6">
-          {/* About */}
-          {company.description && (
-            <Card className="border-none shadow-sm rounded-2xl">
-              <CardContent className="pt-5 pb-5">
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                  <FileText className="h-4 w-4" /> Sobre o Restaurante
-                </h3>
-                <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
-              </CardContent>
-            </Card>
-          )}
+      <div className="max-w-lg md:max-w-5xl mx-auto px-4 py-6 space-y-4">
+        {/* About — full width */}
+        {company.description && (
+          <Card className="border-none shadow-sm rounded-2xl">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <FileText className="h-4 w-4" /> Sobre o Restaurante
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
+            </CardContent>
+          </Card>
+        )}
 
+        {/* Two columns: Hours + Location */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           {/* Opening Hours */}
           {openingHours.length > 0 && (
             <Card className="border-none shadow-sm rounded-2xl">
@@ -285,35 +285,6 @@ export default function CompanyPublicPage() {
               </CardContent>
             </Card>
           )}
-        </div>
-
-        {/* Right column on desktop */}
-        <div className="space-y-4 md:space-y-6">
-          {/* Payment Methods */}
-          {acceptedPayments.length > 0 && (
-            <Card className="border-none shadow-sm rounded-2xl">
-              <CardContent className="pt-5 pb-5">
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                  <CreditCard className="h-4 w-4" /> Formas de Pagamento
-                </h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {acceptedPayments.map(([key]) => {
-                    const pm = PAYMENT_LABELS[key];
-                    const Icon = pm?.icon || CreditCard;
-                    return (
-                      <div
-                        key={key}
-                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
-                      >
-                        <Icon className="h-4 w-4 text-primary shrink-0" />
-                        <span className="text-foreground">{pm?.label || key}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {/* Location & Contact */}
           {(company.phone || company.address) && (
@@ -332,7 +303,6 @@ export default function CompanyPublicPage() {
                   <p className="text-sm text-muted-foreground leading-relaxed">{company.address}</p>
                 )}
 
-                {/* Map embed */}
                 {mapsEmbedUrl && (
                   <div className="rounded-xl overflow-hidden border border-border">
                     <iframe
@@ -366,10 +336,36 @@ export default function CompanyPublicPage() {
           )}
         </div>
 
-        {/* Admin Login — full width below grid */}
+        {/* Payment Methods — centered, full width */}
+        {acceptedPayments.length > 0 && (
+          <Card className="border-none shadow-sm rounded-2xl md:max-w-2xl md:mx-auto">
+            <CardContent className="pt-5 pb-5">
+              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5 md:justify-center">
+                <CreditCard className="h-4 w-4" /> Formas de Pagamento
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
+                {acceptedPayments.map(([key]) => {
+                  const pm = PAYMENT_LABELS[key];
+                  const Icon = pm?.icon || CreditCard;
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
+                    >
+                      <Icon className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-foreground">{pm?.label || key}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Admin Login */}
         {showLogin && (
-          <Card className="border-none shadow-sm rounded-2xl md:col-span-2">
-            <CardContent className="pt-5 pb-5 md:max-w-md md:mx-auto">
+          <Card className="border-none shadow-sm rounded-2xl md:max-w-md md:mx-auto">
+            <CardContent className="pt-5 pb-5">
               <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h3>
               <form onSubmit={handleLogin} className="space-y-3">
                 <div>
@@ -390,7 +386,7 @@ export default function CompanyPublicPage() {
         )}
 
         {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground pt-2 pb-4 md:col-span-2">
+        <p className="text-center text-xs text-muted-foreground pt-2 pb-4">
           Powered by <span className="font-semibold text-primary">ReservaFácil</span>
         </p>
       </div>
