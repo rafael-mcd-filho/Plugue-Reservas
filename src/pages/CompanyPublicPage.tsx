@@ -126,7 +126,7 @@ export default function CompanyPublicPage() {
   const isOpenToday = todayHours && !todayHours.closed;
 
   return (
-    <div className="min-h-screen bg-secondary pb-24">
+    <div className="min-h-screen bg-secondary pb-24 md:pb-0">
       {/* Top bar */}
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
@@ -386,7 +386,7 @@ export default function CompanyPublicPage() {
       </div>
 
       {/* Sticky bottom CTA */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50 md:hidden">
         <div className="max-w-lg mx-auto">
           <Button
             className="w-full py-5 text-base gap-2 rounded-2xl font-semibold"
