@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
           .select('key, value')
           .in('key', ['evolution_api_url', 'evolution_api_token']);
 
-        const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value;
+        const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
         const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
 
         if (evolutionUrl && evolutionToken) {
