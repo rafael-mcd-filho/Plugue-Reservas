@@ -80,6 +80,24 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (automation?.message_template && reservation.guest_phone) {
+        const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+        const logType = event === 'reservation_created' ? 'confirmation' : 'cancellation';
+
+        // Dedup check: avoid duplicate messages for same reservation + type
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: recentDup } = await supabaseAdmin
+          .from('whatsapp_message_logs')
+          .select('id')
+          .eq('company_id', reservation.company_id)
+          .eq('reservation_id', reservation.id)
+          .eq('type', logType)
+          .gte('created_at', fiveMinAgo)
+          .limit(1);
+
+        if (recentDup && recentDup.length > 0) {
+          console.log(`Duplicate message skipped for reservation ${reservation.id} type ${logType}`);
+          results.whatsapp = 'skipped_duplicate';
+        } else {
         // Get Evolution API settings
         const { data: settings } = await supabaseAdmin
           .from('system_settings')
@@ -168,39 +186,70 @@ Deno.serve(async (req) => {
         } else {
           results.whatsapp = 'evolution_not_configured';
         }
+        } // end dedup else
       }
     }
 
     // 2. Waitlist WhatsApp notifications
     if ((event === 'waitlist_added' || event === 'waitlist_called') && waitlist?.guest_phone) {
-      const { data: settings } = await supabaseAdmin
-        .from('system_settings')
-        .select('key, value')
-        .in('key', ['evolution_api_url', 'evolution_api_token']);
+      const automationType = event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called';
 
-      const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
-      const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
+      const { data: automation } = await supabaseAdmin
+        .from('automation_settings')
+        .select('*')
+        .eq('company_id', waitlist.company_id)
+        .eq('type', automationType)
+        .eq('enabled', true)
+        .maybeSingle();
 
-      if (evolutionUrl && evolutionToken) {
-        const { data: instance } = await supabaseAdmin
-          .from('company_whatsapp_instances')
-          .select('instance_name, status')
-          .eq('company_id', waitlist.company_id)
-          .maybeSingle();
+      // Build message from template or use default
+      const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
+      let message = '';
 
-        const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
-        let message = '';
+      if (automation?.message_template) {
+        message = automation.message_template
+          .replace(/\{nome\}/g, waitlist.guest_name || '')
+          .replace(/\{pessoas\}/g, String(waitlist.party_size || 1))
+          .replace(/\{posicao\}/g, String(waitlist.position || ''))
+          .replace(/\{link_acompanhamento\}/g, waitlist.tracking_url || '')
+          .replace(/\{telefone\}/g, waitlist.guest_phone || '');
+      } else if (!automation) {
+        // No automation configured or disabled — skip
+        console.log(`Waitlist automation '${automationType}' not enabled, skipping`);
+      }
 
-        if (event === 'waitlist_added') {
-          message = `Olá ${waitlist.guest_name}! Você está na posição ${waitlist.position} da lista de espera (${waitlist.party_size} pessoa(s)).\n\n📋 Acompanhe em tempo real:\n${waitlist.tracking_url || ''}`;
-        } else if (event === 'waitlist_called') {
-          message = `🔔 ${waitlist.guest_name}, sua mesa está pronta! Dirija-se à recepção. Você tem 10 minutos para se apresentar.`;
-        }
+      if (message) {
+        const { data: settings } = await supabaseAdmin
+          .from('system_settings')
+          .select('key, value')
+          .in('key', ['evolution_api_url', 'evolution_api_token']);
 
-        const msgType = event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called';
+        const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
+        const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
 
-        if (message) {
-          if (instance?.status === 'connected') {
+        if (evolutionUrl && evolutionToken) {
+          const { data: instance } = await supabaseAdmin
+            .from('company_whatsapp_instances')
+            .select('instance_name, status')
+            .eq('company_id', waitlist.company_id)
+            .maybeSingle();
+
+          const msgType = event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called';
+
+          // Dedup check: avoid sending same type to same phone in last 5 minutes
+          const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          const { data: recentDup } = await supabaseAdmin
+            .from('whatsapp_message_logs')
+            .select('id')
+            .eq('company_id', waitlist.company_id)
+            .eq('phone', phone)
+            .eq('type', msgType)
+            .gte('created_at', fiveMinAgo)
+            .limit(1);
+
+          if (recentDup && recentDup.length > 0) {
+            console.log(`Duplicate waitlist message skipped for ${phone} type ${msgType}`);
+          } else if (instance?.status === 'connected') {
             try {
               const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
                 method: 'POST',
@@ -211,9 +260,7 @@ Deno.serve(async (req) => {
               results.whatsapp = res.ok ? 'sent' : 'error';
 
               await supabaseAdmin.from('whatsapp_message_logs').insert({
-                company_id: waitlist.company_id,
-                phone, message,
-                type: msgType,
+                company_id: waitlist.company_id, phone, message, type: msgType,
                 status: res.ok ? 'sent' : 'error',
                 error_details: res.ok ? null : JSON.stringify(data),
               });
@@ -230,7 +277,6 @@ Deno.serve(async (req) => {
               });
             }
           } else {
-            // Not connected — queue
             results.whatsapp = 'queued';
             await supabaseAdmin.from('whatsapp_message_queue').insert({
               company_id: waitlist.company_id, phone, message, type: msgType,
