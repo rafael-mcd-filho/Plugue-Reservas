@@ -192,37 +192,53 @@ export default function CompanyPublicPage() {
 
       {/* Hero */}
       <div
-        className="relative text-primary-foreground px-4 pt-4 pb-8 md:pb-12 md:rounded-none rounded-b-3xl"
+        className="relative text-primary-foreground px-4 pt-6 pb-10 md:pt-12 md:pb-16 md:rounded-none rounded-b-3xl overflow-hidden"
         style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
       >
-        {/* Radial glow overlay */}
+        {/* Radial glow — center warm */}
         <div
           className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(232,105,10,0.12) 0%, transparent 65%)' }}
+          style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.18) 0%, transparent 70%)' }}
         />
-        <div className="max-w-lg md:max-w-5xl mx-auto relative z-10 md:flex md:items-center md:gap-12">
+        {/* Secondary glow — top-left accent */}
+        <div
+          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 40% 40% at 20% 30%, rgba(232,105,10,0.08) 0%, transparent 60%)' }}
+        />
+        {/* Bottom warm edge */}
+        <div
+          className="absolute bottom-0 left-0 right-0 h-32 rounded-b-3xl md:rounded-none pointer-events-none"
+          style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.6) 0%, transparent 100%)' }}
+        />
+        {/* Subtle noise texture overlay */}
+        <div
+          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none opacity-[0.03]"
+          style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\'/%3E%3C/svg%3E")', backgroundSize: '128px 128px' }}
+        />
+
+        <div className="max-w-lg md:max-w-5xl mx-auto relative z-10 md:flex md:items-center md:gap-16">
           {/* Hero text */}
-          <div className="space-y-4 md:flex-1">
+          <div className="space-y-5 md:flex-1">
             {/* Rating */}
-            <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1">
+            <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1 shadow-lg shadow-primary/20">
               <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
             </Badge>
 
             <div>
-              <h2 className="text-2xl md:text-4xl font-bold">{company.name}</h2>
+              <h2 className="text-2xl md:text-5xl font-bold tracking-tight leading-tight">{company.name}</h2>
               {company.description && (
-                <p className="text-sm md:text-base text-primary-foreground/70 mt-1 leading-relaxed">{company.description}</p>
+                <p className="text-sm md:text-lg text-primary-foreground/60 mt-2 leading-relaxed max-w-xl">{company.description}</p>
               )}
             </div>
 
             {/* Tags */}
             <div className="flex flex-wrap gap-2">
               {company.address && (
-                <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
+                <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1 backdrop-blur-sm">
                   <MapPin className="h-3 w-3" /> {company.address.split(',')[0]?.split(' – ')[0]?.split('-')[0]?.trim()}
                 </Badge>
               )}
-              <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1">
+              <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1 backdrop-blur-sm">
                 <Users className="h-3 w-3" /> Até 12 pessoas
               </Badge>
               <Badge variant="secondary" className="bg-primary text-primary-foreground border-none text-xs gap-1">
@@ -232,9 +248,9 @@ export default function CompanyPublicPage() {
           </div>
 
           {/* CTA Buttons — stacked on mobile, side panel on desktop */}
-          <div className="space-y-3 pt-4 md:pt-0 md:w-80 md:shrink-0">
+          <div className="space-y-3 pt-6 md:pt-0 md:w-80 md:shrink-0">
             <Button
-              className="w-full py-6 text-base gap-2 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-lg shadow-primary/30"
+              className="w-full py-6 text-base gap-2 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-xl shadow-primary/30"
               size="lg"
               onClick={() => setShowReservation(true)}
             >
