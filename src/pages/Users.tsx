@@ -61,7 +61,8 @@ export default function Users() {
 
   const openEdit = (user: ManagedUser) => {
     setEditUser(user);
-    setEditForm({ full_name: user.full_name, email: user.email, phone: user.phone });
+    const primaryRole = user.roles.find(r => r !== 'superadmin') || user.roles[0] || 'admin';
+    setEditForm({ full_name: user.full_name, email: user.email, phone: user.phone, company_id: user.company_id || '', role: primaryRole });
   };
 
   const handleEdit = async (e: React.FormEvent) => {
