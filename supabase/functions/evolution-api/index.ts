@@ -113,25 +113,66 @@ Deno.serve(async (req) => {
       }
 
       case 'get_qrcode': {
-        const { data: instance } = await supabaseAdmin
+        let { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
           .select('instance_name')
           .eq('company_id', company_id)
           .maybeSingle();
 
-        if (!instance) {
-          return new Response(JSON.stringify({ error: 'Instância não encontrada. Crie a instância primeiro.' }), {
-            status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
+        const instanceName = instance?.instance_name || instance_name || `company_${company_id}`;
 
-        const res = await fetch(`${evolutionUrl}/instance/connect/${instance.instance_name}`, {
+        // Try to connect and get QR
+        let res = await fetch(`${evolutionUrl}/instance/connect/${instanceName}`, {
           method: 'GET',
           headers,
         });
 
-        const responseText = await res.text();
+        let responseText = await res.text();
         console.log('get_qrcode response status:', res.status);
+        console.log('get_qrcode response body:', responseText);
+
+        // If instance doesn't exist on Evolution side, recreate it
+        if (res.status === 404) {
+          console.log('Instance not found on Evolution, recreating...');
+          const createRes = await fetch(`${evolutionUrl}/instance/create`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              instanceName: instanceName,
+              integration: 'WHATSAPP-BAILEYS',
+              qrcode: true,
+            }),
+          });
+          const createText = await createRes.text();
+          console.log('recreate instance response:', createRes.status, createText);
+
+          let createParsed: any;
+          try { createParsed = JSON.parse(createText); } catch { createParsed = {}; }
+
+          // Save/update instance in DB
+          await supabaseAdmin.from('company_whatsapp_instances').upsert({
+            company_id,
+            instance_name: instanceName,
+            status: 'connecting',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'company_id' });
+
+          // If create returned QR, use it directly
+          const qrBase64 = createParsed?.qrcode?.base64 || createParsed?.base64;
+          const qrCode = createParsed?.qrcode?.pairingCode || createParsed?.pairingCode || createParsed?.code;
+          if (qrBase64 || qrCode) {
+            result = { base64: qrBase64 || null, code: qrCode || null, pairingCode: qrCode || null };
+            break;
+          }
+
+          // Otherwise try connect again
+          res = await fetch(`${evolutionUrl}/instance/connect/${instanceName}`, {
+            method: 'GET',
+            headers,
+          });
+          responseText = await res.text();
+          console.log('get_qrcode retry response:', res.status, responseText);
+        }
         console.log('get_qrcode response body:', responseText);
 
         if (!res.ok) {
