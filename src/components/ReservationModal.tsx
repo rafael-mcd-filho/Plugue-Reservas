@@ -202,7 +202,7 @@ export default function ReservationModal({
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
