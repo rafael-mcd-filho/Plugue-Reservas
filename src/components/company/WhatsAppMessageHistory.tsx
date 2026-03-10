@@ -335,6 +335,41 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
           </TabsContent>
         </Tabs>
       </CardContent>
+
+      <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Limpar fila de mensagens?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todas as {queue.length} mensagens na fila (pendentes e com falha) serão removidas permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                setClearing(true);
+                try {
+                  const ids = queue.map((q: any) => q.id);
+                  for (const id of ids) {
+                    await supabase.from('whatsapp_message_queue' as any).delete().eq('id', id);
+                  }
+                  toast.success('Fila limpa!');
+                  qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });
+                } catch (err: any) {
+                  toast.error(`Erro: ${err.message}`);
+                } finally {
+                  setClearing(false);
+                  setShowClearConfirm(false);
+                }
+              }}
+            >
+              {clearing ? 'Limpando...' : 'Limpar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
