@@ -42,7 +42,9 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
   const evolutionApi = useEvolutionApi();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('all');
-
+  const [processing, setProcessing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   // Message logs
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['whatsapp-message-logs', companyId],
