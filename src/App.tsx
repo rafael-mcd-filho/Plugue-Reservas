@@ -18,6 +18,7 @@ import SettingsPage from "@/pages/Settings";
 import CompanySettings from "@/pages/CompanySettings";
 import CompanyAutomations from "@/pages/CompanyAutomations";
 import CompanyUsers from "@/pages/CompanyUsers";
+import CompanyReports from "@/pages/CompanyReports";
 import Leads from "@/pages/Leads";
 import Users from "@/pages/Users";
 import Login from "@/pages/Login";
@@ -162,6 +163,13 @@ const App = () => (
               <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
                 <CompanySlugProvider>
                   <AppLayout><CompanyUsers /></AppLayout>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/admin/relatorios" element={
+              <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+                <CompanySlugProvider>
+                  <AppLayout><CompanyReports /></AppLayout>
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
