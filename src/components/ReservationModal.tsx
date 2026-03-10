@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
-import { format, addDays } from 'date-fns';
+import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2 } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +66,22 @@ interface AvailableTable {
   section: string;
 }
 
+interface SlotAvailability {
+  total: number;
+  occupied: number;
+  available: number;
+}
+
+interface ConfirmedReservation {
+  id: string;
+  date: string;
+  time: string;
+  partySize: number;
+  tableName: string;
+  guestName: string;
+  companyName: string;
+}
+
 export default function ReservationModal({
   open, onOpenChange, companyId, companyName, openingHours, reservationDuration = 30, onStepChange
 }: ReservationModalProps) {
@@ -75,8 +92,11 @@ export default function ReservationModal({
   const [selectedTableId, setSelectedTableId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
+  const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingTables, setLoadingTables] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmedReservation, setConfirmedReservation] = useState<ConfirmedReservation | null>(null);
   const [form, setForm] = useState({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
@@ -86,6 +106,12 @@ export default function ReservationModal({
     for (let i = 0; i < 7; i++) days.push(addDays(new Date(), i));
     return days;
   }, []);
+
+  // Check if the selected date is within the next7Days range or from calendar
+  const isDateInQuickSelect = useMemo(() => {
+    if (!selectedDate) return false;
+    return next7Days.some(d => d.toDateString() === selectedDate.toDateString());
+  }, [selectedDate, next7Days]);
 
   const selectedDayHours = useMemo(() => {
     if (!selectedDate) return null;
@@ -99,6 +125,49 @@ export default function ReservationModal({
     return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
   }, [selectedDayHours, reservationDuration]);
 
+  // Fetch slot availability when date changes (for step 2 vacancy indicators)
+  useEffect(() => {
+    if (!selectedDate || !companyId) return;
+    
+    const fetchSlotAvailability = async () => {
+      setLoadingSlots(true);
+      try {
+        const dateStr = format(selectedDate, 'yyyy-MM-dd');
+        
+        const [{ data: allTables }, { data: reservations }] = await Promise.all([
+          supabase.from('restaurant_tables' as any).select('id, capacity').eq('company_id', companyId).eq('status', 'available'),
+          supabase.from('reservations' as any).select('table_id, time').eq('company_id', companyId).eq('date', dateStr).neq('status', 'cancelled'),
+        ]);
+
+        const totalTables = (allTables as any[] || []).filter((t: any) => t.capacity >= selectedPartySize).length;
+        
+        // Count occupied tables per time slot
+        const occupiedBySlot: Record<string, number> = {};
+        (reservations as any[] || []).forEach((r: any) => {
+          const timeKey = r.time?.substring(0, 5) || '';
+          occupiedBySlot[timeKey] = (occupiedBySlot[timeKey] || 0) + 1;
+        });
+
+        const availability: Record<string, SlotAvailability> = {};
+        timeSlots.forEach(slot => {
+          const occupied = occupiedBySlot[slot] || 0;
+          availability[slot] = {
+            total: totalTables,
+            occupied,
+            available: Math.max(0, totalTables - occupied),
+          };
+        });
+        setSlotAvailability(availability);
+      } catch (err) {
+        console.error('Error fetching slot availability:', err);
+      } finally {
+        setLoadingSlots(false);
+      }
+    };
+
+    fetchSlotAvailability();
+  }, [selectedDate, companyId, selectedPartySize, timeSlots]);
+
   // Fetch available tables when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) return;
@@ -108,7 +177,6 @@ export default function ReservationModal({
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
         
-        // Get all tables for this company
         const { data: allTables, error: tablesErr } = await supabase
           .from('restaurant_tables' as any)
           .select('id, number, capacity, section')
@@ -117,7 +185,6 @@ export default function ReservationModal({
           .order('number');
         if (tablesErr) throw tablesErr;
 
-        // Get existing reservations for this date/time that aren't cancelled
         const { data: existingRes, error: resErr } = await supabase
           .from('reservations' as any)
           .select('table_id')
@@ -150,6 +217,7 @@ export default function ReservationModal({
     setSelectedPartySize(2);
     setSelectedTableId('');
     setShowCalendar(false);
+    setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
   };
 
@@ -193,15 +261,26 @@ export default function ReservationModal({
         .single();
       
       if (error) throw error;
-      
-      // Fire reservation events (WhatsApp confirmation + webhooks) - fire and forget
+
+      // Fire reservation events
       supabase.functions.invoke('reservation-events', {
         body: { event: 'reservation_created', reservation: inserted },
       }).catch(err => console.warn('Reservation events error:', err));
 
+      const tableName = availableTables.find(t => t.id === selectedTableId)?.number?.toString() || '';
+
+      setConfirmedReservation({
+        id: (inserted as any).id,
+        date: dateStr,
+        time: selectedTime,
+        partySize: selectedPartySize,
+        tableName: tableName ? `Mesa ${tableName}` : '',
+        guestName: form.name,
+        companyName,
+      });
+
       onStepChange?.('completed');
-      toast.success('Reserva confirmada com sucesso!');
-      handleClose(false);
+      setStep(4);
     } catch (err: any) {
       toast.error(`Erro ao criar reserva: ${err.message}`);
     } finally {
@@ -217,24 +296,56 @@ export default function ReservationModal({
     return hours.closed === true;
   };
 
+  const handleCalendarSelect = (d: Date | undefined) => {
+    setSelectedDate(d);
+    setShowCalendar(false);
+  };
+
+  const copyReservationCode = () => {
+    if (confirmedReservation) {
+      navigator.clipboard.writeText(confirmedReservation.id.substring(0, 8).toUpperCase());
+      toast.success('Código copiado!');
+    }
+  };
+
+  const addToCalendarUrl = () => {
+    if (!confirmedReservation || !selectedDate) return '#';
+    const [h, m] = confirmedReservation.time.split(':').map(Number);
+    const startDate = new Date(selectedDate);
+    startDate.setHours(h, m, 0);
+    const endDate = new Date(startDate.getTime() + reservationDuration * 60000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Reserva - ${companyName}`)}&dates=${fmt(startDate)}/${fmt(endDate)}&details=${encodeURIComponent(`Reserva para ${confirmedReservation.partySize} pessoas${confirmedReservation.tableName ? ` · ${confirmedReservation.tableName}` : ''}`)}`;
+  };
+
+  const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
+    const avail = slotAvailability[slot];
+    if (!avail || avail.total === 0) return 'available';
+    if (avail.available === 0) return 'full';
+    if (avail.available <= 2) return 'low';
+    return 'available';
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-center text-lg font-bold text-foreground">
-            Reservar Mesa — {companyName}
+            {step === 4 ? 'Reserva Confirmada!' : `Reservar Mesa — ${companyName}`}
           </DialogTitle>
-          <div className="flex items-center justify-center gap-2 pt-2">
-            {[1, 2, 3, 4].map(s => (
-              <div
-                key={s}
-                className={cn(
-                  'h-2 rounded-full transition-all',
-                  s === step ? 'w-8 bg-primary' : s < step ? 'w-6 bg-primary/50' : 'w-6 bg-muted'
-                )}
-              />
-            ))}
-          </div>
+          {step !== 4 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              {[1, 2, 3].map(s => (
+                <div
+                  key={s}
+                  className={cn(
+                    'h-2 rounded-full transition-all',
+                    s === step ? 'w-8 bg-primary' : s < step ? 'w-6 bg-primary/50' : 'w-6 bg-muted'
+                  )}
+                />
+              ))}
+            </div>
+          )}
         </DialogHeader>
 
         {/* Step 1: Date + Party Size */}
@@ -273,6 +384,17 @@ export default function ReservationModal({
                     );
                   })}
                 </div>
+
+                {/* Show selected calendar date if outside next 7 days */}
+                {selectedDate && !isDateInQuickSelect && (
+                  <div className="flex items-center justify-center gap-2 p-3 rounded-xl border border-primary bg-primary/10">
+                    <CalendarIcon className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold text-primary">
+                      {format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}
+                    </span>
+                  </div>
+                )}
+
                 <Button variant="ghost" className="w-full text-primary" onClick={() => setShowCalendar(true)}>
                   <CalendarIcon className="h-4 w-4 mr-2" /> Escolher outra data
                 </Button>
@@ -280,7 +402,7 @@ export default function ReservationModal({
             ) : (
               <div className="flex flex-col items-center gap-3">
                 <Calendar mode="single" selected={selectedDate}
-                  onSelect={(d) => { setSelectedDate(d); setShowCalendar(false); }}
+                  onSelect={handleCalendarSelect}
                   disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0)) || isDayClosed(date)}
                   locale={ptBR} className="p-3 pointer-events-auto" />
                 <Button variant="ghost" size="sm" onClick={() => setShowCalendar(false)}>
@@ -289,10 +411,15 @@ export default function ReservationModal({
               </div>
             )}
 
-            <Button className="w-full" disabled={!selectedDate}
-              onClick={() => { setStep(2); onStepChange?.('date_select'); }}>
-              Continuar <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
+            <div className="space-y-1">
+              <Button className="w-full" disabled={!selectedDate}
+                onClick={() => { setStep(2); onStepChange?.('date_select'); }}>
+                Continuar <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+              {!selectedDate && (
+                <p className="text-xs text-muted-foreground text-center">Selecione uma data para continuar</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -312,17 +439,36 @@ export default function ReservationModal({
 
             {timeSlots.length === 0 ? (
               <p className="text-center text-sm text-destructive">Nenhum horário disponível para esta data.</p>
+            ) : loadingSlots ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                {timeSlots.map(time => (
-                  <button key={time} onClick={() => { setSelectedTime(time); setSelectedTableId(''); }}
-                    className={cn(
-                      'flex items-center justify-center gap-1.5 py-3 rounded-xl border text-sm transition-all',
-                      selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-border hover:border-primary/50 text-foreground'
-                    )}>
-                    <Clock className="h-3.5 w-3.5" />{time}
-                  </button>
-                ))}
+                {timeSlots.map(time => {
+                  const status = getSlotStatus(time);
+                  const avail = slotAvailability[time];
+                  const isFull = status === 'full';
+                  return (
+                    <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
+                      disabled={isFull}
+                      className={cn(
+                        'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border text-sm transition-all',
+                        isFull && 'opacity-40 cursor-not-allowed bg-muted',
+                        selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border'
+                      )}>
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5" />{time}
+                      </span>
+                      {avail && (
+                        <span className={cn(
+                          'text-[10px] font-medium',
+                          isFull ? 'text-destructive' : status === 'low' ? 'text-amber-600' : 'text-muted-foreground'
+                        )}>
+                          {isFull ? 'Lotado' : `${avail.available} ${avail.available === 1 ? 'vaga' : 'vagas'}`}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -353,10 +499,17 @@ export default function ReservationModal({
               </div>
             )}
 
-            <Button className="w-full" disabled={!selectedTime || !selectedTableId}
-              onClick={() => { setStep(3); onStepChange?.('time_select'); onStepChange?.('form_fill'); }}>
-              Continuar <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
+            <div className="space-y-1">
+              <Button className="w-full" disabled={!selectedTime || !selectedTableId}
+                onClick={() => { setStep(3); onStepChange?.('time_select'); onStepChange?.('form_fill'); }}>
+                Continuar <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+              {(!selectedTime || !selectedTableId) && (
+                <p className="text-xs text-muted-foreground text-center">
+                  {!selectedTime ? 'Selecione um horário para continuar' : 'Selecione uma mesa para continuar'}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -416,6 +569,68 @@ export default function ReservationModal({
               Confirmar Reserva
             </Button>
           </form>
+        )}
+
+        {/* Step 4: Success */}
+        {step === 4 && confirmedReservation && (
+          <div className="space-y-6 pt-4 text-center">
+            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Check className="h-8 w-8 text-primary" />
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-foreground font-medium">
+                Olá {confirmedReservation.guestName}, sua reserva foi confirmada!
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Estamos ansiosos para recebê-lo(a).
+              </p>
+            </div>
+
+            <Card className="border-none shadow-sm text-left">
+              <CardContent className="pt-4 space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Código</span>
+                  <button onClick={copyReservationCode} className="flex items-center gap-1.5 font-mono font-bold text-primary hover:text-primary/80">
+                    {confirmedReservation.id.substring(0, 8).toUpperCase()}
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Data</span>
+                  <span className="font-medium text-foreground">
+                    {format(new Date(confirmedReservation.date + 'T12:00:00'), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Horário</span>
+                  <span className="font-medium text-foreground">{confirmedReservation.time}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Pessoas</span>
+                  <span className="font-medium text-foreground">{confirmedReservation.partySize}</span>
+                </div>
+                {confirmedReservation.tableName && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Mesa</span>
+                    <span className="font-medium text-foreground">{confirmedReservation.tableName}</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="space-y-2">
+              <a href={addToCalendarUrl()} target="_blank" rel="noopener noreferrer">
+                <Button variant="outline" className="w-full gap-2">
+                  <CalendarPlus className="h-4 w-4" />
+                  Adicionar ao Google Calendar
+                </Button>
+              </a>
+              <Button className="w-full" onClick={() => handleClose(false)}>
+                Fechar
+              </Button>
+            </div>
+          </div>
         )}
       </DialogContent>
     </Dialog>
