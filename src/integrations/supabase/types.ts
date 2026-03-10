@@ -85,6 +85,47 @@ export type Database = {
           },
         ]
       }
+      blocked_dates: {
+        Row: {
+          all_day: boolean
+          company_id: string
+          created_at: string
+          date: string
+          end_time: string | null
+          id: string
+          reason: string | null
+          start_time: string | null
+        }
+        Insert: {
+          all_day?: boolean
+          company_id: string
+          created_at?: string
+          date: string
+          end_time?: string | null
+          id?: string
+          reason?: string | null
+          start_time?: string | null
+        }
+        Update: {
+          all_day?: boolean
+          company_id?: string
+          created_at?: string
+          date?: string
+          end_time?: string | null
+          id?: string
+          reason?: string | null
+          start_time?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blocked_dates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           address: string | null
@@ -96,6 +137,7 @@ export type Database = {
           id: string
           instagram: string | null
           logo_url: string | null
+          max_guests_per_slot: number | null
           name: string
           opening_hours: Json | null
           payment_methods: Json | null
@@ -120,6 +162,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           logo_url?: string | null
+          max_guests_per_slot?: number | null
           name: string
           opening_hours?: Json | null
           payment_methods?: Json | null
@@ -144,6 +187,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           logo_url?: string | null
+          max_guests_per_slot?: number | null
           name?: string
           opening_hours?: Json | null
           payment_methods?: Json | null
