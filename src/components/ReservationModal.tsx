@@ -525,6 +525,39 @@ export default function ReservationModal({
 
             <div className="space-y-3">
               <div>
+                <Label className="text-sm font-medium">WhatsApp *</Label>
+                <div className="flex gap-2">
+                  <Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
+                    placeholder="(11) 99999-9999" required maxLength={20}
+                    onBlur={async () => {
+                      if (form.whatsapp.replace(/\D/g, '').length >= 10) {
+                        try {
+                          const { data } = await supabase
+                            .from('reservations' as any)
+                            .select('guest_name, guest_email, guest_birthdate')
+                            .eq('company_id', companyId)
+                            .eq('guest_phone', form.whatsapp)
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                          if (data) {
+                            const d = data as any;
+                            setForm(f => ({
+                              ...f,
+                              name: f.name || d.guest_name || '',
+                              email: f.email || d.guest_email || '',
+                              birthdate: f.birthdate || d.guest_birthdate || '',
+                            }));
+                            toast.success('Dados preenchidos automaticamente! 🎉');
+                          }
+                        } catch { /* silent */ }
+                      }
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">Digite seu WhatsApp para preencher automaticamente</p>
+              </div>
+              <div>
                 <Label className="text-sm font-medium">Nome Completo *</Label>
                 <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   placeholder="Seu nome" required maxLength={100} />
@@ -537,11 +570,6 @@ export default function ReservationModal({
               <div>
                 <Label className="text-sm font-medium">Data de Nascimento</Label>
                 <Input type="date" value={form.birthdate} onChange={e => setForm(f => ({ ...f, birthdate: e.target.value }))} />
-              </div>
-              <div>
-                <Label className="text-sm font-medium">WhatsApp *</Label>
-                <Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
-                  placeholder="(11) 99999-9999" required maxLength={20} />
               </div>
               <div>
                 <Label className="text-sm font-medium">Ocasião</Label>
