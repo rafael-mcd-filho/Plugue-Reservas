@@ -150,6 +150,7 @@ export default function CompanySettings() {
           <TabsTrigger value="payments" className="gap-2"><CreditCard className="h-4 w-4" /> Pagamentos</TabsTrigger>
           <TabsTrigger value="info" className="gap-2"><Globe className="h-4 w-4" /> Informações</TabsTrigger>
           <TabsTrigger value="location" className="gap-2"><MapPin className="h-4 w-4" /> Localização</TabsTrigger>
+          <TabsTrigger value="blocked" className="gap-2"><CalendarOff className="h-4 w-4" /> Bloqueios</TabsTrigger>
         </TabsList>
 
         {/* Opening Hours */}
