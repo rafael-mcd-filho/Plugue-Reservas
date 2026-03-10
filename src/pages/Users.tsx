@@ -305,6 +305,28 @@ export default function Users() {
               <Label>Telefone</Label>
               <Input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
             </div>
+            <div>
+              <Label>Empresa</Label>
+              <Select value={editForm.company_id || 'none'} onValueChange={v => setEditForm({ ...editForm, company_id: v === 'none' ? '' : v })}>
+                <SelectTrigger><SelectValue placeholder="Selecione a empresa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem empresa</SelectItem>
+                  {companies.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Perfil</Label>
+              <Select value={editForm.role} onValueChange={v => setEditForm({ ...editForm, role: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="operator">Operador</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancelar</Button>
               <Button type="submit" disabled={updateUser.isPending}>Salvar</Button>
