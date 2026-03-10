@@ -70,6 +70,7 @@ export default function CompanySettings() {
   const [whatsapp, setWhatsapp] = useState('');
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
+  const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
