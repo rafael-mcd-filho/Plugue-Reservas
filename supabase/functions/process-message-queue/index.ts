@@ -101,6 +101,31 @@ Deno.serve(async (req) => {
       const instanceName = instanceMap.get(msg.company_id);
       if (!instanceName) continue;
 
+      // Mark as being processed (lock)
+      await supabaseAdmin.from('whatsapp_message_queue').update({
+        last_attempt_at: new Date().toISOString(),
+      }).eq('id', msg.id);
+
+      // Dedup: check if this exact message was already sent recently
+      if (msg.reservation_id) {
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: alreadySent } = await supabaseAdmin
+          .from('whatsapp_message_logs')
+          .select('id')
+          .eq('company_id', msg.company_id)
+          .eq('reservation_id', msg.reservation_id)
+          .eq('type', msg.type)
+          .eq('status', 'sent')
+          .gte('created_at', fiveMinAgo)
+          .limit(1);
+
+        if (alreadySent && alreadySent.length > 0) {
+          console.log(`Skipping duplicate queue message ${msg.id}`);
+          await supabaseAdmin.from('whatsapp_message_queue').update({ status: 'sent', error_details: 'Skipped: already sent' }).eq('id', msg.id);
+          continue;
+        }
+      }
+
       // Random delay between 40 seconds and 2 minutes (only between messages, not the first)
       if (sent > 0) {
         const delayMs = Math.floor(Math.random() * (120000 - 40000 + 1)) + 40000;
