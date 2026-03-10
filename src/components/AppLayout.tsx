@@ -4,6 +4,7 @@ import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import { useSystemSettings } from '@/hooks/useSettings';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
@@ -20,6 +21,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { profile, roles, loading, signOut } = useAuth();
+  const { data: systemSettings = [] } = useSystemSettings();
+  const systemName = systemSettings.find(s => s.key === 'system_name')?.value || 'ReservaFácil';
+  const systemLogo = systemSettings.find(s => s.key === 'system_logo_url')?.value || '';
 
   const isSuperadmin = roles.includes('superadmin');
   const rolesLoaded = !loading && roles.length > 0;
@@ -69,9 +73,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         mobileOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-          <UtensilsCrossed className="h-7 w-7 text-sidebar-primary" />
+          {systemLogo ? (
+            <img src={systemLogo} alt={systemName} className="h-7 w-7 object-contain" />
+          ) : (
+            <UtensilsCrossed className="h-7 w-7 text-sidebar-primary" />
+          )}
           <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-            Reserva<span className="text-sidebar-primary">Fácil</span>
+            {systemName}
           </h1>
         </div>
 
@@ -134,7 +142,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg hover:bg-muted">
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>ReservaFácil</h1>
+          <h1 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>{systemName}</h1>
         </header>
         <main className="flex-1 overflow-y-auto p-6 lg:p-8">
           {children}
