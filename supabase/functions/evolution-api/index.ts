@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, company_id, instance_name, phone, message } = body;
+    const { action, company_id, instance_name, phone, message, log_id } = body;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
