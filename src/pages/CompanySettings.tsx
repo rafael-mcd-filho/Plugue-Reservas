@@ -104,6 +104,7 @@ export default function CompanySettings() {
           whatsapp,
           google_maps_url: googleMapsUrl,
           reservation_duration: reservationDuration,
+          max_guests_per_slot: maxGuestsPerSlot,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', company.id);
