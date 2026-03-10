@@ -131,9 +131,10 @@ export function useDashboardData(
 
   // Previous period totals for comparison
   const prevTotals = useMemo(() => {
-    const acc = { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0 };
+    const acc = { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0, totalGuests: 0 };
     for (const r of prevReservations) {
       acc.reservations++;
+      acc.totalGuests += (r as any).party_size || 1;
       if (r.status === 'completed') acc.completed++;
       else if (r.status === 'confirmed') acc.confirmed++;
       else if (r.status === 'pending') acc.pending++;
@@ -142,6 +143,18 @@ export function useDashboardData(
     }
     return acc;
   }, [prevReservations]);
+
+  // Waitlist totals
+  const waitlistTotals = useMemo(() => {
+    const total = rawWaitlist.length;
+    const seated = rawWaitlist.filter(w => w.status === 'seated').length;
+    const expired = rawWaitlist.filter(w => w.status === 'expired' || w.status === 'removed').length;
+    const seatedEntries = rawWaitlist.filter(w => w.status === 'seated' && w.seated_at);
+    const avgWaitMin = seatedEntries.length > 0
+      ? Math.round(seatedEntries.reduce((sum, w) => sum + (new Date(w.seated_at!).getTime() - new Date(w.created_at).getTime()), 0) / seatedEntries.length / 60000)
+      : 0;
+    return { total, seated, expired, avgWaitMin };
+  }, [rawWaitlist]);
 
   // Heatmap
   const heatmapData = useMemo(() => {
