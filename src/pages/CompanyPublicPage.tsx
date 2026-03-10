@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck,
-  LogIn, Clock, CreditCard, Check, X,
+  LogIn, Clock, CreditCard, Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -49,10 +49,10 @@ export default function CompanyPublicPage() {
 
   const { trackStep } = useFunnelTracking(company?.id);
 
-  // Track page view
   useEffect(() => {
     if (company?.id) trackStep('page_view');
   }, [company?.id, trackStep]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
@@ -90,6 +90,12 @@ export default function CompanyPublicPage() {
     ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
     : null;
 
+  const googleMapsSearchUrl = company.google_maps_url
+    ? company.google_maps_url
+    : company.address
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`
+      : null;
+
   const mapsEmbedUrl = company.google_maps_url
     ? company.google_maps_url.includes('/embed')
       ? company.google_maps_url
@@ -98,6 +104,8 @@ export default function CompanyPublicPage() {
 
   const openingHours = (company.opening_hours as any[]) || [];
   const paymentMethods = (company.payment_methods as Record<string, boolean>) || {};
+  // Only show accepted payment methods
+  const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
 
   return (
     <div className="min-h-screen bg-background">
@@ -113,6 +121,9 @@ export default function CompanyPublicPage() {
           )}
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold truncate">{company.name}</h1>
+            {company.description && (
+              <p className="text-sm text-sidebar-foreground/70 mt-0.5 line-clamp-2">{company.description}</p>
+            )}
             <div className="flex gap-3 mt-1">
               {instagramUrl && (
                 <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="text-sidebar-foreground/70 hover:text-sidebar-primary transition-colors">
@@ -126,12 +137,13 @@ export default function CompanyPublicPage() {
               )}
             </div>
           </div>
+          {/* Hidden admin login — only shows icon on long press or triple-click, keeping it subtle */}
           <button
             onClick={() => setShowLogin(!showLogin)}
-            className="ml-auto text-sidebar-foreground/50 hover:text-sidebar-primary transition-colors shrink-0"
-            title="Login administrativo"
+            className="ml-auto text-sidebar-foreground/20 hover:text-sidebar-foreground/50 transition-colors shrink-0"
+            aria-label="Login administrativo"
           >
-            <LogIn className="h-5 w-5" />
+            <LogIn className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -140,10 +152,13 @@ export default function CompanyPublicPage() {
       <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
         {/* CTA Buttons */}
         <div className="space-y-3">
-          <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg" onClick={() => setShowReservation(true)}>
-            <CalendarCheck className="h-5 w-5" />
-            Reservar Mesa
-          </Button>
+          <div>
+            <Button className="w-full py-6 text-base gap-2 rounded-xl" size="lg" onClick={() => setShowReservation(true)}>
+              <CalendarCheck className="h-5 w-5" />
+              Reservar Mesa
+            </Button>
+            <p className="text-xs text-muted-foreground text-center mt-1.5">Rápido e gratuito · Confirmação imediata</p>
+          </div>
 
           {whatsappUrl && (
             <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
@@ -155,19 +170,9 @@ export default function CompanyPublicPage() {
           )}
         </div>
 
-        {/* Description + Opening Hours — side by side */}
-        {(company.description || openingHours.length > 0) && (
+        {/* Opening Hours + Payment — side by side */}
+        {(openingHours.length > 0 || acceptedPayments.length > 0) && (
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Description */}
-            {company.description && (
-              <Card className="border-none shadow-sm">
-                <CardContent className="pt-5">
-                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">Descrição</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{company.description}</p>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Opening Hours */}
             {openingHours.length > 0 && (
               <Card className="border-none shadow-sm">
@@ -189,60 +194,67 @@ export default function CompanyPublicPage() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Payment Methods — only accepted */}
+            {acceptedPayments.length > 0 && (
+              <Card className="border-none shadow-sm">
+                <CardContent className="pt-5">
+                  <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <CreditCard className="h-4 w-4" />
+                    Formas de Pagamento
+                  </h2>
+                  <div className="space-y-2">
+                    {acceptedPayments.map(([key]) => (
+                      <div key={key} className="flex items-center gap-2 text-sm">
+                        <Check className="h-4 w-4 text-primary" />
+                        <span className="text-foreground">
+                          {PAYMENT_LABELS[key] || key}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
-        {/* Payment Methods + Location — side by side */}
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Payment Methods */}
-          {Object.keys(paymentMethods).length > 0 && (
-            <Card className="border-none shadow-sm">
-              <CardContent className="pt-5">
-                <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                  <CreditCard className="h-4 w-4" />
-                  Formas de Pagamento
-                </h2>
-                <div className="space-y-2">
-                  {Object.entries(paymentMethods).map(([key, accepted]) => (
-                    <div key={key} className="flex items-center gap-2 text-sm">
-                      {accepted ? (
-                        <Check className="h-4 w-4 text-primary" />
-                      ) : (
-                        <X className="h-4 w-4 text-destructive" />
-                      )}
-                      <span className={accepted ? 'text-foreground' : 'text-muted-foreground line-through'}>
-                        {PAYMENT_LABELS[key] || key}
-                      </span>
-                    </div>
-                  ))}
+        {/* Contact + Address */}
+        {(company.phone || company.address) && (
+          <Card className="border-none shadow-sm">
+            <CardContent className="pt-5 space-y-3">
+              <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <MapPin className="h-4 w-4" />
+                Localização
+              </h2>
+              {company.phone && (
+                <div className="flex items-center gap-3">
+                  <Phone className="h-4 w-4 text-primary" />
+                  <a href={`tel:${company.phone}`} className="text-sm text-muted-foreground hover:text-foreground">
+                    {company.phone}
+                  </a>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Contact + Address */}
-          {(company.phone || company.address) && (
-            <Card className="border-none shadow-sm">
-              <CardContent className="pt-5 space-y-3">
-                <h2 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4" />
-                  Localização
-                </h2>
-                {company.phone && (
-                  <div className="flex items-center gap-3">
-                    <Phone className="h-4 w-4 text-primary" />
-                    <a href={`tel:${company.phone}`} className="text-sm text-muted-foreground hover:text-foreground">
-                      {company.phone}
+              )}
+              {company.address && (
+                <div>
+                  {googleMapsSearchUrl ? (
+                    <a
+                      href={googleMapsSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-primary hover:underline flex items-center gap-1.5"
+                    >
+                      <MapPin className="h-4 w-4 shrink-0" />
+                      {company.address}
                     </a>
-                  </div>
-                )}
-                {company.address && (
-                  <p className="text-sm text-muted-foreground">{company.address}</p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{company.address}</p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Google Maps */}
         {mapsEmbedUrl && (
