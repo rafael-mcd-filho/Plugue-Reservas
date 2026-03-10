@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useUsers, useToggleBan, useUpdateUser, useResetPassword, ManagedUser } from '@/hooks/useUsers';
 import { useCompanies } from '@/hooks/useCompanies';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -26,6 +28,7 @@ export default function Users() {
   const toggleBan = useToggleBan();
   const updateUser = useUpdateUser();
   const resetPassword = useResetPassword();
+  const qc = useQueryClient();
 
   const [filterCompany, setFilterCompany] = useState<string>('all');
   const [filterRole, setFilterRole] = useState<string>('all');
@@ -34,6 +37,11 @@ export default function Users() {
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
+
+  // New user state
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
 
   const filtered = users.filter(u => {
     if (filterCompany !== 'all' && u.company_id !== filterCompany) return false;
@@ -62,6 +70,40 @@ export default function Users() {
     setEditUser(null);
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createForm.full_name || !createForm.email || !createForm.company_id) {
+      toast.error('Preencha nome, e-mail e empresa');
+      return;
+    }
+    setCreating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-user', {
+        body: {
+          action: 'seed_users',
+          users: [{
+            full_name: createForm.full_name,
+            email: createForm.email,
+            phone: createForm.phone || null,
+            company_id: createForm.company_id,
+            role: createForm.role,
+          }],
+        },
+      });
+      if (error) throw error;
+      const result = data?.results?.[0];
+      if (result?.error) throw new Error(result.error);
+      toast.success(`Usuário criado! Senha temporária: ${result.temp_password}`, { duration: 15000 });
+      qc.invalidateQueries({ queryKey: ['managed-users'] });
+      setShowCreateDialog(false);
+      setCreateForm({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
+    } catch (err: any) {
+      toast.error(`Erro: ${err.message}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -69,7 +111,7 @@ export default function Users() {
           <h1 className="text-3xl font-bold tracking-tight">Usuários</h1>
           <p className="text-muted-foreground mt-1">Gerencie admins e operadores das empresas</p>
         </div>
-        <Button className="gap-2" onClick={() => { setEditUser(null); setEditForm({ full_name: '', email: '', phone: '' }); }}>
+        <Button className="gap-2" onClick={() => setShowCreateDialog(true)}>
           <Plus className="h-4 w-4" /> Novo Usuário
         </Button>
       </div>
@@ -257,6 +299,57 @@ export default function Users() {
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancelar</Button>
               <Button type="submit" disabled={updateUser.isPending}>Salvar</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create User Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo Usuário</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4 mt-4">
+            <div>
+              <Label>Nome completo *</Label>
+              <Input value={createForm.full_name} onChange={e => setCreateForm({ ...createForm, full_name: e.target.value })} placeholder="Nome do usuário" required />
+            </div>
+            <div>
+              <Label>E-mail *</Label>
+              <Input type="email" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} placeholder="email@empresa.com" required />
+            </div>
+            <div>
+              <Label>Telefone</Label>
+              <Input value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} placeholder="(11) 99999-9999" />
+            </div>
+            <div>
+              <Label>Empresa *</Label>
+              <Select value={createForm.company_id} onValueChange={v => setCreateForm({ ...createForm, company_id: v })}>
+                <SelectTrigger><SelectValue placeholder="Selecione a empresa" /></SelectTrigger>
+                <SelectContent>
+                  {companies.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Perfil *</Label>
+              <Select value={createForm.role} onValueChange={v => setCreateForm({ ...createForm, role: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="operator">Operador</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">Uma senha temporária será gerada automaticamente.</p>
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+              <Button type="submit" disabled={creating}>
+                {creating ? 'Criando...' : 'Criar Usuário'}
+              </Button>
             </div>
           </form>
         </DialogContent>
