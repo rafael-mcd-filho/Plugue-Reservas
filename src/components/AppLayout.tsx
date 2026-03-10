@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot, Contact } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Automações', icon: Bot, path: `/${slug}/admin/automacoes`, showFor: ['admin', 'superadmin'] },
+        { label: 'Leads', icon: Contact, path: `/${slug}/admin/leads`, showFor: ['admin', 'superadmin'] },
         { label: 'Configurações', icon: Settings, path: `/${slug}/admin/configuracoes`, showFor: ['admin', 'superadmin'] },
       ]
     : [];

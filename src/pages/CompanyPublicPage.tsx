@@ -57,6 +57,32 @@ export default function CompanyPublicPage() {
 
   const { trackStep } = useFunnelTracking(company?.id);
 
+  // SEO meta tags
+  useEffect(() => {
+    if (!company) return;
+    document.title = `${company.name} — Reservar Mesa`;
+    
+    const setMeta = (name: string, content: string, attr = 'name') => {
+      let el = document.querySelector(`meta[${attr}="${name}"]`) as HTMLMetaElement | null;
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute(attr, name);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+    
+    const desc = company.description || `Reserve sua mesa no ${company.name}. Confirmação imediata.`;
+    setMeta('description', desc);
+    setMeta('og:title', company.name, 'property');
+    setMeta('og:description', desc, 'property');
+    setMeta('og:type', 'website', 'property');
+    setMeta('og:url', window.location.href, 'property');
+    if (company.logo_url) setMeta('og:image', company.logo_url, 'property');
+    
+    return () => { document.title = 'ReservaFácil'; };
+  }, [company]);
+
   useEffect(() => {
     if (company?.id) trackStep('page_view');
   }, [company?.id, trackStep]);
