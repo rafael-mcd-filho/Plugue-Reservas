@@ -158,14 +158,12 @@ function GeneralTab() {
             <Label>Logo do Sistema</Label>
             <div className="flex gap-2 mt-1">
               <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" className="flex-1" />
-              <label className="cursor-pointer">
-                <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                <Button variant="outline" size="icon" asChild disabled={uploading}>
-                  <span>
-                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  </span>
+              <div className="relative">
+                <input type="file" accept="image/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+                <Button variant="outline" size="icon" type="button" disabled={uploading} className="pointer-events-none">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 </Button>
-              </label>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground mt-1">Cole uma URL ou envie um arquivo (máx. 2MB)</p>
             <div className="mt-2 p-4 bg-muted rounded-lg min-h-[64px] flex items-center justify-center">
