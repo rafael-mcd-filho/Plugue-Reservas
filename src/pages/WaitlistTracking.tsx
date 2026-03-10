@@ -149,7 +149,7 @@ export default function WaitlistTracking() {
 
   const status = statusMessages[entry.status] || statusMessages.waiting;
   const StatusIcon = status.icon;
-  const estimatedWait = aheadCount * 10; // ~10min per group estimate
+  const estimatedWait = aheadCount * avgWaitPerPerson;
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
