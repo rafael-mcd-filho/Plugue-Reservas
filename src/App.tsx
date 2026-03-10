@@ -16,6 +16,7 @@ import Companies from "@/pages/Companies";
 import CompanyProfile from "@/pages/CompanyProfile";
 import SettingsPage from "@/pages/Settings";
 import CompanySettings from "@/pages/CompanySettings";
+import CompanyAutomations from "@/pages/CompanyAutomations";
 import Users from "@/pages/Users";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
@@ -138,6 +139,13 @@ const App = () => (
                   <ReservationProvider>
                     <AppLayout><CalendarView /></AppLayout>
                   </ReservationProvider>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/admin/automacoes" element={
+              <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+                <CompanySlugProvider>
+                  <AppLayout><CompanyAutomations /></AppLayout>
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
