@@ -14,8 +14,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
-import AutomationsTab from '@/components/company/AutomationsTab';
-import WebhooksTab from '@/components/company/WebhooksTab';
 
 interface OpeningHour {
   day: string;
