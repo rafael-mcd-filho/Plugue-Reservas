@@ -210,6 +210,20 @@ export default function CompanySettings() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Max guests per slot */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <Label className="text-sm font-medium flex items-center gap-1.5"><Users className="h-4 w-4" /> Capacidade máxima por horário (pessoas)</Label>
+                <p className="text-xs text-muted-foreground mb-2">Limita o total de pessoas que podem reservar no mesmo horário. 0 = sem limite.</p>
+                <Input
+                  type="number"
+                  min={0}
+                  value={maxGuestsPerSlot}
+                  onChange={e => setMaxGuestsPerSlot(Number(e.target.value))}
+                  className="w-40"
+                  placeholder="0"
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
