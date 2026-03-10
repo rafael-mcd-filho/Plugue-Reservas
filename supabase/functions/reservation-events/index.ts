@@ -188,17 +188,19 @@ Deno.serve(async (req) => {
           .eq('company_id', waitlist.company_id)
           .maybeSingle();
 
-        if (instance?.status === 'connected') {
-          const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
-          let message = '';
+        const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
+        let message = '';
 
-          if (event === 'waitlist_added') {
-            message = `Olá ${waitlist.guest_name}! Você está na posição ${waitlist.position} da lista de espera (${waitlist.party_size} pessoa(s)).\n\n📋 Acompanhe em tempo real:\n${waitlist.tracking_url || ''}`;
-          } else if (event === 'waitlist_called') {
-            message = `🔔 ${waitlist.guest_name}, sua mesa está pronta! Dirija-se à recepção. Você tem 10 minutos para se apresentar.`;
-          }
+        if (event === 'waitlist_added') {
+          message = `Olá ${waitlist.guest_name}! Você está na posição ${waitlist.position} da lista de espera (${waitlist.party_size} pessoa(s)).\n\n📋 Acompanhe em tempo real:\n${waitlist.tracking_url || ''}`;
+        } else if (event === 'waitlist_called') {
+          message = `🔔 ${waitlist.guest_name}, sua mesa está pronta! Dirija-se à recepção. Você tem 10 minutos para se apresentar.`;
+        }
 
-          if (message) {
+        const msgType = event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called';
+
+        if (message) {
+          if (instance?.status === 'connected') {
             try {
               const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
                 method: 'POST',
@@ -211,13 +213,28 @@ Deno.serve(async (req) => {
               await supabaseAdmin.from('whatsapp_message_logs').insert({
                 company_id: waitlist.company_id,
                 phone, message,
-                type: event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called',
+                type: msgType,
                 status: res.ok ? 'sent' : 'error',
                 error_details: res.ok ? null : JSON.stringify(data),
               });
+
+              if (!res.ok) {
+                await supabaseAdmin.from('whatsapp_message_queue').insert({
+                  company_id: waitlist.company_id, phone, message, type: msgType,
+                });
+              }
             } catch (err) {
               results.whatsapp = 'error';
+              await supabaseAdmin.from('whatsapp_message_queue').insert({
+                company_id: waitlist.company_id, phone, message, type: msgType,
+              });
             }
+          } else {
+            // Not connected — queue
+            results.whatsapp = 'queued';
+            await supabaseAdmin.from('whatsapp_message_queue').insert({
+              company_id: waitlist.company_id, phone, message, type: msgType,
+            });
           }
         }
       }
