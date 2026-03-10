@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { MessageCircle, CheckCircle2, XCircle, Clock, History, RefreshCw, Inbox, Filter, AlertTriangle } from 'lucide-react';
+import { MessageCircle, CheckCircle2, XCircle, Clock, History, RefreshCw, Inbox, Filter, AlertTriangle, Play, Trash2 } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -41,7 +42,9 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
   const evolutionApi = useEvolutionApi();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('all');
-
+  const [processing, setProcessing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   // Message logs
   const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['whatsapp-message-logs', companyId],
@@ -297,10 +300,76 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
           </TabsContent>
 
           <TabsContent value="queue">
+            <div className="flex items-center gap-2 mb-4">
+              <Button
+                size="sm" variant="outline" className="gap-1.5"
+                disabled={pendingCount === 0 || processing}
+                onClick={async () => {
+                  setProcessing(true);
+                  try {
+                    const { error } = await supabase.functions.invoke('process-message-queue');
+                    if (error) throw error;
+                    toast.success('Fila processada!');
+                    qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });
+                    qc.invalidateQueries({ queryKey: ['whatsapp-message-logs', companyId] });
+                  } catch (err: any) {
+                    toast.error(`Erro: ${err.message}`);
+                  } finally {
+                    setProcessing(false);
+                  }
+                }}
+              >
+                <Play className={`h-3.5 w-3.5 ${processing ? 'animate-spin' : ''}`} />
+                {processing ? 'Processando...' : 'Processar Fila'}
+              </Button>
+              <Button
+                size="sm" variant="outline" className="gap-1.5 text-destructive hover:text-destructive"
+                disabled={queue.length === 0 || clearing}
+                onClick={() => setShowClearConfirm(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Limpar Fila
+              </Button>
+            </div>
             {renderQueueTable([...pendingQueue, ...failedQueue])}
           </TabsContent>
         </Tabs>
       </CardContent>
+
+      <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Limpar fila de mensagens?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todas as {queue.length} mensagens na fila (pendentes e com falha) serão removidas permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                setClearing(true);
+                try {
+                  const ids = queue.map((q: any) => q.id);
+                  for (const id of ids) {
+                    await supabase.from('whatsapp_message_queue' as any).delete().eq('id', id);
+                  }
+                  toast.success('Fila limpa!');
+                  qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });
+                } catch (err: any) {
+                  toast.error(`Erro: ${err.message}`);
+                } finally {
+                  setClearing(false);
+                  setShowClearConfirm(false);
+                }
+              }}
+            >
+              {clearing ? 'Limpando...' : 'Limpar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
