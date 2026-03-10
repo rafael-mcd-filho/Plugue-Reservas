@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users as UsersIcon, Shield, ShieldOff, Pencil, KeyRound, Building2, Clock } from 'lucide-react';
+import { Users as UsersIcon, Shield, ShieldOff, Pencil, KeyRound, Building2, Plus, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,12 +8,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useUsers, useToggleBan, useUpdateUser, useResetPassword, ManagedUser } from '@/hooks/useUsers';
 import { useCompanies } from '@/hooks/useCompanies';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -29,12 +28,16 @@ export default function Users() {
   const resetPassword = useResetPassword();
 
   const [filterCompany, setFilterCompany] = useState<string>('all');
+  const [filterRole, setFilterRole] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '' });
+  const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
+  const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
 
   const filtered = users.filter(u => {
     if (filterCompany !== 'all' && u.company_id !== filterCompany) return false;
+    if (filterRole !== 'all' && !u.roles.includes(filterRole)) return false;
     if (search) {
       const q = search.toLowerCase();
       return u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
@@ -61,9 +64,14 @@ export default function Users() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Usuários</h1>
-        <p className="text-muted-foreground mt-1">Gerencie admins e operadores das empresas</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Usuários</h1>
+          <p className="text-muted-foreground mt-1">Gerencie admins e operadores das empresas</p>
+        </div>
+        <Button className="gap-2" onClick={() => { setEditUser(null); setEditForm({ full_name: '', email: '', phone: '' }); }}>
+          <Plus className="h-4 w-4" /> Novo Usuário
+        </Button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -82,6 +90,17 @@ export default function Users() {
             {companies.map(c => (
               <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterRole} onValueChange={setFilterRole}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filtrar por perfil" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os perfis</SelectItem>
+            <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="operator">Operador</SelectItem>
+            <SelectItem value="superadmin">Superadmin</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -109,7 +128,6 @@ export default function Users() {
                 <TableHead>Empresa</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Último acesso</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
@@ -139,76 +157,33 @@ export default function Users() {
                       <Badge className="text-xs bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">Ativo</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                    {user.last_sign_in ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {format(new Date(user.last_sign_in), "dd/MM/yy HH:mm", { locale: ptBR })}
-                      </span>
-                    ) : '—'}
-                  </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(user)} title="Editar">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className={`h-8 w-8 ${user.is_banned ? 'text-primary hover:text-accent' : 'text-destructive hover:text-destructive'}`}
-                            title={user.is_banned ? 'Desbloquear' : 'Bloquear'}
-                          >
-                            {user.is_banned ? <Shield className="h-4 w-4" /> : <ShieldOff className="h-4 w-4" />}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>
-                              {user.is_banned ? 'Desbloquear usuário?' : 'Bloquear usuário?'}
-                            </AlertDialogTitle>
-                            <AlertDialogDescription>
-                              {user.is_banned
-                                ? `${user.full_name || user.email} voltará a ter acesso ao sistema.`
-                                : `${user.full_name || user.email} perderá acesso imediatamente ao sistema.`}
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => toggleBan.mutate({ user_id: user.id, ban: !user.is_banned })}
-                              className={user.is_banned ? '' : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'}
-                            >
-                              {user.is_banned ? 'Desbloquear' : 'Bloquear'}
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-600 hover:text-amber-700" title="Redefinir senha">
-                            <KeyRound className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Uma nova senha temporária será gerada para {user.full_name || user.email}. A senha atual será invalidada imediatamente.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => resetPassword.mutate(user.id)}>
-                              Redefinir
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEdit(user)}>
+                          <Pencil className="h-4 w-4 mr-2" /> Editar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setResetDialog(user)}>
+                          <KeyRound className="h-4 w-4 mr-2" /> Redefinir senha
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className={user.is_banned ? 'text-primary focus:text-primary' : 'text-destructive focus:text-destructive'}
+                          onClick={() => setBanDialog(user)}
+                        >
+                          {user.is_banned ? (
+                            <><Shield className="h-4 w-4 mr-2" /> Desbloquear</>
+                          ) : (
+                            <><ShieldOff className="h-4 w-4 mr-2" /> Bloquear</>
+                          )}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
@@ -216,6 +191,49 @@ export default function Users() {
           </Table>
         </Card>
       )}
+
+      {/* Ban confirmation */}
+      <AlertDialog open={!!banDialog} onOpenChange={open => !open && setBanDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {banDialog?.is_banned ? 'Desbloquear usuário?' : 'Bloquear usuário?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {banDialog?.is_banned
+                ? `${banDialog.full_name || banDialog.email} voltará a ter acesso ao sistema.`
+                : `${banDialog?.full_name || banDialog?.email} perderá acesso imediatamente ao sistema.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (banDialog) toggleBan.mutate({ user_id: banDialog.id, ban: !banDialog.is_banned }); setBanDialog(null); }}
+              className={banDialog?.is_banned ? '' : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'}
+            >
+              {banDialog?.is_banned ? 'Desbloquear' : 'Bloquear'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reset password confirmation */}
+      <AlertDialog open={!!resetDialog} onOpenChange={open => !open && setResetDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Uma nova senha temporária será gerada para {resetDialog?.full_name || resetDialog?.email}. A senha atual será invalidada imediatamente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (resetDialog) resetPassword.mutate(resetDialog.id); setResetDialog(null); }}>
+              Redefinir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={open => !open && setEditUser(null)}>
