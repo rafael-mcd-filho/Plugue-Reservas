@@ -142,7 +142,59 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2. Fire webhooks
+    // 2. Waitlist WhatsApp notifications
+    if ((event === 'waitlist_added' || event === 'waitlist_called') && waitlist?.guest_phone) {
+      const { data: settings } = await supabaseAdmin
+        .from('system_settings')
+        .select('key, value')
+        .in('key', ['evolution_api_url', 'evolution_api_token']);
+
+      const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
+      const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
+
+      if (evolutionUrl && evolutionToken) {
+        const { data: instance } = await supabaseAdmin
+          .from('company_whatsapp_instances')
+          .select('instance_name, status')
+          .eq('company_id', waitlist.company_id)
+          .maybeSingle();
+
+        if (instance?.status === 'connected') {
+          const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
+          let message = '';
+
+          if (event === 'waitlist_added') {
+            message = `Olá ${waitlist.guest_name}! Você está na posição ${waitlist.position} da lista de espera (${waitlist.party_size} pessoa(s)).\n\n📋 Acompanhe em tempo real:\n${waitlist.tracking_url || ''}`;
+          } else if (event === 'waitlist_called') {
+            message = `🔔 ${waitlist.guest_name}, sua mesa está pronta! Dirija-se à recepção. Você tem 10 minutos para se apresentar.`;
+          }
+
+          if (message) {
+            try {
+              const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
+                body: JSON.stringify({ number: phone, text: message }),
+              });
+              const data = await res.json();
+              results.whatsapp = res.ok ? 'sent' : 'error';
+
+              await supabaseAdmin.from('whatsapp_message_logs').insert({
+                company_id: waitlist.company_id,
+                phone, message,
+                type: event === 'waitlist_added' ? 'waitlist_entry' : 'waitlist_called',
+                status: res.ok ? 'sent' : 'error',
+                error_details: res.ok ? null : JSON.stringify(data),
+              });
+            } catch (err) {
+              results.whatsapp = 'error';
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Fire webhooks
     const webhookEvent = event === 'reservation_created' ? 'reservation_created'
       : event === 'reservation_cancelled' ? 'reservation_cancelled'
       : 'status_changed';
