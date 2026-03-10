@@ -89,13 +89,6 @@ Deno.serve(async (req) => {
       .limit(10);
 
     if (!pendingMessages || pendingMessages.length === 0) {
-      // Also expire old messages
-      await supabaseAdmin
-        .from('whatsapp_message_queue')
-        .update({ status: 'failed', error_details: 'Expired after 2 hours' })
-        .eq('status', 'pending')
-        .lt('expires_at', new Date().toISOString());
-
       return new Response(JSON.stringify({ processed: 0 }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
