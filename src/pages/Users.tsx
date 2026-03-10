@@ -68,7 +68,14 @@ export default function Users() {
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editUser) return;
-    await updateUser.mutateAsync({ user_id: editUser.id, ...editForm });
+    await updateUser.mutateAsync({
+      user_id: editUser.id,
+      full_name: editForm.full_name,
+      email: editForm.email,
+      phone: editForm.phone,
+      company_id: editForm.company_id || null,
+      role: editForm.role,
+    });
     setEditUser(null);
   };
 
