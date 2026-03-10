@@ -168,11 +168,11 @@ export default function ReservationModal({
     fetchSlotAvailability();
   }, [selectedDate, companyId, selectedPartySize, timeSlots]);
 
-  // Fetch available tables when time is selected
+  // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) return;
     
-    const fetchAvailability = async () => {
+    const fetchAndAssignTable = async () => {
       setLoadingTables(true);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -182,7 +182,7 @@ export default function ReservationModal({
           .select('id, number, capacity, section')
           .eq('company_id', companyId)
           .eq('status', 'available')
-          .order('number');
+          .order('capacity', { ascending: true });
         if (tablesErr) throw tablesErr;
 
         const { data: existingRes, error: resErr } = await supabase
@@ -199,15 +199,22 @@ export default function ReservationModal({
           .filter((t: any) => !occupiedIds.has(t.id) && t.capacity >= selectedPartySize) as AvailableTable[];
         
         setAvailableTables(available);
+        // Auto-select the smallest table that fits the party (best-fit)
+        if (available.length > 0) {
+          setSelectedTableId(available[0].id);
+        } else {
+          setSelectedTableId('');
+        }
       } catch (err) {
         console.error('Error fetching availability:', err);
         setAvailableTables([]);
+        setSelectedTableId('');
       } finally {
         setLoadingTables(false);
       }
     };
 
-    fetchAvailability();
+    fetchAndAssignTable();
   }, [selectedDate, selectedTime, companyId, selectedPartySize, step]);
 
   const handleReset = () => {
