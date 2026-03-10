@@ -16,23 +16,38 @@ export default function WhatsAppConnection({ companyId }: Props) {
   const evolutionApi = useEvolutionApi();
   const qc = useQueryClient();
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
 
   const handleConnect = async () => {
     try {
-      // Create instance if needed
+      // Step 1: Create instance if needed
       if (!instance) {
-        await evolutionApi.mutateAsync({ action: 'create_instance', company_id: companyId });
+        const createResult = await evolutionApi.mutateAsync({ action: 'create_instance', company_id: companyId });
         qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
+        
+        // create_instance with qrcode:true might already return QR data
+        if (createResult?.base64) {
+          const src = createResult.base64.startsWith('data:') ? createResult.base64 : `data:image/png;base64,${createResult.base64}`;
+          setQrCode(src);
+          setPairingCode(createResult.pairingCode || createResult.code || null);
+          setPolling(true);
+          return;
+        }
       }
 
-      // Get QR code
+      // Step 2: Get QR code via connect endpoint
       const result = await evolutionApi.mutateAsync({ action: 'get_qrcode', company_id: companyId });
+      
       if (result?.base64) {
-        setQrCode(result.base64);
+        const src = result.base64.startsWith('data:') ? result.base64 : `data:image/png;base64,${result.base64}`;
+        setQrCode(src);
+        setPairingCode(result.pairingCode || null);
         setPolling(true);
-      } else if (result?.code) {
-        setQrCode(result.code);
+      } else if (result?.pairingCode || result?.code) {
+        // No image QR, but we have a pairing code
+        setPairingCode(result.pairingCode || result.code);
+        setQrCode(null);
         setPolling(true);
       } else {
         toast.error('Não foi possível obter o QR Code. Verifique as configurações da Evolution API.');
@@ -47,6 +62,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
       await evolutionApi.mutateAsync({ action: 'disconnect', company_id: companyId });
       qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
       setQrCode(null);
+      setPairingCode(null);
       setPolling(false);
       toast.success('WhatsApp desconectado');
     } catch (err: any) {
@@ -60,6 +76,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
       qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
       if (result?.instance?.state === 'open') {
         setQrCode(null);
+        setPairingCode(null);
         setPolling(false);
         toast.success('WhatsApp conectado!');
       }
@@ -96,17 +113,19 @@ export default function WhatsAppConnection({ companyId }: Props) {
           )}
         </div>
 
-        {qrCode && !isConnected && (
+        {(qrCode || pairingCode) && !isConnected && (
           <div className="flex flex-col items-center gap-3 py-4">
-            <div className="p-4 bg-white rounded-xl border border-border">
-              {qrCode.startsWith('data:') ? (
+            {qrCode && (
+              <div className="p-4 bg-white rounded-xl border border-border">
                 <img src={qrCode} alt="QR Code WhatsApp" className="w-64 h-64" />
-              ) : (
-                <div className="w-64 h-64 flex items-center justify-center text-center">
-                  <p className="text-xs text-muted-foreground break-all font-mono">{qrCode}</p>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
+            {pairingCode && (
+              <div className="text-center space-y-1">
+                <p className="text-xs text-muted-foreground">Ou use o código de pareamento:</p>
+                <p className="text-2xl font-mono font-bold tracking-wider text-foreground">{pairingCode}</p>
+              </div>
+            )}
             <p className="text-sm text-muted-foreground text-center">
               Abra o WhatsApp → Dispositivos conectados → Conectar dispositivo → Escaneie o QR Code
             </p>
@@ -120,7 +139,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
           {!isConnected ? (
             <Button onClick={handleConnect} disabled={evolutionApi.isPending} className="gap-2">
               {evolutionApi.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-              {qrCode ? 'Gerar novo QR' : 'Conectar WhatsApp'}
+              {qrCode || pairingCode ? 'Gerar novo QR' : 'Conectar WhatsApp'}
             </Button>
           ) : (
             <>
