@@ -195,15 +195,16 @@ Deno.serve(async (req) => {
     }
 
     // 3. Fire webhooks
-    const webhookEvent = event === 'reservation_created' ? 'reservation_created'
-      : event === 'reservation_cancelled' ? 'reservation_cancelled'
-      : 'status_changed';
+    if (reservation) {
+      const webhookEvent = event === 'reservation_created' ? 'reservation_created'
+        : event === 'reservation_cancelled' ? 'reservation_cancelled'
+        : 'status_changed';
 
-    const { data: webhooks } = await supabaseAdmin
-      .from('webhook_configs')
-      .select('*')
-      .eq('company_id', reservation.company_id)
-      .eq('enabled', true);
+      const { data: webhooks } = await supabaseAdmin
+        .from('webhook_configs')
+        .select('*')
+        .eq('company_id', reservation.company_id)
+        .eq('enabled', true);
 
     const matchingWebhooks = (webhooks || []).filter((wh: any) => {
       const events = wh.events as string[];
