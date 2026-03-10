@@ -84,7 +84,7 @@ interface ConfirmedReservation {
 }
 
 export default function ReservationModal({
-  open, onOpenChange, companyId, companyName, openingHours, reservationDuration = 30, onStepChange
+  open, onOpenChange, companyId, companyName, openingHours, reservationDuration = 30, maxGuestsPerSlot = 0, onStepChange
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
