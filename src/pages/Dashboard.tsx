@@ -124,7 +124,7 @@ export default function Dashboard() {
 
   const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
-  const { dailyStats, totals, prevTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const { dailyStats, totals, prevTotals, waitlistTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
   const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
