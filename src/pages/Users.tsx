@@ -35,7 +35,7 @@ export default function Users() {
   const [filterRole, setFilterRole] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
 
