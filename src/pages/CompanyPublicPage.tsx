@@ -338,7 +338,7 @@ export default function CompanyPublicPage() {
 
         {/* Payment Methods — centered, full width */}
         {acceptedPayments.length > 0 && (
-          <Card className="border-none shadow-sm rounded-2xl md:max-w-2xl md:mx-auto">
+          <Card className="border-none shadow-sm rounded-2xl">
             <CardContent className="pt-5 pb-5">
               <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5 md:justify-center">
                 <CreditCard className="h-4 w-4" /> Formas de Pagamento
