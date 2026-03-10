@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { MessageCircle, CheckCircle2, XCircle, Clock, History } from 'lucide-react';
+import { MessageCircle, CheckCircle2, XCircle, Clock, History, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useEvolutionApi } from '@/hooks/useAutomations';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 interface Props {
   companyId: string;
@@ -24,6 +29,10 @@ const statusConfig: Record<string, { label: string; icon: typeof CheckCircle2; c
 };
 
 export default function WhatsAppMessageHistory({ companyId }: Props) {
+  const qc = useQueryClient();
+  const evolutionApi = useEvolutionApi();
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['whatsapp-message-logs', companyId],
     queryFn: async () => {
@@ -39,6 +48,30 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
     enabled: !!companyId,
     refetchInterval: 30000,
   });
+
+  const handleResend = async (log: any) => {
+    setResendingId(log.id);
+    try {
+      const result = await evolutionApi.mutateAsync({
+        action: 'send_message',
+        company_id: companyId,
+        phone: log.phone,
+        message: log.message,
+      });
+
+      // Check if Evolution API returned an error
+      if (result?.error) {
+        toast.error(`Erro ao reenviar: ${result.error}`);
+      } else {
+        toast.success('Mensagem reenviada com sucesso!');
+      }
+      qc.invalidateQueries({ queryKey: ['whatsapp-message-logs', companyId] });
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao reenviar mensagem');
+    } finally {
+      setResendingId(null);
+    }
+  };
 
   if (isLoading) {
     return <Card className="border border-border shadow-sm"><CardContent className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</CardContent></Card>;
@@ -68,12 +101,14 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
                   <TableHead>Telefone</TableHead>
                   <TableHead>Mensagem</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {logs.map((log: any) => {
                   const sc = statusConfig[log.status] || statusConfig.pending;
                   const StatusIcon = sc.icon;
+                  const isResending = resendingId === log.id;
                   return (
                     <TableRow key={log.id}>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
@@ -96,6 +131,20 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
                           <p className="text-xs text-destructive mt-1 max-w-[200px] truncate" title={log.error_details}>
                             {log.error_details}
                           </p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {log.status === 'error' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleResend(log)}
+                            disabled={isResending}
+                            className="gap-1 text-xs h-7 px-2"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${isResending ? 'animate-spin' : ''}`} />
+                            Reenviar
+                          </Button>
                         )}
                       </TableCell>
                     </TableRow>
