@@ -186,6 +186,7 @@ Deno.serve(async (req) => {
         } else {
           results.whatsapp = 'evolution_not_configured';
         }
+        } // end dedup else
       }
     }
 
