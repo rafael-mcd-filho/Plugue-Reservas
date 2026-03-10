@@ -80,7 +80,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status')
+        .select('date, time, status, party_size')
         .gte('date', prevStartStr)
         .lte('date', prevEndStr);
       if (companyId) query = query.eq('company_id', companyId);
