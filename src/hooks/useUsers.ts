@@ -48,7 +48,7 @@ export function useToggleBan() {
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { user_id: string; full_name?: string; email?: string; phone?: string }) => {
+    mutationFn: async (data: { user_id: string; full_name?: string; email?: string; phone?: string; company_id?: string | null; role?: string }) => {
       return invokeManageUser({ action: 'update_user', ...data });
     },
     onSuccess: () => {
