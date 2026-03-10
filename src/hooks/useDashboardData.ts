@@ -173,5 +173,5 @@ export function useDashboardData(
     return { counts, maxCount, hours, dayNames: DAY_NAMES };
   }, [rawReservations]);
 
-  return { dailyStats, totals, prevTotals, heatmapData, isLoading };
+  return { dailyStats, totals, prevTotals, waitlistTotals, heatmapData, isLoading };
 }
