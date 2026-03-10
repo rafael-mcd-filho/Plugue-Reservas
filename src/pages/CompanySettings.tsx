@@ -315,6 +315,11 @@ export default function CompanySettings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Blocked Dates */}
+        <TabsContent value="blocked">
+          {company && <BlockedDatesTab companyId={company.id} />}
+        </TabsContent>
       </Tabs>
     </div>
   );
