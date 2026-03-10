@@ -35,7 +35,7 @@ export default function Users() {
   const [filterRole, setFilterRole] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
 
@@ -61,13 +61,21 @@ export default function Users() {
 
   const openEdit = (user: ManagedUser) => {
     setEditUser(user);
-    setEditForm({ full_name: user.full_name, email: user.email, phone: user.phone });
+    const primaryRole = user.roles.find(r => r !== 'superadmin') || user.roles[0] || 'admin';
+    setEditForm({ full_name: user.full_name, email: user.email, phone: user.phone, company_id: user.company_id || '', role: primaryRole });
   };
 
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editUser) return;
-    await updateUser.mutateAsync({ user_id: editUser.id, ...editForm });
+    await updateUser.mutateAsync({
+      user_id: editUser.id,
+      full_name: editForm.full_name,
+      email: editForm.email,
+      phone: editForm.phone,
+      company_id: editForm.company_id || null,
+      role: editForm.role,
+    });
     setEditUser(null);
   };
 
@@ -296,6 +304,28 @@ export default function Users() {
             <div>
               <Label>Telefone</Label>
               <Input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+            </div>
+            <div>
+              <Label>Empresa</Label>
+              <Select value={editForm.company_id || 'none'} onValueChange={v => setEditForm({ ...editForm, company_id: v === 'none' ? '' : v })}>
+                <SelectTrigger><SelectValue placeholder="Selecione a empresa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem empresa</SelectItem>
+                  {companies.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Perfil</Label>
+              <Select value={editForm.role} onValueChange={v => setEditForm({ ...editForm, role: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="operator">Operador</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancelar</Button>
