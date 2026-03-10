@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, company_id, instance_name, phone, message } = body;
+    const { action, company_id, instance_name, phone, message, log_id } = body;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -237,7 +237,8 @@ Deno.serve(async (req) => {
         break;
       }
 
-      case 'send_message': {
+      case 'send_message':
+      case 'resend_message': {
         const { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
           .select('instance_name')
@@ -259,6 +260,13 @@ Deno.serve(async (req) => {
           }),
         });
         result = await res.json();
+
+        // If resend and successful, update the original log status
+        if (action === 'resend_message' && log_id && res.ok) {
+          await supabaseAdmin.from('whatsapp_message_logs')
+            .update({ status: 'sent', error_details: null })
+            .eq('id', log_id);
+        }
         break;
       }
 

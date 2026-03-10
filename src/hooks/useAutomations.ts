@@ -154,7 +154,7 @@ export function useWhatsAppInstance(companyId?: string) {
 
 export function useEvolutionApi() {
   return useMutation({
-    mutationFn: async (payload: { action: string; company_id: string; instance_name?: string; phone?: string; message?: string }) => {
+    mutationFn: async (payload: { action: string; company_id: string; instance_name?: string; phone?: string; message?: string; log_id?: string }) => {
       const { data, error } = await supabase.functions.invoke('evolution-api', {
         body: payload,
       });
