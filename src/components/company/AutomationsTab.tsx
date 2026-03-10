@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bot, MessageCircle, Clock, Save } from 'lucide-react';
+import { Bot, MessageCircle, Clock, Save, PartyPopper, Ban, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -23,11 +23,39 @@ const AUTOMATION_TYPES = [
     defaultTemplate: 'Olá {nome}! Sua reserva para {pessoas} pessoa(s) no dia {data} às {hora} foi confirmada. Até lá! 🎉',
   },
   {
+    type: 'reminder_24h',
+    label: 'Lembrete 24h Antes',
+    description: 'Enviado automaticamente 24 horas antes do horário da reserva',
+    icon: Clock,
+    defaultTemplate: 'Olá {nome}! Lembrete: sua reserva é amanhã, dia {data} às {hora}, para {pessoas} pessoa(s). Esperamos você! 📅',
+  },
+  {
     type: 'reminder_1h',
     label: 'Lembrete 1h Antes',
     description: 'Enviado automaticamente 1 hora antes do horário da reserva',
     icon: Clock,
     defaultTemplate: 'Olá {nome}! Lembrete: sua reserva é hoje às {hora} para {pessoas} pessoa(s). Estamos esperando você! 😊',
+  },
+  {
+    type: 'cancellation_message',
+    label: 'Notificação de Cancelamento',
+    description: 'Enviada quando uma reserva é cancelada (pelo cliente ou restaurante)',
+    icon: Ban,
+    defaultTemplate: 'Olá {nome}, sua reserva do dia {data} às {hora} foi cancelada. Caso queira reagendar, acesse nosso link de reservas. 🙏',
+  },
+  {
+    type: 'post_visit',
+    label: 'Mensagem Pós-Visita',
+    description: 'Enviada automaticamente após o horário da reserva (agradecimento)',
+    icon: Star,
+    defaultTemplate: 'Olá {nome}! Obrigado pela visita! Esperamos que tenha gostado. Nos vemos em breve! ⭐',
+  },
+  {
+    type: 'birthday_message',
+    label: 'Mensagem de Aniversário',
+    description: 'Enviada no dia do aniversário do cliente (baseado na data de nascimento)',
+    icon: PartyPopper,
+    defaultTemplate: 'Parabéns, {nome}! 🎂🎉 Desejamos um feliz aniversário! Que tal comemorar conosco? Faça sua reserva!',
   },
 ];
 
