@@ -248,6 +248,7 @@ Deno.serve(async (req) => {
         results.webhooks.push(`${wh.url}: error`);
       }
     }
+    } // end if (reservation)
 
     return new Response(JSON.stringify({ success: true, results }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
