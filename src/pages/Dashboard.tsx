@@ -238,7 +238,55 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Charts Row 1 */}
+          {/* Waitlist KPIs */}
+          {isCompanyContext && (
+            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-amber-600">
+                    <ClipboardList className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.total}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Total</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-primary">
+                    <CheckCircle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.seated}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Sentados</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-destructive">
+                    <UserX className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.expired}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Desistências</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-muted-foreground">
+                    <Clock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.avgWaitMin}min</p>
+                    <p className="text-xs text-muted-foreground">Fila — Espera Média</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="border border-border shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">
