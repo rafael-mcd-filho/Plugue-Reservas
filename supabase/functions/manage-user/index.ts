@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
       }
 
       case "update_user": {
-        const { user_id, full_name, email, phone } = body;
+        const { user_id, full_name, email, phone, company_id, role } = body;
         if (!user_id) throw new Error("user_id é obrigatório");
 
         // Update profile
@@ -142,6 +142,7 @@ Deno.serve(async (req) => {
         if (full_name !== undefined) updates.full_name = full_name;
         if (email !== undefined) updates.email = email;
         if (phone !== undefined) updates.phone = phone;
+        if (company_id !== undefined) updates.company_id = company_id || null;
         updates.updated_at = new Date().toISOString();
 
         const { error: profileError } = await supabaseAdmin
@@ -156,13 +157,44 @@ Deno.serve(async (req) => {
           await supabaseAdmin.auth.admin.updateUserById(user_id, { email });
         }
 
+        // If role changed, update user_roles
+        if (role) {
+          // Remove existing admin/operator roles
+          await supabaseAdmin
+            .from("user_roles")
+            .delete()
+            .eq("user_id", user_id)
+            .in("role", ["admin", "operator"]);
+
+          // Insert new role
+          await supabaseAdmin.from("user_roles").insert({
+            user_id,
+            role,
+            company_id: company_id !== undefined ? (company_id || null) : undefined,
+          });
+
+          // Also update company_id on existing roles if company changed
+          if (company_id !== undefined) {
+            await supabaseAdmin
+              .from("user_roles")
+              .update({ company_id: company_id || null })
+              .eq("user_id", user_id);
+          }
+        } else if (company_id !== undefined) {
+          // Just update company on existing roles
+          await supabaseAdmin
+            .from("user_roles")
+            .update({ company_id: company_id || null })
+            .eq("user_id", user_id);
+        }
+
         // Audit log
         await supabaseAdmin.from("audit_logs").insert({
           user_id: callerId,
           action: "update_user",
           entity_type: "user",
           entity_id: user_id,
-          details: updates,
+          details: { ...updates, role },
         });
 
         return new Response(JSON.stringify({ success: true }), {
