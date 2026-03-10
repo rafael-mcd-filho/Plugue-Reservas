@@ -153,26 +153,45 @@ export default function ReservationModal({
         
         const [{ data: allTables }, { data: reservations }] = await Promise.all([
           supabase.from('restaurant_tables' as any).select('id, capacity').eq('company_id', companyId).eq('status', 'available'),
-          supabase.from('reservations' as any).select('table_id, time').eq('company_id', companyId).eq('date', dateStr).neq('status', 'cancelled'),
+          supabase.from('reservations' as any).select('table_id, time, party_size').eq('company_id', companyId).eq('date', dateStr).neq('status', 'cancelled'),
         ]);
 
         const totalTables = (allTables as any[] || []).filter((t: any) => t.capacity >= selectedPartySize).length;
         
-        // Count occupied tables per time slot
+        // Count occupied tables and total guests per time slot
         const occupiedBySlot: Record<string, number> = {};
+        const guestsBySlot: Record<string, number> = {};
         (reservations as any[] || []).forEach((r: any) => {
           const timeKey = r.time?.substring(0, 5) || '';
           occupiedBySlot[timeKey] = (occupiedBySlot[timeKey] || 0) + 1;
+          guestsBySlot[timeKey] = (guestsBySlot[timeKey] || 0) + (r.party_size || 1);
         });
+
+        // Check blocked time ranges for this date
+        const dateBlocks = blockedDates.filter((bd: any) => bd.date === dateStr && !bd.all_day);
 
         const availability: Record<string, SlotAvailability> = {};
         timeSlots.forEach(slot => {
           const occupied = occupiedBySlot[slot] || 0;
-          availability[slot] = {
-            total: totalTables,
-            occupied,
-            available: Math.max(0, totalTables - occupied),
-          };
+          let available = Math.max(0, totalTables - occupied);
+
+          // Check if slot is within a blocked time range
+          const isTimeBlocked = dateBlocks.some((bd: any) => {
+            const start = bd.start_time?.substring(0, 5) || '00:00';
+            const end = bd.end_time?.substring(0, 5) || '23:59';
+            return slot >= start && slot < end;
+          });
+          if (isTimeBlocked) available = 0;
+
+          // Check max guests per slot
+          if (maxGuestsPerSlot > 0) {
+            const currentGuests = guestsBySlot[slot] || 0;
+            if (currentGuests + selectedPartySize > maxGuestsPerSlot) {
+              available = 0;
+            }
+          }
+
+          availability[slot] = { total: totalTables, occupied, available };
         });
         setSlotAvailability(availability);
       } catch (err) {
