@@ -84,6 +84,7 @@ export default function CompanySettings() {
       setWhatsapp(company.whatsapp || '');
       setGoogleMapsUrl(company.google_maps_url || '');
       setReservationDuration((company as any).reservation_duration ?? 30);
+      setMaxGuestsPerSlot((company as any).max_guests_per_slot ?? 0);
       setInitialized(true);
     }
   }, [company, initialized]);
