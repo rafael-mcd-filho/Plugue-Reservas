@@ -103,6 +103,21 @@ export default function ReservationModal({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
 
+  // Fetch blocked dates for this company
+  const { data: blockedDates = [] } = useQuery({
+    queryKey: ['blocked-dates-public', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('blocked_dates' as any)
+        .select('date, all_day, start_time, end_time')
+        .eq('company_id', companyId)
+        .gte('date', new Date().toISOString().split('T')[0]);
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!companyId,
+  });
+
   const next7Days = useMemo(() => {
     const days: Date[] = [];
     for (let i = 0; i < 7; i++) days.push(addDays(new Date(), i));
