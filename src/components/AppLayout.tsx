@@ -142,7 +142,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg hover:bg-muted">
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>ReservaFácil</h1>
+          <h1 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>{systemName}</h1>
         </header>
         <main className="flex-1 overflow-y-auto p-6 lg:p-8">
           {children}
