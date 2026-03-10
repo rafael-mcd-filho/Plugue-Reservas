@@ -107,7 +107,7 @@ const App = () => (
 
             {/* Public company page: /:slug */}
             <Route path="/:slug" element={<CompanyPublicPage />} />
-
+            <Route path="/:slug/fila/:code" element={<WaitlistTracking />} />
 
             {/* Company admin routes: /:slug/admin/* */}
             <Route path="/:slug/admin" element={
