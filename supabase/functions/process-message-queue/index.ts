@@ -24,6 +24,22 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
+    // Simple lock: check if there's a message currently being processed (last_attempt_at within last 3 min and status pending)
+    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+    const { data: processing } = await supabaseAdmin
+      .from('whatsapp_message_queue')
+      .select('id')
+      .eq('status', 'pending')
+      .gte('last_attempt_at', threeMinAgo)
+      .limit(1);
+
+    if (processing && processing.length > 0) {
+      console.log('Another process appears to be running, skipping');
+      return new Response(JSON.stringify({ skipped: true, reason: 'another_process_running' }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Get Evolution API settings
     const { data: settings } = await supabaseAdmin
       .from('system_settings')
@@ -55,6 +71,13 @@ Deno.serve(async (req) => {
     const connectedCompanyIds = instances.map(i => i.company_id);
     const instanceMap = new Map(instances.map(i => [i.company_id, i.instance_name]));
 
+    // Expire old messages first
+    await supabaseAdmin
+      .from('whatsapp_message_queue')
+      .update({ status: 'failed', error_details: 'Expired after 2 hours' })
+      .eq('status', 'pending')
+      .lt('expires_at', new Date().toISOString());
+
     // Get pending messages for connected companies that haven't expired
     const { data: pendingMessages } = await supabaseAdmin
       .from('whatsapp_message_queue')
@@ -63,7 +86,7 @@ Deno.serve(async (req) => {
       .eq('status', 'pending')
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: true })
-      .limit(10); // Process max 10 per run
+      .limit(10);
 
     if (!pendingMessages || pendingMessages.length === 0) {
       // Also expire old messages
