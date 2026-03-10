@@ -56,10 +56,11 @@ Deno.serve(async (req) => {
     );
 
     const body = await req.json();
-    const { event, reservation } = body as { event: string; reservation: ReservationData };
+    const { event, reservation, waitlist } = body as { event: string; reservation?: ReservationData; waitlist?: any };
 
-    if (!event || !reservation?.company_id) {
-      return new Response(JSON.stringify({ error: 'Missing event or reservation data' }), {
+    const companyId = reservation?.company_id || waitlist?.company_id;
+    if (!event || !companyId) {
+      return new Response(JSON.stringify({ error: 'Missing event or data' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
