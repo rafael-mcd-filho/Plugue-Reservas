@@ -18,7 +18,7 @@ import SettingsPage from "@/pages/Settings";
 import CompanySettings from "@/pages/CompanySettings";
 import CompanyAutomations from "@/pages/CompanyAutomations";
 import CompanyUsers from "@/pages/CompanyUsers";
-import CompanyReports from "@/pages/CompanyReports";
+
 import Leads from "@/pages/Leads";
 import Users from "@/pages/Users";
 import Login from "@/pages/Login";
