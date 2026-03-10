@@ -109,15 +109,17 @@ function GeneralTab() {
             <Label>Nome do Sistema</Label>
             <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="ReservaFácil" />
           </div>
-          <div>
-            <Label>URL do Logo</Label>
-            <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
-            {logoUrl && (
-              <div className="mt-2 p-4 bg-muted rounded-lg">
-                <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+           <div>
+              <Label>URL do Logo</Label>
+              <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
+              <div className="mt-2 p-4 bg-muted rounded-lg min-h-[64px] flex items-center justify-center">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">Preview do logo aparecerá aqui</p>
+                )}
               </div>
-            )}
-          </div>
+            </div>
           <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2 w-fit">
             <Save className="h-4 w-4" /> Salvar Configurações
           </Button>
