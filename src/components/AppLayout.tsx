@@ -73,9 +73,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         mobileOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-          <UtensilsCrossed className="h-7 w-7 text-sidebar-primary" />
+          {systemLogo ? (
+            <img src={systemLogo} alt={systemName} className="h-7 w-7 object-contain" />
+          ) : (
+            <UtensilsCrossed className="h-7 w-7 text-sidebar-primary" />
+          )}
           <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-            Reserva<span className="text-sidebar-primary">Fácil</span>
+            {systemName}
           </h1>
         </div>
 
