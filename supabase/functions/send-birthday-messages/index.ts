@@ -40,11 +40,11 @@ Deno.serve(async (req) => {
     const todayMonth = String(now.getMonth() + 1).padStart(2, '0');
     const todayDay = String(now.getDate()).padStart(2, '0');
     const todayMMDD = `${todayMonth}-${todayDay}`;
+    const todayStr = now.toISOString().split('T')[0];
 
     console.log(`Birthday check for day: ${todayMMDD}`);
 
     // Find all reservations with guest_birthdate matching today's MM-DD
-    // We look at past reservations to find customers who have been here before
     const { data: birthdayReservations } = await supabaseAdmin
       .from('reservations')
       .select('guest_name, guest_phone, guest_birthdate, company_id')
@@ -57,11 +57,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Filter to today's birthdays
     const todayBirthdays = birthdayReservations.filter((r: any) => {
       if (!r.guest_birthdate) return false;
-      const bd = r.guest_birthdate; // format: YYYY-MM-DD
-      return bd.substring(5) === todayMMDD; // compare MM-DD part
+      return r.guest_birthdate.substring(5) === todayMMDD;
     });
 
     if (todayBirthdays.length === 0) {
@@ -71,7 +69,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Deduplicate by phone+company (same person may have multiple reservations)
+    // Deduplicate by phone+company
     const uniqueMap = new Map<string, any>();
     for (const r of todayBirthdays) {
       const key = `${r.guest_phone}:${r.company_id}`;
@@ -93,14 +91,12 @@ Deno.serve(async (req) => {
       supabaseAdmin
         .from('company_whatsapp_instances')
         .select('*')
-        .in('company_id', companyIds)
-        .eq('status', 'connected'),
+        .in('company_id', companyIds),
     ]);
 
     const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
 
-    // Check already-sent birthday messages today
-    const todayStr = now.toISOString().split('T')[0];
+    // Check already-sent or queued birthday messages today
     const { data: alreadySent } = await supabaseAdmin
       .from('whatsapp_message_logs')
       .select('phone, company_id')
@@ -108,54 +104,83 @@ Deno.serve(async (req) => {
       .gte('created_at', todayStr + 'T00:00:00')
       .eq('status', 'sent');
 
-    const sentSet = new Set((alreadySent || []).map((l: any) => `${l.phone}:${l.company_id}`));
+    const { data: alreadyQueued } = await supabaseAdmin
+      .from('whatsapp_message_queue')
+      .select('phone, company_id')
+      .eq('type', 'birthday')
+      .gte('created_at', todayStr + 'T00:00:00');
+
+    const sentSet = new Set([
+      ...(alreadySent || []).map((l: any) => `${l.phone}:${l.company_id}`),
+      ...(alreadyQueued || []).map((l: any) => `${l.phone}:${l.company_id}`),
+    ]);
 
     let sent = 0;
+    let queued = 0;
 
     for (const contact of uniqueBirthdays) {
       const automation = (automations || []).find((a: any) => a.company_id === contact.company_id);
-      const instance = instanceMap.get(contact.company_id);
-      if (!automation || !instance) continue;
+      if (!automation) continue;
 
       const phone = formatPhoneForWhatsApp(contact.guest_phone);
       const sentKey = `${phone}:${contact.company_id}`;
       if (sentSet.has(sentKey)) {
-        console.log(`Already sent birthday to ${phone}`);
+        console.log(`Already sent/queued birthday to ${phone}`);
         continue;
       }
 
       const message = automation.message_template
         .replace(/\{nome\}/g, contact.guest_name || '');
 
-      try {
-        const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-          body: JSON.stringify({ number: phone, text: message }),
-        });
-        const data = await res.json();
+      const instance = instanceMap.get(contact.company_id);
 
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: contact.company_id,
-          phone, message,
-          type: 'birthday',
-          status: res.ok ? 'sent' : 'error',
-          error_details: res.ok ? null : JSON.stringify(data),
-        });
+      if (instance?.status === 'connected') {
+        try {
+          const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
+            body: JSON.stringify({ number: phone, text: message }),
+          });
+          const data = await res.json();
 
-        if (res.ok) sent++;
-      } catch (err) {
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: contact.company_id,
-          phone, message,
-          type: 'birthday',
-          status: 'error',
-          error_details: String(err),
+          await supabaseAdmin.from('whatsapp_message_logs').insert({
+            company_id: contact.company_id,
+            phone, message,
+            type: 'birthday',
+            status: res.ok ? 'sent' : 'error',
+            error_details: res.ok ? null : JSON.stringify(data),
+          });
+
+          if (res.ok) {
+            sent++;
+          } else {
+            // Queue for retry
+            await supabaseAdmin.from('whatsapp_message_queue').insert({
+              company_id: contact.company_id, phone, message, type: 'birthday',
+            });
+            queued++;
+          }
+        } catch (err) {
+          await supabaseAdmin.from('whatsapp_message_logs').insert({
+            company_id: contact.company_id, phone, message,
+            type: 'birthday', status: 'error', error_details: String(err),
+          });
+          await supabaseAdmin.from('whatsapp_message_queue').insert({
+            company_id: contact.company_id, phone, message, type: 'birthday',
+          });
+          queued++;
+        }
+      } else {
+        // Not connected — queue directly
+        await supabaseAdmin.from('whatsapp_message_queue').insert({
+          company_id: contact.company_id, phone, message, type: 'birthday',
         });
+        queued++;
+        console.log(`Queued birthday for ${phone} (instance not connected)`);
       }
     }
 
-    return new Response(JSON.stringify({ sent, total: uniqueBirthdays.length }), {
+    return new Response(JSON.stringify({ sent, queued, total: uniqueBirthdays.length }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch (error: unknown) {

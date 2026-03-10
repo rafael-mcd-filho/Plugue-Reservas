@@ -51,30 +51,29 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
 
-    // Find reservations that ended 1-2 hours ago (post-visit window)
-    const hours2ago = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-    const hours1ago = new Date(now.getTime() - 1 * 60 * 60 * 1000);
-    const timeFrom = `${String(hours2ago.getHours()).padStart(2, '0')}:${String(hours2ago.getMinutes()).padStart(2, '0')}:00`;
-    const timeTo = `${String(hours1ago.getHours()).padStart(2, '0')}:${String(hours1ago.getMinutes()).padStart(2, '0')}:00`;
+    // Find reservations marked as 'completed' where updated_at is ~12h ago
+    // Window: between 12h and 12h30min ago (to catch within the cron interval)
+    const h12ago = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
+    const h12_30ago = new Date(now.getTime() - (12 * 60 + 30) * 60 * 1000).toISOString();
 
-    console.log(`Post-visit: checking reservations on ${todayStr} with time ${timeFrom}-${timeTo}`);
+    console.log(`Post-visit: checking completed reservations updated between ${h12_30ago} and ${h12ago}`);
 
-    // Get completed reservations (status = completed or confirmed that already passed)
     const { data: reservations } = await supabaseAdmin
       .from('reservations')
       .select('*')
-      .eq('date', todayStr)
-      .in('status', ['completed', 'confirmed'])
-      .gte('time', timeFrom)
-      .lte('time', timeTo);
+      .eq('status', 'completed')
+      .gte('updated_at', h12_30ago)
+      .lte('updated_at', h12ago);
 
     if (!reservations || reservations.length === 0) {
+      console.log('No completed reservations in 12h window');
       return new Response(JSON.stringify({ sent: 0 }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+
+    console.log(`Found ${reservations.length} reservations completed ~12h ago`);
 
     const companyIds = [...new Set(reservations.map((r: any) => r.company_id))];
 
@@ -88,62 +87,79 @@ Deno.serve(async (req) => {
       supabaseAdmin
         .from('company_whatsapp_instances')
         .select('*')
-        .in('company_id', companyIds)
-        .eq('status', 'connected'),
+        .in('company_id', companyIds),
       supabaseAdmin
         .from('whatsapp_message_logs')
         .select('reservation_id')
         .in('reservation_id', reservations.map((r: any) => r.id))
-        .eq('type', 'post_visit')
-        .eq('status', 'sent'),
+        .eq('type', 'post_visit'),
     ]);
 
     const sentIds = new Set((alreadySent || []).map((l: any) => l.reservation_id));
     const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
 
     let sent = 0;
+    let queued = 0;
 
     for (const reservation of reservations) {
       if (sentIds.has(reservation.id)) continue;
 
       const automation = (automations || []).find((a: any) => a.company_id === reservation.company_id);
-      const instance = instanceMap.get(reservation.company_id);
-      if (!automation || !instance) continue;
+      if (!automation) continue;
 
       const message = replaceTemplateVars(automation.message_template, reservation);
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const instance = instanceMap.get(reservation.company_id);
 
-      try {
-        const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-          body: JSON.stringify({ number: phone, text: message }),
-        });
-        const data = await res.json();
+      if (instance?.status === 'connected') {
+        try {
+          const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
+            body: JSON.stringify({ number: phone, text: message }),
+          });
+          const data = await res.json();
 
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone, message,
-          type: 'post_visit',
-          status: res.ok ? 'sent' : 'error',
-          error_details: res.ok ? null : JSON.stringify(data),
-        });
+          await supabaseAdmin.from('whatsapp_message_logs').insert({
+            company_id: reservation.company_id,
+            reservation_id: reservation.id,
+            phone, message,
+            type: 'post_visit',
+            status: res.ok ? 'sent' : 'error',
+            error_details: res.ok ? null : JSON.stringify(data),
+          });
 
-        if (res.ok) sent++;
-      } catch (err) {
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone, message,
-          type: 'post_visit',
-          status: 'error',
-          error_details: String(err),
+          if (res.ok) {
+            sent++;
+          } else {
+            await supabaseAdmin.from('whatsapp_message_queue').insert({
+              company_id: reservation.company_id, reservation_id: reservation.id,
+              phone, message, type: 'post_visit',
+            });
+            queued++;
+          }
+        } catch (err) {
+          await supabaseAdmin.from('whatsapp_message_logs').insert({
+            company_id: reservation.company_id, reservation_id: reservation.id,
+            phone, message, type: 'post_visit', status: 'error', error_details: String(err),
+          });
+          await supabaseAdmin.from('whatsapp_message_queue').insert({
+            company_id: reservation.company_id, reservation_id: reservation.id,
+            phone, message, type: 'post_visit',
+          });
+          queued++;
+        }
+      } else {
+        // Not connected — queue
+        await supabaseAdmin.from('whatsapp_message_queue').insert({
+          company_id: reservation.company_id, reservation_id: reservation.id,
+          phone, message, type: 'post_visit',
         });
+        queued++;
       }
     }
 
-    return new Response(JSON.stringify({ sent, total: reservations.length }), {
+    return new Response(JSON.stringify({ sent, queued, total: reservations.length }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch (error: unknown) {
