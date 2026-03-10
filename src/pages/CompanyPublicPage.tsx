@@ -128,7 +128,7 @@ export default function CompanyPublicPage() {
   return (
     <div className="min-h-screen bg-secondary pb-24">
       {/* Top bar */}
-      <div className="bg-foreground text-primary-foreground">
+      <div style={{ background: '#130D06' }} className="text-primary-foreground">
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             {company.logo_url ? (
