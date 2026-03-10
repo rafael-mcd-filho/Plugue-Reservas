@@ -146,8 +146,6 @@ export default function CompanySettings() {
           <TabsTrigger value="payments" className="gap-2"><CreditCard className="h-4 w-4" /> Pagamentos</TabsTrigger>
           <TabsTrigger value="info" className="gap-2"><Globe className="h-4 w-4" /> Informações</TabsTrigger>
           <TabsTrigger value="location" className="gap-2"><MapPin className="h-4 w-4" /> Localização</TabsTrigger>
-          <TabsTrigger value="automations" className="gap-2"><Bot className="h-4 w-4" /> Automações</TabsTrigger>
-          <TabsTrigger value="webhooks" className="gap-2"><Webhook className="h-4 w-4" /> Webhooks</TabsTrigger>
         </TabsList>
 
         {/* Opening Hours */}
