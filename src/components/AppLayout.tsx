@@ -4,6 +4,7 @@ import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import { useSystemSettings } from '@/hooks/useSettings';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
