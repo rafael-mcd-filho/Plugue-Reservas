@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useSystemSettings } from '@/hooks/useSettings';
+import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
@@ -142,11 +143,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="flex items-center gap-4 px-6 py-4 border-b border-border bg-card lg:hidden">
-          <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg hover:bg-muted">
+        <header className="flex items-center gap-4 px-6 py-4 border-b border-border bg-card">
+          <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg hover:bg-muted lg:hidden">
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)' }}>{systemName}</h1>
+          <h1 className="text-lg font-bold lg:hidden" style={{ fontFamily: 'var(--font-display)' }}>{systemName}</h1>
+          {slug && (
+            <div className="ml-auto">
+              <WhatsAppStatusAlert />
+            </div>
+          )}
         </header>
         <main className="flex-1 overflow-y-auto p-6 lg:p-8">
           {children}
