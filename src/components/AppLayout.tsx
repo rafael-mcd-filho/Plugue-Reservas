@@ -21,6 +21,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { profile, roles, loading, signOut } = useAuth();
+  const { data: systemSettings = [] } = useSystemSettings();
+  const systemName = systemSettings.find(s => s.key === 'system_name')?.value || 'ReservaFácil';
+  const systemLogo = systemSettings.find(s => s.key === 'system_logo_url')?.value || '';
 
   const isSuperadmin = roles.includes('superadmin');
   const rolesLoaded = !loading && roles.length > 0;
