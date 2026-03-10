@@ -19,6 +19,13 @@ interface RawReservation {
   date: string;
   time: string;
   status: string;
+  party_size: number;
+}
+
+interface RawWaitlistEntry {
+  status: string;
+  created_at: string;
+  seated_at: string | null;
 }
 
 export function useDashboardData(
