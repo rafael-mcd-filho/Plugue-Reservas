@@ -57,6 +57,20 @@ const AUTOMATION_TYPES = [
     icon: PartyPopper,
     defaultTemplate: 'Parabéns, {nome}! 🎂🎉 Desejamos um feliz aniversário! Que tal comemorar conosco? Faça sua reserva!',
   },
+  {
+    type: 'waitlist_entry',
+    label: 'Entrada na Lista de Espera',
+    description: 'Enviada quando o cliente é adicionado à lista de espera, com link de acompanhamento',
+    icon: Clock,
+    defaultTemplate: 'Olá {nome}! Você está na posição {posicao} da lista de espera ({pessoas} pessoa(s)).\n\n📋 Acompanhe em tempo real:\n{link_acompanhamento}',
+  },
+  {
+    type: 'waitlist_called',
+    label: 'Chamada da Lista de Espera',
+    description: 'Enviada quando o cliente é chamado da lista de espera',
+    icon: MessageCircle,
+    defaultTemplate: '🔔 {nome}, sua mesa está pronta! Dirija-se à recepção. Você tem 10 minutos para se apresentar.',
+  },
 ];
 
 export default function AutomationsTab({ companyId }: Props) {
