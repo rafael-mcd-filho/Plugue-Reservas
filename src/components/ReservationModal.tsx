@@ -481,7 +481,7 @@ export default function ReservationModal({
                 ) : availableTables.length === 0 ? (
                   <p className="text-center text-sm text-destructive py-2">Nenhuma mesa disponível para este horário e número de pessoas.</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-2">
                     {availableTables.map(table => (
                       <button key={table.id} onClick={() => setSelectedTableId(table.id)}
                         className={cn(
