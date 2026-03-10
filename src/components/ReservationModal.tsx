@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
