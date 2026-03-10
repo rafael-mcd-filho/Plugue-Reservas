@@ -67,12 +67,14 @@ Deno.serve(async (req) => {
     const results: { whatsapp?: string; webhooks?: string[] } = {};
 
     // 1. Send WhatsApp message if automation is enabled
-    if (event === 'reservation_created') {
+    if (event === 'reservation_created' || event === 'reservation_cancelled') {
+      const automationType = event === 'reservation_created' ? 'confirmation_message' : 'cancellation_message';
+
       const { data: automation } = await supabaseAdmin
         .from('automation_settings')
         .select('*')
         .eq('company_id', reservation.company_id)
-        .eq('type', 'confirmation_message')
+        .eq('type', automationType)
         .eq('enabled', true)
         .maybeSingle();
 
@@ -87,7 +89,6 @@ Deno.serve(async (req) => {
         const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
 
         if (evolutionUrl && evolutionToken) {
-          // Get company WhatsApp instance
           const { data: instance } = await supabaseAdmin
             .from('company_whatsapp_instances')
             .select('instance_name, status')
@@ -97,6 +98,7 @@ Deno.serve(async (req) => {
           if (instance?.status === 'connected') {
             const message = replaceTemplateVars(automation.message_template, reservation);
             const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+            const logType = event === 'reservation_created' ? 'confirmation' : 'cancellation';
 
             try {
               const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
@@ -107,15 +109,13 @@ Deno.serve(async (req) => {
               const data = await res.json();
               const status = res.ok ? 'sent' : 'error';
               results.whatsapp = status;
-              console.log('WhatsApp confirmation sent:', res.ok, data);
+              console.log(`WhatsApp ${logType} sent:`, res.ok, data);
 
-              // Log message
               await supabaseAdmin.from('whatsapp_message_logs').insert({
                 company_id: reservation.company_id,
                 reservation_id: reservation.id,
-                phone,
-                message,
-                type: 'confirmation',
+                phone, message,
+                type: logType,
                 status,
                 error_details: res.ok ? null : JSON.stringify(data),
               });
@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
                 reservation_id: reservation.id,
                 phone,
                 message,
-                type: 'confirmation',
+                type: logType,
                 status: 'error',
                 error_details: String(err),
               });
