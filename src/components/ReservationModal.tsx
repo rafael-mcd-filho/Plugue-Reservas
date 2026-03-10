@@ -28,6 +28,7 @@ interface ReservationModalProps {
   companyName: string;
   openingHours: OpeningHour[];
   reservationDuration?: number;
+  maxGuestsPerSlot?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
 }
 
