@@ -343,7 +343,7 @@ export default function CompanyPublicPage() {
               <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5 md:justify-center">
                 <CreditCard className="h-4 w-4" /> Formas de Pagamento
               </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
+              <div className="flex flex-wrap gap-2 md:gap-3 md:justify-center">
                 {acceptedPayments.map(([key]) => {
                   const pm = PAYMENT_LABELS[key];
                   const Icon = pm?.icon || CreditCard;
