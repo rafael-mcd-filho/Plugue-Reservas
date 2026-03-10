@@ -53,10 +53,11 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
     setResendingId(log.id);
     try {
       const result = await evolutionApi.mutateAsync({
-        action: 'send_message',
+        action: 'resend_message',
         company_id: companyId,
         phone: log.phone,
         message: log.message,
+        log_id: log.id,
       });
 
       // Check if Evolution API returned an error
