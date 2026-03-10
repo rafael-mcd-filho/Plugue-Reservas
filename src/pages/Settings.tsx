@@ -245,7 +245,10 @@ function NotificationsTab() {
         <Card className="border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
             <Bell className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            Nenhuma notificação enviada ainda.
+            <p className="mb-4">Nenhuma notificação enviada ainda.</p>
+            <Button onClick={() => setDialogOpen(true)} className="gap-2">
+              <Send className="h-4 w-4" /> Enviar primeira notificação
+            </Button>
           </CardContent>
         </Card>
       ) : (
