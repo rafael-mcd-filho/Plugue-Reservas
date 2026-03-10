@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe, Bot, Webhook } from 'lucide-react';
+import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
