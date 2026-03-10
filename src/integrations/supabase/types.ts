@@ -635,6 +635,69 @@ export type Database = {
           },
         ]
       }
+      whatsapp_message_queue: {
+        Row: {
+          attempts: number
+          company_id: string
+          created_at: string
+          error_details: string | null
+          expires_at: string
+          id: string
+          last_attempt_at: string | null
+          max_attempts: number
+          message: string
+          phone: string
+          reservation_id: string | null
+          status: string
+          type: string
+        }
+        Insert: {
+          attempts?: number
+          company_id: string
+          created_at?: string
+          error_details?: string | null
+          expires_at?: string
+          id?: string
+          last_attempt_at?: string | null
+          max_attempts?: number
+          message: string
+          phone: string
+          reservation_id?: string | null
+          status?: string
+          type?: string
+        }
+        Update: {
+          attempts?: number
+          company_id?: string
+          created_at?: string
+          error_details?: string | null
+          expires_at?: string
+          id?: string
+          last_attempt_at?: string | null
+          max_attempts?: number
+          message?: string
+          phone?: string
+          reservation_id?: string | null
+          status?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_message_queue_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_message_queue_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: false
+            referencedRelation: "reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
