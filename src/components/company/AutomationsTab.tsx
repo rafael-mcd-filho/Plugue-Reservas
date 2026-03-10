@@ -127,7 +127,9 @@ export default function AutomationsTab({ companyId }: Props) {
           <code className="text-primary">{'{pessoas}'}</code>,{' '}
           <code className="text-primary">{'{data}'}</code>,{' '}
           <code className="text-primary">{'{hora}'}</code>,{' '}
-          <code className="text-primary">{'{telefone}'}</code>
+          <code className="text-primary">{'{telefone}'}</code>,{' '}
+          <code className="text-primary">{'{posicao}'}</code> (fila),{' '}
+          <code className="text-primary">{'{link_acompanhamento}'}</code> (fila)
         </div>
 
         {AUTOMATION_TYPES.map(at => {
