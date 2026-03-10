@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useSystemSettings } from '@/hooks/useSettings';
+import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
