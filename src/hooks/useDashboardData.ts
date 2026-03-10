@@ -114,7 +114,7 @@ export function useDashboardData(
   }, [rawReservations, startDate, endDate]);
 
   const totals = useMemo(() => {
-    return dailyStats.reduce(
+    const base = dailyStats.reduce(
       (acc, d) => ({
         reservations: acc.reservations + d.reservations,
         completed: acc.completed + d.completed,
@@ -125,7 +125,9 @@ export function useDashboardData(
       }),
       { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0 },
     );
-  }, [dailyStats]);
+    const totalGuests = rawReservations.reduce((sum, r) => sum + (r.party_size || 1), 0);
+    return { ...base, totalGuests };
+  }, [dailyStats, rawReservations]);
 
   // Previous period totals for comparison
   const prevTotals = useMemo(() => {
