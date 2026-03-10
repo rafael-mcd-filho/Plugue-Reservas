@@ -9,6 +9,7 @@ import {
 } from 'recharts';
 import {
   CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle, Loader2,
+  ArrowUpRight, ArrowDownRight, Minus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -31,11 +32,51 @@ const PERIOD_OPTIONS = [
 ];
 
 const PIE_COLORS = [
-  'hsl(28, 90%, 27%)',   // completed (dark brown)
-  'hsl(28, 85%, 55%)',   // confirmed (orange)
-  'hsl(0, 72%, 51%)',    // cancelled
-  'hsl(0, 0%, 35%)',     // no-show
+  'hsl(28, 90%, 27%)',
+  'hsl(28, 85%, 55%)',
+  'hsl(0, 72%, 51%)',
+  'hsl(0, 0%, 35%)',
 ];
+
+function VariationBadge({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0 && current === 0) return null;
+  
+  let pct: number;
+  if (previous === 0) {
+    pct = 100;
+  } else {
+    pct = Math.round(((current - previous) / previous) * 100);
+  }
+
+  const isPositive = pct > 0;
+  const isNeutral = pct === 0;
+
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
+      isNeutral && "text-muted-foreground bg-muted",
+      isPositive && "text-emerald-700 bg-emerald-100",
+      !isPositive && !isNeutral && "text-red-700 bg-red-100",
+    )}>
+      {isNeutral ? <Minus className="h-2.5 w-2.5" /> : isPositive ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
+      {Math.abs(pct)}%
+    </span>
+  );
+}
+
+// Custom label renderer for the donut chart - renders inside the slices
+const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
+  if (percent < 0.05) return null; // Don't render labels for very small slices
+  const RADIAN = Math.PI / 180;
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600}>
+      {`${(percent * 100).toFixed(0)}%`}
+    </text>
+  );
+};
 
 export default function Dashboard() {
   const { slug } = useParams<{ slug: string }>();
@@ -46,7 +87,6 @@ export default function Dashboard() {
   const [customStart, setCustomStart] = useState<Date | undefined>();
   const [customEnd, setCustomEnd] = useState<Date | undefined>();
 
-  // Fetch real companies for superadmin filter
   const { data: companies = [] } = useQuery({
     queryKey: ['dashboard-companies'],
     queryFn: async () => {
@@ -60,7 +100,6 @@ export default function Dashboard() {
     enabled: !isCompanyContext,
   });
 
-  // Fetch real company ID from slug
   const { data: realCompany } = useQuery({
     queryKey: ['company-id-from-slug', slug],
     queryFn: async () => {
@@ -85,14 +124,13 @@ export default function Dashboard() {
 
   const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
-  // Real dashboard data
-  const { dailyStats, totals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const { dailyStats, totals, prevTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
-  // Funnel data
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
   const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
 
   const avgPerDay = dailyStats.length > 0 ? Math.round(totals.reservations / dailyStats.length) : 0;
+  const prevAvgPerDay = dailyStats.length > 0 ? Math.round(prevTotals.reservations / dailyStats.length) : 0;
 
   const pieData = [
     { name: 'Concluídas', value: totals.completed },
@@ -102,12 +140,14 @@ export default function Dashboard() {
   ].filter(d => d.value > 0);
 
   const stats = [
-    { label: 'Total Reservas', value: totals.reservations, icon: CalendarCheck, color: 'text-primary' },
-    { label: 'Confirmadas', value: totals.confirmed, icon: CheckCircle, color: 'text-accent' },
-    { label: 'Concluídas', value: totals.completed, icon: Users, color: 'text-accent' },
-    { label: 'Cancelamentos', value: totals.cancellations, icon: XCircle, color: 'text-destructive' },
-    { label: 'Média/Dia', value: avgPerDay, icon: TrendingUp, color: 'text-primary' },
+    { label: 'Total Reservas', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
+    { label: 'Confirmadas', value: totals.confirmed, prev: prevTotals.confirmed, icon: CheckCircle, color: 'text-accent' },
+    { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: Users, color: 'text-accent' },
+    { label: 'Cancelamentos', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive' },
+    { label: 'Média/Dia', value: avgPerDay, prev: prevAvgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
+
+  const periodLabel = period === 'custom' ? 'período anterior' : period === '7' ? 'semana passada' : period === '15' ? '15 dias anteriores' : period === '90' ? 'trimestre anterior' : 'mês passado';
 
   return (
     <div className="space-y-6">
@@ -178,16 +218,20 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {stats.map(stat => (
               <Card key={stat.label} className="border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 pt-5 pb-4">
                   <div className={`p-2.5 rounded-xl bg-muted ${stat.color}`}>
                     <stat.icon className="h-5 w-5" />
                   </div>
-                  <div>
-                    <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
+                      <VariationBadge current={stat.value} previous={stat.prev} />
+                    </div>
                     <p className="text-xs text-muted-foreground">{stat.label}</p>
+                    <p className="text-[10px] text-muted-foreground/60">vs. {periodLabel}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -218,14 +262,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'hsl(0, 0%, 100%)',
-                          border: '1px solid hsl(0, 0%, 88%)',
-                          borderRadius: '0.5rem',
-                          fontSize: '0.875rem',
-                        }}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Area type="monotone" dataKey="reservations" name="Total" stroke="hsl(28, 85%, 55%)" fill="url(#colorRes)" strokeWidth={2} />
                       <Area type="monotone" dataKey="completed" name="Concluídas" stroke="hsl(28, 90%, 27%)" fill="url(#colorComp)" strokeWidth={2} />
@@ -255,7 +292,7 @@ export default function Dashboard() {
                           outerRadius={100}
                           paddingAngle={3}
                           dataKey="value"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          label={renderCustomLabel}
                           labelLine={false}
                         >
                           {pieData.map((_, i) => (
@@ -263,6 +300,7 @@ export default function Dashboard() {
                           ))}
                         </Pie>
                         <Tooltip />
+                        <Legend />
                       </PieChart>
                     </ResponsiveContainer>
                   )}
@@ -285,14 +323,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'hsl(0, 0%, 100%)',
-                          border: '1px solid hsl(0, 0%, 88%)',
-                          borderRadius: '0.5rem',
-                          fontSize: '0.875rem',
-                        }}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="completed" name="Concluídas" fill="hsl(28, 90%, 27%)" radius={[4, 4, 0, 0]} />
@@ -314,14 +345,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'hsl(0, 0%, 100%)',
-                          border: '1px solid hsl(0, 0%, 88%)',
-                          borderRadius: '0.5rem',
-                          fontSize: '0.875rem',
-                        }}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="noShows" name="No-Shows" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />

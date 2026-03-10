@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Pencil, Trash2, Pause, Play, ArrowUpDown, Building2, Circle, ExternalLink } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Pause, Play, ArrowUpDown, Building2, Circle, ExternalLink, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,6 +12,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, Company, CompanyInsert, CompanyStatus } from '@/hooks/useCompanies';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -50,6 +52,8 @@ export default function Companies() {
   const [form, setForm] = useState<CompanyInsert>(emptyForm);
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -76,8 +80,7 @@ export default function Companies() {
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setDialogOpen(true); };
 
-  const openEdit = (c: Company, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const openEdit = (c: Company) => {
     setEditing(c);
     setForm({
       name: c.name, slug: c.slug, razao_social: c.razao_social || '', cnpj: c.cnpj || '',
@@ -107,8 +110,7 @@ export default function Companies() {
     setDialogOpen(false);
   };
 
-  const togglePause = (c: Company, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const togglePause = (c: Company) => {
     const newStatus: CompanyStatus = c.status === 'paused' ? 'active' : 'paused';
     updateCompany.mutate({ id: c.id, status: newStatus });
   };
@@ -135,7 +137,14 @@ export default function Companies() {
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Nova Empresa</Button>
+            <Button onClick={openCreate} disabled={createCompany.isPending} className="gap-2">
+              {createCompany.isPending ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              Nova Empresa
+            </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -231,6 +240,9 @@ export default function Companies() {
               <div className="flex justify-end gap-3 pt-2">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
                 <Button type="submit" disabled={createCompany.isPending || updateCompany.isPending}>
+                  {(createCompany.isPending || updateCompany.isPending) && (
+                    <span className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  )}
                   {editing ? 'Salvar' : 'Criar Empresa'}
                 </Button>
               </div>
@@ -321,44 +333,36 @@ export default function Companies() {
                       {format(new Date(company.created_at), "dd/MM/yyyy", { locale: ptBR })}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary" onClick={() => navigate(`/${company.slug}/admin`)} title="Acessar painel">
-                          <ExternalLink className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => openEdit(company, e)} title="Editar">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost" size="icon" className="h-8 w-8"
-                          onClick={(e) => togglePause(company, e)}
-                          title={company.status === 'paused' ? 'Ativar' : 'Pausar'}
-                        >
-                          {company.status === 'paused' ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Excluir">
-                              <Trash2 className="h-4 w-4" />
+                      <div onClick={e => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Isso removerá "{company.name}" e todos os dados associados. <strong>Esta ação não pode ser desfeita.</strong>
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => deleteCompany.mutate(company.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Excluir permanentemente
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => navigate(`/${company.slug}/admin`)}>
+                              <ExternalLink className="h-4 w-4 mr-2" /> Acessar painel
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEdit(company)}>
+                              <Pencil className="h-4 w-4 mr-2" /> Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => togglePause(company)}>
+                              {company.status === 'paused' ? (
+                                <><Play className="h-4 w-4 mr-2" /> Ativar</>
+                              ) : (
+                                <><Pause className="h-4 w-4 mr-2" /> Pausar</>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => { setCompanyToDelete(company); setDeleteDialogOpen(true); }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -368,6 +372,27 @@ export default function Companies() {
           </Table>
         </Card>
       )}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso removerá "{companyToDelete?.name}" e todos os dados associados. <strong>Esta ação não pode ser desfeita.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (companyToDelete) deleteCompany.mutate(companyToDelete.id); setDeleteDialogOpen(false); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir Permanentemente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

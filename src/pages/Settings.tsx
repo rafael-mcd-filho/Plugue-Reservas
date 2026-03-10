@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug } from 'lucide-react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -109,15 +109,17 @@ function GeneralTab() {
             <Label>Nome do Sistema</Label>
             <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="ReservaFácil" />
           </div>
-          <div>
-            <Label>URL do Logo</Label>
-            <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
-            {logoUrl && (
-              <div className="mt-2 p-4 bg-muted rounded-lg">
-                <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => (e.currentTarget.style.display = 'none')} />
+           <div>
+              <Label>URL do Logo</Label>
+              <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
+              <div className="mt-2 p-4 bg-muted rounded-lg min-h-[64px] flex items-center justify-center">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">Preview do logo aparecerá aqui</p>
+                )}
               </div>
-            )}
-          </div>
+            </div>
           <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2 w-fit">
             <Save className="h-4 w-4" /> Salvar Configurações
           </Button>
@@ -243,7 +245,10 @@ function NotificationsTab() {
         <Card className="border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
             <Bell className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            Nenhuma notificação enviada ainda.
+            <p className="mb-4">Nenhuma notificação enviada ainda.</p>
+            <Button onClick={() => setDialogOpen(true)} className="gap-2">
+              <Send className="h-4 w-4" /> Enviar primeira notificação
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -401,6 +406,9 @@ function IntegrationsTab() {
 
   const [evolutionUrl, setEvolutionUrl] = useState('');
   const [evolutionToken, setEvolutionToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   if (!initialized && settings.length > 0) {
@@ -412,6 +420,30 @@ function IntegrationsTab() {
   const handleSave = async () => {
     await updateSetting.mutateAsync({ key: 'evolution_api_url', value: evolutionUrl || null });
     await updateSetting.mutateAsync({ key: 'evolution_api_token', value: evolutionToken || null });
+  };
+
+  const handleTestConnection = async () => {
+    if (!evolutionUrl || !evolutionToken) {
+      setTestResult({ ok: false, message: 'Preencha URL e Token antes de testar.' });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const url = evolutionUrl.replace(/\/$/, '');
+      const res = await fetch(`${url}/instance/fetchInstances`, {
+        headers: { apikey: evolutionToken },
+      });
+      if (res.ok) {
+        setTestResult({ ok: true, message: 'Conexão estabelecida com sucesso!' });
+      } else {
+        setTestResult({ ok: false, message: `Erro ${res.status}: ${res.statusText}` });
+      }
+    } catch (err: any) {
+      setTestResult({ ok: false, message: `Falha na conexão: ${err.message}` });
+    } finally {
+      setTesting(false);
+    }
   };
 
   if (isLoading) {
@@ -432,12 +464,38 @@ function IntegrationsTab() {
         </div>
         <div>
           <Label>Token Global (API Key)</Label>
-          <Input type="password" value={evolutionToken} onChange={e => setEvolutionToken(e.target.value)} placeholder="Seu token global da Evolution API" />
+          <div className="relative">
+            <Input
+              type={showToken ? 'text' : 'password'}
+              value={evolutionToken}
+              onChange={e => setEvolutionToken(e.target.value)}
+              placeholder="Seu token global da Evolution API"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken(!showToken)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">Encontrado nas configurações da sua Evolution API</p>
         </div>
-        <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2">
-          <Save className="h-4 w-4" /> Salvar Integrações
-        </Button>
+        <div className="flex gap-3">
+          <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2">
+            <Save className="h-4 w-4" /> Salvar Integrações
+          </Button>
+          <Button variant="outline" onClick={handleTestConnection} disabled={testing} className="gap-2">
+            {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
+            Testar Conexão
+          </Button>
+        </div>
+        {testResult && (
+          <div className={`text-sm p-3 rounded-lg ${testResult.ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            {testResult.message}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
