@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot, Contact } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot, Contact, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Reservas', icon: CalendarDays, path: `/${slug}/admin/reservas`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Lista de Espera', icon: ClipboardList, path: `/${slug}/admin/fila`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Automações', icon: Bot, path: `/${slug}/admin/automacoes`, showFor: ['admin', 'superadmin'] },
         
         { label: 'Usuários', icon: Users, path: `/${slug}/admin/usuarios`, showFor: ['admin', 'superadmin'] },

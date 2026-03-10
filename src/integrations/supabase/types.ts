@@ -484,6 +484,65 @@ export type Database = {
           },
         ]
       }
+      waitlist: {
+        Row: {
+          called_at: string | null
+          company_id: string
+          created_at: string
+          expired_at: string | null
+          guest_name: string
+          guest_phone: string
+          id: string
+          notes: string | null
+          party_size: number
+          position: number
+          seated_at: string | null
+          status: string
+          tracking_code: string
+          updated_at: string
+        }
+        Insert: {
+          called_at?: string | null
+          company_id: string
+          created_at?: string
+          expired_at?: string | null
+          guest_name: string
+          guest_phone: string
+          id?: string
+          notes?: string | null
+          party_size?: number
+          position?: number
+          seated_at?: string | null
+          status?: string
+          tracking_code?: string
+          updated_at?: string
+        }
+        Update: {
+          called_at?: string | null
+          company_id?: string
+          created_at?: string
+          expired_at?: string | null
+          guest_name?: string
+          guest_phone?: string
+          id?: string
+          notes?: string | null
+          party_size?: number
+          position?: number
+          seated_at?: string | null
+          status?: string
+          tracking_code?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "waitlist_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       webhook_configs: {
         Row: {
           company_id: string

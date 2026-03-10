@@ -18,7 +18,8 @@ import SettingsPage from "@/pages/Settings";
 import CompanySettings from "@/pages/CompanySettings";
 import CompanyAutomations from "@/pages/CompanyAutomations";
 import CompanyUsers from "@/pages/CompanyUsers";
-
+import CompanyWaitlist from "@/pages/CompanyWaitlist";
+import WaitlistTracking from "@/pages/WaitlistTracking";
 import Leads from "@/pages/Leads";
 import Users from "@/pages/Users";
 import Login from "@/pages/Login";
@@ -106,7 +107,7 @@ const App = () => (
 
             {/* Public company page: /:slug */}
             <Route path="/:slug" element={<CompanyPublicPage />} />
-
+            <Route path="/:slug/fila/:code" element={<WaitlistTracking />} />
 
             {/* Company admin routes: /:slug/admin/* */}
             <Route path="/:slug/admin" element={
@@ -156,6 +157,13 @@ const App = () => (
               <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
                 <CompanySlugProvider>
                   <AppLayout><CompanySettings /></AppLayout>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
+            <Route path="/:slug/admin/fila" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <AppLayout><CompanyWaitlist /></AppLayout>
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
