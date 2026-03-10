@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe } from 'lucide-react';
+import { Save, Clock, CreditCard, MapPin, Instagram, MessageCircle, Phone, Globe, CalendarOff, Users } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import BlockedDatesTab from '@/components/company/BlockedDatesTab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -69,6 +70,7 @@ export default function CompanySettings() {
   const [whatsapp, setWhatsapp] = useState('');
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
+  const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -82,6 +84,7 @@ export default function CompanySettings() {
       setWhatsapp(company.whatsapp || '');
       setGoogleMapsUrl(company.google_maps_url || '');
       setReservationDuration((company as any).reservation_duration ?? 30);
+      setMaxGuestsPerSlot((company as any).max_guests_per_slot ?? 0);
       setInitialized(true);
     }
   }, [company, initialized]);
@@ -101,6 +104,7 @@ export default function CompanySettings() {
           whatsapp,
           google_maps_url: googleMapsUrl,
           reservation_duration: reservationDuration,
+          max_guests_per_slot: maxGuestsPerSlot,
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', company.id);
@@ -146,6 +150,7 @@ export default function CompanySettings() {
           <TabsTrigger value="payments" className="gap-2"><CreditCard className="h-4 w-4" /> Pagamentos</TabsTrigger>
           <TabsTrigger value="info" className="gap-2"><Globe className="h-4 w-4" /> Informações</TabsTrigger>
           <TabsTrigger value="location" className="gap-2"><MapPin className="h-4 w-4" /> Localização</TabsTrigger>
+          <TabsTrigger value="blocked" className="gap-2"><CalendarOff className="h-4 w-4" /> Bloqueios</TabsTrigger>
         </TabsList>
 
         {/* Opening Hours */}
@@ -204,6 +209,20 @@ export default function CompanySettings() {
                     <SelectItem value="120">2 horas</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Max guests per slot */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <Label className="text-sm font-medium flex items-center gap-1.5"><Users className="h-4 w-4" /> Capacidade máxima por horário (pessoas)</Label>
+                <p className="text-xs text-muted-foreground mb-2">Limita o total de pessoas que podem reservar no mesmo horário. 0 = sem limite.</p>
+                <Input
+                  type="number"
+                  min={0}
+                  value={maxGuestsPerSlot}
+                  onChange={e => setMaxGuestsPerSlot(Number(e.target.value))}
+                  className="w-40"
+                  placeholder="0"
+                />
               </div>
             </CardContent>
           </Card>
@@ -295,6 +314,11 @@ export default function CompanySettings() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Blocked Dates */}
+        <TabsContent value="blocked">
+          {company && <BlockedDatesTab companyId={company.id} />}
         </TabsContent>
       </Tabs>
     </div>
