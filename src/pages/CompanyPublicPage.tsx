@@ -174,6 +174,7 @@ export default function CompanyPublicPage() {
           className="absolute inset-0 rounded-b-3xl pointer-events-none"
           style={{ background: 'radial-gradient(circle, rgba(232,105,10,0.12) 0%, transparent 65%)' }}
         />
+        <div className="max-w-lg mx-auto space-y-4 relative z-10">
           {/* Rating */}
           <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1">
             <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
