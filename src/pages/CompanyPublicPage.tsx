@@ -386,7 +386,7 @@ export default function CompanyPublicPage() {
       </div>
 
       {/* Sticky bottom CTA */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50 md:hidden">
         <div className="max-w-lg mx-auto">
           <Button
             className="w-full py-5 text-base gap-2 rounded-2xl font-semibold"
