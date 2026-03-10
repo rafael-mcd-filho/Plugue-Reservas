@@ -168,11 +168,11 @@ export default function ReservationModal({
     fetchSlotAvailability();
   }, [selectedDate, companyId, selectedPartySize, timeSlots]);
 
-  // Fetch available tables when time is selected
+  // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) return;
     
-    const fetchAvailability = async () => {
+    const fetchAndAssignTable = async () => {
       setLoadingTables(true);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -182,7 +182,7 @@ export default function ReservationModal({
           .select('id, number, capacity, section')
           .eq('company_id', companyId)
           .eq('status', 'available')
-          .order('number');
+          .order('capacity', { ascending: true });
         if (tablesErr) throw tablesErr;
 
         const { data: existingRes, error: resErr } = await supabase
@@ -199,15 +199,22 @@ export default function ReservationModal({
           .filter((t: any) => !occupiedIds.has(t.id) && t.capacity >= selectedPartySize) as AvailableTable[];
         
         setAvailableTables(available);
+        // Auto-select the smallest table that fits the party (best-fit)
+        if (available.length > 0) {
+          setSelectedTableId(available[0].id);
+        } else {
+          setSelectedTableId('');
+        }
       } catch (err) {
         console.error('Error fetching availability:', err);
         setAvailableTables([]);
+        setSelectedTableId('');
       } finally {
         setLoadingTables(false);
       }
     };
 
-    fetchAvailability();
+    fetchAndAssignTable();
   }, [selectedDate, selectedTime, companyId, selectedPartySize, step]);
 
   const handleReset = () => {
@@ -472,42 +479,21 @@ export default function ReservationModal({
               </div>
             )}
 
-            {/* Available tables for selected time */}
-            {selectedTime && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground font-medium">Mesas disponíveis:</p>
-                {loadingTables ? (
-                  <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
-                ) : availableTables.length === 0 ? (
-                  <p className="text-center text-sm text-destructive py-2">Nenhuma mesa disponível para este horário e número de pessoas.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {availableTables.map(table => (
-                      <button key={table.id} onClick={() => setSelectedTableId(table.id)}
-                        className={cn(
-                          'flex items-center justify-between p-3 rounded-xl border text-sm transition-all',
-                          selectedTableId === table.id ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-border hover:border-primary/50 text-foreground'
-                        )}>
-                        <span>Mesa {table.number}</span>
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Users className="h-3 w-3" />{table.capacity}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+            {/* No table availability message */}
+            {selectedTime && !loadingTables && availableTables.length === 0 && (
+              <p className="text-center text-sm text-destructive py-2">Nenhuma mesa disponível para este horário e número de pessoas.</p>
+            )}
+            {selectedTime && loadingTables && (
+              <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             )}
 
             <div className="space-y-1">
-              <Button className="w-full" disabled={!selectedTime || !selectedTableId}
+              <Button className="w-full" disabled={!selectedTime || !selectedTableId || loadingTables}
                 onClick={() => { setStep(3); onStepChange?.('time_select'); onStepChange?.('form_fill'); }}>
                 Continuar <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
-              {(!selectedTime || !selectedTableId) && (
-                <p className="text-xs text-muted-foreground text-center">
-                  {!selectedTime ? 'Selecione um horário para continuar' : 'Selecione uma mesa para continuar'}
-                </p>
+              {!selectedTime && (
+                <p className="text-xs text-muted-foreground text-center">Selecione um horário para continuar</p>
               )}
             </div>
           </div>
