@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import {
   CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle, Loader2,
-  ArrowUpRight, ArrowDownRight, Minus,
+  ArrowUpRight, ArrowDownRight, Minus, ClipboardList,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -124,7 +124,7 @@ export default function Dashboard() {
 
   const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
 
-  const { dailyStats, totals, prevTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const { dailyStats, totals, prevTotals, waitlistTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
   const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
   const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
@@ -141,8 +141,8 @@ export default function Dashboard() {
 
   const stats = [
     { label: 'Total Reservas', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
-    { label: 'Confirmadas', value: totals.confirmed, prev: prevTotals.confirmed, icon: CheckCircle, color: 'text-accent' },
-    { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: Users, color: 'text-accent' },
+    { label: 'Total Pessoas', value: totals.totalGuests, prev: prevTotals.totalGuests, icon: Users, color: 'text-primary' },
+    { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: CheckCircle, color: 'text-accent' },
     { label: 'Cancelamentos', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive' },
     { label: 'Média/Dia', value: avgPerDay, prev: prevAvgPerDay, icon: TrendingUp, color: 'text-primary' },
   ];
@@ -238,7 +238,55 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Charts Row 1 */}
+          {/* Waitlist KPIs */}
+          {isCompanyContext && (
+            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-amber-600">
+                    <ClipboardList className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.total}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Total</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-primary">
+                    <CheckCircle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.seated}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Sentados</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-destructive">
+                    <UserX className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.expired}</p>
+                    <p className="text-xs text-muted-foreground">Fila — Desistências</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border border-border shadow-sm">
+                <CardContent className="flex items-center gap-3 pt-5 pb-4">
+                  <div className="p-2.5 rounded-xl bg-muted text-muted-foreground">
+                    <Clock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold">{waitlistTotals.avgWaitMin}min</p>
+                    <p className="text-xs text-muted-foreground">Fila — Espera Média</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="border border-border shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">

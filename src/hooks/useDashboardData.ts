@@ -19,6 +19,13 @@ interface RawReservation {
   date: string;
   time: string;
   status: string;
+  party_size: number;
+}
+
+interface RawWaitlistEntry {
+  status: string;
+  created_at: string;
+  seated_at: string | null;
 }
 
 export function useDashboardData(
@@ -41,7 +48,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status')
+        .select('date, time, status, party_size')
         .gte('date', startStr)
         .lte('date', endStr);
       if (companyId) query = query.eq('company_id', companyId);
@@ -51,13 +58,29 @@ export function useDashboardData(
     },
   });
 
+  // Fetch waitlist data for the period
+  const { data: rawWaitlist = [] } = useQuery({
+    queryKey: ['dashboard-waitlist', companyId, startStr, endStr],
+    queryFn: async () => {
+      let query = supabase
+        .from('waitlist' as any)
+        .select('status, created_at, seated_at')
+        .gte('created_at', startStr + 'T00:00:00')
+        .lte('created_at', endStr + 'T23:59:59');
+      if (companyId) query = query.eq('company_id', companyId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data as any[]) as RawWaitlistEntry[];
+    },
+  });
+
   // Fetch previous period data for comparison
   const { data: prevReservations = [] } = useQuery({
     queryKey: ['dashboard-reservations-prev', companyId, prevStartStr, prevEndStr],
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status')
+        .select('date, time, status, party_size')
         .gte('date', prevStartStr)
         .lte('date', prevEndStr);
       if (companyId) query = query.eq('company_id', companyId);
@@ -91,7 +114,7 @@ export function useDashboardData(
   }, [rawReservations, startDate, endDate]);
 
   const totals = useMemo(() => {
-    return dailyStats.reduce(
+    const base = dailyStats.reduce(
       (acc, d) => ({
         reservations: acc.reservations + d.reservations,
         completed: acc.completed + d.completed,
@@ -102,13 +125,16 @@ export function useDashboardData(
       }),
       { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0 },
     );
-  }, [dailyStats]);
+    const totalGuests = rawReservations.reduce((sum, r) => sum + (r.party_size || 1), 0);
+    return { ...base, totalGuests };
+  }, [dailyStats, rawReservations]);
 
   // Previous period totals for comparison
   const prevTotals = useMemo(() => {
-    const acc = { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0 };
+    const acc = { reservations: 0, completed: 0, confirmed: 0, pending: 0, cancellations: 0, noShows: 0, totalGuests: 0 };
     for (const r of prevReservations) {
       acc.reservations++;
+      acc.totalGuests += (r as any).party_size || 1;
       if (r.status === 'completed') acc.completed++;
       else if (r.status === 'confirmed') acc.confirmed++;
       else if (r.status === 'pending') acc.pending++;
@@ -117,6 +143,18 @@ export function useDashboardData(
     }
     return acc;
   }, [prevReservations]);
+
+  // Waitlist totals
+  const waitlistTotals = useMemo(() => {
+    const total = rawWaitlist.length;
+    const seated = rawWaitlist.filter(w => w.status === 'seated').length;
+    const expired = rawWaitlist.filter(w => w.status === 'expired' || w.status === 'removed').length;
+    const seatedEntries = rawWaitlist.filter(w => w.status === 'seated' && w.seated_at);
+    const avgWaitMin = seatedEntries.length > 0
+      ? Math.round(seatedEntries.reduce((sum, w) => sum + (new Date(w.seated_at!).getTime() - new Date(w.created_at).getTime()), 0) / seatedEntries.length / 60000)
+      : 0;
+    return { total, seated, expired, avgWaitMin };
+  }, [rawWaitlist]);
 
   // Heatmap
   const heatmapData = useMemo(() => {
@@ -135,5 +173,5 @@ export function useDashboardData(
     return { counts, maxCount, hours, dayNames: DAY_NAMES };
   }, [rawReservations]);
 
-  return { dailyStats, totals, prevTotals, heatmapData, isLoading };
+  return { dailyStats, totals, prevTotals, waitlistTotals, heatmapData, isLoading };
 }
