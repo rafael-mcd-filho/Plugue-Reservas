@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi } from 'lucide-react';
+import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -80,6 +82,7 @@ function GeneralTab() {
 
   const [systemName, setSystemName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
   if (!initialized && settings.length > 0) {
@@ -91,6 +94,48 @@ function GeneralTab() {
   const handleSave = async () => {
     await updateSetting.mutateAsync({ key: 'system_name', value: systemName });
     await updateSetting.mutateAsync({ key: 'system_logo_url', value: logoUrl || null });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Selecione um arquivo de imagem (PNG, JPG, SVG, etc.)');
+      return;
+    }
+
+    // Max 2MB
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('O arquivo deve ter no máximo 2MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const fileName = `logo-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('system-assets')
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('system-assets')
+        .getPublicUrl(fileName);
+
+      setLogoUrl(publicUrlData.publicUrl);
+      toast.success('Logo enviado com sucesso!');
+    } catch (err: any) {
+      toast.error(`Erro ao enviar: ${err.message}`);
+    } finally {
+      setUploading(false);
+      // Reset input
+      e.target.value = '';
+    }
   };
 
   if (isLoading) {
@@ -109,17 +154,28 @@ function GeneralTab() {
             <Label>Nome do Sistema</Label>
             <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="ReservaFácil" />
           </div>
-           <div>
-              <Label>URL do Logo</Label>
-              <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" />
-              <div className="mt-2 p-4 bg-muted rounded-lg min-h-[64px] flex items-center justify-center">
-                {logoUrl ? (
-                  <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                ) : (
-                  <p className="text-xs text-muted-foreground">Preview do logo aparecerá aqui</p>
-                )}
-              </div>
+          <div>
+            <Label>Logo do Sistema</Label>
+            <div className="flex gap-2 mt-1">
+              <Input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://exemplo.com/logo.png" className="flex-1" />
+              <label className="cursor-pointer">
+                <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                <Button variant="outline" size="icon" asChild disabled={uploading}>
+                  <span>
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  </span>
+                </Button>
+              </label>
             </div>
+            <p className="text-xs text-muted-foreground mt-1">Cole uma URL ou envie um arquivo (máx. 2MB)</p>
+            <div className="mt-2 p-4 bg-muted rounded-lg min-h-[64px] flex items-center justify-center">
+              {logoUrl ? (
+                <img src={logoUrl} alt="Logo preview" className="max-h-16 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+              ) : (
+                <p className="text-xs text-muted-foreground">Preview do logo aparecerá aqui</p>
+              )}
+            </div>
+          </div>
           <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2 w-fit">
             <Save className="h-4 w-4" /> Salvar Configurações
           </Button>
