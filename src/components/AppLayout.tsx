@@ -32,6 +32,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Reservas', icon: CalendarDays, path: `/${slug}/admin/reservas`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Mesas', icon: Grid3X3, path: `/${slug}/admin/mesas`, showFor: ['admin', 'operator', 'superadmin'] },
         { label: 'Calendário', icon: CalendarDays, path: `/${slug}/admin/calendario`, showFor: ['admin', 'operator', 'superadmin'] },
+        { label: 'Automações', icon: Bot, path: `/${slug}/admin/automacoes`, showFor: ['admin', 'superadmin'] },
         { label: 'Configurações', icon: Settings, path: `/${slug}/admin/configuracoes`, showFor: ['admin', 'superadmin'] },
       ]
     : [];

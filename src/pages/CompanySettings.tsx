@@ -296,15 +296,6 @@ export default function CompanySettings() {
             </CardContent>
           </Card>
         </TabsContent>
-        {/* Automations */}
-        <TabsContent value="automations">
-          {company && <AutomationsTab companyId={company.id} />}
-        </TabsContent>
-
-        {/* Webhooks */}
-        <TabsContent value="webhooks">
-          {company && <WebhooksTab companyId={company.id} />}
-        </TabsContent>
       </Tabs>
     </div>
   );
