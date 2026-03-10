@@ -442,7 +442,7 @@ export default function ReservationModal({
             ) : loadingSlots ? (
               <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {timeSlots.map(time => {
                   const status = getSlotStatus(time);
                   const avail = slotAvailability[time];
