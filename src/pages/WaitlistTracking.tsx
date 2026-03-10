@@ -88,7 +88,7 @@ export default function WaitlistTracking() {
     refetchInterval: 5000,
   });
 
-  // Get company name
+  // Get company name + real average wait time
   const { data: company } = useQuery({
     queryKey: ['company-public-waitlist', slug],
     queryFn: async () => {
@@ -100,6 +100,29 @@ export default function WaitlistTracking() {
       return data as any;
     },
     enabled: !!slug,
+  });
+
+  // Fetch today's average wait from seated entries
+  const { data: avgWaitPerPerson = 10 } = useQuery({
+    queryKey: ['waitlist-avg-wait', entry?.company_id],
+    queryFn: async () => {
+      if (!entry) return 10;
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('waitlist' as any)
+        .select('created_at, seated_at')
+        .eq('company_id', entry.company_id)
+        .eq('status', 'seated')
+        .gte('created_at', today + 'T00:00:00')
+        .not('seated_at', 'is', null);
+      if (error || !data || data.length < 2) return 10; // fallback
+      const entries = data as any[];
+      const avgMs = entries.reduce((sum: number, e: any) =>
+        sum + (new Date(e.seated_at).getTime() - new Date(e.created_at).getTime()), 0) / entries.length;
+      return Math.max(5, Math.round(avgMs / 60000));
+    },
+    enabled: !!entry && entry.status === 'waiting',
+    refetchInterval: 30000,
   });
 
   if (isLoading) {
@@ -126,7 +149,7 @@ export default function WaitlistTracking() {
 
   const status = statusMessages[entry.status] || statusMessages.waiting;
   const StatusIcon = status.icon;
-  const estimatedWait = aheadCount * 10; // ~10min per group estimate
+  const estimatedWait = aheadCount * avgWaitPerPerson;
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
