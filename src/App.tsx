@@ -160,6 +160,13 @@ const App = () => (
                 </CompanySlugProvider>
               </ProtectedRoute>
             } />
+            <Route path="/:slug/admin/fila" element={
+              <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>
+                <CompanySlugProvider>
+                  <AppLayout><CompanyWaitlist /></AppLayout>
+                </CompanySlugProvider>
+              </ProtectedRoute>
+            } />
             <Route path="/:slug/admin/usuarios" element={
               <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
                 <CompanySlugProvider>
