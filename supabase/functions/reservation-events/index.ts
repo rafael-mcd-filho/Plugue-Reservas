@@ -110,7 +110,6 @@ Deno.serve(async (req) => {
               const data = await res.json();
               const status = res.ok ? 'sent' : 'error';
               results.whatsapp = status;
-              console.log(`WhatsApp ${logType} sent:`, res.ok, data);
 
               await supabaseAdmin.from('whatsapp_message_logs').insert({
                 company_id: reservation.company_id,
@@ -120,21 +119,51 @@ Deno.serve(async (req) => {
                 status,
                 error_details: res.ok ? null : JSON.stringify(data),
               });
+
+              // If send failed, queue for retry
+              if (!res.ok) {
+                await supabaseAdmin.from('whatsapp_message_queue').insert({
+                  company_id: reservation.company_id,
+                  reservation_id: reservation.id,
+                  phone, message,
+                  type: logType,
+                });
+              }
             } catch (err) {
               console.error('WhatsApp send error:', err);
               results.whatsapp = 'error';
+              const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+              const message = replaceTemplateVars(automation.message_template, reservation);
+              const logType = event === 'reservation_created' ? 'confirmation' : 'cancellation';
+
               await supabaseAdmin.from('whatsapp_message_logs').insert({
                 company_id: reservation.company_id,
                 reservation_id: reservation.id,
-                phone,
-                message,
+                phone, message,
                 type: logType,
                 status: 'error',
                 error_details: String(err),
               });
+              // Queue for retry
+              await supabaseAdmin.from('whatsapp_message_queue').insert({
+                company_id: reservation.company_id,
+                reservation_id: reservation.id,
+                phone, message,
+                type: logType,
+              });
             }
           } else {
-            results.whatsapp = 'instance_not_connected';
+            // Instance not connected — queue the message directly
+            results.whatsapp = 'queued';
+            const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+            const message = replaceTemplateVars(automation.message_template, reservation);
+            const logType = event === 'reservation_created' ? 'confirmation' : 'cancellation';
+            await supabaseAdmin.from('whatsapp_message_queue').insert({
+              company_id: reservation.company_id,
+              reservation_id: reservation.id,
+              phone, message,
+              type: logType,
+            });
           }
         } else {
           results.whatsapp = 'evolution_not_configured';
