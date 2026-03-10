@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, Phone, Clock, UserCheck, UserX, SkipForward, Bell, Copy, ExternalLink } from 'lucide-react';
+import { Users, Plus, Phone, Clock, UserCheck, UserX, Bell, Copy } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -167,6 +168,7 @@ export default function CompanyWaitlist() {
   const calledCount = entries.filter(e => e.status === 'called').length;
 
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -174,12 +176,22 @@ export default function CompanyWaitlist() {
           <p className="text-muted-foreground mt-1">Gerencie a fila de {companyName}</p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" className="gap-2" onClick={callNext} disabled={waitingCount === 0}>
-            <Bell className="h-4 w-4" /> Chamar Próximo
-          </Button>
-          <Button className="gap-2" onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4" /> Adicionar
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" className="gap-2" onClick={callNext} disabled={waitingCount === 0}>
+                <Bell className="h-4 w-4" /> Chamar Próximo
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Chama o próximo cliente da fila e envia notificação WhatsApp</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button className="gap-2" onClick={() => setShowAdd(true)}>
+                <Plus className="h-4 w-4" /> Adicionar
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Adicionar novo cliente à fila de espera</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -209,14 +221,19 @@ export default function CompanyWaitlist() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-muted"><Clock className="h-4 w-4 text-muted-foreground" /></div>
-              <div><p className="text-xl font-bold">{todayStats?.avgWaitMin || 0}min</p><p className="text-xs text-muted-foreground">Espera média</p></div>
-            </div>
-          </CardContent>
-        </Card>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Card className="border-none shadow-sm cursor-help">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-muted"><Clock className="h-4 w-4 text-muted-foreground" /></div>
+                  <div><p className="text-xl font-bold">{todayStats?.avgWaitMin || 0}min</p><p className="text-xs text-muted-foreground">Espera média</p></div>
+                </div>
+              </CardContent>
+            </Card>
+          </TooltipTrigger>
+          <TooltipContent>Média do tempo entre entrada na fila e ser sentado (apenas clientes sentados hoje)</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Queue */}
@@ -253,27 +270,52 @@ export default function CompanyWaitlist() {
                       {entry.notes && <p className="text-xs text-muted-foreground mt-1">{entry.notes}</p>}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyTrackingLink(entry.tracking_code)} title="Copiar link">
-                        <Copy className="h-4 w-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyTrackingLink(entry.tracking_code)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Copiar link de acompanhamento</TooltipContent>
+                      </Tooltip>
                       {entry.status === 'waiting' && (
                         <>
-                          <Button size="sm" variant="outline" className="gap-1" onClick={() => updateStatus.mutate({ id: entry.id, status: 'called' })}>
-                            <Bell className="h-3.5 w-3.5" /> Chamar
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setRemoveEntry(entry)}>
-                            <UserX className="h-3.5 w-3.5" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" className="gap-1" onClick={() => updateStatus.mutate({ id: entry.id, status: 'called' })}>
+                                <Bell className="h-3.5 w-3.5" /> Chamar
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Chamar cliente e notificar via WhatsApp</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setRemoveEntry(entry)}>
+                                <UserX className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Remover da fila</TooltipContent>
+                          </Tooltip>
                         </>
                       )}
                       {entry.status === 'called' && (
                         <>
-                          <Button size="sm" className="gap-1" onClick={() => updateStatus.mutate({ id: entry.id, status: 'seated' })}>
-                            <UserCheck className="h-3.5 w-3.5" /> Sentou
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => updateStatus.mutate({ id: entry.id, status: 'expired' })}>
-                            <Clock className="h-3.5 w-3.5" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" className="gap-1" onClick={() => updateStatus.mutate({ id: entry.id, status: 'seated' })}>
+                                <UserCheck className="h-3.5 w-3.5" /> Sentou
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Marcar que o cliente sentou na mesa</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={() => updateStatus.mutate({ id: entry.id, status: 'expired' })}>
+                                <Clock className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Marcar como expirado (não compareceu)</TooltipContent>
+                          </Tooltip>
                         </>
                       )}
                     </div>
@@ -328,5 +370,6 @@ export default function CompanyWaitlist() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </TooltipProvider>
   );
 }
