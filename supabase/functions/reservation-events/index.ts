@@ -80,6 +80,24 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (automation?.message_template && reservation.guest_phone) {
+        const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+        const logType = event === 'reservation_created' ? 'confirmation' : 'cancellation';
+
+        // Dedup check: avoid duplicate messages for same reservation + type
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: recentDup } = await supabaseAdmin
+          .from('whatsapp_message_logs')
+          .select('id')
+          .eq('company_id', reservation.company_id)
+          .eq('reservation_id', reservation.id)
+          .eq('type', logType)
+          .gte('created_at', fiveMinAgo)
+          .limit(1);
+
+        if (recentDup && recentDup.length > 0) {
+          console.log(`Duplicate message skipped for reservation ${reservation.id} type ${logType}`);
+          results.whatsapp = 'skipped_duplicate';
+        } else {
         // Get Evolution API settings
         const { data: settings } = await supabaseAdmin
           .from('system_settings')
