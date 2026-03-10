@@ -300,6 +300,37 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
           </TabsContent>
 
           <TabsContent value="queue">
+            <div className="flex items-center gap-2 mb-4">
+              <Button
+                size="sm" variant="outline" className="gap-1.5"
+                disabled={pendingCount === 0 || processing}
+                onClick={async () => {
+                  setProcessing(true);
+                  try {
+                    const { error } = await supabase.functions.invoke('process-message-queue');
+                    if (error) throw error;
+                    toast.success('Fila processada!');
+                    qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });
+                    qc.invalidateQueries({ queryKey: ['whatsapp-message-logs', companyId] });
+                  } catch (err: any) {
+                    toast.error(`Erro: ${err.message}`);
+                  } finally {
+                    setProcessing(false);
+                  }
+                }}
+              >
+                <Play className={`h-3.5 w-3.5 ${processing ? 'animate-spin' : ''}`} />
+                {processing ? 'Processando...' : 'Processar Fila'}
+              </Button>
+              <Button
+                size="sm" variant="outline" className="gap-1.5 text-destructive hover:text-destructive"
+                disabled={queue.length === 0 || clearing}
+                onClick={() => setShowClearConfirm(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Limpar Fila
+              </Button>
+            </div>
             {renderQueueTable([...pendingQueue, ...failedQueue])}
           </TabsContent>
         </Tabs>
