@@ -90,7 +90,7 @@ export default function WaitlistTracking() {
     queryKey: ['company-public-waitlist', slug],
     queryFn: async () => {
       const { data } = await supabase
-        .from('companies' as any)
+        .from('companies_public' as any)
         .select('name, logo_url')
         .eq('slug', slug!)
         .maybeSingle();
