@@ -54,6 +54,18 @@ export default function CompanyPublicPage() {
     enabled: !!slug,
   });
 
+  // Check if company is paused (not in public view but exists)
+  const { data: companyStatus } = useQuery({
+    queryKey: ['company-status', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_company_status_by_slug', { _slug: slug! });
+      if (error) throw error;
+      const rows = data as any[];
+      return rows && rows.length > 0 ? rows[0] : null;
+    },
+    enabled: !!slug && !company && !isLoading,
+  });
+
   const { trackStep } = useFunnelTracking(company?.id);
 
   // SEO meta tags
@@ -102,18 +114,6 @@ export default function CompanyPublicPage() {
     const dayIndex = new Date().getDay();
     return Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0] || '';
   }, []);
-
-  // Check if company is paused (not in public view but exists)
-  const { data: companyStatus } = useQuery({
-    queryKey: ['company-status', slug],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_company_status_by_slug', { _slug: slug! });
-      if (error) throw error;
-      const rows = data as any[];
-      return rows && rows.length > 0 ? rows[0] : null;
-    },
-    enabled: !!slug && !company && !isLoading,
-  });
 
   if (isLoading) {
     return (
