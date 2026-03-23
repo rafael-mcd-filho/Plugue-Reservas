@@ -73,14 +73,13 @@ export default function WaitlistTracking() {
     queryKey: ['waitlist-ahead', entry?.company_id, entry?.position],
     queryFn: async () => {
       if (!entry) return 0;
-      const { count, error } = await supabase
-        .from('waitlist' as any)
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', entry.company_id)
-        .eq('status', 'waiting')
-        .lt('position', entry.position);
+      const { data, error } = await supabase
+        .rpc('get_waitlist_ahead_count', {
+          _company_id: entry.company_id,
+          _position: entry.position,
+        });
       if (error) return 0;
-      return count || 0;
+      return (data as number) || 0;
     },
     enabled: !!entry && entry.status === 'waiting',
     refetchInterval: 5000,
