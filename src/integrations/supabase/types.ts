@@ -83,6 +83,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "automation_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       blocked_dates: {
@@ -122,6 +129,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "blocked_dates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
         ]
@@ -240,6 +254,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "company_whatsapp_instances_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       notifications: {
@@ -284,6 +305,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "notifications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       profiles: {
@@ -322,6 +350,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       reservation_funnel_logs: {
@@ -355,6 +390,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservation_funnel_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
         ]
@@ -426,6 +468,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "reservations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "reservations_table_id_fkey"
             columns: ["table_id"]
             isOneToOne: false
@@ -471,6 +520,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "restaurant_tables_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
         ]
@@ -524,6 +580,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_roles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
         ]
@@ -585,6 +648,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "waitlist_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       webhook_configs: {
@@ -624,6 +694,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_configs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
         ]
@@ -668,6 +745,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_message_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
             referencedColumns: ["id"]
           },
           {
@@ -734,6 +818,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "whatsapp_message_queue_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "whatsapp_message_queue_reservation_id_fkey"
             columns: ["reservation_id"]
             isOneToOne: false
@@ -744,9 +835,91 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      companies_public: {
+        Row: {
+          address: string | null
+          description: string | null
+          google_maps_url: string | null
+          id: string | null
+          instagram: string | null
+          logo_url: string | null
+          max_guests_per_slot: number | null
+          name: string | null
+          opening_hours: Json | null
+          payment_methods: Json | null
+          phone: string | null
+          reservation_duration: number | null
+          slug: string | null
+          status: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          address?: string | null
+          description?: string | null
+          google_maps_url?: string | null
+          id?: string | null
+          instagram?: string | null
+          logo_url?: string | null
+          max_guests_per_slot?: number | null
+          name?: string | null
+          opening_hours?: Json | null
+          payment_methods?: Json | null
+          phone?: string | null
+          reservation_duration?: number | null
+          slug?: string | null
+          status?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          address?: string | null
+          description?: string | null
+          google_maps_url?: string | null
+          id?: string | null
+          instagram?: string | null
+          logo_url?: string | null
+          max_guests_per_slot?: number | null
+          name?: string | null
+          opening_hours?: Json | null
+          payment_methods?: Json | null
+          phone?: string | null
+          reservation_duration?: number | null
+          slug?: string | null
+          status?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      get_reservation_count_by_slot: {
+        Args: { _company_id: string; _date: string; _time: string }
+        Returns: number
+      }
+      get_waitlist_by_tracking_code: {
+        Args: { _tracking_code: string }
+        Returns: {
+          called_at: string | null
+          company_id: string
+          created_at: string
+          expired_at: string | null
+          guest_name: string
+          guest_phone: string
+          id: string
+          notes: string | null
+          party_size: number
+          position: number
+          seated_at: string | null
+          status: string
+          tracking_code: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "waitlist"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
