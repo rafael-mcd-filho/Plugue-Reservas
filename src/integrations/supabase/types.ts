@@ -907,6 +907,11 @@ export type Database = {
           total_guests: number
         }[]
       }
+      get_waitlist_ahead_count: {
+        Args: { _company_id: string; _position: number }
+        Returns: number
+      }
+      get_waitlist_avg_wait: { Args: { _company_id: string }; Returns: number }
       get_waitlist_by_tracking_code: {
         Args: { _tracking_code: string }
         Returns: {

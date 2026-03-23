@@ -73,14 +73,13 @@ export default function WaitlistTracking() {
     queryKey: ['waitlist-ahead', entry?.company_id, entry?.position],
     queryFn: async () => {
       if (!entry) return 0;
-      const { count, error } = await supabase
-        .from('waitlist' as any)
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', entry.company_id)
-        .eq('status', 'waiting')
-        .lt('position', entry.position);
+      const { data, error } = await supabase
+        .rpc('get_waitlist_ahead_count', {
+          _company_id: entry.company_id,
+          _position: entry.position,
+        });
       if (error) return 0;
-      return count || 0;
+      return (data as number) || 0;
     },
     enabled: !!entry && entry.status === 'waiting',
     refetchInterval: 5000,
@@ -91,7 +90,7 @@ export default function WaitlistTracking() {
     queryKey: ['company-public-waitlist', slug],
     queryFn: async () => {
       const { data } = await supabase
-        .from('companies' as any)
+        .from('companies_public' as any)
         .select('name, logo_url')
         .eq('slug', slug!)
         .maybeSingle();
@@ -105,19 +104,10 @@ export default function WaitlistTracking() {
     queryKey: ['waitlist-avg-wait', entry?.company_id],
     queryFn: async () => {
       if (!entry) return 10;
-      const today = new Date().toISOString().split('T')[0];
       const { data, error } = await supabase
-        .from('waitlist' as any)
-        .select('created_at, seated_at')
-        .eq('company_id', entry.company_id)
-        .eq('status', 'seated')
-        .gte('created_at', today + 'T00:00:00')
-        .not('seated_at', 'is', null);
-      if (error || !data || data.length < 2) return 10; // fallback
-      const entries = data as any[];
-      const avgMs = entries.reduce((sum: number, e: any) =>
-        sum + (new Date(e.seated_at).getTime() - new Date(e.created_at).getTime()), 0) / entries.length;
-      return Math.max(5, Math.round(avgMs / 60000));
+        .rpc('get_waitlist_avg_wait', { _company_id: entry.company_id });
+      if (error) return 10;
+      return Math.max(5, (data as number) || 10);
     },
     enabled: !!entry && entry.status === 'waiting',
     refetchInterval: 30000,

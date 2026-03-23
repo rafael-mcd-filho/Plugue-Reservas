@@ -44,10 +44,9 @@ export default function CompanyPublicPage() {
     queryKey: ['company-public', slug],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('companies' as any)
+        .from('companies_public' as any)
         .select('*')
         .eq('slug', slug!)
-        .eq('status', 'active')
         .maybeSingle();
       if (error) throw error;
       return data as unknown as Company | null;
