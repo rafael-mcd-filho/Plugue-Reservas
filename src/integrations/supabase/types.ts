@@ -891,9 +891,21 @@ export type Database = {
       }
     }
     Functions: {
+      get_occupied_table_ids: {
+        Args: { _company_id: string; _date: string; _time: string }
+        Returns: string[]
+      }
       get_reservation_count_by_slot: {
         Args: { _company_id: string; _date: string; _time: string }
         Returns: number
+      }
+      get_slot_occupancy: {
+        Args: { _company_id: string; _date: string }
+        Returns: {
+          occupied_tables: number
+          time_slot: string
+          total_guests: number
+        }[]
       }
       get_waitlist_by_tracking_code: {
         Args: { _tracking_code: string }

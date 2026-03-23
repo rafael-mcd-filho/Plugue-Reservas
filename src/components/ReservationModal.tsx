@@ -221,16 +221,15 @@ export default function ReservationModal({
           .order('capacity', { ascending: true });
         if (tablesErr) throw tablesErr;
 
-        const { data: existingRes, error: resErr } = await supabase
-          .from('reservations' as any)
-          .select('table_id')
-          .eq('company_id', companyId)
-          .eq('date', dateStr)
-          .eq('time', selectedTime + ':00')
-          .neq('status', 'cancelled');
+        const { data: occupiedTableIds, error: resErr } = await supabase
+          .rpc('get_occupied_table_ids', {
+            _company_id: companyId,
+            _date: dateStr,
+            _time: selectedTime + ':00',
+          });
         if (resErr) throw resErr;
 
-        const occupiedIds = new Set((existingRes as any[]).map((r: any) => r.table_id));
+        const occupiedIds = new Set((occupiedTableIds as string[]) || []);
         const available = (allTables as any[])
           .filter((t: any) => !occupiedIds.has(t.id) && t.capacity >= selectedPartySize) as AvailableTable[];
         
