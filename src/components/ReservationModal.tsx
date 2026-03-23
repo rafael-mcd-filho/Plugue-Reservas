@@ -151,20 +151,20 @@ export default function ReservationModal({
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
         
-        const [{ data: allTables }, { data: reservations }] = await Promise.all([
+      const [{ data: allTables }, { data: slotOccupancy }] = await Promise.all([
           supabase.from('restaurant_tables' as any).select('id, capacity').eq('company_id', companyId).eq('status', 'available'),
-          supabase.from('reservations' as any).select('table_id, time, party_size').eq('company_id', companyId).eq('date', dateStr).neq('status', 'cancelled'),
+          supabase.rpc('get_slot_occupancy', { _company_id: companyId, _date: dateStr }),
         ]);
 
         const totalTables = (allTables as any[] || []).filter((t: any) => t.capacity >= selectedPartySize).length;
         
-        // Count occupied tables and total guests per time slot
+        // Count occupied tables and total guests per time slot from RPC
         const occupiedBySlot: Record<string, number> = {};
         const guestsBySlot: Record<string, number> = {};
-        (reservations as any[] || []).forEach((r: any) => {
-          const timeKey = r.time?.substring(0, 5) || '';
-          occupiedBySlot[timeKey] = (occupiedBySlot[timeKey] || 0) + 1;
-          guestsBySlot[timeKey] = (guestsBySlot[timeKey] || 0) + (r.party_size || 1);
+        ((slotOccupancy as any[]) || []).forEach((r: any) => {
+          const timeKey = r.time_slot?.substring(0, 5) || '';
+          occupiedBySlot[timeKey] = Number(r.occupied_tables) || 0;
+          guestsBySlot[timeKey] = Number(r.total_guests) || 0;
         });
 
         // Check blocked time ranges for this date
