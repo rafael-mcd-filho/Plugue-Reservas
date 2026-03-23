@@ -103,14 +103,6 @@ export default function CompanyPublicPage() {
     return Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0] || '';
   }, []);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   // Check if company is paused (not in public view but exists)
   const { data: companyStatus } = useQuery({
     queryKey: ['company-status', slug],
@@ -122,6 +114,14 @@ export default function CompanyPublicPage() {
     },
     enabled: !!slug && !company && !isLoading,
   });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (error || !company) {
     // Company exists but is paused
