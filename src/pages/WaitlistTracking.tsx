@@ -59,12 +59,10 @@ export default function WaitlistTracking() {
     queryKey: ['waitlist-tracking', code],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('waitlist' as any)
-        .select('*')
-        .eq('tracking_code', code!)
-        .maybeSingle();
+        .rpc('get_waitlist_by_tracking_code', { _tracking_code: code! });
       if (error) throw error;
-      return data as unknown as WaitlistEntry | null;
+      const rows = data as unknown as WaitlistEntry[];
+      return rows && rows.length > 0 ? rows[0] : null;
     },
     enabled: !!code,
     refetchInterval: 5000,
