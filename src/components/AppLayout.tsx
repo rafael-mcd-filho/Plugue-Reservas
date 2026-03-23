@@ -52,6 +52,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
         { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
         { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
+        { label: 'Saúde do Sistema', icon: Activity, path: '/saude', showFor: ['superadmin'] },
       ]
     : [];
 

@@ -105,6 +105,11 @@ const App = () => (
                 <AppLayout><SettingsPage /></AppLayout>
               </ProtectedRoute>
             } />
+            <Route path="/saude" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><SystemHealth /></AppLayout>
+              </ProtectedRoute>
+            } />
 
             {/* Public company page: /:slug */}
             <Route path="/:slug" element={<CompanyPublicPage />} />
