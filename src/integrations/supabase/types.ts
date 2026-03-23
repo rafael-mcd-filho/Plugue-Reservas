@@ -891,6 +891,15 @@ export type Database = {
       }
     }
     Functions: {
+      get_company_status_by_slug: {
+        Args: { _slug: string }
+        Returns: {
+          name: string
+          phone: string
+          status: string
+          whatsapp: string
+        }[]
+      }
       get_occupied_table_ids: {
         Args: { _company_id: string; _date: string; _time: string }
         Returns: string[]

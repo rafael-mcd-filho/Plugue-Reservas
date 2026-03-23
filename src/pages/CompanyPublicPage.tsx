@@ -103,6 +103,18 @@ export default function CompanyPublicPage() {
     return Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0] || '';
   }, []);
 
+  // Check if company is paused (not in public view but exists)
+  const { data: companyStatus } = useQuery({
+    queryKey: ['company-status', slug],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_company_status_by_slug', { _slug: slug! });
+      if (error) throw error;
+      const rows = data as any[];
+      return rows && rows.length > 0 ? rows[0] : null;
+    },
+    enabled: !!slug && !company && !isLoading,
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -112,6 +124,51 @@ export default function CompanyPublicPage() {
   }
 
   if (error || !company) {
+    // Company exists but is paused
+    if (companyStatus && companyStatus.status === 'paused') {
+      const contactWhatsapp = companyStatus.whatsapp
+        ? `https://wa.me/${companyStatus.whatsapp.replace(/\D/g, '')}`
+        : null;
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-[#130D06] to-[#2E1800] gap-6 p-6 text-center">
+          <div className="bg-card/10 backdrop-blur-sm border border-border/20 rounded-2xl p-8 max-w-md w-full">
+            <Clock className="h-12 w-12 mx-auto mb-4 text-amber-400" />
+            <h1 className="text-2xl font-bold text-white mb-2">{companyStatus.name}</h1>
+            <p className="text-white/70 mb-6">
+              Este restaurante está temporariamente indisponível para novas reservas.
+            </p>
+            <div className="space-y-3">
+              {companyStatus.phone && (
+                <a
+                  href={`tel:${companyStatus.phone}`}
+                  className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <Phone className="h-4 w-4" />
+                  Ligar: {companyStatus.phone}
+                </a>
+              )}
+              {contactWhatsapp && (
+                <a
+                  href={contactWhatsapp}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Falar pelo WhatsApp
+                </a>
+              )}
+            </div>
+            {!companyStatus.phone && !contactWhatsapp && (
+              <p className="text-white/50 text-sm">
+                Entre em contato diretamente com o estabelecimento para mais informações.
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background gap-4">
         <h1 className="text-2xl font-bold text-foreground">Página não encontrada</h1>
