@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot, Contact, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, UtensilsCrossed, Grid3X3, Menu, Building2, LogOut, User, Settings, Users, BarChart3, Bot, Contact, ClipboardList, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Empresas', icon: Building2, path: '/empresas', showFor: ['superadmin'] },
         { label: 'Usuários', icon: Users, path: '/usuarios', showFor: ['superadmin'] },
         { label: 'Configurações', icon: Settings, path: '/configuracoes', showFor: ['superadmin'] },
+        { label: 'Saúde do Sistema', icon: Activity, path: '/saude', showFor: ['superadmin'] },
       ]
     : [];
 

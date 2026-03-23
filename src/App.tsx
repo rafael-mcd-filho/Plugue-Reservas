@@ -26,6 +26,7 @@ import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AccessDenied from "@/pages/AccessDenied";
 import CompanyPublicPage from "@/pages/CompanyPublicPage";
+import SystemHealth from "@/pages/SystemHealth";
 import DevToolbar from "@/components/DevToolbar";
 import NotFound from "./pages/NotFound";
 import { supabase } from "@/integrations/supabase/client";
@@ -102,6 +103,11 @@ const App = () => (
             <Route path="/configuracoes" element={
               <ProtectedRoute allowedRoles={['superadmin']}>
                 <AppLayout><SettingsPage /></AppLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/saude" element={
+              <ProtectedRoute allowedRoles={['superadmin']}>
+                <AppLayout><SystemHealth /></AppLayout>
               </ProtectedRoute>
             } />
 

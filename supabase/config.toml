@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.process-message-queue]
 verify_jwt = false
+
+[functions.system-health]
+verify_jwt = false
