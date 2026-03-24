@@ -30,6 +30,8 @@ interface ReservationModalProps {
   openingHours: OpeningHour[];
   reservationDuration?: number;
   maxGuestsPerSlot?: number;
+  initialDate?: string | null;
+  initialPartySize?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
 }
 
@@ -85,7 +87,16 @@ interface ConfirmedReservation {
 }
 
 export default function ReservationModal({
-  open, onOpenChange, companyId, companyName, openingHours, reservationDuration = 30, maxGuestsPerSlot = 0, onStepChange
+  open,
+  onOpenChange,
+  companyId,
+  companyName,
+  openingHours,
+  reservationDuration = 30,
+  maxGuestsPerSlot = 0,
+  initialDate,
+  initialPartySize = 2,
+  onStepChange,
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
@@ -103,7 +114,48 @@ export default function ReservationModal({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
 
-  // Fetch blocked dates for this company
+  useEffect(() => {
+    if (!open) return;
+
+    setStep(1);
+    setSelectedDate(initialDate ? new Date(`${initialDate}T12:00:00`) : undefined);
+    setSelectedTime('');
+    setSelectedPartySize(initialPartySize);
+    setSelectedTableId('');
+    setShowCalendar(false);
+    setAvailableTables([]);
+    setSlotAvailability({});
+    setConfirmedReservation(null);
+    setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
+  }, [initialDate, initialPartySize, open]);
+
+  useEffect(() => {
+    if (!open || step !== 2 || !selectedTime) return;
+    onStepChange?.('time_select');
+  }, [onStepChange, open, selectedTime, step]);
+
+  useEffect(() => {
+    if (!open || step !== 3) return;
+    onStepChange?.('form_fill');
+  }, [onStepChange, open, step]);
+
+  const { data: allTables = [], isLoading: tablesLoading } = useQuery({
+    queryKey: ['public-available-tables', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('restaurant_tables' as any)
+        .select('id, number, capacity, section')
+        .eq('company_id', companyId)
+        .eq('status', 'available')
+        .order('capacity', { ascending: true });
+      if (error) throw error;
+      return (data as any[]) as AvailableTable[];
+    },
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+  });
+
   const { data: blockedDates = [] } = useQuery({
     queryKey: ['blocked-dates-public', companyId],
     queryFn: async () => {
@@ -144,19 +196,23 @@ export default function ReservationModal({
 
   // Fetch slot availability when date changes (for step 2 vacancy indicators)
   useEffect(() => {
-    if (!selectedDate || !companyId) return;
+    if (!selectedDate || !companyId || timeSlots.length === 0) {
+      setSlotAvailability({});
+      return;
+    }
+    if (tablesLoading) return;
     
     const fetchSlotAvailability = async () => {
       setLoadingSlots(true);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        
-      const [{ data: allTables }, { data: slotOccupancy }] = await Promise.all([
-          supabase.from('restaurant_tables' as any).select('id, capacity').eq('company_id', companyId).eq('status', 'available'),
-          supabase.rpc('get_slot_occupancy', { _company_id: companyId, _date: dateStr }),
-        ]);
+        const { data: slotOccupancy, error: slotOccupancyError } = await supabase.rpc('get_slot_occupancy', {
+          _company_id: companyId,
+          _date: dateStr,
+        });
+        if (slotOccupancyError) throw slotOccupancyError;
 
-        const totalTables = (allTables as any[] || []).filter((t: any) => t.capacity >= selectedPartySize).length;
+        const totalTables = allTables.filter((table) => table.capacity >= selectedPartySize).length;
         
         // Count occupied tables and total guests per time slot from RPC
         const occupiedBySlot: Record<string, number> = {};
@@ -202,24 +258,23 @@ export default function ReservationModal({
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, allTables, tablesLoading]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) return;
+    if (tablesLoading) return;
+
+    if (allTables.length === 0) {
+      setAvailableTables([]);
+      setSelectedTableId('');
+      return;
+    }
     
     const fetchAndAssignTable = async () => {
       setLoadingTables(true);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        
-        const { data: allTables, error: tablesErr } = await supabase
-          .from('restaurant_tables' as any)
-          .select('id, number, capacity, section')
-          .eq('company_id', companyId)
-          .eq('status', 'available')
-          .order('capacity', { ascending: true });
-        if (tablesErr) throw tablesErr;
 
         const { data: occupiedTableIds, error: resErr } = await supabase
           .rpc('get_occupied_table_ids', {
@@ -230,8 +285,8 @@ export default function ReservationModal({
         if (resErr) throw resErr;
 
         const occupiedIds = new Set((occupiedTableIds as string[]) || []);
-        const available = (allTables as any[])
-          .filter((t: any) => !occupiedIds.has(t.id) && t.capacity >= selectedPartySize) as AvailableTable[];
+        const available = allTables
+          .filter((table) => !occupiedIds.has(table.id) && table.capacity >= selectedPartySize);
         
         setAvailableTables(available);
         // Auto-select the smallest table that fits the party (best-fit)
@@ -250,7 +305,7 @@ export default function ReservationModal({
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables, tablesLoading]);
 
   const handleReset = () => {
     setStep(1);
@@ -259,6 +314,8 @@ export default function ReservationModal({
     setSelectedPartySize(2);
     setSelectedTableId('');
     setShowCalendar(false);
+    setAvailableTables([]);
+    setSlotAvailability({});
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
   };
@@ -306,7 +363,13 @@ export default function ReservationModal({
 
       // Fire reservation events
       supabase.functions.invoke('reservation-events', {
-        body: { event: 'reservation_created', reservation: inserted },
+        body: {
+          event: 'reservation_created',
+          reservation: {
+            id: (inserted as any).id,
+            visitor_id: (inserted as any).visitor_id,
+          },
+        },
       }).catch(err => console.warn('Reservation events error:', err));
 
       const tableName = availableTables.find(t => t.id === selectedTableId)?.number?.toString() || '';
@@ -522,13 +585,13 @@ export default function ReservationModal({
             {selectedTime && !loadingTables && availableTables.length === 0 && (
               <p className="text-center text-sm text-destructive py-2">Nenhuma mesa disponível para este horário e número de pessoas.</p>
             )}
-            {selectedTime && loadingTables && (
+            {selectedTime && (loadingTables || tablesLoading) && (
               <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             )}
 
             <div className="space-y-1">
-              <Button className="w-full" disabled={!selectedTime || !selectedTableId || loadingTables}
-                onClick={() => { setStep(3); onStepChange?.('time_select'); onStepChange?.('form_fill'); }}>
+              <Button className="w-full" disabled={!selectedTime || !selectedTableId || loadingTables || tablesLoading}
+                onClick={() => { setStep(3); }}>
                 Continuar <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
               {!selectedTime && (
@@ -557,16 +620,15 @@ export default function ReservationModal({
                     onBlur={async () => {
                       if (form.whatsapp.replace(/\D/g, '').length >= 10) {
                         try {
-                          const { data } = await supabase
-                            .from('reservations' as any)
-                            .select('guest_name, guest_email, guest_birthdate')
-                            .eq('company_id', companyId)
-                            .eq('guest_phone', form.whatsapp)
-                            .order('created_at', { ascending: false })
-                            .limit(1)
-                            .maybeSingle();
-                          if (data) {
-                            const d = data as any;
+                          const { data, error } = await (supabase.rpc as any)('get_public_reservation_prefill', {
+                            _company_id: companyId,
+                            _visitor_id: getVisitorId(),
+                            _guest_phone: form.whatsapp,
+                          });
+                          if (error) throw error;
+                          const row = Array.isArray(data) ? data[0] : data;
+                          if (row) {
+                            const d = row as any;
                             setForm(f => ({
                               ...f,
                               name: f.name || d.guest_name || '',
