@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
+const FunnelDebugPanel = lazy(() => import('@/components/FunnelDebugPanel'));
 
 interface OpeningHour {
   day: string;
@@ -674,6 +675,10 @@ export default function CompanyPublicPage() {
           </Button>
         </div>
       </div>
+
+      <Suspense fallback={null}>
+        <FunnelDebugPanel />
+      </Suspense>
 
       {showReservation && (
         <Suspense fallback={

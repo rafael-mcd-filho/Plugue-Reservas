@@ -27,6 +27,36 @@ const MAX_PENDING_STEPS = 50;
 const RPC_TIMEOUT_MS = 8000;
 const MAX_RETRY_COUNT = 5;
 
+// ---------------------------------------------------------------------------
+// Debug event bus — emite eventos para o FunnelDebugPanel quando ativo.
+// Não tem impacto em produção (zero overhead quando nenhum listener ativo).
+// ---------------------------------------------------------------------------
+export type FunnelDebugEventType = 'queued' | 'sent' | 'failed' | 'retry' | 'discarded';
+
+export interface FunnelDebugEvent {
+  type: FunnelDebugEventType;
+  step: FunnelStep;
+  date: string;
+  retryCount?: number;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+function emitDebug(type: FunnelDebugEventType, payload: FunnelPayload, extra?: { retryCount?: number; errorMessage?: string }): void {
+  try {
+    window.dispatchEvent(new CustomEvent<FunnelDebugEvent>('funnel:debug', {
+      detail: {
+        type,
+        step: payload.step,
+        date: payload.date,
+        retryCount: extra?.retryCount,
+        errorMessage: extra?.errorMessage,
+        timestamp: new Date().toISOString(),
+      },
+    }));
+  } catch { /* silencioso — debug não pode quebrar produção */ }
+}
+
 interface FunnelPayload {
   company_id: string;
   visitor_id: string;
@@ -177,6 +207,7 @@ export function useFunnelTracking(companyId: string | undefined) {
         const retryCount = payload.retryCount ?? 0;
         if (retryCount >= MAX_RETRY_COUNT) {
           console.warn(`[Funnel] Max retries reached for step "${payload.step}", discarding.`);
+          emitDebug('discarded', payload, { retryCount });
           removePendingStep(payload);
           continue;
         }
@@ -186,12 +217,15 @@ export function useFunnelTracking(companyId: string | undefined) {
         try {
           await sendFunnelStep(payload);
           logged.current.add(payloadKey);
+          emitDebug('sent', payload);
           removePendingStep(payload);
-        } catch {
+        } catch (err: unknown) {
           const nextRetry = retryCount + 1;
+          const errorMessage = err instanceof Error ? err.message : String(err);
           updateRetryCount(payload, nextRetry);
           const delay = getBackoffDelayMs(nextRetry);
           console.warn(`[Funnel] Retry ${nextRetry}/${MAX_RETRY_COUNT} for step "${payload.step}" in ${delay}ms`);
+          emitDebug('retry', payload, { retryCount: nextRetry, errorMessage });
           scheduleFlush(delay);
         } finally {
           inFlight.current.delete(payloadKey);
@@ -238,6 +272,7 @@ export function useFunnelTracking(companyId: string | undefined) {
     if (logged.current.has(payloadKey) || inFlight.current.has(payloadKey)) return;
 
     queuePendingStep(payload);
+    emitDebug('queued', payload);
     await flushPendingSteps();
   }, [companyId, flushPendingSteps]);
 

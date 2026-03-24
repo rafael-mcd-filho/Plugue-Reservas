@@ -43,8 +43,8 @@ export function useFunnelData(companyId?: string, startDate?: Date, endDate?: Da
         return { step, count: uniqueVisitors.size };
       });
     },
-    // Só executa quando há algum companyId definido (evita query desnecessária)
-    enabled: companyId !== undefined,
+    // companyId undefined = visão global (todas as empresas) — query sempre ativa
+    enabled: true,
     // Atualiza a cada 30s, mas não quando a aba está oculta (economiza bateria)
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
