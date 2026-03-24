@@ -1,14 +1,23 @@
 import { useState, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, isBefore, startOfDay, addDays } from 'date-fns';
+import { format, endOfMonth, eachDayOfInterval, isToday, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Search, Pencil, Trash2, Loader2, CalendarIcon, Users, Clock, X } from 'lucide-react';
+import { Search, Pencil, Trash2, CalendarIcon, Users, Clock, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -16,6 +25,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useCompanySlug } from '@/contexts/CompanySlugContext';
 
 type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'no-show';
 
@@ -36,7 +46,7 @@ interface Reservation {
 }
 
 export default function Reservations() {
-  const { slug } = useParams<{ slug: string }>();
+  const { companyId } = useCompanySlug();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -46,47 +56,48 @@ export default function Reservations() {
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [editStatus, setEditStatus] = useState<ReservationStatus>('confirmed');
   const [dayModal, setDayModal] = useState<string | null>(null);
-
-  const { data: company } = useQuery({
-    queryKey: ['company-for-reservations', slug],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies' as any).select('id').eq('slug', slug!).maybeSingle();
-      if (error) throw error;
-      return data as any;
-    },
-    enabled: !!slug,
-  });
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: reservations = [], isLoading } = useQuery({
-    queryKey: ['reservations', company?.id],
+    queryKey: ['reservations', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('reservations' as any)
         .select('*')
-        .eq('company_id', company.id)
+        .eq('company_id', companyId)
         .order('date', { ascending: true })
         .order('time', { ascending: true });
       if (error) throw error;
       return (data as any[]) as Reservation[];
     },
-    enabled: !!company?.id,
+    enabled: !!companyId,
   });
 
   const { data: tables = [] } = useQuery({
-    queryKey: ['tables-for-reservations', company?.id],
+    queryKey: ['tables-for-reservations', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('restaurant_tables' as any)
         .select('id, number')
-        .eq('company_id', company.id);
+        .eq('company_id', companyId);
       if (error) throw error;
       return (data as any[]);
     },
-    enabled: !!company?.id,
+    enabled: !!companyId,
   });
 
   const tableMap = new Map(tables.map((t: any) => [t.id, t.number]));
+  const reservationsByDate = useMemo(() => {
+    const map = new Map<string, Reservation[]>();
+
+    for (const reservation of reservations) {
+      const current = map.get(reservation.date) ?? [];
+      current.push(reservation);
+      map.set(reservation.date, current);
+    }
+
+    return map;
+  }, [reservations]);
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: ReservationStatus }) => {
@@ -100,14 +111,14 @@ export default function Reservations() {
       return updated;
     },
     onSuccess: (updated) => {
-      qc.invalidateQueries({ queryKey: ['reservations', company?.id] });
+      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
       toast.success('Status atualizado!');
       setEditDialog(false);
 
       // Fire webhook events - fire and forget
       const event = (updated as any).status === 'cancelled' ? 'reservation_cancelled' : 'status_changed';
       supabase.functions.invoke('reservation-events', {
-        body: { event, reservation: updated },
+        body: { event, reservation: { id: (updated as any).id } },
       }).catch(err => console.warn('Reservation events error:', err));
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
@@ -120,7 +131,7 @@ export default function Reservations() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['reservations', company?.id] });
+      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
       toast.success('Reserva removida!');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
@@ -167,7 +178,7 @@ export default function Reservations() {
     
     return days.map(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
-      const dayRes = reservations.filter(r => r.date === dateStr && r.status !== 'cancelled');
+      const dayRes = (reservationsByDate.get(dateStr) ?? []).filter(r => r.status !== 'cancelled');
       return {
         date: day,
         dateStr,
@@ -175,14 +186,13 @@ export default function Reservations() {
         totalGuests: dayRes.reduce((sum, r) => sum + r.party_size, 0),
       };
     });
-  }, [reservations]);
+  }, [reservationsByDate]);
 
   const dayModalReservations = useMemo(() => {
     if (!dayModal) return [];
-    return reservations
-      .filter(r => r.date === dayModal)
+    return (reservationsByDate.get(dayModal) ?? [])
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [reservations, dayModal]);
+  }, [reservationsByDate, dayModal]);
 
   const openEdit = (r: Reservation) => {
     setEditingRes(r);
@@ -198,8 +208,12 @@ export default function Reservations() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Reservas</h1>
-        <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <div className="h-9 w-40 animate-pulse rounded-lg bg-muted" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-3">
+          {Array.from({ length: 14 }).map((_, i) => (
+            <div key={i} className="h-28 animate-pulse rounded-xl bg-muted" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -313,13 +327,13 @@ export default function Reservations() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left">
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Data/Hora</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Cliente</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Pessoas</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Mesa</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Ocasião</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Status</th>
-                      <th className="px-6 py-4 font-medium text-muted-foreground">Ações</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Data/Hora</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Cliente</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Pessoas</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Mesa</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Ocasião</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Status</th>
+                      <th scope="col" className="px-6 py-4 font-medium text-muted-foreground">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -348,11 +362,12 @@ export default function Reservations() {
                           <td className="px-6 py-4"><ReservationStatusBadge status={r.status} /></td>
                           <td className="px-6 py-4">
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(r)}>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Editar reserva" onClick={() => openEdit(r)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => deleteMutation.mutate(r.id)}>
+                                aria-label="Excluir reserva"
+                                onClick={() => setDeleteConfirmId(r.id)}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
@@ -396,6 +411,30 @@ export default function Reservations() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={open => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir reserva?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. A reserva será removida permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId);
+                setDeleteConfirmId(null);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Day Detail Modal */}
       <Dialog open={!!dayModal} onOpenChange={v => { if (!v) setDayModal(null); }}>

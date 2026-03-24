@@ -1,27 +1,30 @@
-import { useState, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { subDays, format } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { subDays, format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle, Loader2,
-  ArrowUpRight, ArrowDownRight, Minus, ClipboardList,
+  CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle,
+  ArrowUpRight, ArrowDownRight, Minus, ClipboardList, Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import ReservationHeatmap from '@/components/ReservationHeatmap';
+import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
+import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 
 const PERIOD_OPTIONS = [
   { value: '7', label: 'Últimos 7 dias' },
@@ -38,25 +41,39 @@ const PIE_COLORS = [
   'hsl(0, 0%, 35%)',
 ];
 
-function VariationBadge({ current, previous }: { current: number; previous: number }) {
+function VariationBadge({
+  current,
+  previous,
+  goodWhenDecreases = false,
+}: {
+  current: number;
+  previous: number;
+  goodWhenDecreases?: boolean;
+}) {
   if (previous === 0 && current === 0) return null;
-  
-  let pct: number;
+
   if (previous === 0) {
-    pct = 100;
-  } else {
-    pct = Math.round(((current - previous) / previous) * 100);
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+        <ArrowUpRight className="h-2.5 w-2.5" />
+        Novo
+      </span>
+    );
   }
+
+  const pct = Math.round(((current - previous) / previous) * 100);
 
   const isPositive = pct > 0;
   const isNeutral = pct === 0;
+  const isGood = goodWhenDecreases ? pct < 0 : pct > 0;
+  const isBad = !isNeutral && !isGood;
 
   return (
     <span className={cn(
       "inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
       isNeutral && "text-muted-foreground bg-muted",
-      isPositive && "text-emerald-700 bg-emerald-100",
-      !isPositive && !isNeutral && "text-red-700 bg-red-100",
+      isGood && "text-emerald-700 bg-emerald-100",
+      isBad && "text-red-700 bg-red-100",
     )}>
       {isNeutral ? <Minus className="h-2.5 w-2.5" /> : isPositive ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
       {Math.abs(pct)}%
@@ -79,8 +96,9 @@ const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent
 };
 
 export default function Dashboard() {
-  const { slug } = useParams<{ slug: string }>();
-  const isCompanyContext = !!slug;
+  const companyContext = useMaybeCompanySlug();
+  const isCompanyContext = !!companyContext;
+  const queryClient = useQueryClient();
 
   const [companyId, setCompanyId] = useState<string>('all');
   const [period, setPeriod] = useState('30');
@@ -99,20 +117,9 @@ export default function Dashboard() {
     },
     enabled: !isCompanyContext,
   });
-
-  const { data: realCompany } = useQuery({
-    queryKey: ['company-id-from-slug', slug],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies' as any)
-        .select('id')
-        .eq('slug', slug!)
-        .maybeSingle();
-      if (error) throw error;
-      return data as any;
-    },
-    enabled: !!slug,
-  });
+  const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(
+    isCompanyContext ? companyContext?.companyId : undefined,
+  );
 
   const { startDate, endDate } = useMemo(() => {
     if (period === 'custom' && customStart && customEnd) {
@@ -122,15 +129,77 @@ export default function Dashboard() {
     return { startDate: subDays(new Date(), days - 1), endDate: new Date() };
   }, [period, customStart, customEnd]);
 
-  const effectiveCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
+  const effectiveCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
 
-  const { dailyStats, totals, prevTotals, waitlistTotals, heatmapData, isLoading: dashLoading } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  const {
+    dailyStats,
+    totals,
+    prevTotals,
+    waitlistTotals,
+    heatmapData,
+    isLoading: dashLoading,
+    isFetching: dashFetching,
+    lastUpdatedAt: dashboardUpdatedAt,
+  } = useDashboardData(effectiveCompanyId, startDate, endDate);
 
-  const funnelCompanyId = isCompanyContext ? realCompany?.id : (companyId !== 'all' ? companyId : undefined);
-  const { data: funnelData = [] } = useFunnelData(funnelCompanyId, startDate, endDate);
+  const funnelCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
+  const {
+    data: funnelData = [],
+    dataUpdatedAt: funnelUpdatedAt = 0,
+    isFetching: funnelFetching,
+  } = useFunnelData(funnelCompanyId, startDate, endDate);
 
-  const avgPerDay = dailyStats.length > 0 ? Math.round(totals.reservations / dailyStats.length) : 0;
-  const prevAvgPerDay = dailyStats.length > 0 ? Math.round(prevTotals.reservations / dailyStats.length) : 0;
+  useEffect(() => {
+    const channel = supabase
+      .channel(`dashboard-live:${effectiveCompanyId ?? 'all'}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reservations',
+          ...(effectiveCompanyId ? { filter: `company_id=eq.${effectiveCompanyId}` } : {}),
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['dashboard-reservations'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-prev'] });
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'waitlist',
+          ...(effectiveCompanyId ? { filter: `company_id=eq.${effectiveCompanyId}` } : {}),
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reservation_funnel_logs',
+          ...(funnelCompanyId ? { filter: `company_id=eq.${funnelCompanyId}` } : {}),
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['funnel-data'] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient, effectiveCompanyId, funnelCompanyId]);
+
+  const avgPerDayRaw = dailyStats.length > 0 ? totals.reservations / dailyStats.length : 0;
+  const prevAvgPerDayRaw = dailyStats.length > 0 ? prevTotals.reservations / dailyStats.length : 0;
+  const avgPerDay = Math.round(avgPerDayRaw);
+  const prevAvgPerDay = Math.round(prevAvgPerDayRaw);
 
   const pieData = [
     { name: 'Concluídas', value: totals.completed },
@@ -143,17 +212,47 @@ export default function Dashboard() {
     { label: 'Total Reservas', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
     { label: 'Total Pessoas', value: totals.totalGuests, prev: prevTotals.totalGuests, icon: Users, color: 'text-primary' },
     { label: 'Concluídas', value: totals.completed, prev: prevTotals.completed, icon: CheckCircle, color: 'text-accent' },
-    { label: 'Cancelamentos', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive' },
-    { label: 'Média/Dia', value: avgPerDay, prev: prevAvgPerDay, icon: TrendingUp, color: 'text-primary' },
+    { label: 'Cancelamentos', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive', goodWhenDecreases: true },
+    { label: 'Média/Dia', value: avgPerDay, prev: prevAvgPerDay, compareCurrent: avgPerDayRaw, comparePrevious: prevAvgPerDayRaw, icon: TrendingUp, color: 'text-primary' },
   ];
+  const advancedReportsEnabled = !isCompanyContext || !!featureFlags?.features.advanced_reports;
+  const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0);
+  const hasFreshnessData = lastDataSyncAt > 0;
+  const dataLagMs = hasFreshnessData ? Date.now() - lastDataSyncAt : 0;
+  const dataIsStale = hasFreshnessData && dataLagMs > 45000;
+  const dataIsSyncing = dashFetching || funnelFetching;
+  const freshnessLabel = dataIsSyncing ? 'Sincronizando' : dataIsStale ? 'Dados com atraso' : 'Tempo real';
 
-  const periodLabel = period === 'custom' ? 'período anterior' : period === '7' ? 'semana passada' : period === '15' ? '15 dias anteriores' : period === '90' ? 'trimestre anterior' : 'mês passado';
+  const periodLabel = period === 'custom' ? 'periodo anterior' : `${Math.max(dailyStats.length, 1)} dias anteriores`;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant={dataIsStale ? 'destructive' : dataIsSyncing ? 'secondary' : 'outline'} className="gap-1.5">
+                    <Info className="h-3.5 w-3.5" />
+                    {freshnessLabel}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-sm">
+                  <p>
+                    {hasFreshnessData
+                      ? `Última sincronização ${formatDistanceToNow(new Date(lastDataSyncAt), { addSuffix: true, locale: ptBR })}.`
+                      : 'Aguardando a primeira sincronização.'}
+                  </p>
+                  <p className="mt-1">
+                    O dashboard usa atualização em tempo real via Supabase Realtime e polling a cada 30 segundos.
+                    {dataIsStale ? ' Pode haver um atraso momentâneo na exibição.' : ''}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <p className="text-muted-foreground mt-1">Análise de reservas em tempo real</p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -211,10 +310,32 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {dashLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+      {dashLoading || (isCompanyContext && featureFlagsLoading) ? (
+        <>
+          {/* KPI skeleton */}
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 animate-pulse rounded-xl bg-muted" />
+                  <div className="space-y-2">
+                    <div className="h-6 w-12 animate-pulse rounded bg-muted" />
+                    <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Chart skeleton */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2 h-72 animate-pulse rounded-xl border border-border bg-muted" />
+            <div className="h-72 animate-pulse rounded-xl border border-border bg-muted" />
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="h-56 animate-pulse rounded-xl border border-border bg-muted" />
+            <div className="h-56 animate-pulse rounded-xl border border-border bg-muted" />
+          </div>
+        </>
       ) : (
         <>
           {/* KPI Cards */}
@@ -228,7 +349,11 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
-                      <VariationBadge current={stat.value} previous={stat.prev} />
+                      <VariationBadge
+                        current={stat.compareCurrent ?? stat.value}
+                        previous={stat.comparePrevious ?? stat.prev}
+                        goodWhenDecreases={stat.goodWhenDecreases}
+                      />
                     </div>
                     <p className="text-xs text-muted-foreground">{stat.label}</p>
                     <p className="text-[10px] text-muted-foreground/60">vs. {periodLabel}</p>
@@ -287,6 +412,8 @@ export default function Dashboard() {
               </Card>
             </div>
           )}
+          {advancedReportsEnabled ? (
+            <>
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="border border-border shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">
@@ -310,7 +437,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
+                      <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Area type="monotone" dataKey="reservations" name="Total" stroke="hsl(28, 85%, 55%)" fill="url(#colorRes)" strokeWidth={2} />
                       <Area type="monotone" dataKey="completed" name="Concluídas" stroke="hsl(28, 90%, 27%)" fill="url(#colorComp)" strokeWidth={2} />
@@ -347,7 +474,7 @@ export default function Dashboard() {
                             <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip />
+                        <RechartsTooltip />
                         <Legend />
                       </PieChart>
                     </ResponsiveContainer>
@@ -371,7 +498,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
+                      <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="completed" name="Concluídas" fill="hsl(28, 90%, 27%)" radius={[4, 4, 0, 0]} />
@@ -393,7 +520,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                       <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
+                      <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="noShows" name="No-Shows" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />
@@ -413,6 +540,20 @@ export default function Dashboard() {
               description={isCompanyContext ? 'Conversão por etapa do processo de reserva' : 'Conversão agregada de todas as unidades'}
             />
           </div>
+            </>
+          ) : (
+            <Card className="border border-amber-200 bg-amber-50 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Relatório avançado bloqueado</CardTitle>
+                <CardDescription>Esta empresa ainda não tem acesso aos gráficos detalhados, heatmap e funil.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-amber-900">
+                  Os indicadores básicos continuam disponíveis acima. Libere a feature no perfil da empresa para habilitar a análise avançada.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>

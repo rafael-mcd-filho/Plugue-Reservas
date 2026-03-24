@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { getVisitorId } from '@/hooks/useFunnelTracking';
 
 interface OpeningHour {
   day: string;
@@ -56,12 +57,6 @@ function generateTimeSlots(open: string, close: string, interval: number = 30): 
   return slots;
 }
 
-function getVisitorId(): string {
-  const key = 'rv_visitor_id';
-  let id = localStorage.getItem(key);
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id); }
-  return id;
-}
 
 interface AvailableTable {
   id: string;
@@ -387,7 +382,13 @@ export default function ReservationModal({
       onStepChange?.('completed');
       setStep(4);
     } catch (err: any) {
-      toast.error(`Erro ao criar reserva: ${err.message}`);
+      const message: string = err?.message ?? '';
+      if (message.includes('Muitas tentativas')) {
+        toast.error(message);
+      } else {
+        toast.error('Não foi possível criar a reserva. Tente novamente em instantes.');
+        console.error('[ReservationModal] Submit error:', err);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -443,7 +444,7 @@ export default function ReservationModal({
             {step === 4 ? 'Reserva Confirmada!' : `Reservar Mesa — ${companyName}`}
           </DialogTitle>
           {step !== 4 && (
-            <div className="flex items-center justify-center gap-2 pt-2">
+            <div className="flex items-center justify-center gap-2 pt-2" role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={3} aria-label={`Passo ${step} de 3`}>
               {[1, 2, 3].map(s => (
                 <div
                   key={s}
@@ -466,9 +467,11 @@ export default function ReservationModal({
               <Label className="text-sm">Pessoas:</Label>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
+                  aria-label="Diminuir número de pessoas"
                   onClick={() => setSelectedPartySize(Math.max(1, selectedPartySize - 1))}>-</Button>
-                <span className="w-8 text-center font-semibold">{selectedPartySize}</span>
+                <span className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
+                  aria-label="Aumentar número de pessoas"
                   onClick={() => setSelectedPartySize(Math.min(20, selectedPartySize + 1))}>+</Button>
               </div>
             </div>
@@ -616,7 +619,7 @@ export default function ReservationModal({
                 <Label className="text-sm font-medium">WhatsApp *</Label>
                 <div className="flex gap-2">
                   <Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
-                    placeholder="(11) 99999-9999" required maxLength={20}
+                    placeholder="(11) 99999-9999" required maxLength={20} autoComplete="tel" inputMode="tel"
                     onBlur={async () => {
                       if (form.whatsapp.replace(/\D/g, '').length >= 10) {
                         try {
@@ -647,12 +650,12 @@ export default function ReservationModal({
               <div>
                 <Label className="text-sm font-medium">Nome Completo *</Label>
                 <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Seu nome" required maxLength={100} />
+                  placeholder="Seu nome" required maxLength={100} autoComplete="name" />
               </div>
               <div>
                 <Label className="text-sm font-medium">E-mail</Label>
                 <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="seu@email.com" maxLength={255} />
+                  placeholder="seu@email.com" maxLength={255} autoComplete="email" inputMode="email" />
               </div>
               <div>
                 <Label className="text-sm font-medium">Data de Nascimento</Label>
@@ -718,8 +721,10 @@ export default function ReservationModal({
             </div>
 
             <p className="text-xs text-muted-foreground text-center">
-              Ao continuar você concorda com nossa{' '}
-              <span className="underline text-primary cursor-pointer">Termos e Condições</span>
+              Ao continuar você concorda com nossos{' '}
+              <button type="button" className="underline text-primary hover:text-primary/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+                Termos e Condições
+              </button>
             </p>
 
             <Button type="submit" className="w-full py-5 text-base rounded-xl" disabled={submitting}>

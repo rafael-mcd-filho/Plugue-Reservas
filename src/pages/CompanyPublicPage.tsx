@@ -1,65 +1,148 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { addDays, format, isToday, isTomorrow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import {
-  Loader2, MapPin, Phone, Instagram, MessageCircle, CalendarCheck,
-  LogIn, Clock, CreditCard, Star, FileText, ExternalLink, Users,
-  Banknote, Smartphone, QrCode, Wallet,
+  Banknote,
+  CalendarCheck,
+  Clock,
+  CreditCard,
+  ExternalLink,
+  Loader2,
+  MapPin,
+  Phone,
+  QrCode,
+  Wallet,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
-import type { Company } from '@/hooks/useCompanies';
-import ReservationModal from '@/components/ReservationModal';
+import { useAuth } from '@/contexts/AuthContext';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import type { Company } from '@/hooks/useCompanies';
+import { supabase } from '@/integrations/supabase/client';
+import { cn } from '@/lib/utils';
+
+const loadReservationModal = () => import('@/components/ReservationModal');
+const ReservationModal = lazy(loadReservationModal);
+
+interface OpeningHour {
+  day: string;
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+interface BlockedDate {
+  date: string;
+  all_day: boolean;
+  start_time: string | null;
+  end_time: string | null;
+}
+
+function InstagramIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="5" />
+      <circle cx="12" cy="12" r="3.75" />
+      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        fill="currentColor"
+        d="M12 2.25a9.75 9.75 0 0 0-8.35 14.78L2.3 21.7l4.84-1.27A9.75 9.75 0 1 0 12 2.25Z"
+      />
+      <path
+        fill="white"
+        d="M9.25 6.65c-.23 0-.45.11-.63.31-.31.33-.82.83-.82 1.94s.81 2.18.92 2.33c.11.14 1.58 2.52 3.83 3.44 1.87.75 2.25.6 2.66.56.41-.04 1.32-.54 1.51-1.06.19-.53.19-.97.13-1.06-.05-.09-.19-.15-.39-.25-.2-.1-1.16-.57-1.34-.64-.18-.06-.31-.09-.45.12-.13.2-.52.63-.63.77-.12.13-.24.15-.43.05-.2-.1-.84-.31-1.6-1-.59-.53-.99-1.19-1.12-1.39-.12-.2-.02-.3.09-.4.09-.09.2-.23.3-.34.1-.11.13-.2.2-.32.07-.13.03-.25-.01-.34-.05-.1-.44-1.12-.61-1.53-.16-.39-.33-.4-.45-.4h-.38Z"
+      />
+    </svg>
+  );
+}
 
 const PAYMENT_LABELS: Record<string, { label: string; icon: typeof CreditCard }> = {
   dinheiro: { label: 'Dinheiro', icon: Banknote },
-  credito: { label: 'Crédito', icon: CreditCard },
-  debito: { label: 'Débito', icon: CreditCard },
+  credito: { label: 'Cr\u00E9dito', icon: CreditCard },
+  debito: { label: 'D\u00E9bito', icon: CreditCard },
   pix: { label: 'Pix', icon: QrCode },
-  vale_refeicao: { label: 'Vale Refeição', icon: Wallet },
+  vale_refeicao: { label: 'Vale Refei\u00E7\u00E3o', icon: Wallet },
 };
 
 const DAY_MAP: Record<string, number> = {
-  'Dom': 0, 'Seg': 1, 'Ter': 2, 'Qua': 3, 'Qui': 4, 'Sex': 5, 'Sáb': 6,
+  Dom: 0,
+  Seg: 1,
+  Ter: 2,
+  Qua: 3,
+  Qui: 4,
+  Sex: 5,
+  'S\u00E1b': 6,
 };
+
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function formatQuickDay(date: Date) {
+  if (isToday(date)) return 'Hoje';
+  if (isTomorrow(date)) return 'Amanh\u00E3';
+
+  const label = format(date, 'EEE', { locale: ptBR }).replace('.', '');
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
 
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { signIn } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   const [showReservation, setShowReservation] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
+  const handleOpenReservation = () => {
+    void loadReservationModal();
+    setShowReservation(true);
+  };
+
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
     queryFn: async () => {
+      const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
+
+      if (!rpcResult.error) {
+        const rows = (rpcResult.data ?? []) as Company[];
+        return rows.length > 0 ? rows[0] : null;
+      }
+
       const { data, error } = await supabase
         .from('companies_public' as any)
         .select('*')
         .eq('slug', slug!)
         .maybeSingle();
+
       if (error) throw error;
       return data as unknown as Company | null;
     },
     enabled: !!slug,
   });
 
-  // Check if company is paused (not in public view but exists)
   const { data: companyStatus } = useQuery({
     queryKey: ['company-status', slug],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_company_status_by_slug', { _slug: slug! });
       if (error) throw error;
+
       const rows = data as any[];
       return rows && rows.length > 0 ? rows[0] : null;
     },
@@ -68,30 +151,13 @@ export default function CompanyPublicPage() {
 
   const { trackStep } = useFunnelTracking(company?.id);
 
-  // SEO meta tags
   useEffect(() => {
     if (!company) return;
-    document.title = `${company.name} — Reservar Mesa`;
-    
-    const setMeta = (name: string, content: string, attr = 'name') => {
-      let el = document.querySelector(`meta[${attr}="${name}"]`) as HTMLMetaElement | null;
-      if (!el) {
-        el = document.createElement('meta');
-        el.setAttribute(attr, name);
-        document.head.appendChild(el);
-      }
-      el.setAttribute('content', content);
+
+    document.title = `${company.name} - Reservar Mesa`;
+    return () => {
+      document.title = 'ReservaF\u00E1cil';
     };
-    
-    const desc = company.description || `Reserve sua mesa no ${company.name}. Confirmação imediata.`;
-    setMeta('description', desc);
-    setMeta('og:title', company.name, 'property');
-    setMeta('og:description', desc, 'property');
-    setMeta('og:type', 'website', 'property');
-    setMeta('og:url', window.location.href, 'property');
-    if (company.logo_url) setMeta('og:image', company.logo_url, 'property');
-    
-    return () => { document.title = 'ReservaFácil'; };
   }, [company]);
 
   useEffect(() => {
@@ -101,47 +167,178 @@ export default function CompanyPublicPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
-    const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: loginErr } = await signIn(email, password, { slug: slug ?? null });
     setLoginLoading(false);
+
     if (loginErr) {
-      toast.error('Email ou senha inválidos');
+      toast.error(
+        loginErr.message === 'Invalid login credentials'
+          ? 'Email ou senha inv\u00E1lidos'
+          : loginErr.message,
+      );
       return;
     }
+
     navigate(`/${slug}/admin`);
   };
 
-  const todayDayName = useMemo(() => {
-    const dayIndex = new Date().getDay();
-    return Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0] || '';
-  }, []);
+  const { data: blockedDates = [] } = useQuery({
+    queryKey: ['blocked-dates-public-page', company?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('blocked_dates' as any)
+        .select('date, all_day, start_time, end_time')
+        .eq('company_id', company!.id)
+        .gte('date', format(new Date(), 'yyyy-MM-dd'));
+
+      if (error) throw error;
+      return (data ?? []) as BlockedDate[];
+    },
+    enabled: !!company?.id,
+  });
+
+  const whatsappUrl = company?.whatsapp
+    ? `https://wa.me/${company.whatsapp.replace(/\D/g, '')}`
+    : null;
+  const instagramUrl = company?.instagram
+    ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
+    : null;
+  const googleMapsSearchUrl = company?.google_maps_url
+    ? company.google_maps_url
+    : company?.address
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`
+      : null;
+  const mapsEmbedUrl = company?.google_maps_url
+    ? (company.google_maps_url.includes('/embed')
+      ? company.google_maps_url
+      : `https://www.google.com/maps?q=${encodeURIComponent(company.address || company.name)}&output=embed`)
+    : company?.address
+      ? `https://www.google.com/maps?q=${encodeURIComponent(company.address)}&output=embed`
+      : null;
+  const openingHours = (((company?.opening_hours as any[]) || [])) as OpeningHour[];
+  const paymentMethods = (company?.payment_methods as Record<string, boolean>) || {};
+  const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
+  const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
+  const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
+  const showDescription = customPublicPageEnabled && !!company?.description;
+  const showWhatsappButton = customPublicPageEnabled && !!whatsappUrl;
+  const shortAddress = company?.address?.split(',')[0]?.trim() || company?.address || null;
+
+  const getOpeningHourForDate = (date: Date) => {
+    const dayIndex = date.getDay();
+    const dayName = Object.entries(DAY_MAP).find(([, value]) => value === dayIndex)?.[0];
+    return openingHours.find((hour) => hour.day === dayName) || null;
+  };
+
+  const isAllDayBlocked = (iso: string) => blockedDates.some((blocked) => blocked.date === iso && blocked.all_day);
+  const isDateClosed = (date: Date) => {
+    const iso = format(date, 'yyyy-MM-dd');
+    const hours = getOpeningHourForDate(date);
+    return !hours || hours.closed || isAllDayBlocked(iso);
+  };
+
+  const nextOpenSummary = useMemo(() => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    for (let index = 0; index < 7; index += 1) {
+      const date = addDays(new Date(), index);
+      const iso = format(date, 'yyyy-MM-dd');
+      const hours = getOpeningHourForDate(date);
+
+      if (!hours || hours.closed || isAllDayBlocked(iso)) continue;
+
+      const openMinutes = timeToMinutes(hours.open);
+      const closeMinutes = timeToMinutes(hours.close);
+
+      if (index === 0) {
+        if (currentMinutes < openMinutes) {
+          return {
+            label: `Abre hoje \u00E0s ${hours.open}`,
+            detail: 'Ainda d\u00E1 tempo de garantir um bom hor\u00E1rio.',
+            isOpen: false,
+          };
+        }
+
+        if (currentMinutes < closeMinutes) {
+          return {
+            label: `Aberto agora at\u00E9 ${hours.close}`,
+            detail: 'Escolha uma data e finalize em poucos toques.',
+            isOpen: true,
+          };
+        }
+
+        continue;
+      }
+
+      if (index === 1) {
+        return {
+          label: `Pr\u00F3xima abertura amanh\u00E3 \u00E0s ${hours.open}`,
+          detail: 'Se preferir, agende agora e evite fila.',
+          isOpen: false,
+        };
+      }
+
+      return {
+        label: `Pr\u00F3xima abertura ${formatQuickDay(date).toLowerCase()} \u00E0s ${hours.open}`,
+        detail: 'Confira os pr\u00F3ximos hor\u00E1rios dispon\u00EDveis no bot\u00E3o abaixo.',
+        isOpen: false,
+      };
+    }
+
+    return {
+      label: 'Agenda temporariamente indispon\u00EDvel',
+      detail: 'Entre em contato diretamente com o restaurante.',
+      isOpen: false,
+    };
+  }, [blockedDates, openingHours]);
+  const todayHours = getOpeningHourForDate(new Date());
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-secondary">
+        {/* Header skeleton */}
+        <div className="h-16 bg-[#130D06]" />
+        {/* Hero skeleton */}
+        <div className="rounded-b-3xl bg-[#1C1108] px-4 pb-8 pt-5">
+          <div className="mx-auto max-w-lg space-y-4">
+            <div className="h-6 w-40 animate-pulse rounded-full bg-white/10" />
+            <div className="space-y-2">
+              <div className="h-10 w-3/4 animate-pulse rounded-lg bg-white/10" />
+              <div className="h-4 w-full animate-pulse rounded bg-white/10" />
+              <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
+            </div>
+            <div className="h-12 w-full animate-pulse rounded-full bg-primary/30" />
+          </div>
+        </div>
+        {/* Cards skeleton */}
+        <div className="mx-auto max-w-lg space-y-4 px-4 py-5">
+          <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+          <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+        </div>
       </div>
     );
   }
 
   if (error || !company) {
-    // Company exists but is paused
     if (companyStatus && companyStatus.status === 'paused') {
       const contactWhatsapp = companyStatus.whatsapp
         ? `https://wa.me/${companyStatus.whatsapp.replace(/\D/g, '')}`
         : null;
+
       return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-[#130D06] to-[#2E1800] gap-6 p-6 text-center">
-          <div className="bg-card/10 backdrop-blur-sm border border-border/20 rounded-2xl p-8 max-w-md w-full">
-            <Clock className="h-12 w-12 mx-auto mb-4 text-amber-400" />
-            <h1 className="text-2xl font-bold text-white mb-2">{companyStatus.name}</h1>
-            <p className="text-white/70 mb-6">
-              Este restaurante está temporariamente indisponível para novas reservas.
+        <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#130D06] to-[#2E1800] p-6 text-center">
+          <div className="w-full max-w-md rounded-2xl border border-border/20 bg-card/10 p-8 backdrop-blur-sm">
+            <Clock className="mx-auto mb-4 h-12 w-12 text-amber-400" />
+            <h1 className="mb-2 text-2xl font-bold text-white">{companyStatus.name}</h1>
+            <p className="mb-6 text-white/70">
+              {'Este restaurante est\u00E1 temporariamente indispon\u00EDvel para novas reservas.'}
             </p>
             <div className="space-y-3">
               {companyStatus.phone && (
                 <a
                   href={`tel:${companyStatus.phone}`}
-                  className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-4 py-3 text-white transition-colors hover:bg-white/20"
                 >
                   <Phone className="h-4 w-4" />
                   Ligar: {companyStatus.phone}
@@ -152,176 +349,156 @@ export default function CompanyPublicPage() {
                   href={contactWhatsapp}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-white transition-colors hover:bg-emerald-700"
                 >
-                  <MessageCircle className="h-4 w-4" />
+                  <WhatsAppIcon className="h-4 w-4" />
                   Falar pelo WhatsApp
                 </a>
               )}
             </div>
-            {!companyStatus.phone && !contactWhatsapp && (
-              <p className="text-white/50 text-sm">
-                Entre em contato diretamente com o estabelecimento para mais informações.
-              </p>
-            )}
           </div>
         </div>
       );
     }
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background gap-4">
-        <h1 className="text-2xl font-bold text-foreground">Página não encontrada</h1>
-        <p className="text-muted-foreground">Este restaurante não existe ou está temporariamente indisponível.</p>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6 text-center">
+        <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-8 shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+            <MapPin className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-foreground">Página não encontrada</h1>
+            <p className="text-sm text-muted-foreground">
+              Este restaurante não existe ou está temporariamente indisponível.
+            </p>
+          </div>
+          <a
+            href="/"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Voltar ao início
+          </a>
+        </div>
       </div>
     );
   }
 
-  const whatsappUrl = company.whatsapp
-    ? `https://wa.me/${company.whatsapp.replace(/\D/g, '')}`
-    : null;
-
-  const instagramUrl = company.instagram
-    ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
-    : null;
-
-  const googleMapsSearchUrl = company.google_maps_url
-    ? company.google_maps_url
-    : company.address
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`
-      : null;
-
-  const mapsEmbedUrl = company.google_maps_url
-    ? company.google_maps_url.includes('/embed')
-      ? company.google_maps_url
-      : `https://www.google.com/maps?q=${encodeURIComponent(company.address || company.name)}&output=embed`
-    : company.address
-      ? `https://www.google.com/maps?q=${encodeURIComponent(company.address)}&output=embed`
-      : null;
-
-  const openingHours = (company.opening_hours as any[]) || [];
-  const paymentMethods = (company.payment_methods as Record<string, boolean>) || {};
-  const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
-
-  // Check if today is open
-  const todayHours = openingHours.find(h => h.day === todayDayName);
-  const isOpenToday = todayHours && !todayHours.closed;
-
   return (
-    <div className="min-h-screen bg-secondary pb-24 md:pb-0">
-      {/* Top bar */}
+    <div className="min-h-screen bg-secondary pb-28 md:pb-0">
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="max-w-lg md:max-w-5xl mx-auto flex items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-lg items-center px-4 py-3 md:max-w-5xl">
           <div className="flex items-center gap-3">
-            {company.logo_url ? (
-              <img src={company.logo_url} alt={company.name} className="h-10 w-10 rounded-full object-cover border-2 border-primary" />
+            {showCustomLogo ? (
+              <img
+                src={company.logo_url}
+                alt={company.name}
+                className="h-10 w-10 rounded-full border-2 border-primary object-cover"
+              />
             ) : (
-              <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-lg font-bold text-primary-foreground shrink-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-bold text-primary-foreground">
                 {company.name.charAt(0)}
               </div>
             )}
             <div>
               <h1 className="text-sm font-bold">{company.name}</h1>
-              <div className="flex gap-2 mt-0.5">
+              <div className="mt-0.5 flex gap-2">
                 {instagramUrl && (
-                  <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="text-primary-foreground/60 hover:text-primary transition-colors">
-                    <Instagram className="h-4 w-4" />
+                  <a
+                    href={instagramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Instagram"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
+                  >
+                    <InstagramIcon className="h-4 w-4" />
                   </a>
                 )}
-                {whatsappUrl && (
-                  <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-primary-foreground/60 hover:text-primary transition-colors">
-                    <MessageCircle className="h-4 w-4" />
+                {showWhatsappButton && (
+                  <a
+                    href={whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="WhatsApp"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 transition-colors hover:bg-emerald-500/25 hover:text-white"
+                  >
+                    <WhatsAppIcon className="h-4 w-4" />
                   </a>
                 )}
               </div>
             </div>
           </div>
-          <button
-            onClick={() => setShowLogin(!showLogin)}
-            className="text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors"
-            aria-label="Login administrativo"
-          >
-            <LogIn className="h-4 w-4" />
-          </button>
         </div>
       </div>
 
-      {/* Hero */}
       <div
-        className="relative text-primary-foreground px-4 pt-6 pb-10 md:pt-12 md:pb-16 md:rounded-none rounded-b-3xl overflow-hidden"
+        className="relative overflow-hidden rounded-b-3xl px-4 pb-8 pt-5 text-primary-foreground md:rounded-none md:pb-14 md:pt-10"
         style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
       >
-        {/* Radial glow — center warm */}
         <div
-          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.18) 0%, transparent 70%)' }}
+          className="pointer-events-none absolute inset-0 rounded-b-3xl md:rounded-none"
+          style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
         />
-        {/* Secondary glow — top-left accent */}
         <div
-          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 40% 40% at 20% 30%, rgba(232,105,10,0.08) 0%, transparent 60%)' }}
-        />
-        {/* Bottom warm edge */}
-        <div
-          className="absolute bottom-0 left-0 right-0 h-32 rounded-b-3xl md:rounded-none pointer-events-none"
-          style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.6) 0%, transparent 100%)' }}
-        />
-        {/* Subtle noise texture overlay */}
-        <div
-          className="absolute inset-0 rounded-b-3xl md:rounded-none pointer-events-none opacity-[0.03]"
-          style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\'/%3E%3C/svg%3E")', backgroundSize: '128px 128px' }}
+          className="pointer-events-none absolute bottom-0 left-0 right-0 h-24 rounded-b-3xl md:rounded-none"
+          style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
         />
 
-        <div className="max-w-lg md:max-w-5xl mx-auto relative z-10 md:flex md:items-center md:gap-16">
-          {/* Hero text */}
-          <div className="space-y-5 md:flex-1">
-            {/* Rating */}
-            <Badge className="bg-primary text-primary-foreground border-none gap-1 text-xs font-semibold px-2.5 py-1 shadow-lg shadow-primary/20">
-              <Star className="h-3 w-3 fill-current" /> 4.8 · 127 avaliações
-            </Badge>
+        <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm">
+              <span className={cn('h-2 w-2 rounded-full', nextOpenSummary.isOpen ? 'bg-emerald-400' : 'bg-amber-400')} />
+              <span>{nextOpenSummary.label}</span>
+            </div>
 
             <div>
-              <h2 className="text-2xl md:text-5xl font-bold tracking-tight leading-tight">{company.name}</h2>
-              {company.description && (
-                <p className="text-sm md:text-lg text-primary-foreground/60 mt-2 leading-relaxed max-w-xl">{company.description}</p>
+              <h2 className="text-[2rem] font-bold leading-tight tracking-tight md:text-5xl">{company.name}</h2>
+              {showDescription && (
+                <p className="mt-2 max-w-xl overflow-hidden text-sm leading-relaxed text-primary-foreground/68 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-lg md:[-webkit-line-clamp:4]">
+                  {company.description}
+                </p>
               )}
             </div>
 
-            {/* Tags */}
             <div className="flex flex-wrap gap-2">
-              {company.address && (
-                <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1 backdrop-blur-sm">
-                  <MapPin className="h-3 w-3" /> {company.address.split(',')[0]?.split(' – ')[0]?.split('-')[0]?.trim()}
+              {shortAddress && (
+                <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
+                  <MapPin className="h-3 w-3" />
+                  {shortAddress}
                 </Badge>
               )}
-              <Badge variant="secondary" className="bg-primary-foreground/10 text-primary-foreground/80 border-none text-xs gap-1 backdrop-blur-sm">
-                <Users className="h-3 w-3" /> Até 12 pessoas
-              </Badge>
-              <Badge variant="secondary" className="bg-primary text-primary-foreground border-none text-xs gap-1">
-                <CalendarCheck className="h-3 w-3" /> Confirmação imediata
-              </Badge>
+              {todayHours && !todayHours.closed && (
+                <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
+                  <Clock className="h-3 w-3" />
+                  Hoje at\u00E9 {todayHours.close}
+                </Badge>
+              )}
             </div>
           </div>
 
-          {/* CTA Buttons — stacked on mobile, side panel on desktop */}
-          <div className="space-y-3 pt-6 md:pt-0 md:w-80 md:shrink-0">
+          <div className="mt-5 space-y-3 md:mt-0 md:self-end">
+            <p className="max-w-sm text-sm leading-relaxed text-primary-foreground/70">
+              {nextOpenSummary.detail}
+            </p>
             <Button
-              className="w-full py-6 text-base gap-2 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-xl shadow-primary/30"
+              className="w-full gap-2 rounded-full bg-primary py-6 text-base font-semibold text-primary-foreground shadow-xl shadow-primary/30 hover:bg-primary/90"
               size="lg"
-              onClick={() => setShowReservation(true)}
+              onMouseEnter={() => void loadReservationModal()}
+              onFocus={() => void loadReservationModal()}
+              onClick={handleOpenReservation}
             >
               <CalendarCheck className="h-5 w-5" />
-              Reservar Mesa
+              Reservar agora
             </Button>
 
-            {whatsappUrl && (
+            {showWhatsappButton && (
               <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
                 <Button
                   variant="secondary"
-                  className="w-full py-6 text-base gap-2 rounded-full bg-background text-foreground hover:bg-background/90 font-semibold shadow-md border-none"
+                  className="w-full gap-2 rounded-full border-none bg-background py-5 text-base font-semibold text-foreground shadow-md hover:bg-background/90"
                   size="lg"
                 >
-                  <MessageCircle className="h-5 w-5 text-green-600" />
+                  <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
                   Falar pelo WhatsApp
                 </Button>
               </a>
@@ -330,79 +507,71 @@ export default function CompanyPublicPage() {
         </div>
       </div>
 
-      {/* Content cards */}
-      <div className="max-w-lg md:max-w-5xl mx-auto px-4 py-6 space-y-4">
-        {/* About — full width */}
-        {company.description && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <FileText className="h-4 w-4" /> Sobre o Restaurante
-              </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed italic">{company.description}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Two columns: Hours + Location */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-          {/* Opening Hours */}
+      <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
+        <div className="grid gap-4 md:grid-cols-2 md:items-start md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="border-none shadow-sm rounded-2xl">
-              <CardContent className="pt-5 pb-5">
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                  <Clock className="h-4 w-4" /> Horário de Funcionamento
-                </h3>
-                <div className="space-y-0">
-                  {openingHours.map((h: any) => {
-                    const isToday = h.day === todayDayName;
-                    return (
-                      <div
-                        key={h.day}
-                        className={`flex items-center justify-between py-2.5 border-b border-border/50 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
-                      >
-                        <span className={`text-sm ${isToday ? 'text-primary font-bold' : ''}`}>{h.day}</span>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm ${h.closed ? 'text-muted-foreground' : ''}`}>
-                            {h.closed ? 'Fechado' : `${h.open} – ${h.close}`}
-                          </span>
-                          {isToday && !h.closed && (
-                            <div className="flex items-center gap-1.5">
-                              <Badge className="bg-primary text-primary-foreground border-none text-[10px] px-1.5 py-0">HOJE</Badge>
-                              <Badge variant="outline" className="border-primary text-primary text-[10px] px-1.5 py-0">Aberto</Badge>
-                            </div>
-                          )}
-                          {isToday && h.closed && (
-                            <Badge variant="outline" className="border-destructive text-destructive text-[10px] px-1.5 py-0">Fechado</Badge>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+            <Card className="rounded-2xl border-none shadow-sm">
+              <CardContent className="pb-5 pt-5">
+                <div>
+                  <div>
+                    <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                      <Clock className="h-4 w-4" />
+                      {'Hor\u00E1rio de Funcionamento'}
+                    </h3>
+                    {todayHours && (
+                      <p className="mt-2 text-sm text-foreground">
+                        {todayHours.closed ? 'Hoje est\u00E1 fechado.' : `Hoje: ${todayHours.open} - ${todayHours.close}`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-0">
+                  {openingHours.map((hour) => (
+                    <div
+                      key={hour.day}
+                      className={`flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 ${hour.day === (Object.entries(DAY_MAP).find(([, value]) => value === new Date().getDay())?.[0] || '') ? 'font-semibold text-foreground' : 'text-foreground'}`}
+                    >
+                      <span className={`text-sm ${hour.day === (Object.entries(DAY_MAP).find(([, value]) => value === new Date().getDay())?.[0] || '') ? 'font-bold text-primary' : ''}`}>{hour.day}</span>
+                      <span className={`text-sm ${hour.closed ? 'text-muted-foreground' : ''}`}>
+                        {hour.closed ? 'Fechado' : `${hour.open} - ${hour.close}`}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Location & Contact */}
           {(company.phone || company.address) && (
-            <Card className="border-none shadow-sm rounded-2xl">
-              <CardContent className="pt-5 pb-5 space-y-4">
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4" /> Localização & Contato
-                </h3>
+            <Card className="rounded-2xl border-none shadow-sm">
+              <CardContent className="space-y-4 pb-5 pt-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                      <MapPin className="h-4 w-4" />
+                      {'Localiza\u00E7\u00E3o e Contato'}
+                    </h3>
+                    {company.address && (
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{company.address}</p>
+                    )}
+                  </div>
+                  {company.phone && (
+                    <a href={`tel:${company.phone}`} className="shrink-0 text-sm font-medium text-primary hover:text-primary/80">
+                      Ligar
+                    </a>
+                  )}
+                </div>
+
                 {company.phone && (
-                  <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground hover:text-primary transition-colors">
+                  <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground transition-colors hover:text-primary">
                     <Phone className="h-5 w-5 text-primary" />
                     <span className="text-base font-medium">{company.phone}</span>
                   </a>
                 )}
-                {company.address && (
-                  <p className="text-sm text-muted-foreground leading-relaxed">{company.address}</p>
-                )}
 
                 {mapsEmbedUrl && (
-                  <div className="rounded-xl overflow-hidden border border-border">
+                  <div className="overflow-hidden rounded-xl border border-border">
                     <iframe
                       src={mapsEmbedUrl}
                       width="100%"
@@ -411,7 +580,7 @@ export default function CompanyPublicPage() {
                       allowFullScreen
                       loading="lazy"
                       referrerPolicy="no-referrer-when-downgrade"
-                      title="Localização"
+                      title={'Localiza\u00E7\u00E3o'}
                     />
                   </div>
                 )}
@@ -421,10 +590,11 @@ export default function CompanyPublicPage() {
                     href={googleMapsSearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between w-full py-2.5 px-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
+                    className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2.5 transition-colors hover:bg-muted/50"
                   >
                     <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" /> Abrir no Google Maps
+                      <MapPin className="h-4 w-4" />
+                      Abrir no Google Maps
                     </span>
                     <ExternalLink className="h-4 w-4 text-muted-foreground" />
                   </a>
@@ -434,24 +604,21 @@ export default function CompanyPublicPage() {
           )}
         </div>
 
-        {/* Payment Methods — centered, full width */}
         {acceptedPayments.length > 0 && (
-          <Card className="border-none shadow-sm rounded-2xl">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-4 flex items-center gap-1.5 md:justify-center">
-                <CreditCard className="h-4 w-4" /> Formas de Pagamento
+          <Card className="rounded-2xl border-none shadow-sm">
+            <CardContent className="pb-5 pt-5">
+              <h3 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                <CreditCard className="h-4 w-4" />
+                Formas de Pagamento
               </h3>
-              <div className="flex flex-wrap gap-2 md:gap-3 md:justify-center">
+              <div className="flex flex-wrap gap-2">
                 {acceptedPayments.map(([key]) => {
-                  const pm = PAYMENT_LABELS[key];
-                  const Icon = pm?.icon || CreditCard;
+                  const paymentMethod = PAYMENT_LABELS[key];
+                  const Icon = paymentMethod?.icon || CreditCard;
                   return (
-                    <div
-                      key={key}
-                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border bg-background text-sm"
-                    >
-                      <Icon className="h-4 w-4 text-primary shrink-0" />
-                      <span className="text-foreground">{pm?.label || key}</span>
+                    <div key={key} className="flex items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">
+                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="text-foreground">{paymentMethod?.label || key}</span>
                     </div>
                   );
                 })}
@@ -460,22 +627,21 @@ export default function CompanyPublicPage() {
           </Card>
         )}
 
-        {/* Admin Login */}
         {showLogin && (
-          <Card className="border-none shadow-sm rounded-2xl md:max-w-md md:mx-auto">
-            <CardContent className="pt-5 pb-5">
-              <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Acesso Administrativo</h3>
+          <Card className="rounded-2xl border-none shadow-sm md:mx-auto md:max-w-md">
+            <CardContent className="pb-5 pt-5">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Acesso administrativo</h3>
               <form onSubmit={handleLogin} className="space-y-3">
                 <div>
                   <Label className="text-xs">Email</Label>
-                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@empresa.com" required />
+                  <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@empresa.com" required />
                 </div>
                 <div>
                   <Label className="text-xs">Senha</Label>
-                  <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                  <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="********" required />
                 </div>
                 <Button type="submit" className="w-full" disabled={loginLoading}>
-                  {loginLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {loginLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Entrar
                 </Button>
               </form>
@@ -483,36 +649,55 @@ export default function CompanyPublicPage() {
           </Card>
         )}
 
-        {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground pt-2 pb-4">
-          Powered by <span className="font-semibold text-primary">ReservaFácil</span>
-        </p>
+        <div className="flex flex-col items-center gap-2 pb-4 pt-1 text-center">
+          <button
+            type="button"
+            onClick={() => setShowLogin((current) => !current)}
+            aria-expanded={showLogin}
+            className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {showLogin ? 'Ocultar acesso administrativo' : 'Acesso administrativo'}
+          </button>
+          <p className="text-xs text-muted-foreground">
+            {'Powered by '}
+            <span className="font-semibold text-primary">{'ReservaF\u00E1cil'}</span>
+          </p>
+        </div>
       </div>
 
-      {/* Sticky bottom CTA — mobile only */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-lg border-t border-border px-4 py-3 z-50 md:hidden">
-        <div className="max-w-lg mx-auto">
-          <Button
-            className="w-full py-5 text-base gap-2 rounded-2xl font-semibold"
-            size="lg"
-            onClick={() => setShowReservation(true)}
-          >
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/92 px-4 py-3 backdrop-blur-lg md:hidden">
+        <div className="mx-auto max-w-lg">
+          <p className="mb-2 text-center text-xs text-muted-foreground">Confira os hor\u00E1rios dispon\u00EDveis e reserve.</p>
+          <Button className="w-full gap-2 rounded-2xl py-5 text-base font-semibold" size="lg" onClick={handleOpenReservation}>
             <CalendarCheck className="h-5 w-5" />
-            Reservar Mesa
+            Reservar agora
           </Button>
         </div>
       </div>
 
-      <ReservationModal
-        open={showReservation}
-        onOpenChange={setShowReservation}
-        companyId={company.id}
-        companyName={company.name}
-        openingHours={openingHours}
-        reservationDuration={(company as any).reservation_duration ?? 30}
-        maxGuestsPerSlot={(company as any).max_guests_per_slot ?? 0}
-        onStepChange={(step) => trackStep(step)}
-      />
+      {showReservation && (
+        <Suspense fallback={
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Carregando...</p>
+            </div>
+          </div>
+        }>
+          <ReservationModal
+            open={showReservation}
+            onOpenChange={setShowReservation}
+            companyId={company.id}
+            companyName={company.name}
+            openingHours={openingHours}
+            reservationDuration={(company as any).reservation_duration ?? 30}
+            maxGuestsPerSlot={(company as any).max_guests_per_slot ?? 0}
+            initialDate={null}
+            initialPartySize={2}
+            onStepChange={(step) => trackStep(step)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

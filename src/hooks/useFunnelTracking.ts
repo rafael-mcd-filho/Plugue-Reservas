@@ -13,9 +13,9 @@ export const FUNNEL_STEPS = [
 export type FunnelStep = typeof FUNNEL_STEPS[number];
 
 const STEP_LABELS: Record<FunnelStep, string> = {
-  page_view: 'P\u00E1gina P\u00FAblica',
-  date_select: 'Sele\u00E7\u00E3o de Data',
-  time_select: 'Sele\u00E7\u00E3o de Hor\u00E1rio',
+  page_view: 'Página Pública',
+  date_select: 'Seleção de Data',
+  time_select: 'Seleção de Horário',
   form_fill: 'Dados Pessoais',
   completed: 'Reserva Finalizada',
 };
@@ -23,30 +23,36 @@ const STEP_LABELS: Record<FunnelStep, string> = {
 export { STEP_LABELS };
 
 const PENDING_STEPS_STORAGE_KEY = 'rv_funnel_pending_steps';
+const MAX_PENDING_STEPS = 50;
+const RPC_TIMEOUT_MS = 8000;
+const MAX_RETRY_COUNT = 5;
 
 interface FunnelPayload {
   company_id: string;
   visitor_id: string;
   step: FunnelStep;
   date: string;
+  retryCount?: number;
 }
 
-function getVisitorId(): string {
+export function getVisitorId(): string {
   const key = 'rv_visitor_id';
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
+  try {
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    // localStorage unavailable (private mode, etc.)
+    return crypto.randomUUID();
   }
-  return id;
 }
 
-function getTrackingDate(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+/** Retorna a data atual em UTC no formato YYYY-MM-DD. */
+function getTrackingDateUTC(): string {
+  return new Date().toISOString().split('T')[0];
 }
 
 function getPayloadKey(payload: FunnelPayload): string {
@@ -57,117 +63,175 @@ function readPendingSteps(): FunnelPayload[] {
   try {
     const raw = localStorage.getItem(PENDING_STEPS_STORAGE_KEY);
     if (!raw) return [];
-
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-
     return parsed.filter((item): item is FunnelPayload => {
-      return !!item
-        && typeof item.company_id === 'string'
-        && typeof item.visitor_id === 'string'
-        && typeof item.step === 'string'
-        && typeof item.date === 'string'
-        && FUNNEL_STEPS.includes(item.step as FunnelStep);
+      return (
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as FunnelPayload).company_id === 'string' &&
+        typeof (item as FunnelPayload).visitor_id === 'string' &&
+        typeof (item as FunnelPayload).step === 'string' &&
+        typeof (item as FunnelPayload).date === 'string' &&
+        FUNNEL_STEPS.includes((item as FunnelPayload).step as FunnelStep)
+      );
     });
-  } catch {
+  } catch (err) {
+    console.warn('[Funnel] Failed to read pending steps from localStorage:', err);
     return [];
   }
 }
 
-function writePendingSteps(payloads: FunnelPayload[]) {
-  localStorage.setItem(PENDING_STEPS_STORAGE_KEY, JSON.stringify(payloads));
+function writePendingSteps(payloads: FunnelPayload[]): void {
+  try {
+    localStorage.setItem(PENDING_STEPS_STORAGE_KEY, JSON.stringify(payloads));
+  } catch (err) {
+    console.warn('[Funnel] Failed to write pending steps to localStorage:', err);
+  }
 }
 
-function queuePendingStep(payload: FunnelPayload) {
+function queuePendingStep(payload: FunnelPayload): void {
   const payloadKey = getPayloadKey(payload);
   const pending = readPendingSteps();
 
+  // Deduplicar
   if (pending.some((item) => getPayloadKey(item) === payloadKey)) return;
 
-  writePendingSteps([...pending, payload]);
+  // Limitar tamanho da fila para evitar overflow do localStorage
+  const trimmed = pending.length >= MAX_PENDING_STEPS
+    ? pending.slice(pending.length - MAX_PENDING_STEPS + 1)
+    : pending;
+
+  writePendingSteps([...trimmed, { ...payload, retryCount: 0 }]);
 }
 
-function removePendingStep(payload: FunnelPayload) {
+function removePendingStep(payload: FunnelPayload): void {
   const payloadKey = getPayloadKey(payload);
   const pending = readPendingSteps().filter((item) => getPayloadKey(item) !== payloadKey);
   writePendingSteps(pending);
 }
 
-async function sendFunnelStep(payload: FunnelPayload) {
+function updateRetryCount(payload: FunnelPayload, retryCount: number): void {
+  const payloadKey = getPayloadKey(payload);
+  const pending = readPendingSteps().map((item) =>
+    getPayloadKey(item) === payloadKey ? { ...item, retryCount } : item
+  );
+  writePendingSteps(pending);
+}
+
+async function sendFunnelStep(payload: FunnelPayload): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+
   try {
     const { error } = await (supabase.rpc as any)('track_public_funnel_step', {
       _company_id: payload.company_id,
       _visitor_id: payload.visitor_id,
       _step: payload.step,
-      _date: payload.date, // YYYY-MM-DD format
+      _date: payload.date, // YYYY-MM-DD em UTC
     });
 
     if (error) {
-      console.error('Funnel tracking error:', error);
+      console.warn(`[Funnel] RPC error for step "${payload.step}":`, error.message ?? error);
       throw error;
     }
-  } catch (err) {
-    console.error('Failed to track funnel step:', payload.step, err);
-    throw err;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+function getBackoffDelayMs(retryCount: number): number {
+  // 1s, 2s, 4s, 8s, 16s (max ~16s)
+  return Math.min(1000 * 2 ** retryCount, 16000);
 }
 
 export function useFunnelTracking(companyId: string | undefined) {
   const logged = useRef<Set<string>>(new Set());
   const inFlight = useRef<Set<string>>(new Set());
+  const isFlushInProgress = useRef(false);
+  const flushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const flushPendingSteps = useCallback(async () => {
-    const pending = readPendingSteps();
-
-    for (const payload of pending) {
-      const payloadKey = getPayloadKey(payload);
-
-      if (logged.current.has(payloadKey) || inFlight.current.has(payloadKey)) continue;
-
-      inFlight.current.add(payloadKey);
-
-      try {
-        await sendFunnelStep(payload);
-        logged.current.add(payloadKey);
-        removePendingStep(payload);
-      } catch (error) {
-        console.warn('Failed to track funnel step', payload.step, error);
-      } finally {
-        inFlight.current.delete(payloadKey);
-      }
-    }
+  const scheduleFlush = useCallback((delayMs = 0) => {
+    if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
+    flushTimeoutRef.current = setTimeout(() => {
+      flushTimeoutRef.current = null;
+      void flushPendingSteps();
+    }, delayMs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const flushPendingSteps = useCallback(async (): Promise<void> => {
+    // Evita flush paralelo (race condition)
+    if (isFlushInProgress.current) return;
+    isFlushInProgress.current = true;
+
+    try {
+      const pending = readPendingSteps();
+      if (pending.length === 0) return;
+
+      for (const payload of pending) {
+        const payloadKey = getPayloadKey(payload);
+
+        if (logged.current.has(payloadKey) || inFlight.current.has(payloadKey)) continue;
+
+        const retryCount = payload.retryCount ?? 0;
+        if (retryCount >= MAX_RETRY_COUNT) {
+          console.warn(`[Funnel] Max retries reached for step "${payload.step}", discarding.`);
+          removePendingStep(payload);
+          continue;
+        }
+
+        inFlight.current.add(payloadKey);
+
+        try {
+          await sendFunnelStep(payload);
+          logged.current.add(payloadKey);
+          removePendingStep(payload);
+        } catch {
+          const nextRetry = retryCount + 1;
+          updateRetryCount(payload, nextRetry);
+          const delay = getBackoffDelayMs(nextRetry);
+          console.warn(`[Funnel] Retry ${nextRetry}/${MAX_RETRY_COUNT} for step "${payload.step}" in ${delay}ms`);
+          scheduleFlush(delay);
+        } finally {
+          inFlight.current.delete(payloadKey);
+        }
+      }
+    } finally {
+      isFlushInProgress.current = false;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleFlush]);
 
   useEffect(() => {
     void flushPendingSteps();
 
-    const handleOnline = () => {
-      void flushPendingSteps();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void flushPendingSteps();
-      }
+    const handleOnline = () => void flushPendingSteps();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void flushPendingSteps();
     };
 
     window.addEventListener('online', handleOnline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       window.removeEventListener('online', handleOnline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
     };
   }, [flushPendingSteps]);
 
-  const trackStep = useCallback(async (step: FunnelStep) => {
-    if (!companyId) return;
+  const trackStep = useCallback(async (step: FunnelStep): Promise<void> => {
+    if (!companyId) {
+      console.warn('[Funnel] trackStep called without companyId, ignoring.');
+      return;
+    }
 
     const payload: FunnelPayload = {
       company_id: companyId,
       visitor_id: getVisitorId(),
       step,
-      date: getTrackingDate(),
+      date: getTrackingDateUTC(), // ← UTC, não timezone local
     };
     const payloadKey = getPayloadKey(payload);
 
