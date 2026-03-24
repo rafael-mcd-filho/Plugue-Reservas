@@ -446,16 +446,16 @@ export default function CompanyPublicPage() {
         />
 
         <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm">
-              <span className={cn('h-2 w-2 rounded-full', nextOpenSummary.isOpen ? 'bg-emerald-400' : 'bg-amber-400')} />
+          <div className="space-y-4 animate-slide-up">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors hover:bg-white/15">
+              <span className={cn('h-2 w-2 rounded-full', nextOpenSummary.isOpen ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]')} />
               <span>{nextOpenSummary.label}</span>
             </div>
 
             <div>
-              <h2 className="text-[2rem] font-bold leading-tight tracking-tight md:text-5xl">{company.name}</h2>
+              <h2 className="font-display text-[2.25rem] font-bold leading-tight tracking-tight md:text-5xl">{company.name}</h2>
               {showDescription && (
-                <p className="mt-2 max-w-xl overflow-hidden text-sm leading-relaxed text-primary-foreground/68 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-lg md:[-webkit-line-clamp:4]">
+                <p className="mt-3 max-w-xl overflow-hidden font-karla text-sm leading-relaxed text-primary-foreground/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-base md:[-webkit-line-clamp:4]">
                   {company.description}
                 </p>
               )}
@@ -477,18 +477,18 @@ export default function CompanyPublicPage() {
             </div>
           </div>
 
-          <div className="mt-5 space-y-3 md:mt-0 md:self-end">
-            <p className="max-w-sm text-sm leading-relaxed text-primary-foreground/70">
+          <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
+            <p className="max-w-sm font-karla text-sm leading-relaxed text-primary-foreground/70">
               {nextOpenSummary.detail}
             </p>
             <Button
-              className="w-full gap-2 rounded-full bg-primary py-6 text-base font-semibold text-primary-foreground shadow-xl shadow-primary/30 hover:bg-primary/90"
+              className="group w-full gap-2 rounded-full bg-primary py-6 text-base font-semibold text-primary-foreground shadow-xl shadow-primary/30 transition-all duration-200 hover:scale-[1.02] hover:bg-primary/90 hover:shadow-primary/40 active:scale-[0.98]"
               size="lg"
               onMouseEnter={() => void loadReservationModal()}
               onFocus={() => void loadReservationModal()}
               onClick={handleOpenReservation}
             >
-              <CalendarCheck className="h-5 w-5" />
+              <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
               Reservar agora
             </Button>
 
@@ -496,7 +496,7 @@ export default function CompanyPublicPage() {
               <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
                 <Button
                   variant="secondary"
-                  className="w-full gap-2 rounded-full border-none bg-background py-5 text-base font-semibold text-foreground shadow-md hover:bg-background/90"
+                  className="w-full gap-2 rounded-full border-none bg-background py-5 text-base font-semibold text-foreground shadow-md transition-all duration-200 hover:scale-[1.01] hover:bg-background/90 active:scale-[0.99]"
                   size="lg"
                 >
                   <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
@@ -511,7 +511,7 @@ export default function CompanyPublicPage() {
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
         <div className="grid gap-4 md:grid-cols-2 md:items-start md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="rounded-2xl border-none shadow-sm">
+            <Card className="animate-fade-in rounded-2xl border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
               <CardContent className="pb-5 pt-5">
                 <div>
                   <div>
@@ -545,7 +545,7 @@ export default function CompanyPublicPage() {
           )}
 
           {(company.phone || company.address) && (
-            <Card className="rounded-2xl border-none shadow-sm">
+            <Card className="animate-fade-in rounded-2xl border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
               <CardContent className="space-y-4 pb-5 pt-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -666,11 +666,15 @@ export default function CompanyPublicPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/92 px-4 py-3 backdrop-blur-lg md:hidden">
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/50 bg-background/95 px-4 pb-safe pt-3 backdrop-blur-xl md:hidden" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
         <div className="mx-auto max-w-lg">
-          <p className="mb-2 text-center text-xs text-muted-foreground">Confira os hor\u00E1rios dispon\u00EDveis e reserve.</p>
-          <Button className="w-full gap-2 rounded-2xl py-5 text-base font-semibold" size="lg" onClick={handleOpenReservation}>
-            <CalendarCheck className="h-5 w-5" />
+          <Button
+            className="group w-full gap-2 rounded-2xl py-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all duration-200 hover:scale-[1.01] hover:shadow-primary/30 active:scale-[0.99]"
+            size="lg"
+            onClick={handleOpenReservation}
+            onMouseEnter={() => void loadReservationModal()}
+          >
+            <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
             Reservar agora
           </Button>
         </div>
