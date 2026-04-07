@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -254,7 +254,7 @@ export default function ReservationModal({
     return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
   }, [selectedDayHours, reservationDuration]);
 
-  const resolveActiveTableMap = (date: Date, time: string) => {
+  const resolveActiveTableMap = useCallback((date: Date, time: string) => {
     const [hours, minutes] = time.split(':').map(Number);
     const reservationAt = new Date(date);
     reservationAt.setHours(hours, minutes, 0, 0);
@@ -273,7 +273,21 @@ export default function ReservationModal({
 
     if (specialMap) return specialMap;
     return companyTableMaps.find((tableMap) => tableMap.is_default) ?? null;
-  };
+  }, [companyTableMaps]);
+
+  const getEligibleTables = useCallback((date: Date, time: string, partySize: number) => {
+    const activeTableMap = resolveActiveTableMap(date, time);
+    const scopedTables = activeTableMap
+      ? allTables.filter((table) => table.table_map_id === activeTableMap.id)
+      : companyTableMaps.length === 0
+        ? allTables
+        : [];
+
+    return {
+      activeTableMap,
+      tables: scopedTables.filter((table) => table.capacity >= partySize),
+    };
+  }, [allTables, companyTableMaps.length, resolveActiveTableMap]);
 
   // Fetch slot availability when date changes (for step 2 vacancy indicators)
   useEffect(() => {
@@ -307,10 +321,7 @@ export default function ReservationModal({
 
         const availability: Record<string, SlotAvailability> = {};
         timeSlots.forEach(slot => {
-          const activeTableMap = resolveActiveTableMap(selectedDate, slot);
-          const eligibleTables = activeTableMap
-            ? allTables.filter((table) => table.table_map_id === activeTableMap.id && table.capacity >= selectedPartySize)
-            : [];
+          const { tables: eligibleTables } = getEligibleTables(selectedDate, slot, selectedPartySize);
           const totalTables = eligibleTables.length;
           const occupied = occupiedBySlot[slot] || 0;
           let available = Math.max(0, totalTables - occupied);
@@ -342,7 +353,7 @@ export default function ReservationModal({
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, allTables, tablesLoading, companyTableMaps, tableMapsLoading]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, tablesLoading, tableMapsLoading, getEligibleTables]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
@@ -370,16 +381,12 @@ export default function ReservationModal({
         if (resErr) throw resErr;
 
         const occupiedIds = new Set((occupiedTableIds as string[]) || []);
-        const activeTableMap = resolveActiveTableMap(selectedDate, selectedTime);
+        const { activeTableMap, tables: eligibleTables } = getEligibleTables(selectedDate, selectedTime, selectedPartySize);
         const activeTableMapId = activeTableMap?.id ?? '';
-        const available = allTables
-          .filter((table) =>
-            table.table_map_id === activeTableMapId &&
-            !occupiedIds.has(table.id) &&
-            table.capacity >= selectedPartySize);
+        const available = eligibleTables.filter((table) => !occupiedIds.has(table.id));
         
         setAvailableTables(available);
-        setSelectedTableMapId(activeTableMapId);
+        setSelectedTableMapId(activeTableMapId || available[0]?.table_map_id || '');
         // Auto-select the smallest table that fits the party (best-fit)
         if (available.length > 0) {
           setSelectedTableId(available[0].id);
@@ -397,7 +404,7 @@ export default function ReservationModal({
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables, tablesLoading, companyTableMaps, tableMapsLoading]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables]);
 
   const handleReset = () => {
     setStep(1);
