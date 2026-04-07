@@ -38,9 +38,7 @@ const AccessDenied = lazy(() => import("@/pages/AccessDenied"));
 const CompanyPublicPage = lazy(() => import("@/pages/CompanyPublicPage"));
 const SystemHealth = lazy(() => import("@/pages/SystemHealth"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
-const DevToolbar = import.meta.env.DEV
-  ? lazy(() => import("@/components/DevToolbar"))
-  : null;
+const DevToolbar = lazy(() => import("@/components/DevToolbar"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
