@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Loader2,
   MapPin,
-  Megaphone,
   Phone,
   QrCode,
   Wallet,
@@ -19,7 +18,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RichTextContent } from '@/components/ui/rich-text-editor';
@@ -1011,30 +1010,28 @@ export default function CompanyPublicPage() {
           }
         }}
       >
-        <DialogContent className="bottom-auto left-[50%] right-auto top-[50%] w-[calc(100vw-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] gap-0 overflow-hidden rounded-lg border-none p-0 shadow-2xl sm:max-w-md">
+        <DialogContent
+          hideCloseButton
+          className="bottom-auto left-[50%] right-auto top-[50%] z-[70] flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] flex-col gap-0 overflow-hidden rounded-lg border-none bg-background p-0 shadow-2xl sm:max-w-md"
+        >
+          <DialogTitle className="sr-only">Aviso do restaurante</DialogTitle>
+          <DialogDescription className="sr-only">
+            Aviso ativo do restaurante para visitantes da pagina publica.
+          </DialogDescription>
+
           {activePublicNotice?.image_url && (
-            <div className="max-h-[52vh] overflow-hidden bg-muted">
+            <div className="min-h-0 shrink overflow-hidden bg-muted">
               <img
                 src={activePublicNotice.image_url}
                 alt="Aviso do restaurante"
-                className="h-full max-h-[52vh] w-full object-cover"
+                className="max-h-[52dvh] w-full object-contain"
               />
             </div>
           )}
 
-          <div className="space-y-4 p-5 pt-6">
-            <DialogHeader className="space-y-2 pr-8 text-left">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-soft text-primary">
-                <Megaphone className="h-5 w-5" />
-              </div>
-              <DialogTitle className="text-xl">Aviso importante</DialogTitle>
-              <DialogDescription className="sr-only">
-                Aviso ativo do restaurante para visitantes da pagina publica.
-              </DialogDescription>
-            </DialogHeader>
-
+          <div className="flex min-h-0 shrink-0 flex-col gap-4 p-4 sm:p-5">
             {activePublicNotice?.text && (
-              <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+              <p className="max-h-[34dvh] overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
                 {activePublicNotice.text}
               </p>
             )}
