@@ -22,6 +22,7 @@ import {
   useNotifications, useCreateNotification, useDeleteNotification,
 } from '@/hooks/useSettings';
 import { useCompanies } from '@/hooks/useCompanies';
+import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -182,7 +183,7 @@ function GeneralTab() {
         <div className="grid gap-4 max-w-md">
           <div>
             <Label>Nome do Sistema</Label>
-            <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="Plug Guest" />
+            <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder={DEFAULT_SYSTEM_NAME} />
           </div>
           <div>
             <Label>Logo do Sistema</Label>

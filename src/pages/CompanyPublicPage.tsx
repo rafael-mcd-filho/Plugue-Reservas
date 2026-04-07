@@ -28,6 +28,7 @@ import type { Company } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
 import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import { isValidCompanySlug } from '@/lib/validation';
+import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
@@ -166,7 +167,7 @@ export default function CompanyPublicPage() {
 
     document.title = `${company.name} - Reservar Mesa`;
     return () => {
-      document.title = 'ReservaF\u00E1cil';
+      document.title = DEFAULT_SYSTEM_NAME;
     };
   }, [company]);
 
@@ -607,7 +608,7 @@ export default function CompanyPublicPage() {
           </button>
           <p className="text-xs text-muted-foreground">
             {'Powered by '}
-            <span className="font-semibold text-primary">{'ReservaF\u00E1cil'}</span>
+            <span className="font-semibold text-primary">{DEFAULT_SYSTEM_NAME}</span>
           </p>
         </div>
       </div>

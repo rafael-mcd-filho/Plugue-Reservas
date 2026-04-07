@@ -30,6 +30,7 @@ import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
 import { trackAccessAudit } from '@/lib/accessAudit';
 import { useImpersonation } from '@/hooks/useImpersonation';
+import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
@@ -61,7 +62,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [companyMenuOpen, setCompanyMenuOpen] = useState(true);
   const { user, profile, roles, loading, signOut } = useAuth();
   const { data: systemBranding } = useSystemBranding();
-  const systemName = systemBranding?.system_name || 'PlugGuest';
+  const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
   const systemLogo = systemBranding?.system_logo_url || '';
   const userId = user?.id;
 

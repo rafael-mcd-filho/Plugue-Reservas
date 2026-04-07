@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { writeSuperadminAuditLog } from '@/lib/auditLogs';
+import { normalizeSystemName } from '@/lib/branding';
 
 export interface SystemSetting {
   id: string;
@@ -64,7 +65,7 @@ export function useSystemBranding() {
 
       const row = Array.isArray(data) ? data[0] : data;
       return {
-        system_name: row?.system_name || 'PlugGuest',
+        system_name: normalizeSystemName(row?.system_name),
         system_logo_url: row?.system_logo_url || '',
       } as SystemBranding;
     },

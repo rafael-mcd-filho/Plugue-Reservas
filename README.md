@@ -1,4 +1,4 @@
-# Plug Guest
+# Plugue Reservas
 
 Sistema multi-tenant de reservas para restaurantes com pagina publica por empresa, painel administrativo por unidade, painel global de superadmin e automacoes via WhatsApp integradas ao Supabase.
 
