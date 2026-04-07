@@ -239,9 +239,8 @@ function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null
     };
   }
 
-  const minutesToOpen = Math.ceil((nextSlot.start.getTime() - now.getTime()) / 60_000);
   return {
-    title: `Abrimos em ${describeDuration(minutesToOpen)}`,
+    title: 'Fechado agora',
     description: `Próxima abertura ${describeOpeningMoment(nextSlot, now)}.`,
     variant: 'closed',
   };
@@ -771,10 +770,10 @@ export default function CompanyPublicPage() {
       </div>
 
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
-        <div className="grid gap-4 md:grid-cols-2 md:items-start md:gap-6">
+        <div className="grid items-stretch gap-4 md:grid-cols-2 md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
-              <CardContent className="pb-5 pt-5">
+            <Card className="h-full animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
+              <CardContent className="h-full pb-5 pt-5">
                 <div>
                   <div>
                     <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -825,8 +824,8 @@ export default function CompanyPublicPage() {
           )}
 
           {(company.phone || company.address) && (
-            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
-              <CardContent className="space-y-4 pb-5 pt-5">
+            <Card className="h-full animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
+              <CardContent className="flex h-full flex-col gap-4 pb-5 pt-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -852,11 +851,12 @@ export default function CompanyPublicPage() {
                 )}
 
                 {mapsEmbedUrl && (
-                  <div className="overflow-hidden rounded-md border border-border">
+                  <div className="min-h-[180px] flex-1 overflow-hidden rounded-md border border-border">
                     <iframe
                       src={mapsEmbedUrl}
                       width="100%"
-                      height="180"
+                      height="100%"
+                      className="h-full min-h-[180px]"
                       style={{ border: 0 }}
                       allowFullScreen
                       loading="lazy"
