@@ -19,7 +19,7 @@ import {
   normalizePhoneDigits,
 } from '@/lib/validation';
 
-const DISABLED_MESSAGE = 'A entrada online na fila de espera estÃ¡ indisponÃ­vel no momento. Dirija-se Ã  unidade para entrar na fila de espera.';
+const DISABLED_MESSAGE = 'A entrada online na fila de espera está indisponível no momento. Dirija-se à unidade para entrar na fila de espera.';
 
 export default function PublicWaitlistPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -59,7 +59,7 @@ export default function PublicWaitlistPage() {
   const companyTitle = company?.name || slug || 'Fila de espera';
   const helperText = useMemo(
     () => queueEnabled
-      ? 'Preencha seus dados para entrar na fila. Depois vocÃª serÃ¡ redirecionado para a pÃ¡gina de acompanhamento.'
+      ? 'Preencha seus dados para entrar na fila. Depois você será redirecionado para a página de acompanhamento.'
       : DISABLED_MESSAGE,
     [queueEnabled],
   );
@@ -108,11 +108,11 @@ export default function PublicWaitlistPage() {
 
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.tracking_code) {
-        throw new Error('NÃ£o foi possÃ­vel criar a entrada na fila.');
+        throw new Error('Não foi possível criar a entrada na fila.');
       }
 
       if (row.already_exists) {
-        toast.info('VocÃª jÃ¡ estÃ¡ na fila. Redirecionando para o acompanhamento...');
+        toast.info('Você já está na fila. Redirecionando para o acompanhamento...');
       } else {
         toast.success('Entrada na fila criada com sucesso!');
         supabase.functions.invoke('reservation-events', {
@@ -129,7 +129,7 @@ export default function PublicWaitlistPage() {
 
       navigate(`/${slug}/fila/${row.tracking_code}`, { replace: true });
     } catch (submitError: any) {
-      toast.error(submitError.message || 'NÃ£o foi possÃ­vel entrar na fila agora.');
+      toast.error(submitError.message || 'Não foi possível entrar na fila agora.');
     } finally {
       setSubmitting(false);
     }
@@ -150,9 +150,9 @@ export default function PublicWaitlistPage() {
           <CardContent className="space-y-4 py-10 text-center">
             <MapPin className="mx-auto h-12 w-12 text-muted-foreground" />
             <div className="space-y-1">
-              <h1 className="text-xl font-semibold tracking-tight">Link indisponÃ­vel</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Link indisponível</h1>
               <p className="text-sm text-muted-foreground">
-                Esta unidade nÃ£o foi encontrada ou estÃ¡ temporariamente indisponÃ­vel.
+                Esta unidade não foi encontrada ou está temporariamente indisponível.
               </p>
             </div>
           </CardContent>
@@ -256,7 +256,7 @@ export default function PublicWaitlistPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="waitlist-notes" className="flex items-center gap-1.5">
                     <MessageSquare className="h-4 w-4" />
-                    ObservaÃ§Ãµes
+                    Observações
                   </Label>
                   <Textarea
                     id="waitlist-notes"

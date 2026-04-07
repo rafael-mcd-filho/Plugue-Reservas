@@ -57,7 +57,7 @@ export function useCreateCompany() {
   return useMutation({
     mutationFn: async (company: CompanyInsert) => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('NÃ£o autenticado');
+      if (!session) throw new Error('Não autenticado');
 
       const response = await supabase.functions.invoke('create-company', {
         body: company,
@@ -90,11 +90,11 @@ export function useCreateCompany() {
     onError: (err: any) => {
       const msg = err.message || '';
       if (msg.includes('companies_cnpj_key')) {
-        toast.error('JÃ¡ existe uma empresa com este CNPJ');
+        toast.error('Já existe uma empresa com este CNPJ');
       } else if (msg.includes('companies_slug_key')) {
-        toast.error('JÃ¡ existe uma empresa com este slug');
+        toast.error('Já existe uma empresa com este slug');
       } else if (msg.includes('already been registered')) {
-        toast.error('Este email jÃ¡ estÃ¡ cadastrado no sistema');
+        toast.error('Este email já está cadastrado no sistema');
       } else {
         toast.error(`Erro ao criar empresa: ${msg}`);
       }

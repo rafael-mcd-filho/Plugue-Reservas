@@ -51,25 +51,25 @@ const statusMessages: Record<string, { icon: typeof Clock; title: string; descri
   waiting: {
     icon: Clock,
     title: 'Aguardando',
-    description: 'VocÃª estÃ¡ na fila. Fique atento ao seu WhatsApp.',
+    description: 'Você está na fila. Fique atento ao seu WhatsApp.',
     color: 'text-primary',
   },
   called: {
     icon: AlertCircle,
     title: 'Sua vez!',
-    description: 'Dirija-se Ã  recepÃ§Ã£o. Sua mesa estÃ¡ pronta.',
+    description: 'Dirija-se à recepção. Sua mesa está pronta.',
     color: 'text-info',
   },
   seated: {
     icon: CheckCircle2,
     title: 'Sentado',
-    description: 'Bom apetite. Aproveite sua experiÃªncia.',
+    description: 'Bom apetite. Aproveite sua experiência.',
     color: 'text-success',
   },
   expired: {
     icon: XCircle,
     title: 'Expirado',
-    description: 'Seu tempo de espera expirou. Procure a recepÃ§Ã£o se ainda estiver no local.',
+    description: 'Seu tempo de espera expirou. Procure a recepção se ainda estiver no local.',
     color: 'text-muted-foreground',
   },
   removed: {
@@ -131,7 +131,7 @@ export default function WaitlistTracking() {
   const leaveWaitlist = useMutation({
     mutationFn: async () => {
       if (!code) {
-        throw new Error('CÃ³digo de acompanhamento invÃ¡lido.');
+        throw new Error('Código de acompanhamento inválido.');
       }
 
       const { data, error } = await (supabase as any).rpc('leave_public_waitlist', {
@@ -143,7 +143,7 @@ export default function WaitlistTracking() {
 
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.id) {
-        throw new Error('NÃ£o foi possÃ­vel sair da fila agora.');
+        throw new Error('Não foi possível sair da fila agora.');
       }
 
       return row as LeaveWaitlistResult;
@@ -153,19 +153,19 @@ export default function WaitlistTracking() {
       await queryClient.invalidateQueries({ queryKey: ['waitlist-tracking', code] });
 
       if (result.left_waitlist) {
-        toast.success('VocÃª saiu da fila com sucesso.');
+        toast.success('Você saiu da fila com sucesso.');
         return;
       }
 
       if (result.status === 'seated') {
-        toast.info('Essa entrada jÃ¡ foi atendida.');
+        toast.info('Essa entrada já foi atendida.');
         return;
       }
 
-      toast.info('Essa entrada jÃ¡ nÃ£o estÃ¡ mais ativa.');
+      toast.info('Essa entrada já não está mais ativa.');
     },
     onError: (error: any) => {
-      toast.error(error.message || 'NÃ£o foi possÃ­vel sair da fila agora.');
+      toast.error(error.message || 'Não foi possível sair da fila agora.');
     },
   });
 
@@ -183,8 +183,8 @@ export default function WaitlistTracking() {
         <Card className="w-full max-w-md border border-border shadow-sm">
           <CardContent className="py-12 text-center">
             <XCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-            <h2 className="mb-2 text-xl font-bold">Entrada nÃ£o encontrada</h2>
-            <p className="text-muted-foreground">Este cÃ³digo de acompanhamento Ã© invÃ¡lido ou expirou.</p>
+            <h2 className="mb-2 text-xl font-bold">Entrada não encontrada</h2>
+            <p className="text-muted-foreground">Este código de acompanhamento é inválido ou expirou.</p>
           </CardContent>
         </Card>
       </div>
@@ -231,7 +231,7 @@ export default function WaitlistTracking() {
                 <h2 className={`text-lg font-bold ${calledExpired ? 'text-destructive' : status.color}`}>{status.title}</h2>
                 <p className="mt-1 text-muted-foreground">
                   {entry.status === 'called'
-                    ? `Dirija-se Ã  recepÃ§Ã£o. VocÃª tem ${WAITLIST_CALL_TIMEOUT_MINUTES} minutos para se apresentar.`
+                    ? `Dirija-se à recepção. Você tem ${WAITLIST_CALL_TIMEOUT_MINUTES} minutos para se apresentar.`
                     : status.description}
                 </p>
               </div>
@@ -271,8 +271,8 @@ export default function WaitlistTracking() {
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {calledExpired
-                      ? 'O prazo de apresentaÃ§Ã£o terminou. Procure a recepÃ§Ã£o se ainda estiver no local.'
-                      : 'Ao chegar na recepÃ§Ã£o, a equipe vai confirmar sua entrada.'}
+                      ? 'O prazo de apresentação terminou. Procure a recepção se ainda estiver no local.'
+                      : 'Ao chegar na recepção, a equipe vai confirmar sua entrada.'}
                   </p>
                 </div>
               )}
@@ -287,7 +287,7 @@ export default function WaitlistTracking() {
                   <span className="font-medium">{entry.party_size}</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Na fila hÃ¡</span>
+                  <span className="text-muted-foreground">Na fila há</span>
                   <span className="font-medium">
                     {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
                   </span>
@@ -301,7 +301,7 @@ export default function WaitlistTracking() {
               {canLeaveWaitlist && (
                 <div className="space-y-3 border-t border-border pt-4">
                   <p className="text-xs text-muted-foreground">
-                    Se nÃ£o quiser mais aguardar, vocÃª pode sair da fila por aqui.
+                    Se não quiser mais aguardar, você pode sair da fila por aqui.
                   </p>
                   <Button
                     type="button"
@@ -319,7 +319,7 @@ export default function WaitlistTracking() {
           </Card>
 
           <p className="text-center text-xs text-muted-foreground">
-            Esta pÃ¡gina atualiza automaticamente. NÃ£o Ã© necessÃ¡rio recarregar.
+            Esta página atualiza automaticamente. Não é necessário recarregar.
           </p>
         </div>
       </div>
@@ -329,7 +329,7 @@ export default function WaitlistTracking() {
           <AlertDialogHeader>
             <AlertDialogTitle>Sair da fila?</AlertDialogTitle>
             <AlertDialogDescription>
-              Sua entrada serÃ¡ encerrada e vocÃª perderÃ¡ sua posiÃ§Ã£o atual. Se quiser voltar depois, serÃ¡ preciso entrar
+              Sua entrada será encerrada e você perderá sua posição atual. Se quiser voltar depois, será preciso entrar
               novamente na fila.
             </AlertDialogDescription>
           </AlertDialogHeader>

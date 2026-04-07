@@ -98,8 +98,8 @@ export default function Users() {
   const deleteWouldRemoveLastAdmin = isLastActiveAdmin(deleteDialog);
 
   const getCompanyName = (id: string | null) => {
-    if (!id) return 'â€”';
-    return companies.find((company) => company.id === id)?.name || 'â€”';
+    if (!id) return '-';
+    return companies.find((company) => company.id === id)?.name || '-';
   };
 
   const openEdit = (user: ManagedUser) => {
@@ -169,12 +169,12 @@ export default function Users() {
       if (result?.access_link) {
         try {
           await navigator.clipboard.writeText(result.access_link);
-          toast.success('UsuÃ¡rio criado. Link unico copiado.');
+          toast.success('Usuário criado. Link unico copiado.');
         } catch {
-          toast.success('UsuÃ¡rio criado. Link unico gerado.');
+          toast.success('Usuário criado. Link unico gerado.');
         }
       } else {
-        toast.success('UsuÃ¡rio criado com sucesso.');
+        toast.success('Usuário criado com sucesso.');
       }
 
       qc.invalidateQueries({ queryKey: ['managed-users'] });
@@ -191,12 +191,12 @@ export default function Users() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">UsuÃ¡rios</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Usuários</h1>
           <p className="mt-1 text-sm text-muted-foreground">Gerencie admins e operadores das empresas</p>
         </div>
         <Button className="gap-2 rounded-lg" onClick={() => setShowCreateDialog(true)}>
           <Plus className="h-4 w-4" />
-          Novo UsuÃ¡rio
+          Novo Usuário
         </Button>
       </div>
 
@@ -255,7 +255,7 @@ export default function Users() {
         <Card className="overflow-hidden border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
             <UsersIcon className="mx-auto mb-3 h-12 w-12 opacity-30" />
-            Nenhum usuÃ¡rio encontrado.
+            Nenhum usuário encontrado.
           </CardContent>
         </Card>
       ) : (
@@ -268,13 +268,13 @@ export default function Users() {
                 <TableHead>Empresa</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">AÃ§Ãµes</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((user) => (
                 <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.full_name || 'â€”'}</TableCell>
+                  <TableCell className="font-medium">{user.full_name || '-'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                   <TableCell className="text-sm">
                     <span className="inline-flex items-center gap-1 text-muted-foreground">
@@ -305,7 +305,7 @@ export default function Users() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 rounded-lg"
-                          aria-label={`AÃ§Ãµes para ${user.full_name || user.email}`}
+                          aria-label={`Ações para ${user.full_name || user.email}`}
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
@@ -357,14 +357,14 @@ export default function Users() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {banDialog?.is_banned ? 'Desbloquear usuÃ¡rio?' : 'Bloquear usuÃ¡rio?'}
+              {banDialog?.is_banned ? 'Desbloquear usuário?' : 'Bloquear usuário?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {banWouldRemoveLastAdmin
-                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de bloquear este usuÃ¡rio.'
+                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de bloquear este usuário.'
                 : banDialog?.is_banned
-                  ? `${banDialog.full_name || banDialog.email} voltarÃ¡ a ter acesso ao sistema.`
-                  : `${banDialog?.full_name || banDialog?.email} perderÃ¡ acesso imediatamente ao sistema.`}
+                  ? `${banDialog.full_name || banDialog.email} voltará a ter acesso ao sistema.`
+                  : `${banDialog?.full_name || banDialog?.email} perderá acesso imediatamente ao sistema.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -388,11 +388,11 @@ export default function Users() {
       <AlertDialog open={!!deleteDialog} onOpenChange={(open) => !open && setDeleteDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir usuÃ¡rio?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir usuário?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteWouldRemoveLastAdmin
-                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de excluir este usuÃ¡rio.'
-                : `${deleteDialog?.full_name || deleteDialog?.email} serÃ¡ removido permanentemente do sistema.`}
+                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de excluir este usuário.'
+                : `${deleteDialog?.full_name || deleteDialog?.email} será removido permanentemente do sistema.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -418,7 +418,7 @@ export default function Users() {
           <AlertDialogHeader>
             <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
             <AlertDialogDescription>
-              Um link unico de redefinicao serÃ¡ gerado para {resetDialog?.full_name || resetDialog?.email}. O acesso atual serÃ¡ invalidado assim que a nova senha for definida.
+              Um link unico de redefinicao será gerado para {resetDialog?.full_name || resetDialog?.email}. O acesso atual será invalidado assim que a nova senha for definida.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -433,7 +433,7 @@ export default function Users() {
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Editar UsuÃ¡rio</DialogTitle>
+            <DialogTitle>Editar Usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEdit} className="mt-4 space-y-4">
             <div>
@@ -499,7 +499,7 @@ export default function Users() {
             </div>
             {editWouldRemoveLastAdmin && (
               <p className="text-sm text-destructive">
-                Essa alteraÃ§Ã£o removeria o Ãºltimo admin ativo da empresa.
+                Essa alteração removeria o último admin ativo da empresa.
               </p>
             )}
             <div className="flex justify-end gap-3">
@@ -513,7 +513,7 @@ export default function Users() {
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Novo UsuÃ¡rio</DialogTitle>
+            <DialogTitle>Novo Usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="mt-4 space-y-4">
             <div>
@@ -523,7 +523,7 @@ export default function Users() {
                 name="full_name"
                 value={createForm.full_name}
                 onChange={(event) => setCreateForm({ ...createForm, full_name: event.target.value })}
-                placeholder="Nome do usuÃ¡rio"
+                placeholder="Nome do usuário"
                 autoComplete="name"
                 required
               />
@@ -581,11 +581,11 @@ export default function Users() {
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-muted-foreground">Um link unico de acesso serÃ¡ gerado automaticamente.</p>
+            <p className="text-xs text-muted-foreground">Um link unico de acesso será gerado automaticamente.</p>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
               <Button type="submit" disabled={creating}>
-                {creating ? 'Criando...' : 'Criar UsuÃ¡rio'}
+                {creating ? 'Criando...' : 'Criar Usuário'}
               </Button>
             </div>
           </form>
