@@ -38,28 +38,6 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("recharts")) return "vendor-charts";
-          if (id.includes("@supabase")) return "vendor-supabase";
-          if (id.includes("@tanstack/react-query")) return "vendor-query";
-          if (id.includes("@radix-ui")) return "vendor-radix";
-          if (id.includes("date-fns")) return "vendor-date";
-          if (
-            id.includes("react-router") ||
-            id.includes("react-dom") ||
-            id.match(/[\\/]node_modules[\\/](react|scheduler)[\\/]/)
-          ) {
-            return "vendor-react";
-          }
-          return "vendor-misc";
-        },
-      },
-    },
-  },
   define: {
     __APP_VERSION__: JSON.stringify(buildInfo.version),
     __APP_COMMIT__: JSON.stringify(buildInfo.commit),
