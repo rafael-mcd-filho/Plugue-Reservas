@@ -45,13 +45,44 @@ interface DashboardMetricCard {
 
 interface TrackingEventRow {
   id: string;
+  session_id: string | null;
+  journey_id: string | null;
   reservation_id: string | null;
+  anonymous_id: string;
+  event_id: string;
   event_name: string;
   tracking_source: string;
+  step: string | null;
   occurred_at: string;
   path: string | null;
   page_url: string | null;
+  referrer: string | null;
+  event_source_url: string | null;
   metadata: Record<string, unknown> | null;
+  user_data_snapshot: Record<string, unknown> | null;
+  session?: TrackingSessionRow | null;
+}
+
+interface TrackingSessionRow {
+  id: string;
+  anonymous_id: string;
+  first_page_url: string | null;
+  last_page_url: string | null;
+  landing_path: string | null;
+  referrer: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  utm_term: string | null;
+  fbclid: string | null;
+  fbp: string | null;
+  fbc: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  accept_language: string | null;
+  started_at: string;
+  last_seen_at: string;
 }
 
 interface MetaQueueRow {
@@ -115,11 +146,65 @@ function buildPayloadPreview(value: unknown) {
   }
 }
 
+function getRecordText(record: Record<string, unknown> | null | undefined, key: string) {
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function formatEventDisplay(eventName: string) {
+  if (eventName === 'page_view') return 'Abriu pagina publica';
+  if (eventName === 'booking_started') return 'Abriu jornada de reserva';
+  if (eventName === 'date_select') return 'Escolheu data';
+  if (eventName === 'time_select') return 'Escolheu data, pessoas e horario';
+  if (eventName === 'form_fill') return 'Chegou no formulario';
+  if (eventName === 'reservation_created') return 'Reserva efetivada';
+  if (eventName === 'lead_captured') return 'Formulario enviado (legado)';
+  return eventName;
+}
+
+function formatMetaMapping(eventName: string) {
+  if (eventName === 'page_view') return 'PageView';
+  if (eventName === 'time_select') return 'InitiateCheckout';
+  if (eventName === 'reservation_created') return 'Lead';
+  return 'Nao envia para Meta';
+}
+
+function getSessionAttributionValue(event: TrackingEventRow, key: keyof TrackingSessionRow) {
+  const sessionValue = event.session?.[key];
+  if (typeof sessionValue === 'string' && sessionValue.trim()) return sessionValue;
+  return getRecordText(event.metadata, key);
+}
+
+function formatLocationFromUserData(userData: Record<string, unknown> | null | undefined) {
+  const city = getRecordText(userData, 'city');
+  const state = getRecordText(userData, 'state');
+  const country = getRecordText(userData, 'country');
+  const zip = getRecordText(userData, 'zip');
+  const location = [city, state, country].filter(Boolean).join(', ');
+
+  if (location && zip) return `${location} - ${zip}`;
+  if (location) return location;
+  if (zip) return zip;
+  return 'Nao coletada automaticamente';
+}
+
+function DetailItem({ label, value, mono = false }: { label: string; value: string | number | null | undefined; mono?: boolean }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? 'break-all font-mono text-xs text-foreground' : 'break-words text-sm text-foreground'}>
+        {value || '-'}
+      </p>
+    </div>
+  );
+}
+
 export default function CompanyEvents() {
   const { companyId, companyName } = useCompanySlug();
   const queryClient = useQueryClient();
   const [settingsForm, setSettingsForm] = useState<TrackingSettingsForm>(createDefaultSettings);
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<TrackingEventRow | null>(null);
   const [tokenVisible, setTokenVisible] = useState(false);
 
   const since = useMemo(() => subDays(new Date(), 7).toISOString(), []);
@@ -210,7 +295,7 @@ export default function CompanyEvents() {
           .gte('created_at', since),
         supabase
           .from('tracking_events' as any)
-          .select('id, reservation_id, event_name, tracking_source, occurred_at, path, page_url, metadata')
+          .select('id, session_id, journey_id, reservation_id, anonymous_id, event_id, event_name, tracking_source, step, occurred_at, path, page_url, referrer, event_source_url, metadata, user_data_snapshot')
           .eq('company_id', companyId)
           .order('occurred_at', { ascending: false })
           .limit(30),
@@ -242,6 +327,24 @@ export default function CompanyEvents() {
 
       const firstError = results.find((result) => result.error)?.error;
       if (firstError) throw firstError;
+
+      const recentEvents = ((recentEventsResult.data as TrackingEventRow[]) ?? []);
+      const recentSessionIds = Array.from(new Set(
+        recentEvents.map((event) => event.session_id).filter((value): value is string => !!value),
+      ));
+      const sessionDetailsResult = recentSessionIds.length > 0
+        ? await supabase
+          .from('tracking_sessions' as any)
+          .select('id, anonymous_id, first_page_url, last_page_url, landing_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, fbclid, fbp, fbc, ip_address, user_agent, accept_language, started_at, last_seen_at')
+          .eq('company_id', companyId)
+          .in('id', recentSessionIds)
+        : { data: [], error: null };
+
+      if (sessionDetailsResult.error) throw sessionDetailsResult.error;
+
+      const sessionsById = new Map(
+        ((sessionDetailsResult.data as TrackingSessionRow[]) ?? []).map((session) => [session.id, session]),
+      );
 
       const metrics: DashboardMetricCard[] = [
         {
@@ -278,7 +381,10 @@ export default function CompanyEvents() {
 
       return {
         metrics,
-        recentEvents: ((recentEventsResult.data as TrackingEventRow[]) ?? []),
+        recentEvents: recentEvents.map((event) => ({
+          ...event,
+          session: event.session_id ? sessionsById.get(event.session_id) ?? null : null,
+        })),
         metaQueue: ((metaQueueResult.data as MetaQueueRow[]) ?? []),
         metaAttempts: ((metaAttemptsResult.data as MetaAttemptRow[]) ?? []),
       };
@@ -381,6 +487,10 @@ export default function CompanyEvents() {
     }
   };
 
+  const selectedEventSession = selectedEvent?.session ?? null;
+  const selectedEventUserData = selectedEvent?.user_data_snapshot ?? null;
+  const selectedEventMetadata = selectedEvent?.metadata ?? null;
+
   return (
     <>
       <div className="space-y-6">
@@ -472,6 +582,9 @@ export default function CompanyEvents() {
                 <p className="mt-1 text-sm font-medium text-foreground"><code>reservation_created</code> {'->'} <code>Lead</code></p>
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Schedule nao e mais usado neste funil. A conversao final da reserva e enviada para a Meta como Lead.
+            </p>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -535,7 +648,7 @@ export default function CompanyEvents() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">PageView</p>
-                    <p className="text-xs text-muted-foreground">Preparado para uso futuro.</p>
+                    <p className="text-xs text-muted-foreground">Abertura da pagina publica.</p>
                   </div>
                   <Switch
                     checked={settingsForm.send_page_view}
@@ -548,7 +661,7 @@ export default function CompanyEvents() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">InitiateCheckout</p>
-                    <p className="text-xs text-muted-foreground">Abertura da jornada de reserva.</p>
+                    <p className="text-xs text-muted-foreground">Data, pessoas e horario escolhidos.</p>
                   </div>
                   <Switch
                     checked={settingsForm.send_initiate_checkout}
@@ -627,14 +740,30 @@ export default function CompanyEvents() {
                     </TableRow>
                   ) : (
                     recentEvents.map((event) => (
-                      <TableRow key={event.id}>
+                      <TableRow
+                        key={event.id}
+                        role="button"
+                        tabIndex={0}
+                        className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title="Ver detalhes do evento"
+                        onClick={() => setSelectedEvent(event)}
+                        onKeyDown={(keyboardEvent) => {
+                          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                            keyboardEvent.preventDefault();
+                            setSelectedEvent(event);
+                          }
+                        }}
+                      >
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                           {formatDateTime(event.occurred_at)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary">{event.event_name}</Badge>
-                            <Badge variant="outline">{event.tracking_source}</Badge>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">{event.event_name}</Badge>
+                              <Badge variant="outline">{event.tracking_source}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{formatEventDisplay(event.event_name)}</p>
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">
@@ -819,6 +948,88 @@ export default function CompanyEvents() {
           </p>
         </div>
       </div>
+
+      <Dialog open={!!selectedEvent} onOpenChange={(nextOpen) => !nextOpen && setSelectedEvent(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+          {selectedEvent && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Detalhes do evento</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">{selectedEvent.event_name}</Badge>
+                    <Badge variant="outline">{selectedEvent.tracking_source}</Badge>
+                    <Badge variant={formatMetaMapping(selectedEvent.event_name) === 'Nao envia para Meta' ? 'outline' : 'default'}>
+                      Meta: {formatMetaMapping(selectedEvent.event_name)}
+                    </Badge>
+                  </div>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    {formatEventDisplay(selectedEvent.event_name)}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-border p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Evento</h3>
+                    <div className="mt-3 grid gap-3">
+                      <DetailItem label="Quando" value={formatDateTime(selectedEvent.occurred_at)} />
+                      <DetailItem label="Etapa interna" value={selectedEvent.step ?? selectedEvent.event_name} />
+                      <DetailItem label="ID do evento" value={selectedEvent.event_id} mono />
+                      <DetailItem label="Reserva" value={selectedEvent.reservation_id} mono />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Sessao e dispositivo</h3>
+                    <div className="mt-3 grid gap-3">
+                      <DetailItem label="Visitor ID" value={selectedEvent.anonymous_id} mono />
+                      <DetailItem label="Sessao" value={selectedEvent.session_id} mono />
+                      <DetailItem label="IP" value={selectedEventSession?.ip_address} mono />
+                      <DetailItem label="Idioma" value={selectedEventSession?.accept_language} />
+                      <DetailItem label="Navegador" value={selectedEventSession?.user_agent} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Origem</h3>
+                    <div className="mt-3 grid gap-3">
+                      <DetailItem label="Pagina do evento" value={selectedEvent.path ?? selectedEvent.page_url} mono />
+                      <DetailItem label="URL completa" value={selectedEvent.event_source_url ?? selectedEvent.page_url} mono />
+                      <DetailItem label="Primeira pagina da sessao" value={selectedEventSession?.first_page_url} mono />
+                      <DetailItem label="Referenciador" value={selectedEvent.referrer ?? selectedEventSession?.referrer} mono />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Campanha e local</h3>
+                    <div className="mt-3 grid gap-3">
+                      <DetailItem label="UTM source" value={getSessionAttributionValue(selectedEvent, 'utm_source')} />
+                      <DetailItem label="UTM medium" value={getSessionAttributionValue(selectedEvent, 'utm_medium')} />
+                      <DetailItem label="UTM campaign" value={getSessionAttributionValue(selectedEvent, 'utm_campaign')} />
+                      <DetailItem label="fbclid" value={getSessionAttributionValue(selectedEvent, 'fbclid')} mono />
+                      <DetailItem label="Localizacao" value={formatLocationFromUserData(selectedEventUserData)} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border p-4">
+                  <h3 className="text-sm font-semibold text-foreground">Dados brutos</h3>
+                  <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-muted/30 p-3 text-xs text-foreground">
+                    {buildPayloadPreview({
+                      metadata: selectedEventMetadata,
+                      user_data_snapshot: selectedEventUserData,
+                      session: selectedEventSession,
+                    }) ?? '{}'}
+                  </pre>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selectedPayload} onOpenChange={(nextOpen) => !nextOpen && setSelectedPayload(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
