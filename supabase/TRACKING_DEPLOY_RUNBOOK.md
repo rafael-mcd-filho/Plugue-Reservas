@@ -172,7 +172,7 @@ Ativar os toggles desejados:
 - migration aplicada sem erro
 - edge functions publicadas
 - `page_view` aparecendo em `admin/eventos`
-- `booking_started` aparecendo em `admin/eventos`
+- `time_select` aparecendo em `admin/eventos` e entrando na Meta como `InitiateCheckout`
 - `reservation_created` aparecendo em `admin/eventos` e entrando na Meta como `Lead`
 - fila Meta registrando payload e resposta
 - painel ao vivo populando com atividade recente

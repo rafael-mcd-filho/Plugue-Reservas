@@ -162,7 +162,7 @@ export default function CompanyEvents() {
       const [
         sessionsResult,
         pageViewsResult,
-        bookingStartedResult,
+        initiateCheckoutResult,
         reservationsResult,
         metaSentResult,
         metaFailedResult,
@@ -187,7 +187,7 @@ export default function CompanyEvents() {
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
           .eq('tracking_source', 'public')
-          .eq('event_name', 'booking_started')
+          .eq('event_name', 'time_select')
           .gte('occurred_at', since),
         supabase
           .from('tracking_events' as any)
@@ -231,7 +231,7 @@ export default function CompanyEvents() {
       const results = [
         sessionsResult,
         pageViewsResult,
-        bookingStartedResult,
+        initiateCheckoutResult,
         reservationsResult,
         metaSentResult,
         metaFailedResult,
@@ -256,8 +256,8 @@ export default function CompanyEvents() {
         },
         {
           label: 'InitiateCheckout',
-          value: bookingStartedResult.count ?? 0,
-          description: 'Sessoes que iniciaram a jornada de reserva.',
+          value: initiateCheckoutResult.count ?? 0,
+          description: 'Sessoes que escolheram data, pessoas e horario.',
         },
         {
           label: 'Lead',
@@ -464,8 +464,8 @@ export default function CompanyEvents() {
                 <p className="mt-1 text-sm font-medium text-foreground"><code>page_view</code> {'->'} <code>PageView</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Inicio do funil</p>
-                <p className="mt-1 text-sm font-medium text-foreground"><code>booking_started</code> {'->'} <code>InitiateCheckout</code></p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Data e horario</p>
+                <p className="mt-1 text-sm font-medium text-foreground"><code>time_select</code> {'->'} <code>InitiateCheckout</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversao final</p>
