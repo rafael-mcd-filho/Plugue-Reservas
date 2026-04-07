@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -103,6 +103,11 @@ interface SlotAvailability {
   total: number;
   occupied: number;
   available: number;
+}
+
+interface UrgencySlot extends SlotAvailability {
+  time: string;
+  fillRate: number;
 }
 
 interface ConfirmedReservation {
@@ -607,6 +612,33 @@ export default function ReservationModal({
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Reserva - ${companyName}`)}&dates=${fmt(startDate)}/${fmt(endDate)}&details=${encodeURIComponent(`Reserva para ${confirmedReservation.partySize} pessoas${confirmedReservation.tableName ? ` · ${confirmedReservation.tableName}` : ''}`)}`;
   };
 
+  const urgencySlots = useMemo<UrgencySlot[]>(() => {
+    return timeSlots
+      .map((time) => {
+        const slot = slotAvailability[time];
+        if (!slot || slot.total <= 0 || slot.available <= 0) return null;
+
+        return {
+          time,
+          ...slot,
+          fillRate: slot.occupied / slot.total,
+        };
+      })
+      .filter((slot): slot is UrgencySlot => !!slot && (slot.available <= 2 || slot.occupied > 0))
+      .sort((a, b) => {
+        if (a.available !== b.available) return a.available - b.available;
+        if (a.fillRate !== b.fillRate) return b.fillRate - a.fillRate;
+        return a.time.localeCompare(b.time);
+      })
+      .slice(0, 3);
+  }, [slotAvailability, timeSlots]);
+
+  const selectedSlotAvailability = selectedTime ? slotAvailability[selectedTime] : null;
+  const selectedSlotIsLow = !!selectedSlotAvailability
+    && selectedSlotAvailability.available > 0
+    && selectedSlotAvailability.available <= 2;
+  const hasCriticalUrgency = urgencySlots.some((slot) => slot.available <= 2);
+
   const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
     const avail = slotAvailability[slot];
     if (!avail || avail.total === 0) return 'available';
@@ -738,34 +770,72 @@ export default function ReservationModal({
             ) : loadingSlots ? (
               <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {timeSlots.map(time => {
-                  const status = getSlotStatus(time);
-                  const avail = slotAvailability[time];
-                  const isFull = status === 'full';
-                  return (
-                    <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
-                      disabled={isFull}
-                      className={cn(
-                        'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
-                        isFull && 'opacity-40 cursor-not-allowed bg-muted',
-                        selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border'
-                      )}>
-                      <span className="flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5" />{time}
+              <>
+                {urgencySlots.length > 0 && (
+                  <div className="animate-fade-in rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950 shadow-sm" role="status">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                        <Flame className="h-4 w-4" />
                       </span>
-                      {avail && (
-                        <span className={cn(
-                          'text-[10px] font-medium',
-                          isFull ? 'text-destructive' : status === 'low' ? 'text-warning' : 'text-muted-foreground'
+                      <div className="min-w-0 space-y-2">
+                        <div>
+                          <p className="text-sm font-semibold">
+                            {hasCriticalUrgency ? 'Horários quase esgotando' : 'Horários já recebendo reservas'}
+                          </p>
+                          <p className="text-xs leading-relaxed text-amber-800">
+                            {hasCriticalUrgency
+                              ? 'Alguns horários estão com poucas vagas para o tamanho do seu grupo.'
+                              : 'Já existem reservas nesses horários. Se um deles encaixa para você, vale garantir agora.'}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {urgencySlots.map((slot) => (
+                            <span key={slot.time} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm">
+                              {slot.time} · {slot.available} {slot.available === 1 ? 'vaga' : 'vagas'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {timeSlots.map(time => {
+                    const status = getSlotStatus(time);
+                    const avail = slotAvailability[time];
+                    const isFull = status === 'full';
+                    return (
+                      <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
+                        disabled={isFull}
+                        className={cn(
+                          'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
+                          isFull && 'opacity-40 cursor-not-allowed bg-muted',
+                          selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
+                          status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
                         )}>
-                          {isFull ? 'Lotado' : `${avail.available} ${avail.available === 1 ? 'vaga' : 'vagas'}`}
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5" />{time}
                         </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                        {avail && (
+                          <span className={cn(
+                            'text-[10px] font-medium',
+                            isFull ? 'text-destructive' : status === 'low' ? 'text-amber-700' : 'text-muted-foreground'
+                          )}>
+                            {isFull ? 'Lotado' : `${avail.available} ${avail.available === 1 ? 'vaga' : 'vagas'}`}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {selectedSlotIsLow && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900">
+                Esse horário tem só {selectedSlotAvailability?.available} {selectedSlotAvailability?.available === 1 ? 'vaga' : 'vagas'} para {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}. Continue para garantir a reserva.
+              </p>
             )}
 
             {/* No table availability message */}
