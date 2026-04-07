@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -1094,16 +1094,18 @@ export default function ReservationModal({
         {/* Step 4: Success */}
         {step === 4 && confirmedReservation && (
           <div className="animate-fade-in space-y-6 pt-4 text-center">
-            <div className="mx-auto w-16 h-16 rounded-full bg-success/10 flex items-center justify-center">
-              <Check className="h-8 w-8 text-success" />
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-100 shadow-[0_18px_40px_rgba(16,185,129,0.18)]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-[0_10px_24px_rgba(5,150,105,0.35)]">
+                <BadgeCheck className="h-8 w-8" strokeWidth={2.25} />
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <p className="text-foreground font-medium">
-                Olá {confirmedReservation.guestName}, sua reserva foi confirmada!
+            <div className="space-y-2">
+              <p className="text-lg font-semibold leading-snug text-foreground">
+                {confirmedReservation.guestName}, está tudo pronto para você.
               </p>
-              <p className="text-sm text-muted-foreground">
-                Estamos ansiosos para recebê-lo(a).
+              <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
+                Agora é só relaxar — sua experiência com a gente já começou.
               </p>
             </div>
 
@@ -1141,23 +1143,17 @@ export default function ReservationModal({
                   <span className="text-muted-foreground">Pessoas</span>
                   <span className="font-medium text-foreground">{confirmedReservation.partySize}</span>
                 </div>
-                {confirmedReservation.tableName && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Mesa</span>
-                    <span className="font-medium text-foreground">{confirmedReservation.tableName}</span>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
-            <div className="space-y-2">
-              <a href={confirmedReservation.trackingUrl} target="_blank" rel="noopener noreferrer">
+            <div className="flex flex-col gap-3">
+              <a href={confirmedReservation.trackingUrl} target="_blank" rel="noopener noreferrer" className="block">
                 <Button className="w-full gap-2">
                   <ExternalLink className="h-4 w-4" />
                   Acompanhar reserva
                 </Button>
               </a>
-              <a href={addToCalendarUrl()} target="_blank" rel="noopener noreferrer">
+              <a href={addToCalendarUrl()} target="_blank" rel="noopener noreferrer" className="block">
                 <Button variant="outline" className="w-full gap-2">
                   <CalendarPlus className="h-4 w-4" />
                   Adicionar ao Google Calendar
