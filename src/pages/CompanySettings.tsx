@@ -240,7 +240,7 @@ export default function CompanySettings() {
       const normalizedMapsEmbedUrl = normalizeGoogleMapsEmbedInput(googleMapsUrl);
 
       if (googleMapsUrl.trim() && !normalizedMapsEmbedUrl) {
-        throw new Error('Use um link de incorporacao valido do Google Maps.');
+        throw new Error('Use um link de incorporação válido do Google Maps.');
       }
 
       const trimmedNoticeText = noticeText.trim();
@@ -253,7 +253,7 @@ export default function CompanySettings() {
         }
 
         if (!noticeActiveUntilIso) {
-          throw new Error('Informe ate quando o aviso deve ficar ativo.');
+          throw new Error('Informe até quando o aviso deve ficar ativo.');
         }
 
         if (new Date(noticeActiveUntilIso).getTime() <= Date.now()) {
@@ -407,13 +407,13 @@ export default function CompanySettings() {
     }
 
     if (!file.type.startsWith('image/')) {
-      toast.error('Selecione um arquivo de imagem valido');
+      toast.error('Selecione um arquivo de imagem válido');
       event.target.value = '';
       return;
     }
 
     if (file.size > MAX_NOTICE_IMAGE_FILE_SIZE) {
-      toast.error('A imagem do aviso deve ter no maximo 2MB');
+      toast.error('A imagem do aviso deve ter no máximo 2MB');
       event.target.value = '';
       return;
     }
@@ -460,8 +460,8 @@ export default function CompanySettings() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Configuracoes</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Configuracoes da unidade {companyName}</p>
+          <h1 className="text-xl font-semibold tracking-tight">Configurações</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Configurações da unidade {companyName}</p>
         </div>
         <Button
           onClick={() => saveMutation.mutate()}
@@ -476,9 +476,9 @@ export default function CompanySettings() {
       {publicCustomizationLocked && (
         <Card className="rounded-xl border border-primary/20 bg-primary-soft shadow-none">
           <CardContent className="py-3">
-            <p className="text-sm font-medium text-primary">Pagina publica customizada indisponivel neste plano.</p>
+            <p className="text-sm font-medium text-primary">Página pública customizada indisponível neste plano.</p>
             <p className="mt-1 text-sm text-primary/85">
-              Logo, descricao e botao do WhatsApp ficam bloqueados. Endereco, mapa e pagamentos continuam disponiveis.
+              Logo, descrição e botão do WhatsApp ficam bloqueados. Endereço, mapa e pagamentos continuam disponíveis.
             </p>
           </CardContent>
         </Card>
@@ -512,8 +512,8 @@ export default function CompanySettings() {
                   <Clock className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Horario de funcionamento</CardTitle>
-                  <CardDescription>Defina os horarios de abertura e fechamento para cada dia.</CardDescription>
+                  <CardTitle className="text-lg">Horário de funcionamento</CardTitle>
+                  <CardDescription>Defina os horários de abertura e fechamento para cada dia.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -538,7 +538,7 @@ export default function CompanySettings() {
                             onChange={(event) => updateHour(index, 'open', event.target.value)}
                             className={cn('w-full max-w-[132px]', settingsFieldClassName)}
                           />
-                          <span className="text-sm text-muted-foreground">as</span>
+                          <span className="text-sm text-muted-foreground">às</span>
                           <Input
                             type="time"
                             value={hour.close}
@@ -564,16 +564,16 @@ export default function CompanySettings() {
                     <Clock className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
-                    <CardTitle className="text-lg">Duracao de cada reserva</CardTitle>
-                    <CardDescription>Intervalo entre os horarios disponiveis.</CardDescription>
+                    <CardTitle className="text-lg">Duração de cada reserva</CardTitle>
+                    <CardDescription>Intervalo entre os horários disponíveis.</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-2">
                 <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Duracao</Label>
+                  <Label className="text-sm text-muted-foreground">Duração</Label>
                   <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
-                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duracao da reserva">
+                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -596,8 +596,8 @@ export default function CompanySettings() {
                     <Users className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
-                    <CardTitle className="text-lg">Capacidade maxima / horario</CardTitle>
-                    <CardDescription>Total de pessoas por horario. 0 = sem limite.</CardDescription>
+                    <CardTitle className="text-lg">Capacidade máxima / horário</CardTitle>
+                    <CardDescription>Total de pessoas por horário. 0 = sem limite.</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -629,7 +629,7 @@ export default function CompanySettings() {
                 </div>
                 <div className="space-y-1">
                   <CardTitle className="text-lg">Formas de pagamento</CardTitle>
-                  <CardDescription>Selecione quais formas de pagamento sao aceitas.</CardDescription>
+                  <CardDescription>Selecione quais formas de pagamento são aceitas.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -676,8 +676,8 @@ export default function CompanySettings() {
                   <Info className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Informacoes da empresa</CardTitle>
-                  <CardDescription>Dados exibidos na pagina publica e no link oculto da fila.</CardDescription>
+                  <CardTitle className="text-lg">Informações da empresa</CardTitle>
+                  <CardDescription>Dados exibidos na página pública e no link oculto da fila.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -718,7 +718,7 @@ export default function CompanySettings() {
                   )}
                 </div>
 
-                <p className="text-xs text-muted-foreground">Envie PNG, JPG, WEBP ou SVG com ate 2MB.</p>
+                <p className="text-xs text-muted-foreground">Envie PNG, JPG, WEBP ou SVG com até 2MB.</p>
 
                 <div className="flex min-h-28 max-w-sm items-center justify-center rounded-2xl border border-dashed border-[rgba(0,0,0,0.14)] bg-muted/20 p-4">
                   {logoUrl ? (
@@ -738,7 +738,7 @@ export default function CompanySettings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company-settings-description">Descricao</Label>
+                <Label htmlFor="company-settings-description">Descrição</Label>
                 <RichTextEditor
                   id="company-settings-description"
                   value={description}
@@ -795,26 +795,26 @@ export default function CompanySettings() {
                     inputMode="tel"
                   />
                   {publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">O WhatsApp publico fica bloqueado enquanto a feature estiver desativada.</p>
+                    <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>
                   )}
                 </div>
 
                 <div className={settingsFieldGroupClassName}>
-                  <Label className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> Botao do WhatsApp</Label>
+                  <Label className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> Botão do WhatsApp</Label>
                   <Select value={showPublicWhatsappButton} onValueChange={setShowPublicWhatsappButton} disabled={publicCustomizationLocked}>
-                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar exibicao do botao de WhatsApp">
+                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar exibição do botão de WhatsApp">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="show">Mostrar botao</SelectItem>
-                      <SelectItem value="hide">Ocultar botao</SelectItem>
+                      <SelectItem value="show">Mostrar botão</SelectItem>
+                      <SelectItem value="hide">Ocultar botão</SelectItem>
                     </SelectContent>
                   </Select>
                   {publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">O botao de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
+                    <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
                   )}
                   {!publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">Controla se o botao aparece na pagina publica.</p>
+                    <p className="text-xs text-muted-foreground">Controla se o botão aparece na página pública.</p>
                   )}
                 </div>
               </div>
@@ -825,10 +825,10 @@ export default function CompanySettings() {
                     <div>
                       <Label className="flex items-center gap-1.5 text-base font-semibold">
                         <Users className="h-4 w-4" />
-                        Entrada publica na fila de espera
+                        Entrada pública na fila de espera
                       </Label>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Este link nao aparece na pagina publica. So entra quem receber a URL direta.
+                        Este link não aparece na página pública. Só entra quem receber a URL direta.
                       </p>
                     </div>
                     <Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />
@@ -849,7 +849,7 @@ export default function CompanySettings() {
 
                   {!publicWaitlistEnabled && (
                     <p className="text-xs text-muted-foreground">
-                      Quando desabilitado, quem acessar este link vera uma mensagem orientando a se dirigir a unidade para entrar na fila de espera.
+                      Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
                     </p>
                   )}
                 </div>
@@ -861,10 +861,10 @@ export default function CompanySettings() {
                     <div>
                       <Label className="flex items-center gap-1.5 text-base font-semibold">
                         <Megaphone className="h-4 w-4 text-primary" />
-                        Aviso na pagina publica
+                        Aviso na página pública
                       </Label>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Abre um modal central para visitantes enquanto estiver ativo. Apenas um aviso fica disponivel por empresa.
+                        Abre um modal central para visitantes enquanto estiver ativo. Apenas um aviso fica disponível por empresa.
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
@@ -873,7 +873,7 @@ export default function CompanySettings() {
                         checked={noticeActive}
                         onCheckedChange={setNoticeActive}
                         disabled={publicCustomizationLocked}
-                        aria-label="Ativar aviso publico"
+                        aria-label="Ativar aviso público"
                       />
                     </div>
                   </div>
@@ -885,7 +885,7 @@ export default function CompanySettings() {
                         id="company-settings-notice-text"
                         value={noticeText}
                         onChange={(event) => setNoticeText(event.target.value)}
-                        placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedencia."
+                        placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
                         rows={5}
                         disabled={publicCustomizationLocked}
                         className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
@@ -896,7 +896,7 @@ export default function CompanySettings() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="company-settings-notice-active-until">Ativo ate</Label>
+                      <Label htmlFor="company-settings-notice-active-until">Ativo até</Label>
                       <Input
                         id="company-settings-notice-active-until"
                         type="datetime-local"
@@ -907,7 +907,7 @@ export default function CompanySettings() {
                         className={settingsFieldClassName}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Depois desse horario o modal para de aparecer automaticamente.
+                        Depois desse horário o modal para de aparecer automaticamente.
                       </p>
                     </div>
                   </div>
@@ -952,7 +952,7 @@ export default function CompanySettings() {
                       {noticeImageUrl ? (
                         <img
                           src={noticeImageUrl}
-                          alt="Previa do aviso publico"
+                          alt="Prévia do aviso público"
                           className="max-h-48 w-full rounded-lg object-contain"
                         />
                       ) : (
@@ -962,7 +962,7 @@ export default function CompanySettings() {
 
                     {publicCustomizationLocked && (
                       <p className="text-xs text-muted-foreground">
-                        Avisos da pagina publica ficam bloqueados quando a pagina publica customizada esta desativada.
+                        Avisos da página pública ficam bloqueados quando a página pública customizada está desativada.
                       </p>
                     )}
                   </div>
@@ -980,20 +980,20 @@ export default function CompanySettings() {
                   <MapPin className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Localizacao</CardTitle>
-                  <CardDescription>Endereco e mapa exibidos na pagina publica.</CardDescription>
+                  <CardTitle className="text-lg">Localização</CardTitle>
+                  <CardDescription>Endereço e mapa exibidos na página pública.</CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-6 pt-2">
               <div className="space-y-2">
-                <Label htmlFor="company-settings-address">Endereco completo</Label>
+                <Label htmlFor="company-settings-address">Endereço completo</Label>
                 <Textarea
                   id="company-settings-address"
                   name="address"
                   value={address}
                   onChange={(event) => setAddress(event.target.value)}
-                  placeholder="Rua, numero, bairro, cidade - UF"
+                  placeholder="Rua, número, bairro, cidade - UF"
                   rows={3}
                   className={settingsTextAreaClassName}
                   autoComplete="street-address"
@@ -1021,7 +1021,7 @@ export default function CompanySettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Previa do mapa</Label>
+                <Label>Prévia do mapa</Label>
                 <div className="overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-muted/15">
                   {getGoogleMapsEmbedUrl(googleMapsUrl, address || 'Brasil') ? (
                     <iframe
@@ -1032,7 +1032,7 @@ export default function CompanySettings() {
                       allowFullScreen
                       loading="lazy"
                       sandbox="allow-scripts allow-same-origin allow-popups"
-                      title="Previa do mapa"
+                      title="Prévia do mapa"
                     />
                   ) : (
                     <div className="flex h-[180px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">

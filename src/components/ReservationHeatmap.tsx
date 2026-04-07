@@ -27,14 +27,14 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
         <CardHeader className="pb-2">
           <CardTitle className="text-base">
             <span className="inline-flex items-center gap-1.5">
-              <span>Horarios Mais Movimentados</span>
+              <span>Horários mais movimentados</span>
               <InfoTooltip
-                content="Mostra os dias e horarios com mais atendimentos registrados. No detalhe, voce ve o que foi agendado e o que veio da fila."
-                ariaLabel="Entender o grafico Horarios Mais Movimentados"
+                content="Mostra os dias e horários com mais atendimentos registrados. No detalhe, você vê o que foi agendado e o que veio da fila."
+                ariaLabel="Entender o gráfico Horários mais movimentados"
               />
             </span>
           </CardTitle>
-          <CardDescription>Sem dados no periodo selecionado</CardDescription>
+          <CardDescription>Sem dados no período selecionado</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -45,14 +45,14 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
           <span className="inline-flex items-center gap-1.5">
-            <span>Horarios Mais Movimentados</span>
+            <span>Horários mais movimentados</span>
             <InfoTooltip
-              content="Mostra os dias e horarios com mais atendimentos registrados. No detalhe, voce ve o que foi agendado e o que veio da fila."
-              ariaLabel="Entender o grafico Horarios Mais Movimentados"
+              content="Mostra os dias e horários com mais atendimentos registrados. No detalhe, você vê o que foi agendado e o que veio da fila."
+              ariaLabel="Entender o gráfico Horários mais movimentados"
             />
           </span>
         </CardTitle>
-        <CardDescription>Total por dia da semana e horario, com detalhe da origem</CardDescription>
+        <CardDescription>Total por dia da semana e horário, com detalhe da origem</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">

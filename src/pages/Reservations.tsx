@@ -477,11 +477,11 @@ export default function Reservations() {
       }
 
       if (!manualReservationForm.date || !manualReservationForm.time) {
-        throw new Error('Informe data e horario da reserva.');
+        throw new Error('Informe data e horário da reserva.');
       }
 
       if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) {
-        throw new Error('Informe uma quantidade valida de pessoas.');
+        throw new Error('Informe uma quantidade válida de pessoas.');
       }
 
       const reservationId = crypto.randomUUID();
@@ -1148,7 +1148,7 @@ export default function Reservations() {
                         !exportCreatedRange?.from && 'text-muted-foreground',
                       )}
                     >
-                      {formatDateRangeLabel(exportCreatedRange, 'Selecionar periodo')}
+                      {formatDateRangeLabel(exportCreatedRange, 'Selecionar período')}
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1176,7 +1176,7 @@ export default function Reservations() {
                         !exportReservationRange?.from && 'text-muted-foreground',
                       )}
                     >
-                      {formatDateRangeLabel(exportReservationRange, 'Selecionar periodo')}
+                      {formatDateRangeLabel(exportReservationRange, 'Selecionar período')}
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1204,7 +1204,7 @@ export default function Reservations() {
                         !exportLeadCreatedRange?.from && 'text-muted-foreground',
                       )}
                     >
-                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar periodo')}
+                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar período')}
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1657,14 +1657,14 @@ export default function Reservations() {
                 onChange={(event) =>
                   setManualReservationForm((current) => ({ ...current, notes: event.target.value }))
                 }
-                placeholder="Preferencias do cliente, restricoes, observacoes internas..."
+                placeholder="Preferências do cliente, restrições, observações internas..."
                 rows={4}
                 autoComplete="off"
               />
             </div>
 
             <div className="rounded-2xl border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-              A reserva sera criada como <span className="font-medium text-foreground">Confirmada</span>. O check-in e os acompanhantes podem ser registrados depois, no dia do atendimento.
+              A reserva será criada como <span className="font-medium text-foreground">Confirmada</span>. O check-in e os acompanhantes podem ser registrados depois, no dia do atendimento.
             </div>
 
             <div className="flex justify-end gap-3">
@@ -1684,7 +1684,7 @@ export default function Reservations() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir reserva?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acao nao pode ser desfeita. A reserva sera removida permanentemente.
+              Esta ação não pode ser desfeita. A reserva será removida permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

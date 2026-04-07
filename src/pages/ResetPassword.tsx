@@ -30,12 +30,12 @@ export default function ResetPassword() {
     event.preventDefault();
 
     if (!isStrongPassword(password)) {
-      toast.error('Use ao menos 10 caracteres com letra maiuscula, minuscula e numero.');
+      toast.error('Use ao menos 10 caracteres com letra maiúscula, minúscula e número.');
       return;
     }
 
     if (password !== confirmPassword) {
-      toast.error('As senhas informadas nao coincidem.');
+      toast.error('As senhas informadas não coincidem.');
       return;
     }
 
@@ -49,7 +49,7 @@ export default function ResetPassword() {
       await signOut();
       navigate('/login', { replace: true });
     } catch (error: any) {
-      toast.error(error.message || 'Nao foi possivel atualizar a senha.');
+      toast.error(error.message || 'Não foi possível atualizar a senha.');
     } finally {
       setSubmitting(false);
     }
@@ -72,12 +72,12 @@ export default function ResetPassword() {
           </div>
           <div className="space-y-1">
             <CardTitle className="text-xl">
-              {hasRecoverySession ? 'Definir Nova Senha' : 'Link Indisponivel'}
+              {hasRecoverySession ? 'Definir nova senha' : 'Link indisponível'}
             </CardTitle>
             <CardDescription>
               {hasRecoverySession
                 ? 'Crie uma senha forte para concluir o acesso.'
-                : 'Este link expirou ou ja foi utilizado. Solicite um novo link ao administrador.'}
+                : 'Este link expirou ou já foi utilizado. Solicite um novo link ao administrador.'}
             </CardDescription>
           </div>
         </CardHeader>
@@ -97,7 +97,7 @@ export default function ResetPassword() {
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Use ao menos 10 caracteres com letra maiuscula, minuscula e numero.
+                  Use ao menos 10 caracteres com letra maiúscula, minúscula e número.
                 </p>
               </div>
 

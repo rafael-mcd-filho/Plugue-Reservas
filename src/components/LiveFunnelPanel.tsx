@@ -56,13 +56,13 @@ export default function LiveFunnelPanel({
           <span className="inline-flex items-center gap-1.5">
             <span>Ao Vivo Agora</span>
             <InfoTooltip
-              content={`Mostra em qual etapa estao as sessoes ativas nos ultimos ${windowMinutes} minutos, considerando apenas o ultimo estado conhecido de cada sessao.`}
+              content={`Mostra em qual etapa estão as sessões ativas nos últimos ${windowMinutes} minutos, considerando apenas o último estado conhecido de cada sessão.`}
               ariaLabel="Entender o painel ao vivo do funil"
             />
           </span>
         </CardTitle>
         <CardDescription>
-          {totalActive} sessoes com atividade nos ultimos {windowMinutes} minutos
+          {totalActive} sessões com atividade nos últimos {windowMinutes} minutos
         </CardDescription>
       </CardHeader>
       <CardContent>

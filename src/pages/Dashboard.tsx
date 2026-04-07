@@ -71,7 +71,7 @@ const CHART_COLORS = {
 
 function formatDashboardDateRangeLabel(range: DateRange | undefined) {
   if (!range?.from) {
-    return 'Selecionar periodo';
+    return 'Selecionar período';
   }
 
   if (!range.to) {
@@ -347,7 +347,7 @@ export default function Dashboard() {
   const dashboardStats = [
     {
       label: 'Reservas agendadas',
-      tooltip: 'Reservas marcadas previamente para o periodo. Nao inclui quem entrou pela fila.',
+      tooltip: 'Reservas marcadas previamente para o período. Não inclui quem entrou pela fila.',
       value: totals.scheduledReservations,
       prev: prevTotals.scheduledReservations,
       icon: CalendarCheck,
@@ -363,7 +363,7 @@ export default function Dashboard() {
     },
     {
       label: 'Atendimentos totais',
-      tooltip: 'Total registrado em reservas no periodo: agendadas mais o que veio da fila.',
+      tooltip: 'Total registrado em reservas no período: agendadas mais o que veio da fila.',
       value: totals.reservations,
       prev: prevTotals.reservations,
       icon: CalendarIcon,
@@ -371,7 +371,7 @@ export default function Dashboard() {
     },
     {
       label: 'Total pessoas',
-      tooltip: 'Soma das pessoas em todos os atendimentos registrados no periodo.',
+      tooltip: 'Soma das pessoas em todos os atendimentos registrados no período.',
       value: totals.totalGuests,
       prev: prevTotals.totalGuests,
       icon: Users,
@@ -379,7 +379,7 @@ export default function Dashboard() {
     },
     {
       label: 'Check-ins totais',
-      tooltip: 'Atendimentos do periodo em que o cliente realmente chegou, incluindo agendadas e fila convertida.',
+      tooltip: 'Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida.',
       value: totals.completed,
       prev: prevTotals.completed,
       icon: CheckCircle,
@@ -387,7 +387,7 @@ export default function Dashboard() {
     },
     {
       label: 'Cancelamentos agendados',
-      tooltip: 'Reservas agendadas que foram canceladas no periodo. A fila nao entra aqui.',
+      tooltip: 'Reservas agendadas que foram canceladas no período. A fila não entra aqui.',
       value: totals.cancellations,
       prev: prevTotals.cancellations,
       icon: XCircle,
@@ -979,19 +979,19 @@ export default function Dashboard() {
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
               description={
                 uniqueFunnelOnly
-                  ? 'Conversao por etapa considerando apenas navegadores ou dispositivos anonimos unicos no periodo'
+                  ? 'Conversão por etapa considerando apenas navegadores ou dispositivos anônimos únicos no período'
                   : isCompanyContext
-                    ? 'Conversao por etapa considerando sessoes e jornadas do processo de reserva'
-                    : 'Conversao agregada de todas as unidades considerando sessoes e jornadas'
+                    ? 'Conversão por etapa considerando sessões e jornadas do processo de reserva'
+                    : 'Conversão agregada de todas as unidades considerando sessões e jornadas'
               }
-              measurementLabel={uniqueFunnelOnly ? 'Unicos' : 'Sessoes'}
+              measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}
               headerActions={(
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Checkbox
                     checked={uniqueFunnelOnly}
                     onCheckedChange={(checked) => setUniqueFunnelOnly(checked === true)}
                   />
-                  Mostrar apenas unicos
+                  Mostrar apenas únicos
                 </label>
               )}
             />

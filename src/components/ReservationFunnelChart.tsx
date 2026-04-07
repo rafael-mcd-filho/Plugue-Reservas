@@ -62,7 +62,7 @@ export default function ReservationFunnelChart({
                 <span>{title}</span>
                 <InfoTooltip
                   content={`Mostra quantas ${measurementLabel.toLowerCase()} avancaram em cada etapa do processo de reserva online.`}
-                  ariaLabel={`Entender o grafico ${title}`}
+                  ariaLabel={`Entender o gráfico ${title}`}
                 />
               </span>
             </CardTitle>
@@ -111,7 +111,7 @@ export default function ReservationFunnelChart({
           </ResponsiveContainer>
         </div>
         <p className="mt-2 text-center text-sm text-muted-foreground">
-          Taxa de conversao geral: <span className="font-semibold text-foreground">{overallConversion}%</span>
+          Taxa de conversão geral: <span className="font-semibold text-foreground">{overallConversion}%</span>
         </p>
       </CardContent>
     </Card>

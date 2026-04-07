@@ -334,13 +334,13 @@ export default function CompanyDialog({
     }
 
     if (!file.type.startsWith('image/')) {
-      toast.error('Selecione um arquivo de imagem valido');
+      toast.error('Selecione um arquivo de imagem válido');
       event.target.value = '';
       return;
     }
 
     if (file.size > MAX_LOGO_FILE_SIZE) {
-      toast.error('O logo deve ter no maximo 2MB');
+      toast.error('O logo deve ter no máximo 2MB');
       event.target.value = '';
       return;
     }
@@ -397,7 +397,7 @@ export default function CompanyDialog({
     };
 
     if ((form.google_maps_url || '').trim() && !payload.google_maps_url) {
-      toast.error('Use um link de incorporacao valido do Google Maps.');
+      toast.error('Use um link de incorporação válido do Google Maps.');
       return;
     }
 
@@ -524,7 +524,7 @@ export default function CompanyDialog({
                           </div>
 
                           <p className="text-xs text-muted-foreground">
-                            Envie PNG, JPG, WEBP ou SVG com ate 2MB.
+                            Envie PNG, JPG, WEBP ou SVG com até 2MB.
                           </p>
 
                           <div className="flex min-h-28 max-w-sm items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 p-4">
@@ -542,7 +542,7 @@ export default function CompanyDialog({
                           </div>
                         </div>
                         {publicCustomizationLocked && (
-                          <p className="mt-1 text-xs text-muted-foreground">A logo da pagina publica fica bloqueada quando a feature de pagina publica customizada estiver desativada.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">A logo da página pública fica bloqueada quando a feature de página pública customizada estiver desativada.</p>
                         )}
                       </div>
                       {isEditing && (
@@ -565,19 +565,19 @@ export default function CompanyDialog({
 
                     <div className="space-y-4">
                       <div>
-                        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Responsavel</p>
+                        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Responsável</p>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div>
-                          <Label>Nome do Responsavel</Label>
+                          <Label>Nome do Responsável</Label>
                           <Input value={form.responsible_name || ''} onChange={(event) => setForm((current) => ({ ...current, responsible_name: event.target.value }))} />
                         </div>
                         <div>
-                          <Label>Email do Responsavel {!isEditing && '*'}</Label>
+                          <Label>Email do Responsável {!isEditing && '*'}</Label>
                           <Input type="email" value={form.responsible_email || ''} onChange={(event) => setForm((current) => ({ ...current, responsible_email: event.target.value }))} />
                         </div>
                         <div>
-                          <Label>Telefone do Responsavel</Label>
+                          <Label>Telefone do Responsável</Label>
                           <Input value={form.responsible_phone || ''} onChange={(event) => setForm((current) => ({ ...current, responsible_phone: event.target.value }))} />
                         </div>
                       </div>
@@ -587,18 +587,18 @@ export default function CompanyDialog({
 
                     <div className="space-y-4">
                       <div>
-                        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Pagina Publica e Localizacao</p>
+                        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Página pública e localização</p>
                         {publicCustomizationLocked && (
-                          <p className="mt-1 text-xs text-muted-foreground">Descricao, logo e botao de WhatsApp ficam bloqueados. Endereco, mapa e pagamentos continuam disponiveis.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Descrição, logo e botão de WhatsApp ficam bloqueados. Endereço, mapa e pagamentos continuam disponíveis.</p>
                         )}
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="md:col-span-2">
-                          <Label>Descricao</Label>
+                          <Label>Descrição</Label>
                           <RichTextEditor
                             value={form.description || ''}
                             onChange={(nextValue) => setForm((current) => ({ ...current, description: nextValue }))}
-                            placeholder="Descreva a experiencia, ambiente e diferenciais da empresa..."
+                            placeholder="Descreva a experiência, o ambiente e os diferenciais da empresa..."
                             disabled={publicCustomizationLocked}
                           />
                         </div>
@@ -611,7 +611,7 @@ export default function CompanyDialog({
                           <Input value={form.whatsapp || ''} onChange={(event) => setForm((current) => ({ ...current, whatsapp: event.target.value }))} placeholder="5584999999999" disabled={publicCustomizationLocked} />
                         </div>
                         <div className="md:col-span-2">
-                          <Label>Endereco</Label>
+                          <Label>Endereço</Label>
                           <Textarea value={form.address || ''} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} rows={2} />
                         </div>
                         <div className="md:col-span-2">
@@ -628,9 +628,9 @@ export default function CompanyDialog({
                 <Card className="border-none shadow-sm">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Clock3 className="h-4 w-4 text-primary" /> Horarios e Capacidade
+                      <Clock3 className="h-4 w-4 text-primary" /> Horários e capacidade
                     </CardTitle>
-                    <CardDescription>Disponibilidade de reserva, duracao e limite por horario.</CardDescription>
+                    <CardDescription>Disponibilidade de reserva, duração e limite por horário.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <div className="space-y-3">
@@ -644,7 +644,7 @@ export default function CompanyDialog({
                           {!hour.closed ? (
                             <>
                               <Input type="time" value={hour.open} onChange={(event) => updateHour(index, 'open', event.target.value)} className="w-32" />
-                              <span className="text-sm text-muted-foreground">as</span>
+                              <span className="text-sm text-muted-foreground">às</span>
                               <Input type="time" value={hour.close} onChange={(event) => updateHour(index, 'close', event.target.value)} className="w-32" />
                             </>
                           ) : (
@@ -656,7 +656,7 @@ export default function CompanyDialog({
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <Label>Duracao da reserva</Label>
+                        <Label>Duração da reserva</Label>
                         <Select
                           value={String(form.reservation_duration ?? 30)}
                           onValueChange={(value) => setForm((current) => ({ ...current, reservation_duration: Number(value) }))}
@@ -675,7 +675,7 @@ export default function CompanyDialog({
                         </Select>
                       </div>
                       <div>
-                        <Label>Capacidade maxima por horario</Label>
+                        <Label>Capacidade máxima por horário</Label>
                         <Input
                           type="number"
                           min={0}
@@ -692,7 +692,7 @@ export default function CompanyDialog({
                     <CardTitle className="text-base flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-primary" /> Pagamentos
                     </CardTitle>
-                    <CardDescription>Metodos aceitos pela empresa na pagina publica.</CardDescription>
+                    <CardDescription>Métodos aceitos pela empresa na página pública.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {PAYMENT_OPTIONS.map((option) => (
@@ -721,7 +721,7 @@ export default function CompanyDialog({
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-muted-foreground">
-                        Salve a empresa primeiro para cadastrar bloqueios de datas e horarios.
+                        Salve a empresa primeiro para cadastrar bloqueios de datas e horários.
                       </p>
                     </CardContent>
                   </Card>
@@ -732,9 +732,9 @@ export default function CompanyDialog({
                 <Card className="border-none shadow-sm">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <ShieldCheck className="h-4 w-4 text-primary" /> Features da Empresa
+                      <ShieldCheck className="h-4 w-4 text-primary" /> Features da empresa
                     </CardTitle>
-                    <CardDescription>Ative ou desative os recursos disponiveis para esta empresa.</CardDescription>
+                    <CardDescription>Ative ou desative os recursos disponíveis para esta empresa.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <CompanyFeatureSwitchList
@@ -759,10 +759,10 @@ export default function CompanyDialog({
                     <CardContent className="grid gap-4 md:grid-cols-2">
                       <InfoRow icon={<Mail className="h-4 w-4 text-muted-foreground" />} label="Email principal" value={company.email} />
                       <InfoRow icon={<Phone className="h-4 w-4 text-muted-foreground" />} label="Telefone principal" value={company.phone} />
-                      <InfoRow icon={<MapPin className="h-4 w-4 text-muted-foreground" />} label="Endereco" value={company.address} />
+                      <InfoRow icon={<MapPin className="h-4 w-4 text-muted-foreground" />} label="Endereço" value={company.address} />
                       <InfoRow icon={<Globe className="h-4 w-4 text-muted-foreground" />} label="Slug" value={company.slug} />
-                      <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Criada em" value={format(new Date(company.created_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })} />
-                      <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Atualizada em" value={format(new Date(company.updated_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })} />
+                      <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Criada em" value={format(new Date(company.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} />
+                      <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Atualizada em" value={format(new Date(company.updated_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} />
                     </CardContent>
                   </Card>
 
@@ -771,7 +771,7 @@ export default function CompanyDialog({
                       <CardTitle className="text-base flex items-center gap-2">
                         <Clock3 className="h-4 w-4 text-primary" /> Timeline
                       </CardTitle>
-                      <CardDescription>Conta criada, primeira reserva, usuarios e ultimo acesso.</CardDescription>
+                      <CardDescription>Conta criada, primeira reserva, usuários e último acesso.</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {timelineLoading ? (
@@ -796,7 +796,7 @@ export default function CompanyDialog({
                                   <div className="flex flex-wrap items-center gap-2">
                                     <p className="text-sm font-medium">{event.title}</p>
                                     <span className="text-xs text-muted-foreground">
-                                      {format(new Date(event.occurred_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                                      {format(new Date(event.occurred_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                                     </span>
                                   </div>
                                   <p className="mt-1 text-sm text-muted-foreground">{event.description}</p>

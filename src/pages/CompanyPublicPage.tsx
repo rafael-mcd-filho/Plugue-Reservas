@@ -35,7 +35,7 @@ import { cn } from '@/lib/utils';
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
 const FunnelDebugPanel = lazy(() => import('@/components/FunnelDebugPanel'));
-const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com pagina publica, painel por unidade e automacoes via WhatsApp.';
+const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
 
 interface OpeningHour {
@@ -317,6 +317,30 @@ function removeCanonical() {
   document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.remove();
 }
 
+function upsertPublicCompanyIcon(rel: string, href: string, type?: string) {
+  if (typeof document === 'undefined') return;
+
+  let element = document.head.querySelector<HTMLLinkElement>(`link[data-public-company-icon="${rel}"]`);
+  if (!element) {
+    element = document.createElement('link');
+    element.rel = rel;
+    element.setAttribute('data-public-company-icon', rel);
+    document.head.appendChild(element);
+  }
+
+  element.href = href;
+  if (type) {
+    element.type = type;
+  } else {
+    element.removeAttribute('type');
+  }
+}
+
+function removePublicCompanyIcons() {
+  if (typeof document === 'undefined') return;
+  document.head.querySelectorAll<HTMLLinkElement>('link[data-public-company-icon]').forEach((element) => element.remove());
+}
+
 function upsertJsonLd(data: Record<string, unknown>) {
   if (typeof document === 'undefined') return;
 
@@ -574,10 +598,19 @@ export default function CompanyPublicPage() {
 
     if (seoImage) {
       upsertMeta('property', 'og:image', seoImage);
+      upsertMeta('property', 'og:image:secure_url', seoImage);
+      upsertMeta('property', 'og:image:alt', `Logo do ${company.name}`);
       upsertMeta('name', 'twitter:image', seoImage);
+      upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
+      upsertPublicCompanyIcon('icon', seoImage);
+      upsertPublicCompanyIcon('apple-touch-icon', seoImage);
     } else {
       removeMeta('property', 'og:image');
+      removeMeta('property', 'og:image:secure_url');
+      removeMeta('property', 'og:image:alt');
       removeMeta('name', 'twitter:image');
+      removeMeta('name', 'twitter:image:alt');
+      removePublicCompanyIcons();
     }
 
     upsertJsonLd(compactJsonLd({
@@ -618,9 +651,13 @@ export default function CompanyPublicPage() {
       removeMeta('property', 'og:locale');
       removeMeta('property', 'og:url');
       removeMeta('property', 'og:image');
+      removeMeta('property', 'og:image:secure_url');
+      removeMeta('property', 'og:image:alt');
       removeMeta('name', 'twitter:image');
+      removeMeta('name', 'twitter:image:alt');
       removeCanonical();
       removeJsonLd();
+      removePublicCompanyIcons();
     };
   }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours]);
 
@@ -1024,7 +1061,7 @@ export default function CompanyPublicPage() {
         >
           <DialogTitle className="sr-only">Aviso do restaurante</DialogTitle>
           <DialogDescription className="sr-only">
-            Aviso ativo do restaurante para visitantes da pagina publica.
+            Aviso ativo do restaurante para visitantes da página pública.
           </DialogDescription>
 
           {activePublicNotice?.image_url && (

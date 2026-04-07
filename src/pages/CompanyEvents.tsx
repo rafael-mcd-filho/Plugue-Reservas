@@ -127,7 +127,7 @@ function createDefaultSettings(): TrackingSettingsForm {
 
 function formatDateTime(value: string | null) {
   if (!value) return '-';
-  return format(new Date(value), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR });
+  return format(new Date(value), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
 }
 
 function formatMetaStatus(status: string) {
@@ -152,13 +152,13 @@ function getRecordText(record: Record<string, unknown> | null | undefined, key: 
 }
 
 function formatEventDisplay(eventName: string) {
-  if (eventName === 'page_view') return 'Abriu pagina publica';
+  if (eventName === 'page_view') return 'Abriu página pública';
   if (eventName === 'booking_started') return 'Abriu jornada de reserva';
   if (eventName === 'date_select') return 'Escolheu data';
-  if (eventName === 'time_select') return 'Escolheu data, pessoas e horario';
-  if (eventName === 'form_fill') return 'Chegou no formulario';
+  if (eventName === 'time_select') return 'Escolheu data, pessoas e horário';
+  if (eventName === 'form_fill') return 'Chegou no formulário';
   if (eventName === 'reservation_created') return 'Reserva efetivada';
-  if (eventName === 'lead_captured') return 'Formulario enviado (legado)';
+  if (eventName === 'lead_captured') return 'Formulário enviado (legado)';
   return eventName;
 }
 
@@ -166,7 +166,7 @@ function formatMetaMapping(eventName: string) {
   if (eventName === 'page_view') return 'PageView';
   if (eventName === 'time_select') return 'InitiateCheckout';
   if (eventName === 'reservation_created') return 'Lead';
-  return 'Nao envia para Meta';
+  return 'Não envia para Meta';
 }
 
 function getSessionAttributionValue(event: TrackingEventRow, key: keyof TrackingSessionRow) {
@@ -185,7 +185,7 @@ function formatLocationFromUserData(userData: Record<string, unknown> | null | u
   if (location && zip) return `${location} - ${zip}`;
   if (location) return location;
   if (zip) return zip;
-  return 'Nao coletada automaticamente';
+  return 'Não coletada automaticamente';
 }
 
 function DetailItem({ label, value, mono = false }: { label: string; value: string | number | null | undefined; mono?: boolean }) {
@@ -348,24 +348,24 @@ export default function CompanyEvents() {
 
       const metrics: DashboardMetricCard[] = [
         {
-          label: 'Sessoes',
+          label: 'Sessões',
           value: sessionsResult.count ?? 0,
-          description: 'Visitas registradas nos ultimos 7 dias.',
+          description: 'Visitas registradas nos últimos 7 dias.',
         },
         {
           label: 'Page views',
           value: pageViewsResult.count ?? 0,
-          description: 'Visualizacoes publicas persistidas no banco.',
+          description: 'Visualizações públicas persistidas no banco.',
         },
         {
           label: 'InitiateCheckout',
           value: initiateCheckoutResult.count ?? 0,
-          description: 'Sessoes que escolheram data, pessoas e horario.',
+          description: 'Sessões que escolheram data, pessoas e horário.',
         },
         {
           label: 'Lead',
           value: reservationsResult.count ?? 0,
-          description: 'Reservas efetivadas e tratadas como conversao final na Meta.',
+          description: 'Reservas efetivadas e tratadas como conversão final na Meta.',
         },
         {
           label: 'Meta enviados',
@@ -375,7 +375,7 @@ export default function CompanyEvents() {
         {
           label: 'Meta com erro',
           value: metaFailedResult.count ?? 0,
-          description: 'Eventos que falharam e exigem revisao.',
+          description: 'Eventos que falharam e exigem revisão.',
         },
       ];
 
@@ -420,10 +420,10 @@ export default function CompanyEvents() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['company-tracking-settings', companyId] });
-      toast.success('Configuracoes de tracking salvas.');
+      toast.success('Configurações de tracking salvas.');
     },
     onError: (error: any) => {
-      toast.error(`Erro ao salvar configuracoes: ${error.message}`);
+      toast.error(`Erro ao salvar configurações: ${error.message}`);
     },
   });
 
@@ -479,7 +479,7 @@ export default function CompanyEvents() {
     const confirmed = window.confirm(
       scope === 'meta_queue'
         ? 'Limpar todos os itens da fila Meta desta empresa?'
-        : 'Limpar o log de eventos desta empresa? As metricas do periodo podem mudar.',
+        : 'Limpar o log de eventos desta empresa? As métricas do período podem mudar.',
     );
 
     if (confirmed) {
@@ -498,7 +498,7 @@ export default function CompanyEvents() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Eventos</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Tracking persistido no banco, historico do funil e operacao da Meta CAPI para {companyName}.
+              Tracking persistido no banco, histórico do funil e operação da Meta CAPI para {companyName}.
             </p>
           </div>
 
@@ -564,7 +564,7 @@ export default function CompanyEvents() {
             {!metaConfigured && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 Eventos internos continuam alimentando o funil, mas nada deve entrar na fila Meta enquanto Pixel ID,
-                Access Token e Meta CAPI habilitada nao estiverem configurados.
+                Access Token e Meta CAPI habilitada não estiverem configurados.
               </div>
             )}
 
@@ -574,7 +574,7 @@ export default function CompanyEvents() {
                 <p className="mt-1 text-sm font-medium text-foreground"><code>page_view</code> {'->'} <code>PageView</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Data e horario</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Data e horário</p>
                 <p className="mt-1 text-sm font-medium text-foreground"><code>time_select</code> {'->'} <code>InitiateCheckout</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
@@ -583,7 +583,7 @@ export default function CompanyEvents() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Schedule nao e mais usado neste funil. A conversao final da reserva e enviada para a Meta como Lead.
+              Schedule não é mais usado neste funil. A conversão final da reserva é enviada para a Meta como Lead.
             </p>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -648,7 +648,7 @@ export default function CompanyEvents() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">PageView</p>
-                    <p className="text-xs text-muted-foreground">Abertura da pagina publica.</p>
+                    <p className="text-xs text-muted-foreground">Abertura da página pública.</p>
                   </div>
                   <Switch
                     checked={settingsForm.send_page_view}
@@ -661,7 +661,7 @@ export default function CompanyEvents() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">InitiateCheckout</p>
-                    <p className="text-xs text-muted-foreground">Data, pessoas e horario escolhidos.</p>
+                    <p className="text-xs text-muted-foreground">Data, pessoas e horário escolhidos.</p>
                   </div>
                   <Switch
                     checked={settingsForm.send_initiate_checkout}
@@ -941,10 +941,10 @@ export default function CompanyEvents() {
         <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2 text-foreground">
             <Clock3 className="h-4 w-4" />
-            Janela de metricas
+            Janela de métricas
           </div>
           <p className="mt-2">
-            Os cards desta tela mostram os ultimos 7 dias. Os logs abaixo exibem os registros mais recentes gravados no banco.
+            Os cards desta tela mostram os últimos 7 dias. Os logs abaixo exibem os registros mais recentes gravados no banco.
           </p>
         </div>
       </div>
@@ -962,7 +962,7 @@ export default function CompanyEvents() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">{selectedEvent.event_name}</Badge>
                     <Badge variant="outline">{selectedEvent.tracking_source}</Badge>
-                    <Badge variant={formatMetaMapping(selectedEvent.event_name) === 'Nao envia para Meta' ? 'outline' : 'default'}>
+                    <Badge variant={formatMetaMapping(selectedEvent.event_name) === 'Não envia para Meta' ? 'outline' : 'default'}>
                       Meta: {formatMetaMapping(selectedEvent.event_name)}
                     </Badge>
                   </div>
@@ -983,10 +983,10 @@ export default function CompanyEvents() {
                   </div>
 
                   <div className="rounded-lg border border-border p-4">
-                    <h3 className="text-sm font-semibold text-foreground">Sessao e dispositivo</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Sessão e dispositivo</h3>
                     <div className="mt-3 grid gap-3">
                       <DetailItem label="Visitor ID" value={selectedEvent.anonymous_id} mono />
-                      <DetailItem label="Sessao" value={selectedEvent.session_id} mono />
+                      <DetailItem label="Sessão" value={selectedEvent.session_id} mono />
                       <DetailItem label="IP" value={selectedEventSession?.ip_address} mono />
                       <DetailItem label="Idioma" value={selectedEventSession?.accept_language} />
                       <DetailItem label="Navegador" value={selectedEventSession?.user_agent} />
@@ -996,9 +996,9 @@ export default function CompanyEvents() {
                   <div className="rounded-lg border border-border p-4">
                     <h3 className="text-sm font-semibold text-foreground">Origem</h3>
                     <div className="mt-3 grid gap-3">
-                      <DetailItem label="Pagina do evento" value={selectedEvent.path ?? selectedEvent.page_url} mono />
+                      <DetailItem label="Página do evento" value={selectedEvent.path ?? selectedEvent.page_url} mono />
                       <DetailItem label="URL completa" value={selectedEvent.event_source_url ?? selectedEvent.page_url} mono />
-                      <DetailItem label="Primeira pagina da sessao" value={selectedEventSession?.first_page_url} mono />
+                      <DetailItem label="Primeira página da sessão" value={selectedEventSession?.first_page_url} mono />
                       <DetailItem label="Referenciador" value={selectedEvent.referrer ?? selectedEventSession?.referrer} mono />
                     </div>
                   </div>
@@ -1010,7 +1010,7 @@ export default function CompanyEvents() {
                       <DetailItem label="UTM medium" value={getSessionAttributionValue(selectedEvent, 'utm_medium')} />
                       <DetailItem label="UTM campaign" value={getSessionAttributionValue(selectedEvent, 'utm_campaign')} />
                       <DetailItem label="fbclid" value={getSessionAttributionValue(selectedEvent, 'fbclid')} mono />
-                      <DetailItem label="Localizacao" value={formatLocationFromUserData(selectedEventUserData)} />
+                      <DetailItem label="Localização" value={formatLocationFromUserData(selectedEventUserData)} />
                     </div>
                   </div>
                 </div>

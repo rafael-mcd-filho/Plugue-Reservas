@@ -1181,7 +1181,7 @@ export default function Leads() {
                         !exportLeadCreatedRange?.from && 'text-muted-foreground',
                       )}
                     >
-                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar periodo')}
+                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar período')}
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1209,7 +1209,7 @@ export default function Leads() {
                         !exportVisitRange?.from && 'text-muted-foreground',
                       )}
                     >
-                      {formatDateRangeLabel(exportVisitRange, 'Selecionar periodo')}
+                      {formatDateRangeLabel(exportVisitRange, 'Selecionar período')}
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
@@ -1331,7 +1331,7 @@ export default function Leads() {
                   <p className="text-sm text-muted-foreground">
                     {exportedLeads.length === 0
                       ? 'Nenhum lead encontrado com os filtros informados.'
-                      : 'A planilha vai sair com os dados do lead e um historico resumido somente das visitas filtradas.'}
+                      : 'A planilha vai sair com os dados do lead e um histórico resumido somente das visitas filtradas.'}
                   </p>
                   <Button className="gap-2" onClick={exportLeadsCsv} disabled={exportedLeads.length === 0}>
                     <Download className="h-4 w-4" />

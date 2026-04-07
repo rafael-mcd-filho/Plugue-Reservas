@@ -542,11 +542,11 @@ export default function CompanyUsers() {
       <AlertDialog open={!!deleteDialog} onOpenChange={(open) => !open && setDeleteDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir usuario?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir usuário?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteWouldRemoveLastAdmin
-                ? 'A unidade ficaria sem admin ativo. Promova ou cadastre outro admin antes de excluir este usuario.'
-                : `${deleteDialog?.full_name || deleteDialog?.email} sera removido permanentemente.`}
+                ? 'A unidade ficaria sem admin ativo. Promova ou cadastre outro admin antes de excluir este usuário.'
+                : `${deleteDialog?.full_name || deleteDialog?.email} será removido permanentemente.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -567,7 +567,7 @@ export default function CompanyUsers() {
           <AlertDialogHeader>
             <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
             <AlertDialogDescription>
-              Um link unico de redefinicao sera gerado para {resetDialog?.full_name || resetDialog?.email}.
+              Um link único de redefinição será gerado para {resetDialog?.full_name || resetDialog?.email}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -582,7 +582,7 @@ export default function CompanyUsers() {
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Editar usuario</DialogTitle>
+            <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEdit} className="mt-4 space-y-4">
             <div>
@@ -623,7 +623,7 @@ export default function CompanyUsers() {
             <div>
               <Label>Perfil</Label>
               <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })}>
-                <SelectTrigger aria-label="Perfil do usuario">
+                <SelectTrigger aria-label="Perfil do usuário">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -652,7 +652,7 @@ export default function CompanyUsers() {
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Novo usuario</DialogTitle>
+            <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="mt-4 space-y-4">
             <div>
@@ -662,7 +662,7 @@ export default function CompanyUsers() {
                 name="full_name"
                 value={createForm.full_name}
                 onChange={(event) => setCreateForm({ ...createForm, full_name: event.target.value })}
-                placeholder="Nome do usuario"
+                placeholder="Nome do usuário"
                 autoComplete="name"
                 required
               />
@@ -698,7 +698,7 @@ export default function CompanyUsers() {
             <div>
               <Label>Perfil *</Label>
               <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })}>
-                <SelectTrigger aria-label="Perfil do novo usuario">
+                <SelectTrigger aria-label="Perfil do novo usuário">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -708,14 +708,14 @@ export default function CompanyUsers() {
               </Select>
             </div>
             <p className="text-xs text-muted-foreground">
-              O usuario sera vinculado automaticamente a {companyName}. Um link unico de acesso sera gerado.
+              O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
             </p>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>
                 Cancelar
               </Button>
               <Button type="submit" disabled={creating}>
-                {creating ? 'Criando...' : 'Criar usuario'}
+                {creating ? 'Criando...' : 'Criar usuário'}
               </Button>
             </div>
           </form>

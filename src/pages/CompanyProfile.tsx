@@ -219,7 +219,7 @@ export default function CompanyProfile() {
         </Button>
         <Card className="border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
-            Empresa nao encontrada.
+            Empresa não encontrada.
           </CardContent>
         </Card>
       </div>
@@ -318,7 +318,7 @@ export default function CompanyProfile() {
         <Card className="border-none shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <User className="h-4 w-4 text-primary" /> Responsavel
+              <User className="h-4 w-4 text-primary" /> Responsável
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -381,7 +381,7 @@ export default function CompanyProfile() {
               <Clock3 className="h-4 w-4 text-primary" /> Timeline da Empresa
             </CardTitle>
             <CardDescription>
-              Conta criada, primeira reserva, usuarios adicionados e ultimo acesso ao painel.
+              Conta criada, primeira reserva, usuários adicionados e último acesso ao painel.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -406,7 +406,7 @@ export default function CompanyProfile() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium">{event.title}</p>
                           <span className="text-xs text-muted-foreground">
-                            {format(new Date(event.occurred_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                            {format(new Date(event.occurred_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                           </span>
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">{event.description}</p>
@@ -430,7 +430,7 @@ export default function CompanyProfile() {
               <Clock3 className="h-4 w-4 text-primary" /> Auditoria de Acesso
             </CardTitle>
             <CardDescription>
-              Ultimos acessos ao painel com usuario, horario, rota e IP.
+              Últimos acessos ao painel com usuário, horário, rota e IP.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -447,7 +447,7 @@ export default function CompanyProfile() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Usuario</TableHead>
+                      <TableHead>Usuário</TableHead>
                       <TableHead>Evento</TableHead>
                       <TableHead>Quando</TableHead>
                       <TableHead>Rota</TableHead>
@@ -521,19 +521,19 @@ export default function CompanyProfile() {
                 <Input value={form.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} />
               </div>
               <div className="col-span-2">
-                <Label>Endereco</Label>
+                <Label>Endereço</Label>
                 <Textarea value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} rows={2} />
               </div>
               <div>
-                <Label>Nome do Responsavel</Label>
+                <Label>Nome do Responsável</Label>
                 <Input value={form.responsible_name || ''} onChange={(e) => setForm({ ...form, responsible_name: e.target.value })} />
               </div>
               <div>
-                <Label>Email do Responsavel</Label>
+                <Label>Email do Responsável</Label>
                 <Input value={form.responsible_email || ''} onChange={(e) => setForm({ ...form, responsible_email: e.target.value })} />
               </div>
               <div>
-                <Label>Telefone do Responsavel</Label>
+                <Label>Telefone do Responsável</Label>
                 <Input value={form.responsible_phone || ''} onChange={(e) => setForm({ ...form, responsible_phone: e.target.value })} />
               </div>
               <div>

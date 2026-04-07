@@ -416,7 +416,7 @@ export default function Companies() {
           <DialogHeader>
             <DialogTitle>Escolher impersonação</DialogTitle>
             <DialogDescription>
-              Selecione o usuario da empresa que sera impersonado. O painel respeitara o papel efetivo dele.
+              Selecione o usuário da empresa que será impersonado. O painel respeitará o papel efetivo dele.
             </DialogDescription>
           </DialogHeader>
 
@@ -457,7 +457,7 @@ export default function Companies() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
             <AlertDialogDescription>
-              Isso removera "{companyToDelete?.name}" e os dados associados. Esta acao nao pode ser desfeita.
+              Isso removerá "{companyToDelete?.name}" e os dados associados. Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

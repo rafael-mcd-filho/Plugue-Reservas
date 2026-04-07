@@ -920,8 +920,8 @@ export default function ReservationModal({
             {(selectedSlotIsLow || selectedSlotHasDemand) && (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900">
                 {selectedSlotIsLow
-                  ? `Esse horario tem so ${selectedSlotAvailability?.available} ${selectedSlotAvailability?.available === 1 ? 'vaga' : 'vagas'} para ${selectedPartySize} ${selectedPartySize === 1 ? 'pessoa' : 'pessoas'}. Continue para garantir a reserva.`
-                  : 'Esse horario ja recebeu reservas. Continue para garantir sua mesa enquanto ainda ha disponibilidade.'}
+                  ? `Esse horário tem só ${selectedSlotAvailability?.available} ${selectedSlotAvailability?.available === 1 ? 'vaga' : 'vagas'} para ${selectedPartySize} ${selectedPartySize === 1 ? 'pessoa' : 'pessoas'}. Continue para garantir a reserva.`
+                  : 'Esse horário já recebeu reservas. Continue para garantir sua mesa enquanto ainda há disponibilidade.'}
               </p>
             )}
 
@@ -973,7 +973,7 @@ export default function ReservationModal({
                 {customerFoundForCurrentPhone && (
                   <div className="mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900" role="status" aria-live="polite">
                     <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>Cadastro encontrado. Conferimos seus dados e voce ja pode confirmar a reserva.</span>
+                    <span>Cadastro encontrado. Conferimos seus dados e você já pode confirmar a reserva.</span>
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
@@ -1060,7 +1060,7 @@ export default function ReservationModal({
               <div>
                 <Label className="text-sm font-medium">Ocasião</Label>
                 <Select value={form.occasion} onValueChange={v => setForm(f => ({ ...f, occasion: v }))}>
-                  <SelectTrigger id="public-reservation-occasion-trigger" aria-label="Selecionar ocasiao da reserva">
+                  <SelectTrigger id="public-reservation-occasion-trigger" aria-label="Selecionar ocasião da reserva">
                     <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>
                   <SelectContent>

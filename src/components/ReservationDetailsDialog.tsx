@@ -197,14 +197,14 @@ export default function ReservationDetailsDialog({
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Criada em</p>
                   <p className="mt-1 font-medium text-foreground">
-                    {format(new Date(reservation.created_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                    {format(new Date(reservation.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                   </p>
                 </div>
                 {reservation.checked_in_at && (
                   <div className="rounded-lg border border-border bg-muted/30 p-3">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Check-in</p>
                     <p className="mt-1 font-medium text-foreground">
-                      {format(new Date(reservation.checked_in_at), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                      {format(new Date(reservation.checked_in_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                     </p>
                   </div>
                 )}
@@ -214,13 +214,13 @@ export default function ReservationDetailsDialog({
                 <div className="space-y-3">
                   {reservation.occasion && (
                     <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Ocasiao</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Ocasião</p>
                       <p className="mt-1 font-medium text-foreground">{reservation.occasion}</p>
                     </div>
                   )}
                   {reservation.notes && (
                     <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Observacoes</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Observações</p>
                       <p className="mt-1 whitespace-pre-wrap text-foreground">{reservation.notes}</p>
                     </div>
                   )}
@@ -231,7 +231,7 @@ export default function ReservationDetailsDialog({
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
-                    <p className="text-sm font-medium text-foreground">Historico de eventos</p>
+                    <p className="text-sm font-medium text-foreground">Histórico de eventos</p>
                   </div>
                   {!timelineLoading && (
                     <p className="text-xs text-muted-foreground">{timeline.length} registros</p>
@@ -241,10 +241,10 @@ export default function ReservationDetailsDialog({
                 {timelineLoading ? (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Carregando historico...
+                    Carregando histórico...
                   </div>
                 ) : timelineError ? (
-                  <p className="mt-3 text-sm text-destructive">Nao foi possivel carregar o historico desta reserva.</p>
+                  <p className="mt-3 text-sm text-destructive">Não foi possível carregar o histórico desta reserva.</p>
                 ) : timeline.length === 0 ? (
                   <p className="mt-3 text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
                 ) : (
@@ -265,7 +265,7 @@ export default function ReservationDetailsDialog({
                               )}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              {format(new Date(item.occurred_at), "dd/MM/yyyy 'as' HH:mm:ss", { locale: ptBR })}
+                              {format(new Date(item.occurred_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
                             </p>
                           </div>
 

@@ -20,21 +20,21 @@ export const COMPANY_PLAN_LABELS: Record<CompanyPlanTier, string> = {
 export const COMPANY_FEATURE_DEFINITIONS: CompanyFeatureDefinition[] = [
   {
     key: 'whatsapp_integration',
-    label: 'Integracao WhatsApp',
+    label: 'Integração WhatsApp',
     shortLabel: 'WhatsApp',
-    description: 'Permite conectar instancias e automacoes via WhatsApp.',
+    description: 'Permite conectar instâncias e automações via WhatsApp.',
   },
   {
     key: 'custom_public_page',
-    label: 'Pagina publica customizada',
-    shortLabel: 'Pagina publica',
-    description: 'Libera personalizacao da vitrine publica da empresa.',
+    label: 'Página pública customizada',
+    shortLabel: 'Página pública',
+    description: 'Libera personalização da vitrine pública da empresa.',
   },
   {
     key: 'advanced_reports',
-    label: 'Relatorio avancado',
-    shortLabel: 'Relatorios',
-    description: 'Libera graficos, funil e analises detalhadas no dashboard.',
+    label: 'Relatório avançado',
+    shortLabel: 'Relatórios',
+    description: 'Libera gráficos, funil e análises detalhadas no dashboard.',
   },
 ];
 

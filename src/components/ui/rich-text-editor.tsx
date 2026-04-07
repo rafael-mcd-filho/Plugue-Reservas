@@ -106,7 +106,7 @@ export function RichTextEditor({
           id={id}
           role="textbox"
           aria-multiline="true"
-          aria-label="Descricao"
+          aria-label="Descrição"
           contentEditable={!disabled}
           suppressContentEditableWarning
           onFocus={() => setFocused(true)}

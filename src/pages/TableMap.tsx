@@ -137,12 +137,12 @@ const ACTIVATION_OPTIONS: Array<{
   {
     value: 'from_date',
     title: 'Ativar a partir de uma data',
-    description: 'O mapa comeca a valer em uma data futura e segue ativo sem data final.',
+    description: 'O mapa começa a valer em uma data futura e segue ativo sem data final.',
   },
   {
     value: 'period',
-    title: 'Ativar so por um periodo',
-    description: 'O mapa assume apenas dentro do intervalo escolhido e depois o sistema volta sozinho ao padrao.',
+    title: 'Ativar só por um período',
+    description: 'O mapa assume apenas dentro do intervalo escolhido e depois o sistema volta sozinho ao padrão.',
   },
 ];
 
@@ -203,12 +203,12 @@ function formatMapPeriod(tableMap: TableMapRow | null) {
   if (tableMap.is_default) return 'Sempre ativo como fallback da unidade';
   if (!tableMap.is_enabled && !tableMap.active_from && !tableMap.active_to) return 'Rascunho sem data';
   if (tableMap.active_from && tableMap.active_to) {
-    return `${format(new Date(tableMap.active_from), 'dd/MM/yyyy HH:mm')} ate ${format(new Date(tableMap.active_to), 'dd/MM/yyyy HH:mm')}`;
+    return `${format(new Date(tableMap.active_from), 'dd/MM/yyyy HH:mm')} até ${format(new Date(tableMap.active_to), 'dd/MM/yyyy HH:mm')}`;
   }
   if (tableMap.active_from) {
     return `A partir de ${format(new Date(tableMap.active_from), 'dd/MM/yyyy HH:mm')}`;
   }
-  return 'Sem periodo definido';
+  return 'Sem período definido';
 }
 
 function deriveActivationMode(tableMap: TableMapRow | null): ActivationMode {
@@ -254,7 +254,7 @@ function getMapState(tableMap: TableMapRow, reference = new Date()) {
     return {
       key: 'ended' as MapState,
       label: 'Encerrado',
-      description: 'Ja passou. O sistema voltou para o mapa padrao.',
+      description: 'Já passou. O sistema voltou para o mapa padrão.',
       badgeClassName: 'bg-muted text-muted-foreground hover:bg-muted',
     };
   }
@@ -262,7 +262,7 @@ function getMapState(tableMap: TableMapRow, reference = new Date()) {
   return {
     key: 'active' as MapState,
     label: 'Ativo agora',
-    description: 'Sobrepoe o mapa padrao neste momento.',
+    description: 'Sobrepõe o mapa padrão neste momento.',
     badgeClassName: 'bg-success text-white hover:bg-success',
   };
 }
@@ -680,16 +680,16 @@ export default function TableMap() {
             break;
           case 'from_date':
             activeFrom = fromDateTimeLocalValue(mapForm.activeFrom);
-            if (!activeFrom) throw new Error('Escolha a data de inicio do evento.');
+            if (!activeFrom) throw new Error('Escolha a data de início do evento.');
             isEnabled = true;
             activeTo = null;
             break;
           case 'period':
             activeFrom = fromDateTimeLocalValue(mapForm.activeFrom);
             activeTo = fromDateTimeLocalValue(mapForm.activeTo);
-            if (!activeFrom || !activeTo) throw new Error('Escolha o inicio e o fim do periodo.');
+            if (!activeFrom || !activeTo) throw new Error('Escolha o início e o fim do período.');
             if (new Date(activeFrom).getTime() >= new Date(activeTo).getTime()) {
-              throw new Error('O periodo final precisa ser maior que o inicial.');
+              throw new Error('O período final precisa ser maior que o inicial.');
             }
             isEnabled = true;
             break;
@@ -706,7 +706,7 @@ export default function TableMap() {
         : null;
 
       if (overlappingMap) {
-        throw new Error(`O mapa "${overlappingMap.name}" ja ocupa esse periodo.`);
+        throw new Error(`O mapa "${overlappingMap.name}" já ocupa esse período.`);
       }
 
       if (editingMap) {
@@ -809,7 +809,7 @@ export default function TableMap() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['table-maps', companyId] });
-      toast.success('Mapa definido como padrao!');
+      toast.success('Mapa definido como padrão!');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
@@ -1008,7 +1008,7 @@ export default function TableMap() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Mapas de Mesas</h1>
           <p className="mt-1 text-muted-foreground">
-            Mantenha um mapa padrao, crie eventos com ativacao programada e organize as secoes da unidade.
+            Mantenha um mapa padrão, crie eventos com ativação programada e organize as seções da unidade.
           </p>
         </div>
 
@@ -1096,7 +1096,7 @@ export default function TableMap() {
                       {selectedMap.is_default ? (
                         <Badge className="gap-1 bg-primary text-primary-foreground hover:bg-primary">
                           <Star className="h-3.5 w-3.5" />
-                          Mapa padrao
+                          Mapa padrão
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="gap-1">
@@ -1127,7 +1127,7 @@ export default function TableMap() {
                         disabled={setDefaultMapMutation.isPending}
                       >
                         <Star className="h-4 w-4" />
-                        Tornar padrao
+                        Tornar padrão
                       </Button>
                     )}
                     {!selectedMap.is_default && (
@@ -1171,8 +1171,8 @@ export default function TableMap() {
 
                 {!selectedMap.is_default && (
                   <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4 text-sm text-muted-foreground">
-                    Quando este evento estiver habilitado dentro do periodo escolhido, ele sobrepoe o mapa padrao.
-                    Ao fim do periodo, o sistema volta automaticamente para o padrao.
+                    Quando este evento estiver habilitado dentro do período escolhido, ele sobrepõe o mapa padrão.
+                    Ao fim do período, o sistema volta automaticamente para o padrão.
                   </div>
                 )}
               </CardContent>
@@ -1462,7 +1462,7 @@ export default function TableMap() {
 
             {editingMap?.is_default ? (
               <div className="rounded-xl border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary">
-                O mapa padrao fica sempre sem periodo. Ele entra automaticamente quando nenhum evento estiver ativo.
+                O mapa padrão fica sempre sem período. Ele entra automaticamente quando nenhum evento estiver ativo.
               </div>
             ) : (
               <>

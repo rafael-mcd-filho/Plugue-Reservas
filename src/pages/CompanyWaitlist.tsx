@@ -102,15 +102,15 @@ function validateWaitlistGuestInput(input: {
   }
 
   if (guestName.length > MAX_WAITLIST_NAME_LENGTH) {
-    throw new Error(`O nome deve ter no maximo ${MAX_WAITLIST_NAME_LENGTH} caracteres.`);
+    throw new Error(`O nome deve ter no máximo ${MAX_WAITLIST_NAME_LENGTH} caracteres.`);
   }
 
   if (!isValidBrazilWhatsApp(guestPhone)) {
-    throw new Error('Informe um WhatsApp valido com DDD.');
+    throw new Error('Informe um WhatsApp válido com DDD.');
   }
 
   if (notes.length > MAX_WAITLIST_NOTES_LENGTH) {
-    throw new Error(`As observacoes devem ter no maximo ${MAX_WAITLIST_NOTES_LENGTH} caracteres.`);
+    throw new Error(`As observações devem ter no máximo ${MAX_WAITLIST_NOTES_LENGTH} caracteres.`);
   }
 
   return {

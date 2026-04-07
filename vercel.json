@@ -1,6 +1,17 @@
 {
   "rewrites": [
     {
+      "source": "/:slug([a-z0-9-]+)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|whatsapp|facebookexternalhit|Facebot|Twitterbot|Slackbot|TelegramBot|LinkedInBot).*"
+        }
+      ],
+      "destination": "/api/social-preview?slug=:slug"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
