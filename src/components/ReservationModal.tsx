@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -152,7 +152,10 @@ export default function ReservationModal({
   const [form, setForm] = useState({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
+  const [prefilledPhoneDigits, setPrefilledPhoneDigits] = useState('');
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const whatsappDigits = normalizePhone(form.whatsapp);
+  const customerFoundForCurrentPhone = !!prefilledPhoneDigits && prefilledPhoneDigits === whatsappDigits;
 
   useEffect(() => {
     if (!open) return;
@@ -168,6 +171,7 @@ export default function ReservationModal({
     setSlotAvailability({});
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
+    setPrefilledPhoneDigits('');
   }, [initialDate, initialPartySize, open]);
 
   useEffect(() => {
@@ -418,6 +422,7 @@ export default function ReservationModal({
     setSlotAvailability({});
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
+    setPrefilledPhoneDigits('');
   };
 
   const handleClose = (v: boolean) => {
@@ -426,6 +431,50 @@ export default function ReservationModal({
       clearTrackingJourney?.();
     }
     onOpenChange(v);
+  };
+
+  const focusConfirmButton = () => {
+    window.setTimeout(() => {
+      const button = confirmButtonRef.current;
+      if (!button) return;
+
+      button.focus({ preventScroll: true });
+      button.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 0);
+  };
+
+  const handleWhatsappBlur = async (event: React.FocusEvent<HTMLInputElement>) => {
+    const normalizedPhone = normalizePhone(event.currentTarget.value);
+
+    if (normalizedPhone.length < MIN_PREFILL_PHONE_DIGITS) {
+      setPrefilledPhoneDigits('');
+      return;
+    }
+
+    try {
+      const { data, error } = await (supabase.rpc as any)('get_public_reservation_prefill', {
+        _company_id: companyId,
+        _visitor_id: getVisitorId(),
+        _guest_phone: normalizedPhone,
+      });
+      if (error) throw error;
+
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) {
+        setPrefilledPhoneDigits('');
+        return;
+      }
+
+      const d = row as any;
+      setForm(f => ({
+        ...f,
+        name: f.name || d.guest_name || '',
+        email: f.email || d.guest_email || '',
+        birthdate: f.birthdate || d.guest_birthdate || '',
+      }));
+      setPrefilledPhoneDigits(normalizedPhone);
+      focusConfirmButton();
+    } catch { /* silent */ }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -918,33 +967,15 @@ export default function ReservationModal({
                     value={form.whatsapp}
                     onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
                     placeholder="(11) 99999-9999" required maxLength={20} autoComplete="tel" inputMode="tel"
-                    onBlur={async (event) => {
-                      const normalizedPhone = normalizePhone(event.currentTarget.value);
-
-                      if (normalizedPhone.length >= MIN_PREFILL_PHONE_DIGITS) {
-                        try {
-                          const { data, error } = await (supabase.rpc as any)('get_public_reservation_prefill', {
-                            _company_id: companyId,
-                            _visitor_id: getVisitorId(),
-                            _guest_phone: normalizedPhone,
-                          });
-                          if (error) throw error;
-                          const row = Array.isArray(data) ? data[0] : data;
-                          if (row) {
-                            const d = row as any;
-                            setForm(f => ({
-                              ...f,
-                              name: f.name || d.guest_name || '',
-                              email: f.email || d.guest_email || '',
-                              birthdate: f.birthdate || d.guest_birthdate || '',
-                            }));
-                            toast.success('Dados preenchidos automaticamente! 🎉');
-                          }
-                        } catch { /* silent */ }
-                      }
-                    }}
+                    onBlur={handleWhatsappBlur}
                   />
                 </div>
+                {customerFoundForCurrentPhone && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900" role="status" aria-live="polite">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>Cadastro encontrado. Conferimos seus dados e voce ja pode confirmar a reserva.</span>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">
                   {whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS
                     ? 'Digite o WhatsApp completo com DDD para buscar os dados.'
@@ -1052,7 +1083,7 @@ export default function ReservationModal({
             </p>
 
             <div className="sticky bottom-0 -mx-5 bg-card/95 px-5 pb-1 pt-3 shadow-[0_-12px_24px_rgba(255,255,255,0.92)] backdrop-blur">
-              <Button type="submit" className="w-full text-base rounded-md shadow-sm" disabled={submitting}>
+              <Button ref={confirmButtonRef} type="submit" className="w-full text-base rounded-md shadow-sm" disabled={submitting}>
                 {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Confirmar Reserva
               </Button>
