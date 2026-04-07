@@ -464,12 +464,21 @@ export default function CompanyPublicPage() {
   const { data: publicNotice } = useQuery({
     queryKey: ['company-public-notice', company?.id],
     queryFn: async () => {
+      const rpcResult = await (supabase as any).rpc('get_active_company_public_notice', {
+        _company_id: company!.id,
+      });
+
+      if (!rpcResult.error) {
+        const rows = (rpcResult.data ?? []) as PublicNotice[];
+        return rows.length > 0 ? rows[0] : null;
+      }
+
       const { data, error } = await supabase
         .from('company_public_notices' as any)
-        .select('id, text, image_url, active_until')
+        .select('id, text, image_url, active_until, created_at')
         .eq('company_id', company!.id)
         .eq('is_active', true)
-        .gt('active_until', new Date().toISOString())
+        .order('created_at', { ascending: false })
         .maybeSingle();
 
       if (error) throw error;
