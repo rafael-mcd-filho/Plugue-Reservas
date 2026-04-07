@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RichTextContent } from '@/components/ui/rich-text-editor';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
@@ -29,6 +30,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import { isValidCompanySlug } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
+import { richTextHasContent } from '@/lib/richText';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
@@ -222,7 +224,7 @@ export default function CompanyPublicPage() {
   const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
   const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
-  const showDescription = customPublicPageEnabled && !!company?.description;
+  const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
   const getOpeningHourForDate = (date: Date) => {
     const dayIndex = date.getDay();
@@ -390,9 +392,10 @@ export default function CompanyPublicPage() {
                 <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
               </div>
               {showDescription && (
-                <p className="mt-3 max-w-xl overflow-hidden text-sm leading-relaxed text-primary-foreground/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-base md:[-webkit-line-clamp:4]">
-                  {company.description}
-                </p>
+                <RichTextContent
+                  value={company.description}
+                  className="mt-3 max-h-36 max-w-xl overflow-hidden text-sm text-primary-foreground/75 md:max-h-44 md:text-base [&_h1]:text-2xl [&_h2]:text-xl [&_p]:text-sm md:[&_p]:text-base"
+                />
               )}
             </div>
 

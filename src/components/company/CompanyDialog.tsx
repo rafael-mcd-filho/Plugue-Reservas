@@ -33,12 +33,14 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { useCreateCompany, useUpdateCompany, type Company, type CompanyInsert, type CompanyStatus } from '@/hooks/useCompanies';
 import { useSaveCompanyFeatures, type CompanyFeatureState } from '@/hooks/useCompanyFeatures';
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
 import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchList';
 import { normalizeGoogleMapsEmbedInput } from '@/lib/maps';
+import { toSafeRichTextHtml } from '@/lib/richText';
 import { toast } from 'sonner';
 
 interface CompanyDialogProps {
@@ -385,7 +387,7 @@ export default function CompanyDialog({
     const payload: CompanyInsert = {
       ...form,
       logo_url: publicCustomizationLocked ? (company?.logo_url || '') : (form.logo_url || ''),
-      description: publicCustomizationLocked ? (company?.description || '') : (form.description || ''),
+      description: publicCustomizationLocked ? (company?.description || '') : toSafeRichTextHtml(form.description || ''),
       whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : (form.whatsapp || ''),
       google_maps_url: normalizeGoogleMapsEmbedInput(form.google_maps_url) || '',
       opening_hours: normalizeOpeningHours(form.opening_hours),
@@ -593,7 +595,12 @@ export default function CompanyDialog({
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="md:col-span-2">
                           <Label>Descricao</Label>
-                          <Textarea value={form.description || ''} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} rows={3} disabled={publicCustomizationLocked} />
+                          <RichTextEditor
+                            value={form.description || ''}
+                            onChange={(nextValue) => setForm((current) => ({ ...current, description: nextValue }))}
+                            placeholder="Descreva a experiencia, ambiente e diferenciais da empresa..."
+                            disabled={publicCustomizationLocked}
+                          />
                         </div>
                         <div>
                           <Label>Instagram</Label>

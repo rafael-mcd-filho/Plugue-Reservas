@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,6 +38,7 @@ import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { getGoogleMapsEmbedUrl, normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { cn } from '@/lib/utils';
+import { toSafeRichTextHtml } from '@/lib/richText';
 
 interface OpeningHour {
   day: string;
@@ -171,7 +173,7 @@ export default function CompanySettings() {
         .update({
           opening_hours: hours,
           payment_methods: payments,
-          description: publicCustomizationLocked ? (company.description || '') : description,
+          description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
           logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
           address,
           phone,
@@ -579,16 +581,13 @@ export default function CompanySettings() {
 
               <div className="space-y-2">
                 <Label htmlFor="company-settings-description">Descricao</Label>
-                <Textarea
+                <RichTextEditor
                   id="company-settings-description"
-                  name="description"
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={setDescription}
                   placeholder="Descreva seu restaurante para os clientes..."
-                  rows={4}
                   disabled={publicCustomizationLocked}
                   className={settingsTextAreaClassName}
-                  autoComplete="off"
                 />
                 {publicCustomizationLocked && (
                   <p className="mt-1 text-xs text-muted-foreground">A descrição pública fica bloqueada quando a página pública customizada está desativada.</p>
