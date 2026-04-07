@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
       }
 
       case 'get_qrcode': {
-        let { data: instance } = await supabaseAdmin
+        const { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
           .select('instance_name')
           .eq('company_id', company_id)

@@ -385,7 +385,7 @@ async function sendWaitlistAutomation(
 
   if (!automation?.message_template) return;
 
-  let message = automation.message_template
+  const message = automation.message_template
     .replace(/\{nome\}/g, waitlist.guest_name || "")
     .replace(/\{pessoas\}/g, String(waitlist.party_size || 1))
     .replace(/\{posicao\}/g, String(waitlist.position || ""))

@@ -1014,52 +1014,6 @@ export default function Leads() {
           </PopoverContent>
         </Popover>
 
-        {false && (
-          <>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn('justify-start text-left text-sm', !createdFrom && 'text-muted-foreground')}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {createdFrom ? format(createdFrom, 'dd/MM/yy') : 'Criado de'}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              selected={createdFrom}
-              onSelect={setCreatedFrom}
-              initialFocus
-              className="pointer-events-auto p-3"
-            />
-          </PopoverContent>
-        </Popover>
-
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn('justify-start text-left text-sm', !createdTo && 'text-muted-foreground')}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {createdTo ? format(createdTo, 'dd/MM/yy') : 'Criado até'}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              selected={createdTo}
-              onSelect={setCreatedTo}
-              initialFocus
-              className="pointer-events-auto p-3"
-            />
-          </PopoverContent>
-        </Popover>
-          </>
-        )}
-
         <Input
           type="number"
           min="1"
