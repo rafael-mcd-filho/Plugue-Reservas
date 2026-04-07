@@ -74,6 +74,25 @@ function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function RatingStarsLink({ href, className }: { href: string; className?: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Avaliações no Google"
+      className={cn(
+        'inline-flex items-center rounded-md border border-amber-300/30 bg-black/25 px-3 py-1.5 shadow-[0_0_22px_rgba(251,191,36,0.24)] backdrop-blur-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-black/35 hover:shadow-[0_0_30px_rgba(251,191,36,0.36)]',
+        className,
+      )}
+    >
+      <span className="bg-gradient-to-r from-amber-200 via-yellow-300 to-amber-500 bg-clip-text text-lg font-black leading-none text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
+        ★★★★★
+      </span>
+    </a>
+  );
+}
+
 const PAYMENT_LABELS: Record<string, { label: string; icon: typeof CreditCard }> = {
   dinheiro: { label: 'Dinheiro', icon: Banknote },
   credito: { label: 'Cr\u00E9dito', icon: CreditCard },
@@ -475,17 +494,20 @@ export default function CompanyPublicPage() {
   return (
     <div className="min-h-screen bg-secondary pb-28 md:pb-0">
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="mx-auto flex max-w-lg items-center justify-center px-4 py-4 md:max-w-5xl md:justify-start md:py-5">
+        <div className="mx-auto flex max-w-lg flex-col items-center justify-center px-4 py-5 md:max-w-5xl md:items-start md:py-6">
           {showCustomLogo ? (
             <img
               src={company.logo_url}
               alt={company.name}
-              className="h-16 w-16 shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-14 md:w-14"
+              className="h-[5.6rem] w-[5.6rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-20 md:w-20"
             />
           ) : (
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground shadow-lg md:h-14 md:w-14 md:text-lg">
+            <div className="flex h-[5.6rem] w-[5.6rem] shrink-0 items-center justify-center rounded-full bg-primary text-3xl font-bold text-primary-foreground shadow-lg md:h-20 md:w-20 md:text-2xl">
               {company.name.charAt(0)}
             </div>
+          )}
+          {googleMapsSearchUrl && (
+            <RatingStarsLink href={googleMapsSearchUrl} className="mt-3 md:hidden" />
           )}
         </div>
       </div>
@@ -506,14 +528,7 @@ export default function CompanyPublicPage() {
         <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
           <div className="space-y-4 animate-slide-up">
             {googleMapsSearchUrl && (
-              <a
-                href={googleMapsSearchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors hover:bg-white/15"
-              >
-                <span className="text-sm tracking-[0.18em] text-amber-300">★★★★★</span>
-              </a>
+              <RatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
             )}
 
             <div>
@@ -532,10 +547,12 @@ export default function CompanyPublicPage() {
                 <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
               </div>
               {showDescription && (
-                <RichTextContent
-                  value={company.description}
-                  className="mt-3 max-h-36 max-w-xl overflow-hidden text-sm text-primary-foreground/75 md:max-h-44 md:text-base [&_h1]:text-2xl [&_h2]:text-xl [&_p]:text-sm md:[&_p]:text-base"
-                />
+                <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
+                  <RichTextContent
+                    value={company.description}
+                    className="text-sm leading-relaxed text-muted-foreground md:text-base [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-sm md:[&_p]:text-base"
+                  />
+                </div>
               )}
             </div>
 
