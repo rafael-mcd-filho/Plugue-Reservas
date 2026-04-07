@@ -35,7 +35,6 @@ interface TrackingSettingsForm {
   send_page_view: boolean;
   send_initiate_checkout: boolean;
   send_lead: boolean;
-  send_schedule: boolean;
 }
 
 interface DashboardMetricCard {
@@ -91,8 +90,7 @@ function createDefaultSettings(): TrackingSettingsForm {
     capi_enabled: false,
     send_page_view: false,
     send_initiate_checkout: true,
-    send_lead: false,
-    send_schedule: true,
+    send_lead: true,
   };
 }
 
@@ -154,8 +152,7 @@ export default function CompanyEvents() {
       capi_enabled: !!settings.capi_enabled,
       send_page_view: !!settings.send_page_view,
       send_initiate_checkout: settings.send_initiate_checkout ?? true,
-      send_lead: !!settings.send_lead,
-      send_schedule: settings.send_schedule ?? true,
+      send_lead: settings.send_lead ?? true,
     });
   }, [settings]);
 
@@ -167,7 +164,6 @@ export default function CompanyEvents() {
         pageViewsResult,
         bookingStartedResult,
         reservationsResult,
-        leadsResult,
         metaSentResult,
         metaFailedResult,
         recentEventsResult,
@@ -199,13 +195,6 @@ export default function CompanyEvents() {
           .eq('company_id', companyId)
           .eq('tracking_source', 'public')
           .eq('event_name', 'reservation_created')
-          .gte('occurred_at', since),
-        supabase
-          .from('tracking_events' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('tracking_source', 'public')
-          .eq('event_name', 'lead_captured')
           .gte('occurred_at', since),
         supabase
           .from('meta_event_queue' as any)
@@ -244,7 +233,6 @@ export default function CompanyEvents() {
         pageViewsResult,
         bookingStartedResult,
         reservationsResult,
-        leadsResult,
         metaSentResult,
         metaFailedResult,
         recentEventsResult,
@@ -273,13 +261,8 @@ export default function CompanyEvents() {
         },
         {
           label: 'Lead',
-          value: leadsResult.count ?? 0,
-          description: 'Formularios enviados com dados do contato.',
-        },
-        {
-          label: 'Schedule',
           value: reservationsResult.count ?? 0,
-          description: 'Reservas concluidas e prontas para otimizar campanha.',
+          description: 'Reservas efetivadas e tratadas como conversao final na Meta.',
         },
         {
           label: 'Meta enviados',
@@ -316,6 +299,7 @@ export default function CompanyEvents() {
       const payload = {
         company_id: companyId,
         ...settingsForm,
+        send_schedule: false,
         pixel_id: pixelId || null,
         access_token: accessToken || null,
         test_event_code: settingsForm.test_event_code.trim() || null,
@@ -474,7 +458,7 @@ export default function CompanyEvents() {
               </div>
             )}
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Visita</p>
                 <p className="mt-1 text-sm font-medium text-foreground"><code>page_view</code> {'->'} <code>PageView</code></p>
@@ -484,12 +468,8 @@ export default function CompanyEvents() {
                 <p className="mt-1 text-sm font-medium text-foreground"><code>booking_started</code> {'->'} <code>InitiateCheckout</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Formulario</p>
-                <p className="mt-1 text-sm font-medium text-foreground"><code>lead_captured</code> {'->'} <code>Lead</code></p>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversao final</p>
-                <p className="mt-1 text-sm font-medium text-foreground"><code>reservation_created</code> {'->'} <code>Schedule</code></p>
+                <p className="mt-1 text-sm font-medium text-foreground"><code>reservation_created</code> {'->'} <code>Lead</code></p>
               </div>
             </div>
 
@@ -537,7 +517,7 @@ export default function CompanyEvents() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -581,7 +561,7 @@ export default function CompanyEvents() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">Lead</p>
-                    <p className="text-xs text-muted-foreground">Contato enviado no formulario.</p>
+                    <p className="text-xs text-muted-foreground">Reserva efetivada.</p>
                   </div>
                   <Switch
                     checked={settingsForm.send_lead}
@@ -590,18 +570,6 @@ export default function CompanyEvents() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Schedule</p>
-                    <p className="text-xs text-muted-foreground">Reserva concluida.</p>
-                  </div>
-                  <Switch
-                    checked={settingsForm.send_schedule}
-                    onCheckedChange={(checked) => setSettingsForm((current) => ({ ...current, send_schedule: checked }))}
-                  />
-                </div>
-              </div>
             </div>
 
             <div className="flex justify-end">

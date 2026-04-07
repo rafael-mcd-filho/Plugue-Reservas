@@ -100,7 +100,6 @@ O painel flutuante deve mostrar:
 - `date_select`
 - `time_select`
 - `form_fill`
-- `lead_captured`
 
 ### Validacao no admin
 
@@ -167,7 +166,6 @@ Ativar os toggles desejados:
 - `PageView`
 - `InitiateCheckout`
 - `Lead`
-- `Schedule`
 
 ## 11. Checklist de aceite
 
@@ -175,8 +173,7 @@ Ativar os toggles desejados:
 - edge functions publicadas
 - `page_view` aparecendo em `admin/eventos`
 - `booking_started` aparecendo em `admin/eventos`
-- `lead_captured` aparecendo em `admin/eventos`
-- `reservation_created` aparecendo na timeline da reserva
+- `reservation_created` aparecendo em `admin/eventos` e entrando na Meta como `Lead`
 - fila Meta registrando payload e resposta
 - painel ao vivo populando com atividade recente
 

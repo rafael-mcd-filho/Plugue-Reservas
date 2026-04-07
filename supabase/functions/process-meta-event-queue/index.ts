@@ -66,8 +66,8 @@ function getRetryDelayMinutes(attempt: number) {
 function isEventTypeEnabled(metaEventName: string, settings: Record<string, any>) {
   if (metaEventName === "PageView") return !!settings.send_page_view;
   if (metaEventName === "InitiateCheckout") return settings.send_initiate_checkout !== false;
-  if (metaEventName === "Lead") return !!settings.send_lead;
-  if (metaEventName === "Schedule") return settings.send_schedule !== false;
+  if (metaEventName === "Lead") return settings.send_lead !== false;
+  if (metaEventName === "Schedule") return false;
   return true;
 }
 

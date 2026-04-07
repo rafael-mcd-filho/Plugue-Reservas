@@ -153,7 +153,7 @@ export default function CompanyPublicPage() {
     enabled: slugIsValid && !company && !isLoading,
   });
 
-  const { trackStep, startJourney, getTrackingSnapshot, trackLeadCapture, clearJourney } = useFunnelTracking(undefined, slug);
+  const { trackStep, startJourney, getTrackingSnapshot, clearJourney } = useFunnelTracking(undefined, slug);
 
   const handleOpenReservation = () => {
     void startJourney();
@@ -652,7 +652,6 @@ export default function CompanyPublicPage() {
             initialPartySize={2}
             onStepChange={(step) => trackStep(step)}
             getTrackingSnapshot={getTrackingSnapshot}
-            trackLeadCapture={trackLeadCapture}
             clearTrackingJourney={clearJourney}
           />
         </Suspense>

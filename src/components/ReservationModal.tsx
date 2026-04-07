@@ -36,7 +36,6 @@ interface ReservationModalProps {
   initialPartySize?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
   getTrackingSnapshot?: () => Promise<TrackingSnapshot>;
-  trackLeadCapture?: (userData: TrackingUserData) => Promise<void>;
   clearTrackingJourney?: () => void;
 }
 
@@ -135,7 +134,6 @@ export default function ReservationModal({
   initialPartySize = 2,
   onStepChange,
   getTrackingSnapshot,
-  trackLeadCapture,
   clearTrackingJourney,
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -461,7 +459,7 @@ export default function ReservationModal({
             },
           };
       const guestNameParts = splitGuestName(form.name);
-      const leadCapturePayload: TrackingUserData = {
+      const reservationUserData: TrackingUserData = {
         first_name: guestNameParts.first_name,
         last_name: guestNameParts.last_name,
         email: form.email || null,
@@ -472,12 +470,6 @@ export default function ReservationModal({
         country: null,
         external_id: trackingSnapshot.anonymous_id,
       };
-
-      try {
-        await trackLeadCapture?.(leadCapturePayload);
-      } catch (leadCaptureError) {
-        console.warn('[ReservationModal] Lead capture tracking error:', leadCaptureError);
-      }
 
       const attributionSnapshot = {
         ...trackingSnapshot.attribution_snapshot,
@@ -497,7 +489,7 @@ export default function ReservationModal({
         utm_campaign: trackingSnapshot.utm_campaign,
         utm_content: trackingSnapshot.utm_content,
         utm_term: trackingSnapshot.utm_term,
-        user_data: leadCapturePayload,
+        user_data: reservationUserData,
       };
       const reservationData = {
         id: reservationId,
