@@ -492,9 +492,9 @@ export default function CompanyPublicPage() {
   }
 
   return (
-    <div className="min-h-screen bg-secondary pb-28 md:pb-0">
+    <div className="min-h-screen bg-secondary">
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="mx-auto flex max-w-lg flex-col items-center justify-center px-4 py-5 md:max-w-5xl md:items-start md:py-6">
+        <div className="mx-auto flex max-w-lg flex-col items-center justify-center px-4 py-5 md:max-w-5xl md:flex-row md:items-center md:justify-start md:py-6">
           {showCustomLogo ? (
             <img
               src={company.logo_url}
@@ -780,20 +780,6 @@ export default function CompanyPublicPage() {
             {'Powered by '}
             <span className="font-semibold text-primary">{DEFAULT_SYSTEM_NAME}</span>
           </p>
-        </div>
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/50 bg-background/95 px-4 pb-safe pt-3 backdrop-blur-xl md:hidden" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-        <div className="mx-auto max-w-lg">
-          <Button
-            className="group w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-200"
-            size="lg"
-            onClick={handleOpenReservation}
-            onMouseEnter={() => void loadReservationModal()}
-          >
-            <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
-            Reservar agora
-          </Button>
         </div>
       </div>
 
