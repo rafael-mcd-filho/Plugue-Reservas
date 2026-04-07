@@ -15,6 +15,8 @@ import {
   CalendarOff,
   Trash2,
   Upload,
+  Megaphone,
+  ImageIcon,
   Users,
   Copy,
   Banknote,
@@ -45,6 +47,15 @@ interface OpeningHour {
   open: string;
   close: string;
   closed?: boolean;
+}
+
+interface CompanyPublicNoticeSettings {
+  id: string;
+  company_id: string;
+  text: string | null;
+  image_url: string | null;
+  is_active: boolean;
+  active_until: string | null;
 }
 
 const DEFAULT_HOURS: OpeningHour[] = [
@@ -88,6 +99,7 @@ const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded
 const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -97,6 +109,25 @@ function isSettingsTab(value: string | null): value is SettingsTab {
 
 function slugify(text: string) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+}
+
+function toDateTimeLocalValue(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function fromDateTimeLocalValue(value: string) {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString();
 }
 
 export default function CompanySettings() {
@@ -121,6 +152,21 @@ export default function CompanySettings() {
 
   const { data: featureFlags } = useCompanyFeatureFlags(companyId);
 
+  const { data: publicNotice } = useQuery({
+    queryKey: ['company-public-notice-settings', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_public_notices' as any)
+        .select('id, company_id, text, image_url, is_active, active_until')
+        .eq('company_id', companyId!)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data as CompanyPublicNoticeSettings | null;
+    },
+    enabled: !!companyId,
+  });
+
   const [hours, setHours] = useState<OpeningHour[]>(DEFAULT_HOURS);
   const [payments, setPayments] = useState<Record<string, boolean>>(DEFAULT_PAYMENTS);
   const [description, setDescription] = useState('');
@@ -135,6 +181,11 @@ export default function CompanySettings() {
   const [reservationDuration, setReservationDuration] = useState(30);
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [noticeText, setNoticeText] = useState('');
+  const [noticeImageUrl, setNoticeImageUrl] = useState('');
+  const [noticeActive, setNoticeActive] = useState(false);
+  const [noticeActiveUntil, setNoticeActiveUntil] = useState('');
+  const [uploadingNoticeImage, setUploadingNoticeImage] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -156,6 +207,28 @@ export default function CompanySettings() {
     setInitialized(true);
   }, [company, initialized]);
 
+  useEffect(() => {
+    if (publicNotice === undefined) return;
+
+    if (!publicNotice) {
+      setNoticeText('');
+      setNoticeImageUrl('');
+      setNoticeActive(false);
+      setNoticeActiveUntil('');
+      return;
+    }
+
+    const noticeExpiresAt = publicNotice.active_until ? new Date(publicNotice.active_until) : null;
+    const isNoticeStillActive = publicNotice.is_active
+      && !!noticeExpiresAt
+      && noticeExpiresAt.getTime() > Date.now();
+
+    setNoticeText(publicNotice.text || '');
+    setNoticeImageUrl(publicNotice.image_url || '');
+    setNoticeActive(isNoticeStillActive);
+    setNoticeActiveUntil(toDateTimeLocalValue(publicNotice.active_until));
+  }, [publicNotice]);
+
   const publicCustomizationLocked = featureFlags
     ? !featureFlags.features.custom_public_page
     : false;
@@ -168,6 +241,24 @@ export default function CompanySettings() {
 
       if (googleMapsUrl.trim() && !normalizedMapsEmbedUrl) {
         throw new Error('Use um link de incorporacao valido do Google Maps.');
+      }
+
+      const trimmedNoticeText = noticeText.trim();
+      const hasNoticeContent = !!trimmedNoticeText || !!noticeImageUrl;
+      const noticeActiveUntilIso = fromDateTimeLocalValue(noticeActiveUntil);
+
+      if (!publicCustomizationLocked && noticeActive) {
+        if (!hasNoticeContent) {
+          throw new Error('Informe um texto ou uma imagem para ativar o aviso.');
+        }
+
+        if (!noticeActiveUntilIso) {
+          throw new Error('Informe ate quando o aviso deve ficar ativo.');
+        }
+
+        if (new Date(noticeActiveUntilIso).getTime() <= Date.now()) {
+          throw new Error('A data final do aviso precisa ser futura.');
+        }
       }
 
       const { error } = await supabase
@@ -193,10 +284,26 @@ export default function CompanySettings() {
         .eq('id', companyId);
 
       if (error) throw error;
+
+      if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
+        const { error: noticeError } = await supabase
+          .from('company_public_notices' as any)
+          .upsert({
+            company_id: companyId,
+            text: trimmedNoticeText || null,
+            image_url: noticeImageUrl || null,
+            is_active: noticeActive,
+            active_until: noticeActiveUntilIso,
+          }, { onConflict: 'company_id' });
+
+        if (noticeError) throw noticeError;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
+      qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
+      qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
       toast.success('Configurações salvas!');
     },
     onError: (error: any) => {
@@ -287,6 +394,55 @@ export default function CompanySettings() {
       toast.error(`Erro ao enviar logo: ${error.message}`);
     } finally {
       setUploadingLogo(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleNoticeImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file || publicCustomizationLocked) {
+      event.target.value = '';
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Selecione um arquivo de imagem valido');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_NOTICE_IMAGE_FILE_SIZE) {
+      toast.error('A imagem do aviso deve ter no maximo 2MB');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadingNoticeImage(true);
+
+    try {
+      const extension = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      const slugBase = slugify(slug || companyName || 'empresa');
+      const filePath = `company-notices/${companyId}/${slugBase || 'empresa'}-${Date.now()}.${extension}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('system-assets')
+        .upload(filePath, file, { upsert: false });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('system-assets')
+        .getPublicUrl(filePath);
+
+      setNoticeImageUrl(publicUrlData.publicUrl);
+      toast.success('Imagem do aviso enviada com sucesso');
+    } catch (error: any) {
+      toast.error(`Erro ao enviar imagem: ${error.message}`);
+    } finally {
+      setUploadingNoticeImage(false);
       event.target.value = '';
     }
   };
@@ -696,6 +852,120 @@ export default function CompanySettings() {
                       Quando desabilitado, quem acessar este link vera uma mensagem orientando a se dirigir a unidade para entrar na fila de espera.
                     </p>
                   )}
+                </div>
+              </div>
+
+              <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
+                <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <Label className="flex items-center gap-1.5 text-base font-semibold">
+                        <Megaphone className="h-4 w-4 text-primary" />
+                        Aviso na pagina publica
+                      </Label>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Abre um modal central para visitantes enquanto estiver ativo. Apenas um aviso fica disponivel por empresa.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
+                      <span className="text-sm font-medium text-muted-foreground">Ativar agora</span>
+                      <Switch
+                        checked={noticeActive}
+                        onCheckedChange={setNoticeActive}
+                        disabled={publicCustomizationLocked}
+                        aria-label="Ativar aviso publico"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+                    <div className="space-y-2">
+                      <Label htmlFor="company-settings-notice-text">Texto do aviso</Label>
+                      <Textarea
+                        id="company-settings-notice-text"
+                        value={noticeText}
+                        onChange={(event) => setNoticeText(event.target.value)}
+                        placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedencia."
+                        rows={5}
+                        disabled={publicCustomizationLocked}
+                        className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        O aviso pode ter apenas texto, apenas imagem, ou os dois.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="company-settings-notice-active-until">Ativo ate</Label>
+                      <Input
+                        id="company-settings-notice-active-until"
+                        type="datetime-local"
+                        value={noticeActiveUntil}
+                        onChange={(event) => setNoticeActiveUntil(event.target.value)}
+                        disabled={publicCustomizationLocked}
+                        min={toDateTimeLocalValue(new Date().toISOString())}
+                        className={settingsFieldClassName}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Depois desse horario o modal para de aparecer automaticamente.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Imagem do aviso</Label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleNoticeImageUpload}
+                          disabled={publicCustomizationLocked || uploadingNoticeImage}
+                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={publicCustomizationLocked || uploadingNoticeImage}
+                          className="pointer-events-none gap-2 bg-white"
+                        >
+                          {uploadingNoticeImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                          {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
+                        </Button>
+                      </div>
+
+                      {noticeImageUrl && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={publicCustomizationLocked || uploadingNoticeImage}
+                          onClick={() => setNoticeImageUrl('')}
+                          className="gap-2 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remover
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
+                      {noticeImageUrl ? (
+                        <img
+                          src={noticeImageUrl}
+                          alt="Previa do aviso publico"
+                          className="max-h-48 w-full rounded-lg object-contain"
+                        />
+                      ) : (
+                        <p className="text-center text-xs text-muted-foreground">Nenhuma imagem enviada para o aviso.</p>
+                      )}
+                    </div>
+
+                    {publicCustomizationLocked && (
+                      <p className="text-xs text-muted-foreground">
+                        Avisos da pagina publica ficam bloqueados quando a pagina publica customizada esta desativada.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardContent>

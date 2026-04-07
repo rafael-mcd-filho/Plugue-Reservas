@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   MapPin,
+  Megaphone,
   Phone,
   QrCode,
   Wallet,
@@ -18,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RichTextContent } from '@/components/ui/rich-text-editor';
@@ -49,6 +51,13 @@ interface BlockedDate {
   all_day: boolean;
   start_time: string | null;
   end_time: string | null;
+}
+
+interface PublicNotice {
+  id: string;
+  text: string | null;
+  image_url: string | null;
+  active_until: string | null;
 }
 
 function InstagramIcon(props: SVGProps<SVGSVGElement>) {
@@ -372,6 +381,7 @@ export default function CompanyPublicPage() {
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [statusNow, setStatusNow] = useState(() => new Date());
+  const [dismissedNoticeId, setDismissedNoticeId] = useState<string | null>(null);
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
@@ -452,6 +462,27 @@ export default function CompanyPublicPage() {
     enabled: !!company?.id,
   });
 
+  const { data: publicNotice } = useQuery({
+    queryKey: ['company-public-notice', company?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_public_notices' as any)
+        .select('id, text, image_url, active_until')
+        .eq('company_id', company!.id)
+        .eq('is_active', true)
+        .gt('active_until', new Date().toISOString())
+        .maybeSingle();
+
+      if (error) throw error;
+      return data as PublicNotice | null;
+    },
+    enabled: !!company?.id,
+  });
+
+  useEffect(() => {
+    setDismissedNoticeId(null);
+  }, [company?.id, publicNotice?.id]);
+
   const whatsappUrl = company?.whatsapp
     ? `https://wa.me/${company.whatsapp.replace(/\D/g, '')}`
     : null;
@@ -471,6 +502,7 @@ export default function CompanyPublicPage() {
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
+  const activePublicNotice = publicNotice && publicNotice.id !== dismissedNoticeId ? publicNotice : null;
   const getOpeningHourForDate = (date: Date) => {
     const dayIndex = date.getDay();
     const dayName = Object.entries(DAY_MAP).find(([, value]) => value === dayIndex)?.[0];
@@ -970,6 +1002,57 @@ export default function CompanyPublicPage() {
       <Suspense fallback={null}>
         <FunnelDebugPanel />
       </Suspense>
+
+      <Dialog
+        open={!!activePublicNotice}
+        onOpenChange={(open) => {
+          if (!open && activePublicNotice) {
+            setDismissedNoticeId(activePublicNotice.id);
+          }
+        }}
+      >
+        <DialogContent className="bottom-auto left-[50%] right-auto top-[50%] w-[calc(100vw-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] gap-0 overflow-hidden rounded-lg border-none p-0 shadow-2xl sm:max-w-md">
+          {activePublicNotice?.image_url && (
+            <div className="max-h-[52vh] overflow-hidden bg-muted">
+              <img
+                src={activePublicNotice.image_url}
+                alt="Aviso do restaurante"
+                className="h-full max-h-[52vh] w-full object-cover"
+              />
+            </div>
+          )}
+
+          <div className="space-y-4 p-5 pt-6">
+            <DialogHeader className="space-y-2 pr-8 text-left">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-soft text-primary">
+                <Megaphone className="h-5 w-5" />
+              </div>
+              <DialogTitle className="text-xl">Aviso importante</DialogTitle>
+              <DialogDescription className="sr-only">
+                Aviso ativo do restaurante para visitantes da pagina publica.
+              </DialogDescription>
+            </DialogHeader>
+
+            {activePublicNotice?.text && (
+              <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                {activePublicNotice.text}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              className="w-full rounded-lg"
+              onClick={() => {
+                if (activePublicNotice) {
+                  setDismissedNoticeId(activePublicNotice.id);
+                }
+              }}
+            >
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 px-4 pt-3 shadow-[0_-12px_32px_rgba(0,0,0,0.14)] backdrop-blur-xl md:hidden"
