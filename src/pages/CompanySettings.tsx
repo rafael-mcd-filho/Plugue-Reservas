@@ -82,9 +82,11 @@ const SETTINGS_TAB_ITEMS = [
   { value: 'blocked', label: 'Bloqueios', icon: CalendarOff },
 ] as const;
 const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
-const settingsFieldClassName = 'h-10 rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
+const settingsFieldClassName = 'h-10 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsTextAreaClassName = 'rounded-xl border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
+const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
+const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
@@ -594,9 +596,9 @@ export default function CompanySettings() {
                 )}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="company-settings-phone" className="flex items-center gap-1.5"><Phone className="h-4 w-4" /> Telefone</Label>
+              <div className="grid items-start gap-4 md:grid-cols-2">
+                <div className={settingsFieldGroupClassName}>
+                  <Label htmlFor="company-settings-phone" className={settingsLabelClassName}><Phone className="h-4 w-4" /> Telefone</Label>
                   <Input
                     id="company-settings-phone"
                     name="phone"
@@ -609,8 +611,8 @@ export default function CompanySettings() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="company-settings-instagram" className="flex items-center gap-1.5"><Instagram className="h-4 w-4" /> Instagram</Label>
+                <div className={settingsFieldGroupClassName}>
+                  <Label htmlFor="company-settings-instagram" className={settingsLabelClassName}><Instagram className="h-4 w-4" /> Instagram</Label>
                   <Input
                     id="company-settings-instagram"
                     name="instagram"
@@ -623,8 +625,8 @@ export default function CompanySettings() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="company-settings-whatsapp" className="flex items-center gap-1.5"><MessageCircle className="h-4 w-4" /> WhatsApp</Label>
+                <div className={settingsFieldGroupClassName}>
+                  <Label htmlFor="company-settings-whatsapp" className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> WhatsApp</Label>
                   <Input
                     id="company-settings-whatsapp"
                     name="whatsapp"
@@ -641,8 +643,8 @@ export default function CompanySettings() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Botao de WhatsApp na pagina publica</Label>
+                <div className={settingsFieldGroupClassName}>
+                  <Label className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> Botao do WhatsApp</Label>
                   <Select value={showPublicWhatsappButton} onValueChange={setShowPublicWhatsappButton} disabled={publicCustomizationLocked}>
                     <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar exibicao do botao de WhatsApp">
                       <SelectValue />
@@ -654,6 +656,9 @@ export default function CompanySettings() {
                   </Select>
                   {publicCustomizationLocked && (
                     <p className="text-xs text-muted-foreground">O botao de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
+                  )}
+                  {!publicCustomizationLocked && (
+                    <p className="text-xs text-muted-foreground">Controla se o botao aparece na pagina publica.</p>
                   )}
                 </div>
               </div>
