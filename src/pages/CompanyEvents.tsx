@@ -167,12 +167,12 @@ export default function CompanyEvents() {
         pageViewsResult,
         bookingStartedResult,
         reservationsResult,
+        leadsResult,
         metaSentResult,
         metaFailedResult,
         recentEventsResult,
         metaQueueResult,
         metaAttemptsResult,
-        leadsResult,
       ] = await Promise.all([
         supabase
           .from('tracking_sessions' as any)
