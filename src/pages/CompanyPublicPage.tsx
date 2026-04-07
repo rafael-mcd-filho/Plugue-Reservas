@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type SVGProps } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -16,7 +16,6 @@ import {
   Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,6 +29,7 @@ import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import { isValidCompanySlug } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { richTextHasContent } from '@/lib/richText';
+import { cn } from '@/lib/utils';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
@@ -92,6 +92,140 @@ const DAY_MAP: Record<string, number> = {
   'S\u00E1b': 6,
 };
 
+const DAY_NAMES_BY_INDEX = Object.entries(DAY_MAP).reduce<Record<number, string>>((acc, [day, index]) => {
+  acc[index] = day;
+  return acc;
+}, {});
+
+const CLOSING_SOON_THRESHOLD_MINUTES = 60;
+
+interface OpeningSlot {
+  day: string;
+  open: string;
+  close: string;
+  start: Date;
+  end: Date;
+}
+
+interface OpeningStatus {
+  title: string;
+  description: string;
+  variant: 'open' | 'closing' | 'closed';
+}
+
+function parseTimeToMinutes(time?: string | null) {
+  if (!time) return null;
+  const [hours, minutes] = time.split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
+function describeDuration(totalMinutes: number) {
+  const minutes = Math.max(1, Math.ceil(totalMinutes));
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0) return `${hours}h`;
+  return `${hours}h${String(remainingMinutes).padStart(2, '0')}`;
+}
+
+function isSameCalendarDate(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function getOpeningHourByDayIndex(hours: OpeningHour[], dayIndex: number) {
+  const dayName = DAY_NAMES_BY_INDEX[dayIndex];
+  return dayName ? hours.find((hour) => hour.day === dayName) || null : null;
+}
+
+function buildOpeningSlots(hours: OpeningHour[], now: Date) {
+  const slots: OpeningSlot[] = [];
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  for (let offset = -1; offset <= 8; offset += 1) {
+    const dayStart = new Date(todayStart);
+    dayStart.setDate(todayStart.getDate() + offset);
+
+    const hour = getOpeningHourByDayIndex(hours, dayStart.getDay());
+    if (!hour || hour.closed) continue;
+
+    const openMinutes = parseTimeToMinutes(hour.open);
+    const closeMinutes = parseTimeToMinutes(hour.close);
+    if (openMinutes === null || closeMinutes === null) continue;
+
+    const closeOffset = closeMinutes <= openMinutes ? 24 * 60 : 0;
+    const start = new Date(dayStart.getTime() + openMinutes * 60_000);
+    const end = new Date(dayStart.getTime() + (closeMinutes + closeOffset) * 60_000);
+
+    slots.push({
+      day: hour.day,
+      open: hour.open,
+      close: hour.close,
+      start,
+      end,
+    });
+  }
+
+  return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
+}
+
+function describeOpeningMoment(slot: OpeningSlot, now: Date) {
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  if (isSameCalendarDate(slot.start, now)) return `hoje às ${slot.open}`;
+  if (isSameCalendarDate(slot.start, tomorrow)) return `amanhã às ${slot.open}`;
+  return `${slot.day} às ${slot.open}`;
+}
+
+function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null {
+  if (hours.length === 0) return null;
+
+  const slots = buildOpeningSlots(hours, now);
+  const currentSlot = slots.find((slot) => now >= slot.start && now < slot.end);
+
+  if (currentSlot) {
+    const minutesToClose = Math.ceil((currentSlot.end.getTime() - now.getTime()) / 60_000);
+    const nextSlot = slots.find((slot) => slot.start > currentSlot.end);
+
+    if (minutesToClose <= CLOSING_SOON_THRESHOLD_MINUTES) {
+      return {
+        title: `Fechando em ${describeDuration(minutesToClose)}`,
+        description: nextSlot
+          ? `Depois, abrimos novamente ${describeOpeningMoment(nextSlot, now)}.`
+          : 'Consulte o restaurante para confirmar a próxima abertura.',
+        variant: 'closing',
+      };
+    }
+
+    return {
+      title: 'Aberto agora',
+      description: `Hoje até ${currentSlot.close}.`,
+      variant: 'open',
+    };
+  }
+
+  const nextSlot = slots.find((slot) => slot.start > now);
+  if (!nextSlot) {
+    return {
+      title: 'Fechado agora',
+      description: 'Consulte o restaurante para confirmar a próxima abertura.',
+      variant: 'closed',
+    };
+  }
+
+  const minutesToOpen = Math.ceil((nextSlot.start.getTime() - now.getTime()) / 60_000);
+  return {
+    title: `Abrimos em ${describeDuration(minutesToOpen)}`,
+    description: `Próxima abertura ${describeOpeningMoment(nextSlot, now)}.`,
+    variant: 'closed',
+  };
+}
+
 function getGoogleMapsOpenUrl(company: Company | null) {
   if (!company) return null;
 
@@ -120,6 +254,7 @@ export default function CompanyPublicPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [statusNow, setStatusNow] = useState(() => new Date());
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
@@ -217,7 +352,10 @@ export default function CompanyPublicPage() {
     : null;
   const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
   const mapsEmbedUrl = getGoogleMapsEmbedUrl(company?.google_maps_url, company?.address || company?.name || null);
-  const openingHours = (((company?.opening_hours as any[]) || [])) as OpeningHour[];
+  const openingHours = useMemo(
+    () => (((company?.opening_hours as any[]) || [])) as OpeningHour[],
+    [company?.opening_hours],
+  );
   const paymentMethods = (company?.payment_methods as Record<string, boolean>) || {};
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
   const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
@@ -237,7 +375,12 @@ export default function CompanyPublicPage() {
     const hours = getOpeningHourForDate(date);
     return !hours || hours.closed || isAllDayBlocked(iso);
   };
-  const todayHours = getOpeningHourForDate(new Date());
+  const openingStatus = useMemo(() => getOpeningStatus(openingHours, statusNow), [openingHours, statusNow]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setStatusNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   if (isLoading) {
     return (
@@ -396,14 +539,6 @@ export default function CompanyPublicPage() {
               )}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {todayHours && !todayHours.closed && (
-                <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
-                  <Clock className="h-3 w-3" />
-                  Hoje até {todayHours.close}
-                </Badge>
-              )}
-            </div>
           </div>
 
           <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
@@ -445,10 +580,28 @@ export default function CompanyPublicPage() {
                       <Clock className="h-4 w-4" />
                       {'Hor\u00E1rio de Funcionamento'}
                     </h3>
-                    {todayHours && (
-                      <p className="mt-2 text-sm text-foreground">
-                        {todayHours.closed ? 'Hoje est\u00E1 fechado.' : `Hoje: ${todayHours.open} - ${todayHours.close}`}
-                      </p>
+                    {openingStatus && (
+                      <div
+                        className={cn(
+                          'mt-3 rounded-md border px-3 py-2.5',
+                          openingStatus.variant === 'open' && 'border-emerald-200 bg-emerald-50 text-emerald-950',
+                          openingStatus.variant === 'closing' && 'border-red-200 bg-red-50 text-red-950',
+                          openingStatus.variant === 'closed' && 'border-amber-200 bg-amber-50 text-amber-950',
+                        )}
+                        role="status"
+                      >
+                        <p className="text-sm font-semibold">{openingStatus.title}</p>
+                        <p
+                          className={cn(
+                            'mt-0.5 text-xs leading-relaxed',
+                            openingStatus.variant === 'open' && 'text-emerald-800',
+                            openingStatus.variant === 'closing' && 'text-red-800',
+                            openingStatus.variant === 'closed' && 'text-amber-800',
+                          )}
+                        >
+                          {openingStatus.description}
+                        </p>
+                      </div>
                     )}
                   </div>
                 </div>
