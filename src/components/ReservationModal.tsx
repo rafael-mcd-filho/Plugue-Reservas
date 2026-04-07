@@ -651,7 +651,7 @@ export default function ReservationModal({
 
   const getSlotSignalLabel = (slot: SlotAvailability | undefined) => {
     if (!slot || slot.available <= 0) return null;
-    if (slot.available <= 2) return 'Ultimas vagas';
+    if (slot.available <= 2) return 'Últimas vagas';
     if (slot.occupied > 0) return 'Alta procura';
     return null;
   };
@@ -780,23 +780,41 @@ export default function ReservationModal({
               <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             ) : (
               <>
-                {urgencySlots.length > 0 && (
-                  <div className="animate-fade-in rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950 shadow-sm" role="status">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                        <Flame className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0 space-y-2">
-                        <div>
-                          <p className="text-sm font-semibold">
-                            {hasCriticalUrgency ? 'Horarios quase esgotando' : 'Horarios com maior procura'}
-                          </p>
-                          <p className="text-xs leading-relaxed text-amber-800">
-                            {hasCriticalUrgency
-                              ? 'Alguns horarios estao com poucas vagas para o tamanho do seu grupo.'
-                              : 'Ja existem reservas nesses horarios. Se um deles encaixa para voce, vale garantir agora.'}
-                          </p>
-                        </div>
+                <div
+                  className={cn(
+                    'animate-fade-in rounded-lg border p-3 shadow-sm',
+                    urgencySlots.length > 0
+                      ? 'border-amber-200 bg-amber-50 text-amber-950'
+                      : 'border-primary/20 bg-primary/5 text-foreground',
+                  )}
+                  role="status"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={cn(
+                      'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+                      urgencySlots.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-primary/10 text-primary',
+                    )}>
+                      <Flame className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 space-y-2">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {urgencySlots.length > 0
+                            ? hasCriticalUrgency ? 'Horários quase esgotando' : 'Horários com maior procura'
+                            : 'Os horários podem esgotar rápido'}
+                        </p>
+                        <p className={cn(
+                          'text-xs leading-relaxed',
+                          urgencySlots.length > 0 ? 'text-amber-800' : 'text-muted-foreground',
+                        )}>
+                          {urgencySlots.length > 0
+                            ? hasCriticalUrgency
+                              ? 'Alguns horários estão com poucas vagas para o tamanho do seu grupo.'
+                              : 'Já existem reservas nesses horários. Se um deles encaixa para você, vale garantir agora.'
+                            : 'Escolha uma opção para garantir sua mesa. A disponibilidade muda conforme novas reservas entram.'}
+                        </p>
+                      </div>
+                      {urgencySlots.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
                           {urgencySlots.map((slot) => (
                             <span key={slot.time} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm">
@@ -804,10 +822,10 @@ export default function ReservationModal({
                             </span>
                           ))}
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
 
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {timeSlots.map(time => {
