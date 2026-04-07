@@ -173,6 +173,7 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     let failed = 0;
+    let skipped = 0;
 
     for (const queueRow of queueRows as any[]) {
       const attemptNumber = Number(queueRow.attempts || 0) + 1;
@@ -203,31 +204,12 @@ Deno.serve(async (req) => {
       const eventTypeEnabled = isEventTypeEnabled(queueRow.meta_event_name, settingsRecord);
 
       if (!capiEnabled || !pixelId || !accessToken || !eventTypeEnabled) {
-        const disabledReason = !eventTypeEnabled
-          ? `Envio do evento ${queueRow.meta_event_name} esta desabilitado`
-          : "Meta CAPI nao configurada para esta empresa";
-
         await supabaseAdmin
           .from("meta_event_queue")
-          .update({
-            status: "failed",
-            last_error: disabledReason,
-            last_response_status: null,
-          })
+          .delete()
           .eq("id", queueRow.id);
 
-        await supabaseAdmin
-          .from("meta_event_attempts")
-          .insert({
-            queue_id: queueRow.id,
-            company_id: queueRow.company_id,
-            reservation_id: queueRow.reservation_id,
-            status: "failed",
-            request_payload: {},
-            error_message: disabledReason,
-          });
-
-        failed++;
+        skipped++;
         continue;
       }
 
@@ -499,6 +481,7 @@ Deno.serve(async (req) => {
       processed: queueRows.length,
       sent,
       failed,
+      skipped,
     }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

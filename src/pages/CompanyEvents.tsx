@@ -13,6 +13,7 @@ import {
   Save,
   Send,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +80,8 @@ interface MetaAttemptRow {
   request_payload: Record<string, unknown> | null;
   created_at: string;
 }
+
+type ClearEventDataScope = 'meta_queue' | 'event_log';
 
 function createDefaultSettings(): TrackingSettingsForm {
   return {
@@ -303,11 +306,18 @@ export default function CompanyEvents() {
 
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
+      const pixelId = settingsForm.pixel_id.trim();
+      const accessToken = settingsForm.access_token.trim();
+
+      if (settingsForm.capi_enabled && (!pixelId || !accessToken)) {
+        throw new Error('Informe Pixel ID e Access Token antes de habilitar a Meta CAPI.');
+      }
+
       const payload = {
         company_id: companyId,
         ...settingsForm,
-        pixel_id: settingsForm.pixel_id.trim() || null,
-        access_token: settingsForm.access_token.trim() || null,
+        pixel_id: pixelId || null,
+        access_token: accessToken || null,
         test_event_code: settingsForm.test_event_code.trim() || null,
         updated_at: new Date().toISOString(),
       };
@@ -334,12 +344,12 @@ export default function CompanyEvents() {
       });
 
       if (error) throw error;
-      return (data ?? {}) as { processed?: number; sent?: number; failed?: number };
+      return (data ?? {}) as { processed?: number; sent?: number; failed?: number; skipped?: number };
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
       toast.success(
-        `Fila processada. Processados: ${result.processed ?? 0}, enviados: ${result.sent ?? 0}, falhas: ${result.failed ?? 0}.`,
+        `Fila processada. Processados: ${result.processed ?? 0}, enviados: ${result.sent ?? 0}, falhas: ${result.failed ?? 0}, ignorados: ${result.skipped ?? 0}.`,
       );
     },
     onError: (error: any) => {
@@ -347,9 +357,45 @@ export default function CompanyEvents() {
     },
   });
 
+  const clearEventDataMutation = useMutation({
+    mutationFn: async (scope: ClearEventDataScope) => {
+      const { data, error } = await supabase.rpc('clear_company_event_data' as any, {
+        _company_id: companyId,
+        _scope: scope,
+      });
+
+      if (error) throw error;
+      return data as Record<string, number>;
+    },
+    onSuccess: (result, scope) => {
+      queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
+      const total = Object.values(result ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
+      toast.success(scope === 'meta_queue'
+        ? `Fila Meta limpa. ${total} registro(s) removido(s).`
+        : `Log de eventos limpo. ${total} registro(s) removido(s).`,
+      );
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao limpar eventos: ${error.message}`);
+    },
+  });
+
   const recentEvents = eventsDashboard?.recentEvents ?? [];
   const metaQueue = eventsDashboard?.metaQueue ?? [];
   const metaAttempts = eventsDashboard?.metaAttempts ?? [];
+  const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
+
+  const handleClearEventData = (scope: ClearEventDataScope) => {
+    const confirmed = window.confirm(
+      scope === 'meta_queue'
+        ? 'Limpar todos os itens da fila Meta desta empresa?'
+        : 'Limpar o log de eventos desta empresa? As metricas do periodo podem mudar.',
+    );
+
+    if (confirmed) {
+      clearEventDataMutation.mutate(scope);
+    }
+  };
 
   return (
     <>
@@ -376,7 +422,8 @@ export default function CompanyEvents() {
               type="button"
               className="gap-2"
               onClick={() => processQueueMutation.mutate()}
-              disabled={processQueueMutation.isPending}
+              disabled={processQueueMutation.isPending || !metaConfigured}
+              title={!metaConfigured ? 'Informe Pixel ID, Access Token e habilite a Meta CAPI antes de processar a fila.' : undefined}
             >
               {processQueueMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Processar fila Meta
@@ -420,6 +467,13 @@ export default function CompanyEvents() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {!metaConfigured && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Eventos internos continuam alimentando o funil, mas nada deve entrar na fila Meta enquanto Pixel ID,
+                Access Token e Meta CAPI habilitada nao estiverem configurados.
+              </div>
+            )}
+
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Visita</p>
@@ -566,12 +620,25 @@ export default function CompanyEvents() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MousePointerClick className="h-4 w-4" />
-                Log de eventos
-              </CardTitle>
-              <CardDescription>Ultimos eventos persistidos do site e das reservas.</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <MousePointerClick className="h-4 w-4" />
+                  Log de eventos
+                </CardTitle>
+                <CardDescription>Ultimos eventos persistidos do site e das reservas.</CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => handleClearEventData('event_log')}
+                disabled={clearEventDataMutation.isPending || recentEvents.length === 0}
+              >
+                <Trash2 className="h-4 w-4" />
+                Limpar
+              </Button>
             </CardHeader>
             <CardContent>
               <Table>
@@ -617,12 +684,25 @@ export default function CompanyEvents() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Send className="h-4 w-4" />
-                Fila de envio Meta
-              </CardTitle>
-              <CardDescription>Status atual dos eventos prontos para envio via CAPI.</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Send className="h-4 w-4" />
+                  Fila de envio Meta
+                </CardTitle>
+                <CardDescription>Status atual dos eventos prontos para envio via CAPI.</CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => handleClearEventData('meta_queue')}
+                disabled={clearEventDataMutation.isPending || metaQueue.length === 0}
+              >
+                <Trash2 className="h-4 w-4" />
+                Limpar
+              </Button>
             </CardHeader>
             <CardContent>
               <Table>
