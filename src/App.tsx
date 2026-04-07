@@ -33,7 +33,6 @@ const Leads = lazy(() => import("@/pages/Leads"));
 const Users = lazy(() => import("@/pages/Users"));
 const Login = lazy(() => import("@/pages/Login"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
-const Signup = lazy(() => import("@/pages/Signup"));
 const AccessDenied = lazy(() => import("@/pages/AccessDenied"));
 const CompanyPublicPage = lazy(() => import("@/pages/CompanyPublicPage"));
 const SystemHealth = lazy(() => import("@/pages/SystemHealth"));
@@ -231,11 +230,7 @@ const App = () => (
               />
               <Route
                 path="/cadastro"
-                element={
-                  <SuspenseRoute fallback={<AuthPageSkeleton />}>
-                    <Signup />
-                  </SuspenseRoute>
-                }
+                element={<Navigate to="/login" replace />}
               />
               <Route
                 path="/acesso-negado"
