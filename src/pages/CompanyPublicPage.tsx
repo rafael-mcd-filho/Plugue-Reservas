@@ -716,27 +716,8 @@ export default function CompanyPublicPage() {
 
   return (
     <div className="min-h-screen bg-secondary pb-24 md:pb-0">
-      <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="mx-auto flex max-w-lg flex-col items-center justify-center px-4 py-5 md:max-w-5xl md:flex-row md:items-center md:justify-start md:py-6">
-          {showCustomLogo ? (
-            <img
-              src={company.logo_url}
-              alt={company.name}
-              className="h-[5.6rem] w-[5.6rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-20 md:w-20"
-            />
-          ) : (
-            <div className="flex h-[5.6rem] w-[5.6rem] shrink-0 items-center justify-center rounded-full bg-primary text-3xl font-bold text-primary-foreground shadow-lg md:h-20 md:w-20 md:text-2xl">
-              {company.name.charAt(0)}
-            </div>
-          )}
-          {googleMapsSearchUrl && (
-            <RatingStarsLink href={googleMapsSearchUrl} className="mt-3 md:hidden" />
-          )}
-        </div>
-      </div>
-
       <div
-        className="relative overflow-hidden px-4 pb-8 pt-5 text-primary-foreground md:pb-14 md:pt-10"
+        className="relative overflow-hidden px-4 pb-8 pt-5 text-primary-foreground md:pb-14 md:pt-6"
         style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
       >
         <div
@@ -748,63 +729,81 @@ export default function CompanyPublicPage() {
           style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
         />
 
-        <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
-          <div className="space-y-4 animate-slide-up">
-            {googleMapsSearchUrl && (
-              <RatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
-            )}
-
-            <div>
-              <div className="flex items-center gap-3">
-                {instagramUrl && (
-                  <a
-                    href={instagramUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Instagram"
-                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
-                  >
-                    <InstagramIcon className="h-4 w-4" />
-                  </a>
-                )}
-                <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
+        <div className="relative z-10 mx-auto max-w-lg md:max-w-5xl">
+          <div className="flex flex-col items-center md:items-start">
+            {showCustomLogo ? (
+              <img
+                src={company.logo_url}
+                alt={company.name}
+                className="h-[5.6rem] w-[5.6rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-20 md:w-20"
+              />
+            ) : (
+              <div className="flex h-[5.6rem] w-[5.6rem] shrink-0 items-center justify-center rounded-full bg-primary text-3xl font-bold text-primary-foreground shadow-lg md:h-20 md:w-20 md:text-2xl">
+                {company.name.charAt(0)}
               </div>
-              {showDescription && (
-                <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
-                  <RichTextContent
-                    value={company.description}
-                    className="text-sm leading-relaxed text-muted-foreground md:text-base [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-sm md:[&_p]:text-base"
-                  />
-                </div>
-              )}
-            </div>
-
+            )}
+            {googleMapsSearchUrl && (
+              <RatingStarsLink href={googleMapsSearchUrl} className="mt-3 md:hidden" />
+            )}
           </div>
 
-          <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
-            <Button
-              className="group w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
-              size="lg"
-              onMouseEnter={() => void loadReservationModal()}
-              onFocus={() => void loadReservationModal()}
-              onClick={handleOpenReservation}
-            >
-              <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
-              Reservar agora
-            </Button>
+          <div className="mt-5 md:grid md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
+            <div className="space-y-4 animate-slide-up">
+              {googleMapsSearchUrl && (
+                <RatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
+              )}
 
-            {showWhatsappButton && (
-              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
-                <Button
-                  variant="secondary"
-                  className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-background/90"
-                  size="lg"
-                >
-                  <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
-                  Falar pelo WhatsApp
-                </Button>
-              </a>
-            )}
+              <div>
+                <div className="flex items-center gap-3">
+                  {instagramUrl && (
+                    <a
+                      href={instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Instagram"
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
+                    >
+                      <InstagramIcon className="h-4 w-4" />
+                    </a>
+                  )}
+                  <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
+                </div>
+                {showDescription && (
+                  <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
+                    <RichTextContent
+                      value={company.description}
+                      className="text-sm leading-relaxed text-muted-foreground md:text-base [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-sm md:[&_p]:text-base"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
+              <Button
+                className="group w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
+                size="lg"
+                onMouseEnter={() => void loadReservationModal()}
+                onFocus={() => void loadReservationModal()}
+                onClick={handleOpenReservation}
+              >
+                <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
+                Reservar agora
+              </Button>
+
+              {showWhatsappButton && (
+                <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <Button
+                    variant="secondary"
+                    className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-background/90"
+                    size="lg"
+                  >
+                    <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
+                    Falar pelo WhatsApp
+                  </Button>
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
