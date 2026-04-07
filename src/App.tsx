@@ -9,7 +9,6 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
-import BuildVersionBadge from "@/components/BuildVersionBadge";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -37,7 +36,6 @@ const AccessDenied = lazy(() => import("@/pages/AccessDenied"));
 const CompanyPublicPage = lazy(() => import("@/pages/CompanyPublicPage"));
 const SystemHealth = lazy(() => import("@/pages/SystemHealth"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
-const DevToolbar = lazy(() => import("@/components/DevToolbar"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -205,12 +203,6 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            {DevToolbar ? (
-              <Suspense fallback={null}>
-                <DevToolbar />
-              </Suspense>
-            ) : null}
-            <BuildVersionBadge />
             <Routes>
               <Route
                 path="/login"

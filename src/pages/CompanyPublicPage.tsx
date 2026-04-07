@@ -399,7 +399,7 @@ export default function CompanyPublicPage() {
               {todayHours && !todayHours.closed && (
                 <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
                   <Clock className="h-3 w-3" />
-                  Hoje at\u00E9 {todayHours.close}
+                  Hoje até {todayHours.close}
                 </Badge>
               )}
             </div>

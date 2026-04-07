@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ClipboardList,
   Contact,
+  ExternalLink,
   Grid3X3,
   LayoutDashboard,
   LogOut,
@@ -60,7 +61,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [companyMenuOpen, setCompanyMenuOpen] = useState(true);
   const { user, profile, roles, loading, signOut } = useAuth();
   const { data: systemBranding } = useSystemBranding();
-  const systemName = systemBranding?.system_name || 'ReservaF\u00E1cil';
+  const systemName = systemBranding?.system_name || 'PlugGuest';
   const systemLogo = systemBranding?.system_logo_url || '';
   const userId = user?.id;
 
@@ -517,6 +518,19 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              {slug && (
+                <a
+                  href={`/${slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Ver página pública"
+                >
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Página pública</span>
+                  </Button>
+                </a>
+              )}
               {slug && <CompanyNotificationsPopover />}
               {slug && <WhatsAppStatusAlert />}
               {isImpersonatingCompany && (

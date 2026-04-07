@@ -64,7 +64,7 @@ export function useSystemBranding() {
 
       const row = Array.isArray(data) ? data[0] : data;
       return {
-        system_name: row?.system_name || 'ReservaFacil',
+        system_name: row?.system_name || 'PlugGuest',
         system_logo_url: row?.system_logo_url || '',
       } as SystemBranding;
     },

@@ -950,14 +950,14 @@ export default function CompanyEvents() {
       </div>
 
       <Dialog open={!!selectedEvent} onOpenChange={(nextOpen) => !nextOpen && setSelectedEvent(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto overflow-x-hidden sm:max-w-[min(90vw,56rem)]">
           {selectedEvent && (
             <>
               <DialogHeader>
                 <DialogTitle>Detalhes do evento</DialogTitle>
               </DialogHeader>
 
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 <div className="rounded-lg border border-border bg-muted/20 p-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">{selectedEvent.event_name}</Badge>
@@ -971,7 +971,7 @@ export default function CompanyEvents() {
                   </p>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border p-4">
                     <h3 className="text-sm font-semibold text-foreground">Evento</h3>
                     <div className="mt-3 grid gap-3">
@@ -1015,9 +1015,9 @@ export default function CompanyEvents() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-border p-4">
+                <div className="min-w-0 rounded-lg border border-border p-4">
                   <h3 className="text-sm font-semibold text-foreground">Dados brutos</h3>
-                  <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-muted/30 p-3 text-xs text-foreground">
+                  <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-muted/30 p-3 text-xs text-foreground whitespace-pre-wrap break-all">
                     {buildPayloadPreview({
                       metadata: selectedEventMetadata,
                       user_data_snapshot: selectedEventUserData,
