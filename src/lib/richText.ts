@@ -100,3 +100,27 @@ export function richTextHasContent(value: string | null | undefined) {
 
   return text.length > 0;
 }
+
+export function richTextToPlainText(value: string | null | undefined) {
+  const html = toSafeRichTextHtml(value);
+  if (!html) return '';
+
+  if (typeof DOMParser !== 'undefined') {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  return html
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(p|h1|h2|li)>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}

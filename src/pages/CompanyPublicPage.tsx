@@ -28,12 +28,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import { isValidCompanySlug } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
-import { richTextHasContent } from '@/lib/richText';
+import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
 const FunnelDebugPanel = lazy(() => import('@/components/FunnelDebugPanel'));
+const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com pagina publica, painel por unidade e automacoes via WhatsApp.';
+const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
 
 interface OpeningHour {
   day: string;
@@ -263,6 +265,103 @@ function getGoogleMapsOpenUrl(company: Company | null) {
   return null;
 }
 
+function truncateSeoText(value: string, maxLength = 155) {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+
+  const trimmed = normalized.slice(0, maxLength - 1);
+  const lastSpace = trimmed.lastIndexOf(' ');
+  return `${trimmed.slice(0, lastSpace > 80 ? lastSpace : trimmed.length).trim()}...`;
+}
+
+function upsertMeta(attribute: 'name' | 'property', key: string, content: string) {
+  if (typeof document === 'undefined') return;
+
+  let element = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"]`);
+  if (!element) {
+    element = document.createElement('meta');
+    element.setAttribute(attribute, key);
+    document.head.appendChild(element);
+  }
+
+  element.content = content;
+}
+
+function removeMeta(attribute: 'name' | 'property', key: string) {
+  if (typeof document === 'undefined') return;
+  document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"]`)?.remove();
+}
+
+function upsertCanonical(url: string) {
+  if (typeof document === 'undefined') return;
+
+  let element = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+  if (!element) {
+    element = document.createElement('link');
+    element.rel = 'canonical';
+    document.head.appendChild(element);
+  }
+
+  element.href = url;
+}
+
+function removeCanonical() {
+  if (typeof document === 'undefined') return;
+  document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.remove();
+}
+
+function upsertJsonLd(data: Record<string, unknown>) {
+  if (typeof document === 'undefined') return;
+
+  let element = document.getElementById(PUBLIC_RESERVATION_JSON_LD_ID) as HTMLScriptElement | null;
+  if (!element) {
+    element = document.createElement('script');
+    element.id = PUBLIC_RESERVATION_JSON_LD_ID;
+    element.type = 'application/ld+json';
+    document.head.appendChild(element);
+  }
+
+  element.text = JSON.stringify(data);
+}
+
+function removeJsonLd() {
+  if (typeof document === 'undefined') return;
+  document.getElementById(PUBLIC_RESERVATION_JSON_LD_ID)?.remove();
+}
+
+function getSchemaDayName(day: string) {
+  const map: Record<string, string> = {
+    Dom: 'Sunday',
+    Seg: 'Monday',
+    Ter: 'Tuesday',
+    Qua: 'Wednesday',
+    Qui: 'Thursday',
+    Sex: 'Friday',
+    'S\u00E1b': 'Saturday',
+  };
+
+  return map[day] ?? null;
+}
+
+function compactJsonLd<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => {
+      if (Array.isArray(entry)) return entry.length > 0;
+      return entry !== null && entry !== undefined && entry !== '';
+    }),
+  );
+}
+
+function toAbsoluteUrl(url: string | null | undefined) {
+  if (!url || typeof window === 'undefined') return null;
+
+  try {
+    return new URL(url, window.location.origin).toString();
+  } catch {
+    return null;
+  }
+}
+
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
@@ -316,15 +415,6 @@ export default function CompanyPublicPage() {
     void loadReservationModal();
     setShowReservation(true);
   };
-
-  useEffect(() => {
-    if (!company) return;
-
-    document.title = `${company.name} - Reservar Mesa`;
-    return () => {
-      document.title = DEFAULT_SYSTEM_NAME;
-    };
-  }, [company]);
 
   useEffect(() => {
     if (company?.id) trackStep('page_view');
@@ -400,6 +490,100 @@ export default function CompanyPublicPage() {
     const interval = window.setInterval(() => setStatusNow(new Date()), 60_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!company || typeof window === 'undefined') return;
+
+    const canonicalUrl = `${window.location.origin}${window.location.pathname}`;
+    const descriptionText = richTextToPlainText(company.description);
+    const seoTitle = `Reservar mesa no ${company.name} | ${DEFAULT_SYSTEM_NAME}`;
+    const seoDescription = truncateSeoText(
+      descriptionText
+        ? `Reserve sua mesa no ${company.name}. ${descriptionText}`
+        : `Página de reserva do ${company.name}${company.address ? ` em ${company.address}` : ''}. Consulte horários, localização e faça sua reserva online.`,
+    );
+    const seoImage = customPublicPageEnabled ? toAbsoluteUrl(company.logo_url) : null;
+    const sameAs = [instagramUrl, googleMapsSearchUrl].filter(Boolean) as string[];
+    const openingHoursSpecification = openingHours
+      .map((hour) => {
+        const dayOfWeek = getSchemaDayName(hour.day);
+        if (!dayOfWeek || hour.closed) return null;
+
+        return compactJsonLd({
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek,
+          opens: hour.open,
+          closes: hour.close,
+        });
+      })
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+
+    document.title = seoTitle;
+    upsertCanonical(canonicalUrl);
+    upsertMeta('name', 'description', seoDescription);
+    upsertMeta('name', 'author', DEFAULT_SYSTEM_NAME);
+    upsertMeta('name', 'robots', 'index, follow');
+    upsertMeta('property', 'og:title', seoTitle);
+    upsertMeta('property', 'og:description', seoDescription);
+    upsertMeta('property', 'og:site_name', DEFAULT_SYSTEM_NAME);
+    upsertMeta('property', 'og:type', 'website');
+    upsertMeta('property', 'og:locale', 'pt_BR');
+    upsertMeta('property', 'og:url', canonicalUrl);
+    upsertMeta('name', 'twitter:card', seoImage ? 'summary_large_image' : 'summary');
+    upsertMeta('name', 'twitter:title', seoTitle);
+    upsertMeta('name', 'twitter:description', seoDescription);
+
+    if (seoImage) {
+      upsertMeta('property', 'og:image', seoImage);
+      upsertMeta('name', 'twitter:image', seoImage);
+    } else {
+      removeMeta('property', 'og:image');
+      removeMeta('name', 'twitter:image');
+    }
+
+    upsertJsonLd(compactJsonLd({
+      '@context': 'https://schema.org',
+      '@type': 'Restaurant',
+      name: company.name,
+      description: seoDescription,
+      url: canonicalUrl,
+      image: seoImage,
+      telephone: company.phone,
+      address: company.address
+        ? compactJsonLd({
+          '@type': 'PostalAddress',
+          streetAddress: company.address,
+        })
+        : null,
+      sameAs,
+      openingHoursSpecification,
+      potentialAction: compactJsonLd({
+        '@type': 'ReserveAction',
+        name: `Reservar mesa no ${company.name}`,
+        target: canonicalUrl,
+      }),
+    }));
+
+    return () => {
+      document.title = DEFAULT_SYSTEM_NAME;
+      upsertMeta('name', 'description', DEFAULT_SEO_DESCRIPTION);
+      upsertMeta('name', 'author', DEFAULT_SYSTEM_NAME);
+      upsertMeta('name', 'robots', 'index, follow');
+      upsertMeta('property', 'og:title', DEFAULT_SYSTEM_NAME);
+      upsertMeta('property', 'og:description', DEFAULT_SEO_DESCRIPTION);
+      upsertMeta('property', 'og:site_name', DEFAULT_SYSTEM_NAME);
+      upsertMeta('property', 'og:type', 'website');
+      upsertMeta('name', 'twitter:card', 'summary_large_image');
+      upsertMeta('name', 'twitter:title', DEFAULT_SYSTEM_NAME);
+      upsertMeta('name', 'twitter:description', DEFAULT_SEO_DESCRIPTION);
+      removeMeta('property', 'og:locale');
+      removeMeta('property', 'og:url');
+      removeMeta('property', 'og:image');
+      removeMeta('name', 'twitter:image');
+      removeCanonical();
+      removeJsonLd();
+    };
+  }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours]);
 
   if (isLoading) {
     return (
