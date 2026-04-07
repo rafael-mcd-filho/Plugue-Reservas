@@ -13,7 +13,6 @@ import {
   MapPin,
   Phone,
   QrCode,
-  Star,
   Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -333,19 +332,18 @@ export default function CompanyPublicPage() {
   return (
     <div className="min-h-screen bg-secondary pb-28 md:pb-0">
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="mx-auto flex max-w-lg items-center gap-3 px-4 py-3 md:max-w-5xl">
+        <div className="mx-auto flex max-w-lg items-center justify-center px-4 py-4 md:max-w-5xl md:justify-start md:py-5">
           {showCustomLogo ? (
             <img
               src={company.logo_url}
               alt={company.name}
-              className="h-9 w-9 shrink-0 rounded-full border border-white/20 object-cover"
+              className="h-16 w-16 shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-14 md:w-14"
             />
           ) : (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground shadow-lg md:h-14 md:w-14 md:text-lg">
               {company.name.charAt(0)}
             </div>
           )}
-          <span className="text-sm font-semibold text-white/90 truncate">{company.name}</span>
         </div>
       </div>
 
@@ -371,8 +369,7 @@ export default function CompanyPublicPage() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors hover:bg-white/15"
               >
-                <Star className="h-3.5 w-3.5 fill-current text-amber-300" />
-                <span>Google 4,9 / 5</span>
+                <span className="text-sm tracking-[0.18em] text-amber-300">★★★★★</span>
               </a>
             )}
 

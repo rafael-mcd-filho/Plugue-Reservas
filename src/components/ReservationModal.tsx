@@ -636,6 +636,9 @@ export default function ReservationModal({
   const selectedSlotIsLow = !!selectedSlotAvailability
     && selectedSlotAvailability.available > 0
     && selectedSlotAvailability.available <= 2;
+  const selectedSlotHasDemand = !!selectedSlotAvailability
+    && selectedSlotAvailability.occupied > 0
+    && selectedSlotAvailability.available > 0;
   const hasCriticalUrgency = urgencySlots.some((slot) => slot.available <= 2);
 
   const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
@@ -646,9 +649,16 @@ export default function ReservationModal({
     return 'available';
   };
 
+  const getSlotSignalLabel = (slot: SlotAvailability | undefined) => {
+    if (!slot || slot.available <= 0) return null;
+    if (slot.available <= 2) return 'Ultimas vagas';
+    if (slot.occupied > 0) return 'Alta procura';
+    return null;
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="text-center text-lg font-bold text-foreground">
             {step === 4 ? 'Reserva Confirmada!' : `Reservar Mesa — ${companyName}`}
@@ -779,18 +789,18 @@ export default function ReservationModal({
                       <div className="min-w-0 space-y-2">
                         <div>
                           <p className="text-sm font-semibold">
-                            {hasCriticalUrgency ? 'Horários quase esgotando' : 'Horários já recebendo reservas'}
+                            {hasCriticalUrgency ? 'Horarios quase esgotando' : 'Horarios com maior procura'}
                           </p>
                           <p className="text-xs leading-relaxed text-amber-800">
                             {hasCriticalUrgency
-                              ? 'Alguns horários estão com poucas vagas para o tamanho do seu grupo.'
-                              : 'Já existem reservas nesses horários. Se um deles encaixa para você, vale garantir agora.'}
+                              ? 'Alguns horarios estao com poucas vagas para o tamanho do seu grupo.'
+                              : 'Ja existem reservas nesses horarios. Se um deles encaixa para voce, vale garantir agora.'}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {urgencySlots.map((slot) => (
                             <span key={slot.time} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm">
-                              {slot.time} · {slot.available} {slot.available === 1 ? 'vaga' : 'vagas'}
+                              {slot.time} - {slot.available} {slot.available === 1 ? 'vaga' : 'vagas'}
                             </span>
                           ))}
                         </div>
@@ -804,6 +814,7 @@ export default function ReservationModal({
                     const status = getSlotStatus(time);
                     const avail = slotAvailability[time];
                     const isFull = status === 'full';
+                    const signalLabel = getSlotSignalLabel(avail);
                     return (
                       <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
                         disabled={isFull}
@@ -824,6 +835,14 @@ export default function ReservationModal({
                             {isFull ? 'Lotado' : `${avail.available} ${avail.available === 1 ? 'vaga' : 'vagas'}`}
                           </span>
                         )}
+                        {signalLabel && (
+                          <span className={cn(
+                            'rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none',
+                            status === 'low' ? 'bg-amber-100 text-amber-800' : 'bg-primary/10 text-primary',
+                          )}>
+                            {signalLabel}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -831,9 +850,11 @@ export default function ReservationModal({
               </>
             )}
 
-            {selectedSlotIsLow && (
+            {(selectedSlotIsLow || selectedSlotHasDemand) && (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900">
-                Esse horário tem só {selectedSlotAvailability?.available} {selectedSlotAvailability?.available === 1 ? 'vaga' : 'vagas'} para {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}. Continue para garantir a reserva.
+                {selectedSlotIsLow
+                  ? `Esse horario tem so ${selectedSlotAvailability?.available} ${selectedSlotAvailability?.available === 1 ? 'vaga' : 'vagas'} para ${selectedPartySize} ${selectedPartySize === 1 ? 'pessoa' : 'pessoas'}. Continue para garantir a reserva.`
+                  : 'Esse horario ja recebeu reservas. Continue para garantir sua mesa enquanto ainda ha disponibilidade.'}
               </p>
             )}
 
@@ -1012,10 +1033,12 @@ export default function ReservationModal({
               </button>
             </p>
 
-            <Button type="submit" className="w-full text-base rounded-md" disabled={submitting}>
-              {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Confirmar Reserva
-            </Button>
+            <div className="sticky bottom-0 -mx-5 bg-card/95 px-5 pb-1 pt-3 shadow-[0_-12px_24px_rgba(255,255,255,0.92)] backdrop-blur">
+              <Button type="submit" className="w-full text-base rounded-md shadow-sm" disabled={submitting}>
+                {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Confirmar Reserva
+              </Button>
+            </div>
           </form>
         )}
 
