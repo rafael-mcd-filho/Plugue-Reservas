@@ -36,21 +36,31 @@ export default function PublicWaitlistPage() {
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
     queryFn: async () => {
+      const fetchPublicCompanyFromView = async () => {
+        const { data, error } = await supabase
+          .from('companies_public' as any)
+          .select('*')
+          .eq('slug', slug!)
+          .maybeSingle();
+
+        if (error) throw error;
+        return data as Company | null;
+      };
+
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
 
       if (!rpcResult.error) {
         const rows = (rpcResult.data ?? []) as Company[];
-        return rows.length > 0 ? rows[0] : null;
+        const row = rows.length > 0 ? rows[0] : null;
+
+        if (row && !Object.prototype.hasOwnProperty.call(row, 'public_waitlist_enabled')) {
+          return fetchPublicCompanyFromView();
+        }
+
+        return row;
       }
 
-      const { data, error } = await supabase
-        .from('companies_public' as any)
-        .select('*')
-        .eq('slug', slug!)
-        .maybeSingle();
-
-      if (error) throw error;
-      return data as Company | null;
+      return fetchPublicCompanyFromView();
     },
     enabled: slugIsValid,
   });
@@ -281,7 +291,7 @@ export default function PublicWaitlistPage() {
                   <Clock3 className="h-5 w-5" />
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-lg font-semibold tracking-tight">Entrada online indisponivel</h2>
+                  <h2 className="text-lg font-semibold tracking-tight">Entrada online indisponível</h2>
                   <p className="text-sm text-muted-foreground">{DISABLED_MESSAGE}</p>
                 </div>
               </div>
