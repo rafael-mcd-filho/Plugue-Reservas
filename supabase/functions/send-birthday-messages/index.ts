@@ -1,8 +1,8 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
 };
 
 function formatPhoneForWhatsApp(phone: string): string {
@@ -17,10 +17,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    if (!isAuthorizedInternalJob(req)) {
+      return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
 
     const { data: settings } = await supabaseAdmin
       .from('system_settings')
@@ -44,20 +48,69 @@ Deno.serve(async (req) => {
 
     console.log(`Birthday check for day: ${todayMMDD}`);
 
-    // Find all reservations with guest_birthdate matching today's MM-DD
-    const { data: birthdayReservations } = await supabaseAdmin
-      .from('reservations')
-      .select('guest_name, guest_phone, guest_birthdate, company_id')
-      .not('guest_birthdate', 'is', null)
-      .not('guest_phone', 'is', null);
+    const [
+      { data: birthdayReservations },
+      { data: birthdayCompanions },
+      { data: birthdayWaitlistHolders },
+      { data: birthdayWaitlistCompanions },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('reservations')
+        .select('guest_name, guest_phone, guest_birthdate, company_id')
+        .not('guest_birthdate', 'is', null)
+        .not('guest_phone', 'is', null),
+      supabaseAdmin
+        .from('reservation_companions')
+        .select('name, phone, birthdate, company_id')
+        .not('birthdate', 'is', null)
+        .not('phone', 'is', null),
+      supabaseAdmin
+        .from('waitlist')
+        .select('guest_name, guest_phone, guest_birthdate, company_id')
+        .eq('status', 'seated')
+        .not('guest_birthdate', 'is', null)
+        .not('guest_phone', 'is', null),
+      supabaseAdmin
+        .from('waitlist_companions')
+        .select('name, phone, birthdate, company_id')
+        .not('birthdate', 'is', null)
+        .not('phone', 'is', null),
+    ]);
 
-    if (!birthdayReservations || birthdayReservations.length === 0) {
+    const birthdayContacts = [
+      ...((birthdayReservations || []).map((reservation: any) => ({
+        guest_name: reservation.guest_name,
+        guest_phone: reservation.guest_phone,
+        guest_birthdate: reservation.guest_birthdate,
+        company_id: reservation.company_id,
+      }))),
+      ...((birthdayCompanions || []).map((companion: any) => ({
+        guest_name: companion.name,
+        guest_phone: companion.phone,
+        guest_birthdate: companion.birthdate,
+        company_id: companion.company_id,
+      }))),
+      ...((birthdayWaitlistHolders || []).map((entry: any) => ({
+        guest_name: entry.guest_name,
+        guest_phone: entry.guest_phone,
+        guest_birthdate: entry.guest_birthdate,
+        company_id: entry.company_id,
+      }))),
+      ...((birthdayWaitlistCompanions || []).map((companion: any) => ({
+        guest_name: companion.name,
+        guest_phone: companion.phone,
+        guest_birthdate: companion.birthdate,
+        company_id: companion.company_id,
+      }))),
+    ];
+
+    if (birthdayContacts.length === 0) {
       return new Response(JSON.stringify({ sent: 0, reason: 'no_birthdate_data' }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    const todayBirthdays = birthdayReservations.filter((r: any) => {
+    const todayBirthdays = birthdayContacts.filter((r: any) => {
       if (!r.guest_birthdate) return false;
       return r.guest_birthdate.substring(5) === todayMMDD;
     });

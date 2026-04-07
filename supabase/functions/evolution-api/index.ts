@@ -5,6 +5,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+function normalizeOptionalCompanyId(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function normalizeEffectiveRole(value: unknown) {
+  return value === 'admin' || value === 'operator' ? value : null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -28,6 +36,59 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
+    const body = await req.json();
+    const { action, company_id, instance_name, phone, message, log_id } = body;
+    const scopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
+    const impersonatedBySuperadmin = body.impersonated_by_superadmin === true;
+    const effectiveRole = normalizeEffectiveRole(body.effective_role);
+
+    if (!company_id) {
+      return new Response(JSON.stringify({ error: 'company_id é obrigatório' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const { data: memberships, error: membershipsError } = await supabaseAdmin
+      .from('user_roles')
+      .select('role, company_id')
+      .eq('user_id', userData.user.id);
+
+    if (membershipsError) {
+      return new Response(JSON.stringify({ error: membershipsError.message }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const roleRows = memberships ?? [];
+    const isSuperadmin = roleRows.some((row: any) => row.role === 'superadmin');
+    const adminCompanyIds = [...new Set(
+      roleRows
+        .filter((row: any) => row.role === 'admin' && row.company_id)
+        .map((row: any) => row.company_id as string)
+    )];
+
+    if (!isSuperadmin && adminCompanyIds.length === 0) {
+      return new Response(JSON.stringify({ error: 'Apenas admins e superadmins podem gerenciar a Evolution API' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const allowedCompanyIds = isSuperadmin
+      ? (scopeCompanyId ? [scopeCompanyId] : null)
+      : adminCompanyIds;
+
+    if (allowedCompanyIds && !allowedCompanyIds.includes(company_id)) {
+      return new Response(JSON.stringify({ error: 'Acesso negado para esta empresa no contexto atual' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (isSuperadmin && scopeCompanyId && impersonatedBySuperadmin && effectiveRole !== 'admin') {
+      return new Response(JSON.stringify({ error: 'Operadores impersonados nao podem gerenciar a Evolution API' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Get Evolution API settings from system_settings
     const { data: settings } = await supabaseAdmin
       .from('system_settings')
@@ -42,9 +103,6 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    const body = await req.json();
-    const { action, company_id, instance_name, phone, message, log_id } = body;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

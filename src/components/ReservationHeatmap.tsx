@@ -1,9 +1,11 @@
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface HeatmapProps {
   counts: Record<string, number>;
+  breakdown: Record<string, { total: number; scheduled: number; waitlist: number }>;
   maxCount: number;
   hours: string[];
   dayNames: string[];
@@ -12,19 +14,27 @@ interface HeatmapProps {
 function getIntensity(count: number, max: number): string {
   if (count === 0 || max === 0) return 'bg-muted';
   const ratio = count / max;
-  if (ratio > 0.75) return 'bg-primary';
-  if (ratio > 0.5) return 'bg-primary/70';
-  if (ratio > 0.25) return 'bg-primary/40';
-  return 'bg-primary/20';
+  if (ratio > 0.75) return 'bg-info';
+  if (ratio > 0.5) return 'bg-info/70';
+  if (ratio > 0.25) return 'bg-info/40';
+  return 'bg-info/20';
 }
 
-export default function ReservationHeatmap({ counts, maxCount, hours, dayNames }: HeatmapProps) {
+export default function ReservationHeatmap({ counts, breakdown, maxCount, hours, dayNames }: HeatmapProps) {
   if (hours.length === 0) {
     return (
       <Card className="border border-border shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Horários Mais Reservados</CardTitle>
-          <CardDescription>Sem dados no período selecionado</CardDescription>
+          <CardTitle className="text-base">
+            <span className="inline-flex items-center gap-1.5">
+              <span>Horarios Mais Movimentados</span>
+              <InfoTooltip
+                content="Mostra os dias e horarios com mais atendimentos registrados. No detalhe, voce ve o que foi agendado e o que veio da fila."
+                ariaLabel="Entender o grafico Horarios Mais Movimentados"
+              />
+            </span>
+          </CardTitle>
+          <CardDescription>Sem dados no periodo selecionado</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -33,44 +43,56 @@ export default function ReservationHeatmap({ counts, maxCount, hours, dayNames }
   return (
     <Card className="border border-border shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Horários Mais Reservados</CardTitle>
-        <CardDescription>Distribuição por dia da semana e horário</CardDescription>
+        <CardTitle className="text-base">
+          <span className="inline-flex items-center gap-1.5">
+            <span>Horarios Mais Movimentados</span>
+            <InfoTooltip
+              content="Mostra os dias e horarios com mais atendimentos registrados. No detalhe, voce ve o que foi agendado e o que veio da fila."
+              ariaLabel="Entender o grafico Horarios Mais Movimentados"
+            />
+          </span>
+        </CardTitle>
+        <CardDescription>Total por dia da semana e horario, com detalhe da origem</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
           <TooltipProvider delayDuration={100}>
             <div className="min-w-[500px]">
-              {/* Header row with hours */}
-              <div className="flex gap-1 mb-1">
+              <div className="mb-1 flex gap-1">
                 <div className="w-10 shrink-0" />
-                {hours.map(h => (
-                  <div key={h} className="flex-1 text-center text-[10px] text-muted-foreground font-medium">
-                    {h}
+                {hours.map((hour) => (
+                  <div key={hour} className="flex-1 text-center text-xs font-medium text-muted-foreground">
+                    {hour}
                   </div>
                 ))}
               </div>
 
-              {/* Grid rows */}
               {dayNames.map((day, dayIdx) => (
-                <div key={day} className="flex gap-1 mb-1">
-                  <div className="w-10 shrink-0 text-xs text-muted-foreground font-medium flex items-center">
+                <div key={day} className="mb-1 flex gap-1">
+                  <div className="flex w-10 shrink-0 items-center text-xs font-medium text-muted-foreground">
                     {day}
                   </div>
-                  {hours.map(hour => {
+                  {hours.map((hour) => {
                     const key = `${dayIdx}_${hour}`;
                     const count = counts[key] || 0;
+                    const cellBreakdown = breakdown[key] || { total: 0, scheduled: 0, waitlist: 0 };
                     return (
                       <Tooltip key={key}>
                         <TooltipTrigger asChild>
                           <div
                             className={cn(
-                              'flex-1 h-8 rounded-sm transition-colors cursor-default min-w-[28px]',
+                              'h-8 min-w-[28px] flex-1 cursor-default rounded-sm transition-colors',
                               getIntensity(count, maxCount),
                             )}
                           />
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs">
-                          <span className="font-semibold">{day} {hour}</span>: {count} reserva{count !== 1 ? 's' : ''}
+                        <TooltipContent side="top" className="space-y-1 text-xs">
+                          <p className="font-semibold">
+                            {day} {hour}
+                          </p>
+                          <p>Total: {cellBreakdown.total} atendimento{cellBreakdown.total !== 1 ? 's' : ''}</p>
+                          <p>Agendadas: {cellBreakdown.scheduled}</p>
+                          <p>Fila convertida: {cellBreakdown.waitlist}</p>
                         </TooltipContent>
                       </Tooltip>
                     );
@@ -80,15 +102,14 @@ export default function ReservationHeatmap({ counts, maxCount, hours, dayNames }
             </div>
           </TooltipProvider>
 
-          {/* Legend */}
-          <div className="flex items-center justify-end gap-2 mt-3">
-            <span className="text-[10px] text-muted-foreground">Menos</span>
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">Menos</span>
             <div className="flex gap-0.5">
-              {['bg-muted', 'bg-primary/20', 'bg-primary/40', 'bg-primary/70', 'bg-primary'].map(c => (
-                <div key={c} className={cn('w-4 h-4 rounded-sm', c)} />
+              {['bg-muted', 'bg-info/20', 'bg-info/40', 'bg-info/70', 'bg-info'].map((className) => (
+                <div key={className} className={cn('h-4 w-4 rounded-sm', className)} />
               ))}
             </div>
-            <span className="text-[10px] text-muted-foreground">Mais</span>
+            <span className="text-xs text-muted-foreground">Mais</span>
           </div>
         </div>
       </CardContent>

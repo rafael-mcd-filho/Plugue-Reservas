@@ -116,7 +116,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
         {(qrCode || pairingCode) && !isConnected && (
           <div className="flex flex-col items-center gap-3 py-4">
             {qrCode && (
-              <div className="p-4 bg-white rounded-xl border border-border">
+              <div className="p-4 bg-white rounded-md border border-border">
                 <img src={qrCode} alt="QR Code WhatsApp" className="w-64 h-64" />
               </div>
             )}

@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
+import { lazy, Suspense, useEffect, useState, type SVGProps } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { addDays, format, isToday, isTomorrow } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Banknote,
@@ -13,6 +13,7 @@ import {
   MapPin,
   Phone,
   QrCode,
+  Star,
   Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -25,7 +26,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
-import { cn } from '@/lib/utils';
+import { getGoogleMapsEmbedUrl } from '@/lib/maps';
+import { isValidCompanySlug } from '@/lib/validation';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const ReservationModal = lazy(loadReservationModal);
@@ -88,33 +90,34 @@ const DAY_MAP: Record<string, number> = {
   'S\u00E1b': 6,
 };
 
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
-  return hours * 60 + minutes;
-}
+function getGoogleMapsOpenUrl(company: Company | null) {
+  if (!company) return null;
 
-function formatQuickDay(date: Date) {
-  if (isToday(date)) return 'Hoje';
-  if (isTomorrow(date)) return 'Amanh\u00E3';
+  if (company.address) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`;
+  }
 
-  const label = format(date, 'EEE', { locale: ptBR }).replace('.', '');
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  if (company.google_maps_url && !company.google_maps_url.includes('/embed')) {
+    return company.google_maps_url;
+  }
+
+  if (company.name) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.name)}`;
+  }
+
+  return null;
 }
 
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const slugIsValid = isValidCompanySlug(slug);
   const { signIn } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   const [showReservation, setShowReservation] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
-
-  const handleOpenReservation = () => {
-    void loadReservationModal();
-    setShowReservation(true);
-  };
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
@@ -135,7 +138,7 @@ export default function CompanyPublicPage() {
       if (error) throw error;
       return data as unknown as Company | null;
     },
-    enabled: !!slug,
+    enabled: slugIsValid,
   });
 
   const { data: companyStatus } = useQuery({
@@ -147,10 +150,16 @@ export default function CompanyPublicPage() {
       const rows = data as any[];
       return rows && rows.length > 0 ? rows[0] : null;
     },
-    enabled: !!slug && !company && !isLoading,
+    enabled: slugIsValid && !company && !isLoading,
   });
 
-  const { trackStep } = useFunnelTracking(company?.id);
+  const { trackStep, startJourney, getTrackingSnapshot, trackLeadCapture, clearJourney } = useFunnelTracking(undefined, slug);
+
+  const handleOpenReservation = () => {
+    void startJourney();
+    void loadReservationModal();
+    setShowReservation(true);
+  };
 
   useEffect(() => {
     if (!company) return;
@@ -204,27 +213,16 @@ export default function CompanyPublicPage() {
   const instagramUrl = company?.instagram
     ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
     : null;
-  const googleMapsSearchUrl = company?.google_maps_url
-    ? company.google_maps_url
-    : company?.address
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`
-      : null;
-  const mapsEmbedUrl = company?.google_maps_url
-    ? (company.google_maps_url.includes('/embed')
-      ? company.google_maps_url
-      : `https://www.google.com/maps?q=${encodeURIComponent(company.address || company.name)}&output=embed`)
-    : company?.address
-      ? `https://www.google.com/maps?q=${encodeURIComponent(company.address)}&output=embed`
-      : null;
+  const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
+  const mapsEmbedUrl = getGoogleMapsEmbedUrl(company?.google_maps_url, company?.address || company?.name || null);
   const openingHours = (((company?.opening_hours as any[]) || [])) as OpeningHour[];
   const paymentMethods = (company?.payment_methods as Record<string, boolean>) || {};
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
   const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
+  const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && !!company?.description;
-  const showWhatsappButton = customPublicPageEnabled && !!whatsappUrl;
-  const shortAddress = company?.address?.split(',')[0]?.trim() || company?.address || null;
-
+  const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
   const getOpeningHourForDate = (date: Date) => {
     const dayIndex = date.getDay();
     const dayName = Object.entries(DAY_MAP).find(([, value]) => value === dayIndex)?.[0];
@@ -237,62 +235,6 @@ export default function CompanyPublicPage() {
     const hours = getOpeningHourForDate(date);
     return !hours || hours.closed || isAllDayBlocked(iso);
   };
-
-  const nextOpenSummary = useMemo(() => {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    for (let index = 0; index < 7; index += 1) {
-      const date = addDays(new Date(), index);
-      const iso = format(date, 'yyyy-MM-dd');
-      const hours = getOpeningHourForDate(date);
-
-      if (!hours || hours.closed || isAllDayBlocked(iso)) continue;
-
-      const openMinutes = timeToMinutes(hours.open);
-      const closeMinutes = timeToMinutes(hours.close);
-
-      if (index === 0) {
-        if (currentMinutes < openMinutes) {
-          return {
-            label: `Abre hoje \u00E0s ${hours.open}`,
-            detail: 'Ainda d\u00E1 tempo de garantir um bom hor\u00E1rio.',
-            isOpen: false,
-          };
-        }
-
-        if (currentMinutes < closeMinutes) {
-          return {
-            label: `Aberto agora at\u00E9 ${hours.close}`,
-            detail: 'Escolha uma data e finalize em poucos toques.',
-            isOpen: true,
-          };
-        }
-
-        continue;
-      }
-
-      if (index === 1) {
-        return {
-          label: `Pr\u00F3xima abertura amanh\u00E3 \u00E0s ${hours.open}`,
-          detail: 'Se preferir, agende agora e evite fila.',
-          isOpen: false,
-        };
-      }
-
-      return {
-        label: `Pr\u00F3xima abertura ${formatQuickDay(date).toLowerCase()} \u00E0s ${hours.open}`,
-        detail: 'Confira os pr\u00F3ximos hor\u00E1rios dispon\u00EDveis no bot\u00E3o abaixo.',
-        isOpen: false,
-      };
-    }
-
-    return {
-      label: 'Agenda temporariamente indispon\u00EDvel',
-      detail: 'Entre em contato diretamente com o restaurante.',
-      isOpen: false,
-    };
-  }, [blockedDates, openingHours]);
   const todayHours = getOpeningHourForDate(new Date());
 
   if (isLoading) {
@@ -301,7 +243,7 @@ export default function CompanyPublicPage() {
         {/* Header skeleton */}
         <div className="h-16 bg-[#130D06]" />
         {/* Hero skeleton */}
-        <div className="rounded-b-3xl bg-[#1C1108] px-4 pb-8 pt-5">
+        <div className="bg-[#1C1108] px-4 pb-8 pt-5">
           <div className="mx-auto max-w-lg space-y-4">
             <div className="h-6 w-40 animate-pulse rounded-full bg-white/10" />
             <div className="space-y-2">
@@ -309,19 +251,19 @@ export default function CompanyPublicPage() {
               <div className="h-4 w-full animate-pulse rounded bg-white/10" />
               <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
             </div>
-            <div className="h-12 w-full animate-pulse rounded-full bg-primary/30" />
+            <div className="h-12 w-full animate-pulse rounded-lg bg-primary/30" />
           </div>
         </div>
         {/* Cards skeleton */}
         <div className="mx-auto max-w-lg space-y-4 px-4 py-5">
-          <div className="h-48 animate-pulse rounded-2xl bg-muted" />
-          <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
         </div>
       </div>
     );
   }
 
-  if (error || !company) {
+  if (!slugIsValid || error || !company) {
     if (companyStatus && companyStatus.status === 'paused') {
       const contactWhatsapp = companyStatus.whatsapp
         ? `https://wa.me/${companyStatus.whatsapp.replace(/\D/g, '')}`
@@ -329,7 +271,7 @@ export default function CompanyPublicPage() {
 
       return (
         <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#130D06] to-[#2E1800] p-6 text-center">
-          <div className="w-full max-w-md rounded-2xl border border-border/20 bg-card/10 p-8 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border/20 bg-card/10 p-8 backdrop-blur-sm">
             <Clock className="mx-auto mb-4 h-12 w-12 text-amber-400" />
             <h1 className="mb-2 text-2xl font-bold text-white">{companyStatus.name}</h1>
             <p className="mb-6 text-white/70">
@@ -339,7 +281,7 @@ export default function CompanyPublicPage() {
               {companyStatus.phone && (
                 <a
                   href={`tel:${companyStatus.phone}`}
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-4 py-3 text-white transition-colors hover:bg-white/20"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-4 py-3 text-white transition-colors hover:bg-white/20"
                 >
                   <Phone className="h-4 w-4" />
                   Ligar: {companyStatus.phone}
@@ -350,7 +292,7 @@ export default function CompanyPublicPage() {
                   href={contactWhatsapp}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-white transition-colors hover:bg-emerald-700"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-white transition-colors hover:bg-emerald-700"
                 >
                   <WhatsAppIcon className="h-4 w-4" />
                   Falar pelo WhatsApp
@@ -364,7 +306,7 @@ export default function CompanyPublicPage() {
 
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-        <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-8 shadow-sm">
+        <div className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-card p-8 shadow-sm">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-muted">
             <MapPin className="h-7 w-7 text-muted-foreground" />
           </div>
@@ -376,7 +318,7 @@ export default function CompanyPublicPage() {
           </div>
           <a
             href="/"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Voltar ao início
           </a>
@@ -388,86 +330,72 @@ export default function CompanyPublicPage() {
   return (
     <div className="min-h-screen bg-secondary pb-28 md:pb-0">
       <div style={{ background: '#130D06' }} className="text-primary-foreground">
-        <div className="mx-auto flex max-w-lg items-center px-4 py-3 md:max-w-5xl">
-          <div className="flex items-center gap-3">
-            {showCustomLogo ? (
-              <img
-                src={company.logo_url}
-                alt={company.name}
-                className="h-10 w-10 rounded-full border-2 border-primary object-cover"
-              />
-            ) : (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-bold text-primary-foreground">
-                {company.name.charAt(0)}
-              </div>
+        <div className="mx-auto flex max-w-lg items-center gap-3 px-4 py-3 md:max-w-5xl">
+          {showCustomLogo ? (
+            <img
+              src={company.logo_url}
+              alt={company.name}
+              className="h-9 w-9 shrink-0 rounded-full border border-white/20 object-cover"
+            />
+          ) : (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+              {company.name.charAt(0)}
+            </div>
+          )}
+          <span className="text-sm font-semibold text-white/90 truncate">{company.name}</span>
+        </div>
+      </div>
+
+      <div
+        className="relative overflow-hidden px-4 pb-8 pt-5 text-primary-foreground md:pb-14 md:pt-10"
+        style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
+        />
+        <div
+          className="pointer-events-none absolute bottom-0 left-0 right-0 h-24"
+          style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
+        />
+
+        <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
+          <div className="space-y-4 animate-slide-up">
+            {googleMapsSearchUrl && (
+              <a
+                href={googleMapsSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors hover:bg-white/15"
+              >
+                <Star className="h-3.5 w-3.5 fill-current text-amber-300" />
+                <span>Google 4,9 / 5</span>
+              </a>
             )}
+
             <div>
-              <h1 className="text-sm font-bold">{company.name}</h1>
-              <div className="mt-0.5 flex gap-2">
+              <div className="flex items-center gap-3">
                 {instagramUrl && (
                   <a
                     href={instagramUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label="Instagram"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
                   >
                     <InstagramIcon className="h-4 w-4" />
                   </a>
                 )}
-                {showWhatsappButton && (
-                  <a
-                    href={whatsappUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="WhatsApp"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 transition-colors hover:bg-emerald-500/25 hover:text-white"
-                  >
-                    <WhatsAppIcon className="h-4 w-4" />
-                  </a>
-                )}
+                <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="relative overflow-hidden rounded-b-3xl px-4 pb-8 pt-5 text-primary-foreground md:rounded-none md:pb-14 md:pt-10"
-        style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
-      >
-        <div
-          className="pointer-events-none absolute inset-0 rounded-b-3xl md:rounded-none"
-          style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
-        />
-        <div
-          className="pointer-events-none absolute bottom-0 left-0 right-0 h-24 rounded-b-3xl md:rounded-none"
-          style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
-        />
-
-        <div className="relative z-10 mx-auto max-w-lg md:grid md:max-w-5xl md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
-          <div className="space-y-4 animate-slide-up">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium backdrop-blur-sm transition-colors hover:bg-white/15">
-              <span className={cn('h-2 w-2 rounded-full', nextOpenSummary.isOpen ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]')} />
-              <span>{nextOpenSummary.label}</span>
-            </div>
-
-            <div>
-              <h2 className="font-display text-[2.25rem] font-bold leading-tight tracking-tight md:text-5xl">{company.name}</h2>
               {showDescription && (
-                <p className="mt-3 max-w-xl overflow-hidden font-karla text-sm leading-relaxed text-primary-foreground/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-base md:[-webkit-line-clamp:4]">
+                <p className="mt-3 max-w-xl overflow-hidden text-sm leading-relaxed text-primary-foreground/75 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] md:text-base md:[-webkit-line-clamp:4]">
                   {company.description}
                 </p>
               )}
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {shortAddress && (
-                <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
-                  <MapPin className="h-3 w-3" />
-                  {shortAddress}
-                </Badge>
-              )}
               {todayHours && !todayHours.closed && (
                 <Badge variant="secondary" className="gap-1 border-none bg-primary-foreground/10 text-xs text-primary-foreground/85 backdrop-blur-sm">
                   <Clock className="h-3 w-3" />
@@ -478,11 +406,8 @@ export default function CompanyPublicPage() {
           </div>
 
           <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
-            <p className="max-w-sm font-karla text-sm leading-relaxed text-primary-foreground/70">
-              {nextOpenSummary.detail}
-            </p>
             <Button
-              className="group w-full gap-2 rounded-full bg-primary py-6 text-base font-semibold text-primary-foreground shadow-xl shadow-primary/30 transition-all duration-200 hover:scale-[1.02] hover:bg-primary/90 hover:shadow-primary/40 active:scale-[0.98]"
+              className="group w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
               size="lg"
               onMouseEnter={() => void loadReservationModal()}
               onFocus={() => void loadReservationModal()}
@@ -496,7 +421,7 @@ export default function CompanyPublicPage() {
               <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
                 <Button
                   variant="secondary"
-                  className="w-full gap-2 rounded-full border-none bg-background py-5 text-base font-semibold text-foreground shadow-md transition-all duration-200 hover:scale-[1.01] hover:bg-background/90 active:scale-[0.99]"
+                  className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-background/90"
                   size="lg"
                 >
                   <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
@@ -511,7 +436,7 @@ export default function CompanyPublicPage() {
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
         <div className="grid gap-4 md:grid-cols-2 md:items-start md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="animate-fade-in rounded-2xl border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
+            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
               <CardContent className="pb-5 pt-5">
                 <div>
                   <div>
@@ -545,7 +470,7 @@ export default function CompanyPublicPage() {
           )}
 
           {(company.phone || company.address) && (
-            <Card className="animate-fade-in rounded-2xl border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
+            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
               <CardContent className="space-y-4 pb-5 pt-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -572,7 +497,7 @@ export default function CompanyPublicPage() {
                 )}
 
                 {mapsEmbedUrl && (
-                  <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="overflow-hidden rounded-md border border-border">
                     <iframe
                       src={mapsEmbedUrl}
                       width="100%"
@@ -581,6 +506,7 @@ export default function CompanyPublicPage() {
                       allowFullScreen
                       loading="lazy"
                       referrerPolicy="no-referrer-when-downgrade"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
                       title={'Localiza\u00E7\u00E3o'}
                     />
                   </div>
@@ -591,7 +517,7 @@ export default function CompanyPublicPage() {
                     href={googleMapsSearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2.5 transition-colors hover:bg-muted/50"
+                    className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50"
                   >
                     <span className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="h-4 w-4" />
@@ -606,18 +532,18 @@ export default function CompanyPublicPage() {
         </div>
 
         {acceptedPayments.length > 0 && (
-          <Card className="rounded-2xl border-none shadow-sm">
-            <CardContent className="pb-5 pt-5">
-              <h3 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+          <Card className="rounded-lg border-none shadow-sm">
+            <CardContent className="pb-5 pt-5 text-center">
+              <h3 className="mb-4 flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
                 <CreditCard className="h-4 w-4" />
                 Formas de Pagamento
               </h3>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 {acceptedPayments.map(([key]) => {
                   const paymentMethod = PAYMENT_LABELS[key];
                   const Icon = paymentMethod?.icon || CreditCard;
                   return (
-                    <div key={key} className="flex items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">
+                    <div key={key} className="flex items-center gap-2.5 rounded-md border border-border bg-background px-3 py-2.5 text-sm">
                       <Icon className="h-4 w-4 shrink-0 text-primary" />
                       <span className="text-foreground">{paymentMethod?.label || key}</span>
                     </div>
@@ -629,17 +555,37 @@ export default function CompanyPublicPage() {
         )}
 
         {showLogin && (
-          <Card className="rounded-2xl border-none shadow-sm md:mx-auto md:max-w-md">
+          <Card className="rounded-lg border-none shadow-sm md:mx-auto md:max-w-md">
             <CardContent className="pb-5 pt-5">
               <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Acesso administrativo</h3>
               <form onSubmit={handleLogin} className="space-y-3">
                 <div>
-                  <Label className="text-xs">Email</Label>
-                  <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@empresa.com" required />
+                  <Label htmlFor="company-login-email" className="text-xs">Email</Label>
+                  <Input
+                    id="company-login-email"
+                    name="email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="admin@empresa.com"
+                    autoComplete="email"
+                    inputMode="email"
+                    spellCheck={false}
+                    required
+                  />
                 </div>
                 <div>
-                  <Label className="text-xs">Senha</Label>
-                  <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="********" required />
+                  <Label htmlFor="company-login-password" className="text-xs">Senha</Label>
+                  <Input
+                    id="company-login-password"
+                    name="password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="********"
+                    autoComplete="current-password"
+                    required
+                  />
                 </div>
                 <Button type="submit" className="w-full" disabled={loginLoading}>
                   {loginLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -669,7 +615,7 @@ export default function CompanyPublicPage() {
       <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/50 bg-background/95 px-4 pb-safe pt-3 backdrop-blur-xl md:hidden" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
         <div className="mx-auto max-w-lg">
           <Button
-            className="group w-full gap-2 rounded-2xl py-5 text-base font-semibold shadow-lg shadow-primary/20 transition-all duration-200 hover:scale-[1.01] hover:shadow-primary/30 active:scale-[0.99]"
+            className="group w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-200"
             size="lg"
             onClick={handleOpenReservation}
             onMouseEnter={() => void loadReservationModal()}
@@ -696,6 +642,7 @@ export default function CompanyPublicPage() {
           <ReservationModal
             open={showReservation}
             onOpenChange={setShowReservation}
+            slug={slug ?? ''}
             companyId={company.id}
             companyName={company.name}
             openingHours={openingHours}
@@ -704,6 +651,9 @@ export default function CompanyPublicPage() {
             initialDate={null}
             initialPartySize={2}
             onStepChange={(step) => trackStep(step)}
+            getTrackingSnapshot={getTrackingSnapshot}
+            trackLeadCapture={trackLeadCapture}
+            clearTrackingJourney={clearJourney}
           />
         </Suspense>
       )}

@@ -17,7 +17,7 @@ CREATE POLICY "Superadmins can manage system settings"
 
 -- Seed default settings
 INSERT INTO public.system_settings (key, value) VALUES
-  ('system_name', 'ReservaFácil'),
+  ('system_name', 'Plug Guest'),
   ('system_logo_url', NULL);
 
 -- Audit logs for superadmin actions

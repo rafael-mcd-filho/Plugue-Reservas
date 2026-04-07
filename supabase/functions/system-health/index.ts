@@ -12,16 +12,15 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Verify caller is superadmin
     const authHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // User client to check role
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader || "" } },
     });
+
     const { data: { user }, error: authError } = await userClient.auth.getUser();
     if (authError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -30,7 +29,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Check superadmin role
     const adminClient = createClient(supabaseUrl, serviceKey);
     const { data: roleData } = await adminClient
       .from("user_roles")
@@ -48,56 +46,79 @@ Deno.serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // 1. Database health
     const dbStart = Date.now();
     const { error: dbError } = await adminClient
       .from("system_settings")
       .select("id")
       .limit(1);
+
     results.database = {
       status: dbError ? "error" : "healthy",
       responseMs: Date.now() - dbStart,
       error: dbError?.message || null,
     };
 
-    // 2. WhatsApp instances status
     const { data: instances } = await adminClient
       .from("company_whatsapp_instances")
       .select("id, instance_name, status, phone_number, company_id, updated_at");
-    
+
     const { data: companies } = await adminClient
       .from("companies")
       .select("id, name, slug");
-    
-    const companyMap = new Map((companies || []).map((c: any) => [c.id, c]));
-    
+
+    const companyMap = new Map((companies || []).map((company: any) => [company.id, company]));
+
     results.whatsapp = {
       total: instances?.length || 0,
-      connected: instances?.filter((i: any) => i.status === "connected").length || 0,
-      disconnected: instances?.filter((i: any) => i.status !== "connected").length || 0,
-      instances: (instances || []).map((i: any) => ({
-        ...i,
-        company_name: companyMap.get(i.company_id)?.name || "Desconhecida",
+      connected: instances?.filter((instance: any) => instance.status === "connected").length || 0,
+      disconnected: instances?.filter((instance: any) => instance.status !== "connected").length || 0,
+      instances: (instances || []).map((instance: any) => ({
+        ...instance,
+        company_name: companyMap.get(instance.company_id)?.name || "Desconhecida",
       })),
     };
 
-    // 3. Message queue stats
+    const queueFailureCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: queueStats } = await adminClient
       .from("whatsapp_message_queue")
-      .select("status, company_id");
-    
-    const pending = (queueStats || []).filter((q: any) => q.status === "pending").length;
-    const failed = (queueStats || []).filter((q: any) => q.status === "failed").length;
-    const processing = (queueStats || []).filter((q: any) => q.status === "processing").length;
+      .select("status, company_id, created_at, last_attempt_at");
+
+    const pending = (queueStats || []).filter((item: any) => item.status === "pending").length;
+    const processing = (queueStats || []).filter((item: any) => item.status === "processing").length;
+    const failed = (queueStats || []).filter((item: any) => {
+      if (item.status !== "failed") return false;
+      const failureAt = item.last_attempt_at || item.created_at;
+      return !!failureAt && failureAt >= queueFailureCutoff;
+    }).length;
 
     results.messageQueue = {
       pending,
       failed,
       processing,
       total: queueStats?.length || 0,
+      failureWindowHours: 24,
     };
 
-    // 4. Recent message errors (last 24h)
+    const { data: metaQueueStats } = await adminClient
+      .from("meta_event_queue")
+      .select("status, created_at, last_attempt_at");
+
+    const metaPending = (metaQueueStats || []).filter((item: any) => item.status === "pending").length;
+    const metaProcessing = (metaQueueStats || []).filter((item: any) => item.status === "processing").length;
+    const metaFailed = (metaQueueStats || []).filter((item: any) => {
+      if (item.status !== "failed") return false;
+      const failureAt = item.last_attempt_at || item.created_at;
+      return !!failureAt && failureAt >= queueFailureCutoff;
+    }).length;
+
+    results.metaQueue = {
+      pending: metaPending,
+      failed: metaFailed,
+      processing: metaProcessing,
+      total: metaQueueStats?.length || 0,
+      failureWindowHours: 24,
+    };
+
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: recentErrors } = await adminClient
       .from("whatsapp_message_logs")
@@ -107,18 +128,28 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(20);
 
-    results.recentErrors = (recentErrors || []).map((e: any) => ({
-      ...e,
-      company_name: companyMap.get(e.company_id)?.name || "Desconhecida",
+    results.recentErrors = (recentErrors || []).map((item: any) => ({
+      ...item,
+      company_name: companyMap.get(item.company_id)?.name || "Desconhecida",
     }));
 
-    // 5. Companies overview
-    const activeCompanies = (companies || []).filter((c: any) => true).length;
+    const { data: recentMetaErrors } = await adminClient
+      .from("meta_event_attempts")
+      .select("id, company_id, reservation_id, error_message, response_body, created_at")
+      .eq("status", "failed")
+      .gte("created_at", yesterday)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    results.recentMetaErrors = (recentMetaErrors || []).map((item: any) => ({
+      ...item,
+      company_name: companyMap.get(item.company_id)?.name || "Desconhecida",
+    }));
+
     results.companies = {
       total: companies?.length || 0,
     };
 
-    // 6. Reservations today
     const today = new Date().toISOString().split("T")[0];
     const { count: todayReservations } = await adminClient
       .from("reservations")
@@ -127,9 +158,16 @@ Deno.serve(async (req) => {
 
     results.reservationsToday = todayReservations || 0;
 
-    // 7. Evolution API check (try fetching instances)
-    const evolutionUrl = Deno.env.get("EVOLUTION_API_URL");
-    const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
+    const { data: settings } = await adminClient
+      .from("system_settings")
+      .select("key, value")
+      .in("key", ["evolution_api_url", "evolution_api_token"]);
+
+    const evolutionUrl = settings?.find((setting: any) => setting.key === "evolution_api_url")?.value?.replace(/\/+$/, "")
+      || Deno.env.get("EVOLUTION_API_URL")?.replace(/\/+$/, "");
+    const evolutionKey = settings?.find((setting: any) => setting.key === "evolution_api_token")?.value
+      || Deno.env.get("EVOLUTION_API_KEY");
+
     if (evolutionUrl && evolutionKey) {
       try {
         const evoStart = Date.now();
@@ -137,22 +175,26 @@ Deno.serve(async (req) => {
           headers: { apikey: evolutionKey },
           signal: AbortSignal.timeout(5000),
         });
+
         results.evolutionApi = {
           status: evoRes.ok ? "healthy" : "error",
           responseMs: Date.now() - evoStart,
           statusCode: evoRes.status,
+          source: settings?.length ? "system_settings" : "env",
         };
+
         await evoRes.text();
-      } catch (e: any) {
+      } catch (error: any) {
         results.evolutionApi = {
           status: "unreachable",
-          error: e.message,
+          error: error.message,
+          source: settings?.length ? "system_settings" : "env",
         };
       }
     } else {
       results.evolutionApi = {
         status: "not_configured",
-        error: "EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados",
+        error: "Evolution nao encontrada em system_settings nem nas variaveis de ambiente",
       };
     }
 

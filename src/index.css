@@ -1,7 +1,6 @@
 /* Admin/Dashboard */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
-/* Página pública: elegante para restaurante */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display+SC:wght@400;700&family=Karla:wght@300;400;500;600;700&display=swap');
+/* Fonte secundária removida — Poppins é suficiente para todo o sistema */
 
 @tailwind base;
 @tailwind components;
@@ -9,89 +8,110 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
+    --background: 45 20% 96%;
+    --foreground: 35 20% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
+    --card-foreground: 35 20% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
+    --popover-foreground: 35 20% 12%;
 
-    --primary: 28 85% 55%;
+    --primary: 30 51% 50%;
     --primary-foreground: 0 0% 100%;
+    --primary-soft: 37 51% 92%;
 
-    --secondary: 30 20% 95%;
-    --secondary-foreground: 28 90% 27%;
+    --secondary: 38 26% 92%;
+    --secondary-foreground: 35 20% 12%;
 
-    --muted: 30 10% 95%;
-    --muted-foreground: 0 0% 40%;
+    --muted: 38 26% 92%;
+    --muted-foreground: 33 10% 38%;
 
-    --accent: 28 90% 27%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 37 51% 92%;
+    --accent-foreground: 30 40% 32%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 52% 47%;
     --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 48% 94%;
 
-    --border: 30 10% 88%;
-    --input: 30 10% 88%;
-    --ring: 28 85% 55%;
+    --border: 0 0% 0% / 0.08;
+    --input: 0 0% 0% / 0.14;
+    --ring: 30 51% 50%;
 
-    --radius: 0.75rem;
+    --radius: 0.625rem;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-
-    --success: 145 45% 42%;
+    --success: 164 33% 26%;
     --success-foreground: 0 0% 100%;
+    --success-soft: 156 22% 91%;
 
-    --sidebar-background: 0 0% 0%;
-    --sidebar-foreground: 0 0% 85%;
-    --sidebar-primary: 28 85% 55%;
+    --info: 219 56% 38%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 218 58% 94%;
+
+    --warning: 38 92% 48%;
+    --warning-foreground: 25 25% 8%;
+    --warning-soft: 45 100% 92%;
+
+    --sidebar-background: 45 8% 9%;
+    --sidebar-foreground: 45 17% 92%;
+    --sidebar-primary: 30 51% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 10%;
-    --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 0 0% 15%;
-    --sidebar-ring: 28 85% 55%;
+    --sidebar-accent: 34 9% 15%;
+    --sidebar-accent-foreground: 45 17% 92%;
+    --sidebar-border: 0 0% 100% / 0.08;
+    --sidebar-ring: 30 51% 50%;
   }
 
   .dark {
-    --background: 0 0% 5%;
-    --foreground: 0 0% 95%;
+    --background: 45 20% 96%;
+    --foreground: 35 20% 12%;
 
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 95%;
+    --card: 0 0% 100%;
+    --card-foreground: 35 20% 12%;
 
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 95%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 35 20% 12%;
 
-    --primary: 28 85% 55%;
+    --primary: 30 51% 50%;
     --primary-foreground: 0 0% 100%;
+    --primary-soft: 37 51% 92%;
 
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 0 0% 90%;
+    --secondary: 38 26% 92%;
+    --secondary-foreground: 35 20% 12%;
 
-    --muted: 0 0% 12%;
-    --muted-foreground: 0 0% 55%;
+    --muted: 38 26% 92%;
+    --muted-foreground: 33 10% 38%;
 
-    --accent: 28 90% 27%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 37 51% 92%;
+    --accent-foreground: 30 40% 32%;
 
-    --destructive: 0 62% 40%;
+    --destructive: 0 52% 47%;
     --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 48% 94%;
 
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 28 85% 55%;
+    --border: 0 0% 0% / 0.08;
+    --input: 0 0% 0% / 0.14;
+    --ring: 30 51% 50%;
 
-    --sidebar-background: 0 0% 3%;
-    --sidebar-foreground: 0 0% 85%;
-    --sidebar-primary: 28 85% 55%;
+    --warning: 30 51% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --success: 164 33% 26%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 156 22% 91%;
+
+    --info: 219 56% 38%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 218 58% 94%;
+
+    --sidebar-background: 45 8% 9%;
+    --sidebar-foreground: 45 17% 92%;
+    --sidebar-primary: 30 51% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 10%;
-    --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 0 0% 12%;
-    --sidebar-ring: 28 85% 55%;
+    --sidebar-accent: 34 9% 15%;
+    --sidebar-accent-foreground: 45 17% 92%;
+    --sidebar-border: 0 0% 100% / 0.08;
+    --sidebar-ring: 30 51% 50%;
   }
 }
 
@@ -110,7 +130,7 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Poppins', sans-serif;
-    line-height: 1.6;
+    line-height: 1.5;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -140,8 +160,7 @@
 
 /* ─── Utilitários ─────────────────────────────────────────────────────────── */
 @layer utilities {
-  .font-display { font-family: 'Playfair Display SC', Georgia, serif; }
-  .font-karla   { font-family: 'Karla', system-ui, sans-serif; }
+  /* font-display e font-karla removidos — usar Poppins para tudo */
 
   /* Scrollbar sutil */
   .scrollbar-thin::-webkit-scrollbar        { width: 5px; height: 5px; }

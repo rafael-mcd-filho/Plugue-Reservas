@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { useImpersonation } from '@/hooks/useImpersonation';
 
 export interface AutomationSetting {
   id: string;
@@ -153,10 +154,21 @@ export function useWhatsAppInstance(companyId?: string) {
 }
 
 export function useEvolutionApi() {
+  const { isImpersonatingCompany, effectiveRole } = useImpersonation();
+
   return useMutation({
     mutationFn: async (payload: { action: string; company_id: string; instance_name?: string; phone?: string; message?: string; log_id?: string }) => {
       const { data, error } = await supabase.functions.invoke('evolution-api', {
-        body: payload,
+        body: {
+          ...payload,
+          ...(isImpersonatingCompany
+            ? {
+                scope_company_id: payload.company_id,
+                impersonated_by_superadmin: true,
+                effective_role: effectiveRole,
+              }
+            : {}),
+        },
       });
       if (error) throw error;
       return data;

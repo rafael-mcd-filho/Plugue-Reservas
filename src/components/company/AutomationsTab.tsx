@@ -73,6 +73,7 @@ const AUTOMATION_TYPES = [
   },
 ];
 
+
 export default function AutomationsTab({ companyId }: Props) {
   const { data: automations = [], isLoading } = useAutomationSettings(companyId);
   const upsertAutomation = useUpsertAutomation();

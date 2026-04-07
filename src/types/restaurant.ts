@@ -1,4 +1,4 @@
-export type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'no-show';
+export type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
 
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 
@@ -21,7 +21,7 @@ export interface RestaurantTable {
   number: number;
   capacity: number;
   status: TableStatus;
-  section: 'salão' | 'varanda' | 'privativo';
+  section: string;
   x: number;
   y: number;
 }

@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/hooks/useImpersonation';
 import { Loader2 } from 'lucide-react';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
@@ -12,6 +13,7 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { user, roles, loading } = useAuth();
+  const { isImpersonatingCompany, effectiveRoles } = useImpersonation();
 
   if (loading) {
     return (
@@ -26,7 +28,8 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   }
 
   if (allowedRoles && allowedRoles.length > 0) {
-    const hasAccess = allowedRoles.some(role => roles.includes(role));
+    const activeRoles = isImpersonatingCompany ? effectiveRoles : roles;
+    const hasAccess = allowedRoles.some(role => activeRoles.includes(role));
     if (!hasAccess) {
       return <Navigate to="/acesso-negado" replace />;
     }

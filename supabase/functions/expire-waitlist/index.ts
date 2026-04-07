@@ -1,26 +1,30 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  );
+  if (!isAuthorizedInternalJob(req)) {
+    return new Response(JSON.stringify({ error: "Nao autorizado" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
-  // Find entries called more than 10 minutes ago
-  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const supabase = createSupabaseAdminClient();
+
+  // Find entries called more than 5 minutes ago
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const { data: expired, error } = await supabase
     .from("waitlist")
     .update({ status: "expired", expired_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("status", "called")
-    .lt("called_at", tenMinAgo)
+    .lt("called_at", fiveMinutesAgo)
     .select("id, guest_name");
 
   if (error) {

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Plug Guest">
+  <defs>
+    <linearGradient id="bg" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#0f766e" />
+    </linearGradient>
+    <linearGradient id="accent" x1="128" y1="48" x2="184" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34d399" />
+      <stop offset="1" stop-color="#99f6e4" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)" />
+  <rect width="188" height="188" x="34" y="34" rx="44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="4" />
+  <path d="M92 58v140" fill="none" stroke="#f8fafc" stroke-linecap="round" stroke-width="24" />
+  <path
+    d="M92 70h46c30.928 0 56 25.072 56 56s-25.072 56-56 56H98"
+    fill="none"
+    stroke="#f8fafc"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="24"
+  />
+  <circle cx="160" cy="126" r="16" fill="url(#accent)" />
+</svg>

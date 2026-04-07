@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload } from 'lucide-react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,8 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   useSystemSettings, useUpdateSetting,
   useAuditLogs,
@@ -25,10 +26,10 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 const notifTypeConfig: Record<string, { label: string; className: string }> = {
-  info: { label: 'Informação', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-  warning: { label: 'Aviso', className: 'bg-amber-100 text-amber-700 border-amber-200' },
+  info: { label: 'Informação', className: 'bg-info-soft text-info border-info/30' },
+  warning: { label: 'Aviso', className: 'bg-warning-soft text-warning border-warning/30' },
   success: { label: 'Sucesso', className: 'bg-primary/15 text-primary border-primary/30' },
-  error: { label: 'Erro', className: 'bg-red-100 text-red-700 border-red-200' },
+  error: { label: 'Erro', className: 'bg-destructive-soft text-destructive border-destructive/30' },
 };
 
 const actionLabels: Record<string, string> = {
@@ -37,15 +38,45 @@ const actionLabels: Record<string, string> = {
   delete_company: 'Removeu empresa',
   pause_company: 'Pausou empresa',
   activate_company: 'Ativou empresa',
+  create_user: 'Criou usuário',
+  update_user: 'Atualizou usuário',
+  delete_user: 'Excluiu usuário',
+  block_user: 'Bloqueou usuário',
+  unblock_user: 'Desbloqueou usuário',
+  reset_password: 'Redefiniu senha',
   send_notification: 'Enviou notificação',
+  delete_notification: 'Removeu notificação',
   update_settings: 'Atualizou configurações',
 };
+
+function formatLogSummary(details: Record<string, any> | null | undefined) {
+  if (!details || Object.keys(details).length === 0) return 'Sem detalhes adicionais';
+
+  const preferredKeys = [
+    'target_name',
+    'target_email',
+    'name',
+    'email',
+    'title',
+    'key',
+    'company_id',
+    'role',
+    'status',
+  ];
+
+  const parts = preferredKeys
+    .filter((key) => details[key] !== undefined && details[key] !== null && details[key] !== '')
+    .slice(0, 3)
+    .map((key) => `${key}: ${String(details[key])}`);
+
+  return parts.length > 0 ? parts.join(' | ') : JSON.stringify(details);
+}
 
 export default function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Configurações</h1>
         <p className="text-muted-foreground mt-1">Configurações gerais do sistema</p>
       </div>
 
@@ -83,13 +114,12 @@ function GeneralTab() {
   const [systemName, setSystemName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [initialized, setInitialized] = useState(false);
 
-  if (!initialized && settings.length > 0) {
+  useEffect(() => {
+    if (settings.length === 0) return;
     setSystemName(getSetting('system_name'));
     setLogoUrl(getSetting('system_logo_url'));
-    setInitialized(true);
-  }
+  }, [settings]);
 
   const handleSave = async () => {
     await updateSetting.mutateAsync({ key: 'system_name', value: systemName });
@@ -152,7 +182,7 @@ function GeneralTab() {
         <div className="grid gap-4 max-w-md">
           <div>
             <Label>Nome do Sistema</Label>
-            <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="ReservaFácil" />
+            <Input value={systemName} onChange={e => setSystemName(e.target.value)} placeholder="Plug Guest" />
           </div>
           <div>
             <Label>Logo do Sistema</Label>
@@ -205,8 +235,9 @@ function NotificationsTab() {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title || !form.message) return;
+    const targetCompanyIds = sendToAll ? companies.map(c => c.id) : form.company_ids;
     await createNotification.mutateAsync({
-      company_ids: sendToAll ? [] : form.company_ids,
+      company_ids: targetCompanyIds,
       title: form.title,
       message: form.message,
       type: form.type,
@@ -284,7 +315,14 @@ function NotificationsTab() {
               </div>
               <div className="flex justify-end gap-3">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-                <Button type="submit" disabled={createNotification.isPending || (!sendToAll && form.company_ids.length === 0)} className="gap-2">
+                <Button
+                  type="submit"
+                  disabled={
+                    createNotification.isPending
+                    || (sendToAll ? companies.length === 0 : form.company_ids.length === 0)
+                  }
+                  className="gap-2"
+                >
                   <Send className="h-4 w-4" /> Enviar
                 </Button>
               </div>
@@ -351,7 +389,7 @@ function NotificationsTab() {
                           )}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-warning">
                           <Clock className="h-3.5 w-3.5" /> Não lida
                         </span>
                       )}
@@ -393,6 +431,7 @@ function NotificationsTab() {
 
 function LogsTab() {
   const { data: logs = [], isLoading } = useAuditLogs(100);
+  const [selectedLog, setSelectedLog] = useState<(typeof logs)[number] | null>(null);
 
   return (
     <div className="space-y-4">
@@ -416,10 +455,12 @@ function LogsTab() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Data/Hora</TableHead>
+                <TableHead>Quem</TableHead>
                 <TableHead>Ação</TableHead>
                 <TableHead>Entidade</TableHead>
                 <TableHead>IP</TableHead>
                 <TableHead>Detalhes</TableHead>
+                <TableHead className="text-right">Ver</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -427,6 +468,12 @@ function LogsTab() {
                 <TableRow key={log.id}>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                     {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <div className="min-w-[180px]">
+                      <p className="font-medium">{log.actor_name || 'Usuário sem perfil'}</p>
+                      <p className="text-muted-foreground break-all">{log.actor_email || log.user_id}</p>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="text-xs">
@@ -439,8 +486,14 @@ function LogsTab() {
                   <TableCell className="text-sm text-muted-foreground font-mono">
                     {log.ip_address || '—'}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-                    {log.details && Object.keys(log.details).length > 0 ? JSON.stringify(log.details) : '—'}
+                  <TableCell className="text-sm text-muted-foreground max-w-[320px] whitespace-normal break-words">
+                    {formatLogSummary(log.details)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setSelectedLog(log)}>
+                      Ver tudo
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -448,6 +501,61 @@ function LogsTab() {
           </Table>
         </Card>
       )}
+
+      <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Detalhes do log</DialogTitle>
+            <DialogDescription>
+              Visualização completa da ação registrada, incluindo autor e payload bruto.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedLog && (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Data/Hora</p>
+                  <p className="text-sm">{format(new Date(selectedLog.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Ação</p>
+                  <p className="text-sm">{actionLabels[selectedLog.action] || selectedLog.action}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Quem realizou</p>
+                  <p className="text-sm font-medium">{selectedLog.actor_name || 'Usuário sem perfil'}</p>
+                  <p className="text-xs text-muted-foreground break-all">{selectedLog.actor_email || selectedLog.user_id}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">IP</p>
+                  <p className="text-sm font-mono">{selectedLog.ip_address || '—'}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Entidade</p>
+                  <p className="text-sm">{selectedLog.entity_type || '—'}</p>
+                  <p className="text-xs text-muted-foreground break-all">{selectedLog.entity_id || 'Sem entity_id'}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Usuário autor</p>
+                  <p className="text-sm break-all">{selectedLog.user_id}</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border">
+                <div className="border-b px-4 py-3">
+                  <p className="text-sm font-medium">Payload completo</p>
+                </div>
+                <ScrollArea className="max-h-[420px]">
+                  <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-6">
+                    {JSON.stringify(selectedLog.details ?? {}, null, 2)}
+                  </pre>
+                </ScrollArea>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -463,13 +571,12 @@ function IntegrationsTab() {
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [initialized, setInitialized] = useState(false);
 
-  if (!initialized && settings.length > 0) {
+  useEffect(() => {
+    if (settings.length === 0) return;
     setEvolutionUrl(getSetting('evolution_api_url'));
     setEvolutionToken(getSetting('evolution_api_token'));
-    setInitialized(true);
-  }
+  }, [settings]);
 
   const handleSave = async () => {
     await updateSetting.mutateAsync({ key: 'evolution_api_url', value: evolutionUrl || null });
@@ -546,7 +653,7 @@ function IntegrationsTab() {
           </Button>
         </div>
         {testResult && (
-          <div className={`text-sm p-3 rounded-lg ${testResult.ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          <div className={`rounded-lg border p-3 text-sm ${testResult.ok ? 'border-success/30 bg-success-soft text-success' : 'border-destructive/30 bg-destructive-soft text-destructive'}`}>
             {testResult.message}
           </div>
         )}

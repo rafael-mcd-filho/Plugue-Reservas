@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Inbox, Server, Loader2 } from 'lucide-react';
+import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Inbox, Server, Loader2, Send } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,9 +23,10 @@ function useSystemHealth() {
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'healthy' || status === 'connected') return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
+  if (status === 'warning') return <AlertTriangle className="h-5 w-5 text-warning" />;
   if (status === 'error' || status === 'disconnected') return <XCircle className="h-5 w-5 text-destructive" />;
-  if (status === 'not_configured') return <AlertTriangle className="h-5 w-5 text-amber-500" />;
-  return <AlertTriangle className="h-5 w-5 text-amber-500" />;
+  if (status === 'not_configured') return <AlertTriangle className="h-5 w-5 text-warning" />;
+  return <AlertTriangle className="h-5 w-5 text-warning" />;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -34,6 +35,7 @@ function StatusBadge({ status }: { status: string }) {
     connected: { label: 'Conectado', variant: 'default' },
     error: { label: 'Erro', variant: 'destructive' },
     disconnected: { label: 'Desconectado', variant: 'destructive' },
+    warning: { label: 'Atenção', variant: 'outline' },
     not_configured: { label: 'Não configurado', variant: 'secondary' },
     unreachable: { label: 'Inacessível', variant: 'destructive' },
   };
@@ -48,8 +50,8 @@ export default function SystemHealth() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Activity className="h-8 w-8 text-primary" />
+          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary" />
             Saúde do Sistema
           </h1>
           <p className="text-muted-foreground mt-1">Monitoramento em tempo real dos serviços</p>
@@ -78,7 +80,7 @@ export default function SystemHealth() {
       ) : (
         <>
           {/* Service Status Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <ServiceCard
               icon={<Database className="h-5 w-5" />}
               title="Banco de Dados"
@@ -90,14 +92,20 @@ export default function SystemHealth() {
               icon={<Server className="h-5 w-5" />}
               title="Evolution API"
               status={data.evolutionApi?.status}
-              detail={data.evolutionApi?.responseMs ? `${data.evolutionApi.responseMs}ms` : undefined}
+              detail={[
+                data.evolutionApi?.responseMs ? `${data.evolutionApi.responseMs}ms` : null,
+                data.evolutionApi?.source ? `fonte: ${data.evolutionApi.source}` : null,
+              ].filter(Boolean).join(' • ') || undefined}
               error={data.evolutionApi?.error}
             />
             <ServiceCard
               icon={<MessageSquare className="h-5 w-5" />}
               title="Fila de Mensagens"
               status={data.messageQueue?.failed > 0 ? 'error' : data.messageQueue?.pending > 0 ? 'warning' : 'healthy'}
-              detail={`${data.messageQueue?.pending || 0} pendentes`}
+              detail={[
+                `${data.messageQueue?.pending || 0} pendentes`,
+                data.messageQueue?.failureWindowHours ? `falhas em ${data.messageQueue.failureWindowHours}h` : null,
+              ].filter(Boolean).join(' • ')}
             />
             <ServiceCard
               icon={<Wifi className="h-5 w-5" />}
@@ -105,40 +113,60 @@ export default function SystemHealth() {
               status={data.whatsapp?.disconnected > 0 ? 'error' : 'healthy'}
               detail={`${data.whatsapp?.connected || 0}/${data.whatsapp?.total || 0} conectados`}
             />
+            <ServiceCard
+              icon={<Send className="h-5 w-5" />}
+              title="Fila Meta"
+              status={data.metaQueue?.failed > 0 ? 'error' : data.metaQueue?.pending > 0 ? 'warning' : 'healthy'}
+              detail={[
+                `${data.metaQueue?.pending || 0} pendentes`,
+                data.metaQueue?.failureWindowHours ? `falhas em ${data.metaQueue.failureWindowHours}h` : null,
+              ].filter(Boolean).join(' • ')}
+            />
           </div>
 
           {/* Quick Stats */}
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <Card className="border-none shadow-sm">
               <CardContent className="p-6 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-primary/10">
+                <div className="p-2 rounded-md bg-primary/10">
                   <Inbox className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{data.reservationsToday || 0}</p>
+                  <p className="text-xl font-bold">{data.reservationsToday || 0}</p>
                   <p className="text-sm text-muted-foreground">Reservas hoje</p>
                 </div>
               </CardContent>
             </Card>
             <Card className="border-none shadow-sm">
               <CardContent className="p-6 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-amber-500/10">
-                  <Clock className="h-5 w-5 text-amber-500" />
+                <div className="p-2 rounded-md bg-amber-500/10">
+                  <Clock className="h-5 w-5 text-warning" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{data.messageQueue?.pending || 0}</p>
+                  <p className="text-xl font-bold">{data.messageQueue?.pending || 0}</p>
                   <p className="text-sm text-muted-foreground">Mensagens na fila</p>
                 </div>
               </CardContent>
             </Card>
             <Card className="border-none shadow-sm">
               <CardContent className="p-6 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-destructive/10">
+                <div className="p-2 rounded-md bg-destructive/10">
                   <AlertTriangle className="h-5 w-5 text-destructive" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{data.messageQueue?.failed || 0}</p>
-                  <p className="text-sm text-muted-foreground">Mensagens com erro</p>
+                  <p className="text-xl font-bold">{data.messageQueue?.failed || 0}</p>
+                  <p className="text-sm text-muted-foreground">Falhas recentes da fila</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-none shadow-sm">
+              <CardContent className="p-6 flex items-center gap-4">
+                <div className="p-2 rounded-md bg-sky-500/10">
+                  <Send className="h-5 w-5 text-sky-600" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold">{data.metaQueue?.pending || 0}</p>
+                  <p className="text-sm text-muted-foreground">Eventos Meta na fila</p>
                 </div>
               </CardContent>
             </Card>
@@ -233,6 +261,50 @@ export default function SystemHealth() {
               )}
             </CardContent>
           </Card>
+
+          <Card className="border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Send className="h-4 w-4 text-destructive" /> Erros Meta CAPI (24h)
+              </CardTitle>
+              <CardDescription>{data.recentMetaErrors?.length || 0} erro(s) nas últimas 24 horas</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!data.recentMetaErrors?.length ? (
+                <div className="py-8 text-center text-muted-foreground">
+                  <CheckCircle2 className="h-10 w-10 mx-auto mb-2 text-emerald-500 opacity-50" />
+                  <p className="text-sm">Nenhum erro recente na Meta CAPI.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Data</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Reserva</TableHead>
+                      <TableHead>Erro</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.recentMetaErrors.map((err: any) => (
+                      <TableRow key={err.id}>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {format(new Date(err.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                        </TableCell>
+                        <TableCell className="text-sm">{err.company_name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {err.reservation_id ? String(err.reservation_id).slice(0, 8) : '—'}
+                        </TableCell>
+                        <TableCell className="text-sm text-destructive max-w-[420px] truncate">
+                          {err.error_message || err.response_body || '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
@@ -252,7 +324,7 @@ function ServiceCard({ icon, title, status, detail, error }: {
       <CardContent className="p-6">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-lg ${isOk ? 'bg-emerald-500/10' : 'bg-destructive/10'}`}>
+            <div className={`p-2 rounded-md ${isOk ? 'bg-emerald-500/10' : 'bg-destructive/10'}`}>
               {icon}
             </div>
             <div>

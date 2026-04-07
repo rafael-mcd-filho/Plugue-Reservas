@@ -1,11 +1,31 @@
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Clock, Users, MapPin, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { getVisitorId } from '@/hooks/useFunnelTracking';
+import { supabase } from '@/integrations/supabase/client';
+import {
+  formatWaitlistCountdown,
+  getWaitlistCallRemainingMs,
+  hasWaitlistCallExpired,
+  WAITLIST_CALL_TIMEOUT_MINUTES,
+} from '@/lib/waitlist';
+import { isValidCompanySlug } from '@/lib/validation';
 
 interface WaitlistEntry {
   id: string;
@@ -16,119 +36,155 @@ interface WaitlistEntry {
   position: number;
   created_at: string;
   called_at: string | null;
-  company_id: string;
+  ahead_count: number;
+  avg_wait_minutes: number;
 }
 
-const statusMessages: Record<string, { icon: any; title: string; description: string; color: string }> = {
+interface LeaveWaitlistResult {
+  id: string;
+  tracking_code: string;
+  status: string;
+  left_waitlist: boolean;
+}
+
+const statusMessages: Record<string, { icon: typeof Clock; title: string; description: string; color: string }> = {
   waiting: {
     icon: Clock,
     title: 'Aguardando',
-    description: 'Você está na fila! Fique atento ao seu WhatsApp.',
-    color: 'text-amber-600',
+    description: 'VocÃª estÃ¡ na fila. Fique atento ao seu WhatsApp.',
+    color: 'text-primary',
   },
   called: {
     icon: AlertCircle,
     title: 'Sua vez!',
-    description: 'Dirija-se à recepção. Sua mesa está pronta!',
-    color: 'text-blue-600',
+    description: 'Dirija-se Ã  recepÃ§Ã£o. Sua mesa estÃ¡ pronta.',
+    color: 'text-info',
   },
   seated: {
     icon: CheckCircle2,
     title: 'Sentado',
-    description: 'Bom apetite! Aproveite sua experiência.',
-    color: 'text-primary',
+    description: 'Bom apetite. Aproveite sua experiÃªncia.',
+    color: 'text-success',
   },
   expired: {
     icon: XCircle,
     title: 'Expirado',
-    description: 'Seu tempo de espera expirou. Procure a recepção se ainda estiver no local.',
+    description: 'Seu tempo de espera expirou. Procure a recepÃ§Ã£o se ainda estiver no local.',
     color: 'text-muted-foreground',
   },
   removed: {
     icon: XCircle,
-    title: 'Removido',
-    description: 'Você foi removido da lista de espera.',
+    title: 'Encerrado',
+    description: 'Sua entrada na fila foi encerrada.',
     color: 'text-muted-foreground',
   },
 };
 
 export default function WaitlistTracking() {
   const { slug, code } = useParams<{ slug: string; code: string }>();
+  const queryClient = useQueryClient();
+  const slugIsValid = isValidCompanySlug(slug);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const { data: entry, isLoading, error } = useQuery({
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const { data: entry, isLoading } = useQuery({
     queryKey: ['waitlist-tracking', code],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .rpc('get_waitlist_by_tracking_code', { _tracking_code: code! });
+      const { data, error } = await (supabase as any).rpc('get_waitlist_by_tracking_code', {
+        _tracking_code: code!,
+        _visitor_id: getVisitorId(),
+      });
       if (error) throw error;
       const rows = data as unknown as WaitlistEntry[];
-      return rows && rows.length > 0 ? rows[0] : null;
+      return rows.length > 0 ? rows[0] : null;
     },
     enabled: !!code,
     refetchInterval: 5000,
   });
 
-  // Count people ahead
-  const { data: aheadCount = 0 } = useQuery({
-    queryKey: ['waitlist-ahead', entry?.company_id, entry?.position],
-    queryFn: async () => {
-      if (!entry) return 0;
-      const { data, error } = await supabase
-        .rpc('get_waitlist_ahead_count', {
-          _company_id: entry.company_id,
-          _position: entry.position,
-        });
-      if (error) return 0;
-      return (data as number) || 0;
-    },
-    enabled: !!entry && entry.status === 'waiting',
-    refetchInterval: 5000,
-  });
-
-  // Get company name + real average wait time
   const { data: company } = useQuery({
     queryKey: ['company-public-waitlist', slug],
     queryFn: async () => {
-      const { data } = await supabase
+      const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
+      if (!rpcResult.error) {
+        const rows = (rpcResult.data ?? []) as Array<{ name: string; logo_url: string | null }>;
+        return rows.length > 0 ? rows[0] : null;
+      }
+
+      const { data, error } = await supabase
         .from('companies_public' as any)
         .select('name, logo_url')
         .eq('slug', slug!)
         .maybeSingle();
-      return data as any;
+
+      if (error) throw error;
+      return data as { name: string; logo_url: string | null } | null;
     },
-    enabled: !!slug,
+    enabled: slugIsValid,
   });
 
-  // Fetch today's average wait from seated entries
-  const { data: avgWaitPerPerson = 10 } = useQuery({
-    queryKey: ['waitlist-avg-wait', entry?.company_id],
-    queryFn: async () => {
-      if (!entry) return 10;
-      const { data, error } = await supabase
-        .rpc('get_waitlist_avg_wait', { _company_id: entry.company_id });
-      if (error) return 10;
-      return Math.max(5, (data as number) || 10);
+  const leaveWaitlist = useMutation({
+    mutationFn: async () => {
+      if (!code) {
+        throw new Error('CÃ³digo de acompanhamento invÃ¡lido.');
+      }
+
+      const { data, error } = await (supabase as any).rpc('leave_public_waitlist', {
+        _tracking_code: code,
+        _visitor_id: getVisitorId(),
+      });
+
+      if (error) throw error;
+
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.id) {
+        throw new Error('NÃ£o foi possÃ­vel sair da fila agora.');
+      }
+
+      return row as LeaveWaitlistResult;
     },
-    enabled: !!entry && entry.status === 'waiting',
-    refetchInterval: 30000,
+    onSuccess: async (result) => {
+      setLeaveDialogOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['waitlist-tracking', code] });
+
+      if (result.left_waitlist) {
+        toast.success('VocÃª saiu da fila com sucesso.');
+        return;
+      }
+
+      if (result.status === 'seated') {
+        toast.info('Essa entrada jÃ¡ foi atendida.');
+        return;
+      }
+
+      toast.info('Essa entrada jÃ¡ nÃ£o estÃ¡ mais ativa.');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'NÃ£o foi possÃ­vel sair da fila agora.');
+    },
   });
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  if (!entry) {
+  if (!slugIsValid || !entry) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-6">
-        <Card className="max-w-md w-full border-none shadow-lg">
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <Card className="w-full max-w-md border border-border shadow-sm">
           <CardContent className="py-12 text-center">
-            <XCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-            <h2 className="text-xl font-bold mb-2">Entrada não encontrada</h2>
-            <p className="text-muted-foreground">Este código de acompanhamento é inválido ou expirou.</p>
+            <XCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+            <h2 className="mb-2 text-xl font-bold">Entrada nÃ£o encontrada</h2>
+            <p className="text-muted-foreground">Este cÃ³digo de acompanhamento Ã© invÃ¡lido ou expirou.</p>
           </CardContent>
         </Card>
       </div>
@@ -137,72 +193,161 @@ export default function WaitlistTracking() {
 
   const status = statusMessages[entry.status] || statusMessages.waiting;
   const StatusIcon = status.icon;
-  const estimatedWait = aheadCount * avgWaitPerPerson;
+  const estimatedWait = entry.ahead_count * entry.avg_wait_minutes;
+  const canLeaveWaitlist = entry.status === 'waiting' || entry.status === 'called';
+  const calledRemainingMs = getWaitlistCallRemainingMs(entry.called_at, nowMs);
+  const calledExpired = entry.status === 'called' && hasWaitlistCallExpired(entry.called_at, nowMs);
+  const calledCountdown = formatWaitlistCountdown(calledRemainingMs);
+  const cardAccentClassName = entry.status === 'called'
+    ? (calledExpired ? 'bg-destructive' : 'bg-info animate-pulse')
+    : entry.status === 'waiting'
+      ? 'bg-primary'
+      : 'bg-success';
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          {company?.logo_url && (
-            <img src={company.logo_url} alt={company.name} className="h-12 w-12 mx-auto rounded-xl object-cover" />
-          )}
-          <h1 className="text-xl font-bold">{company?.name || slug}</h1>
-          <p className="text-sm text-muted-foreground">Lista de Espera</p>
-        </div>
+    <>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md space-y-6">
+          <div className="space-y-2 text-center">
+            {company?.logo_url && (
+              <img
+                src={company.logo_url}
+                alt={company.name}
+                className="mx-auto h-12 w-12 rounded-md object-cover"
+              />
+            )}
+            <h1 className="text-xl font-bold">{company?.name || slug}</h1>
+            <p className="text-sm text-muted-foreground">Lista de espera</p>
+          </div>
 
-        {/* Status Card */}
-        <Card className="border-none shadow-lg overflow-hidden">
-          <div className={`h-1.5 ${entry.status === 'called' ? 'bg-blue-500 animate-pulse' : entry.status === 'waiting' ? 'bg-amber-500' : 'bg-primary'}`} />
-          <CardContent className="p-6 text-center space-y-4">
-            <StatusIcon className={`h-14 w-14 mx-auto ${status.color} ${entry.status === 'called' ? 'animate-bounce' : ''}`} />
-            <div>
-              <h2 className={`text-2xl font-bold ${status.color}`}>{status.title}</h2>
-              <p className="text-muted-foreground mt-1">{status.description}</p>
-            </div>
+          <Card className="overflow-hidden border border-border shadow-sm">
+            <div className={`h-1.5 ${cardAccentClassName}`} />
+            <CardContent className="space-y-4 p-6 text-center">
+              <StatusIcon
+                className={`mx-auto h-10 w-10 ${calledExpired ? 'text-destructive' : status.color} ${entry.status === 'called' && !calledExpired ? 'animate-bounce' : ''}`}
+              />
 
-            {entry.status === 'waiting' && (
-              <div className="space-y-4 pt-2">
-                <div className="flex justify-center gap-8">
-                  <div className="text-center">
-                    <p className="text-4xl font-bold text-foreground">{aheadCount}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {aheadCount === 1 ? 'pessoa na frente' : 'pessoas na frente'}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-4xl font-bold text-foreground">~{estimatedWait}<span className="text-lg">min</span></p>
-                    <p className="text-xs text-muted-foreground mt-1">tempo estimado</p>
+              <div>
+                <h2 className={`text-lg font-bold ${calledExpired ? 'text-destructive' : status.color}`}>{status.title}</h2>
+                <p className="mt-1 text-muted-foreground">
+                  {entry.status === 'called'
+                    ? `Dirija-se Ã  recepÃ§Ã£o. VocÃª tem ${WAITLIST_CALL_TIMEOUT_MINUTES} minutos para se apresentar.`
+                    : status.description}
+                </p>
+              </div>
+
+              {entry.status === 'waiting' && (
+                <div className="space-y-4 pt-2">
+                  <div className="flex justify-center gap-8">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-foreground">{entry.ahead_count}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {entry.ahead_count === 1 ? 'pessoa na frente' : 'pessoas na frente'}
+                      </p>
+                    </div>
+
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-foreground">
+                        ~{estimatedWait}
+                        <span className="text-lg">min</span>
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">tempo estimado</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            <div className="pt-4 border-t border-border space-y-2 text-sm text-left">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Nome</span>
-                <span className="font-medium">{entry.guest_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Pessoas</span>
-                <span className="font-medium">{entry.party_size}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Na fila há</span>
-                <span className="font-medium">{formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Código</span>
-                <span className="font-mono font-medium">{entry.tracking_code}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              {entry.status === 'called' && (
+                <div
+                  className={calledExpired
+                    ? 'rounded-2xl border border-destructive/30 bg-destructive-soft p-4'
+                    : 'rounded-2xl border border-info/30 bg-info-soft p-4'}
+                >
+                  <p className={`text-xs font-medium uppercase tracking-[0.12em] ${calledExpired ? 'text-destructive' : 'text-info'}`}>
+                    {calledExpired ? 'Tempo esgotado' : 'Tempo restante para chegar'}
+                  </p>
+                  <p className={`mt-2 text-3xl font-semibold tabular-nums ${calledExpired ? 'text-destructive' : 'text-foreground'}`}>
+                    {calledCountdown}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {calledExpired
+                      ? 'O prazo de apresentaÃ§Ã£o terminou. Procure a recepÃ§Ã£o se ainda estiver no local.'
+                      : 'Ao chegar na recepÃ§Ã£o, a equipe vai confirmar sua entrada.'}
+                  </p>
+                </div>
+              )}
 
-        <p className="text-xs text-center text-muted-foreground">
-          Esta página atualiza automaticamente. Não é necessário recarregar.
-        </p>
+              <div className="space-y-2 border-t border-border pt-4 text-left text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Nome</span>
+                  <span className="font-medium text-right">{entry.guest_name}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Pessoas</span>
+                  <span className="font-medium">{entry.party_size}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Na fila hÃ¡</span>
+                  <span className="font-medium">
+                    {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Codigo</span>
+                  <span className="font-mono font-medium">{entry.tracking_code}</span>
+                </div>
+              </div>
+
+              {canLeaveWaitlist && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Se nÃ£o quiser mais aguardar, vocÃª pode sair da fila por aqui.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-destructive/30 text-destructive hover:text-destructive"
+                    onClick={() => setLeaveDialogOpen(true)}
+                    disabled={leaveWaitlist.isPending}
+                  >
+                    {leaveWaitlist.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Sair da fila
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <p className="text-center text-xs text-muted-foreground">
+            Esta pÃ¡gina atualiza automaticamente. NÃ£o Ã© necessÃ¡rio recarregar.
+          </p>
+        </div>
       </div>
-    </div>
+
+      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sair da fila?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sua entrada serÃ¡ encerrada e vocÃª perderÃ¡ sua posiÃ§Ã£o atual. Se quiser voltar depois, serÃ¡ preciso entrar
+              novamente na fila.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={leaveWaitlist.isPending}>Continuar aguardando</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                leaveWaitlist.mutate();
+              }}
+              disabled={leaveWaitlist.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {leaveWaitlist.isPending ? 'Saindo...' : 'Sair da fila'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

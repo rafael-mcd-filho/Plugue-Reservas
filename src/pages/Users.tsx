@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Users as UsersIcon, Shield, ShieldOff, Pencil, KeyRound, Building2, Plus, MoreHorizontal } from 'lucide-react';
+import {
+  Users as UsersIcon,
+  Shield,
+  ShieldOff,
+  Pencil,
+  KeyRound,
+  Building2,
+  Plus,
+  MoreHorizontal,
+  Trash2,
+  AlertTriangle,
+  RefreshCw,
+  Loader2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,13 +22,23 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useUsers, useToggleBan, useUpdateUser, useResetPassword, ManagedUser } from '@/hooks/useUsers';
+import { useUsers, useToggleBan, useUpdateUser, useResetPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
 import { useCompanies } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { getFunctionErrorMessage } from '@/lib/functionErrors';
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -24,11 +47,12 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function Users() {
-  const { data: users = [], isLoading } = useUsers();
+  const { data: users = [], isLoading, error, refetch, isFetching } = useUsers();
   const { data: companies = [] } = useCompanies();
   const toggleBan = useToggleBan();
   const updateUser = useUpdateUser();
   const resetPassword = useResetPassword();
+  const deleteUser = useDeleteUser();
   const qc = useQueryClient();
 
   const [filterCompany, setFilterCompany] = useState<string>('all');
@@ -38,36 +62,67 @@ export default function Users() {
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
-
-  // New user state
+  const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
 
-  const filtered = users.filter(u => {
-    if (filterCompany !== 'all' && u.company_id !== filterCompany) return false;
-    if (filterRole !== 'all' && !u.roles.includes(filterRole)) return false;
+  const filtered = users.filter((user) => {
+    if (filterCompany !== 'all' && user.company_id !== filterCompany) return false;
+    if (filterRole !== 'all' && !user.roles.includes(filterRole)) return false;
     if (search) {
-      const q = search.toLowerCase();
-      return u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+      const query = search.toLowerCase();
+      return user.full_name.toLowerCase().includes(query) || user.email.toLowerCase().includes(query);
     }
     return true;
   });
 
+  const activeAdminCounts = users.reduce((acc, user) => {
+    if (!user.is_banned && user.roles.includes('admin') && user.company_id) {
+      acc[user.company_id] = (acc[user.company_id] || 0) + 1;
+    }
+    return acc;
+  }, {} as Record<string, number>);
+
+  const isLastActiveAdmin = (user: ManagedUser | null) =>
+    !!user
+    && !user.is_banned
+    && user.roles.includes('admin')
+    && !!user.company_id
+    && activeAdminCounts[user.company_id] === 1;
+
+  const editWouldRemoveLastAdmin = !!editUser
+    && isLastActiveAdmin(editUser)
+    && (editForm.role !== 'admin' || (editForm.company_id || '') !== (editUser.company_id || ''));
+  const banWouldRemoveLastAdmin = isLastActiveAdmin(banDialog);
+  const deleteWouldRemoveLastAdmin = isLastActiveAdmin(deleteDialog);
+
   const getCompanyName = (id: string | null) => {
-    if (!id) return '—';
-    return companies.find(c => c.id === id)?.name || '—';
+    if (!id) return 'â€”';
+    return companies.find((company) => company.id === id)?.name || 'â€”';
   };
 
   const openEdit = (user: ManagedUser) => {
     setEditUser(user);
-    const primaryRole = user.roles.find(r => r !== 'superadmin') || user.roles[0] || 'admin';
-    setEditForm({ full_name: user.full_name, email: user.email, phone: user.phone, company_id: user.company_id || '', role: primaryRole });
+    const primaryRole = user.roles.find((role) => role !== 'superadmin') || user.roles[0] || 'admin';
+    setEditForm({
+      full_name: user.full_name,
+      email: user.email,
+      phone: user.phone,
+      company_id: user.company_id || '',
+      role: primaryRole,
+    });
   };
 
-  const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!editUser) return;
+
+    if (editWouldRemoveLastAdmin) {
+      toast.error('Cada empresa precisa ter pelo menos um admin ativo');
+      return;
+    }
+
     await updateUser.mutateAsync({
       user_id: editUser.id,
       full_name: editForm.full_name,
@@ -76,16 +131,19 @@ export default function Users() {
       company_id: editForm.company_id || null,
       role: editForm.role,
     });
+
     setEditUser(null);
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!createForm.full_name || !createForm.email || !createForm.company_id) {
       toast.error('Preencha nome, e-mail e empresa');
       return;
     }
+
     setCreating(true);
+
     try {
       const { data, error } = await supabase.functions.invoke('manage-user', {
         body: {
@@ -99,10 +157,26 @@ export default function Users() {
           }],
         },
       });
-      if (error) throw error;
+
+      if (error) throw new Error(await getFunctionErrorMessage(error));
       const result = data?.results?.[0];
       if (result?.error) throw new Error(result.error);
-      toast.success(`Usuário criado! Senha temporária: ${result.temp_password}`, { duration: 15000 });
+
+      if (result?.warning) {
+        toast.warning(result.warning);
+      }
+
+      if (result?.access_link) {
+        try {
+          await navigator.clipboard.writeText(result.access_link);
+          toast.success('UsuÃ¡rio criado. Link unico copiado.');
+        } catch {
+          toast.success('UsuÃ¡rio criado. Link unico gerado.');
+        }
+      } else {
+        toast.success('UsuÃ¡rio criado com sucesso.');
+      }
+
       qc.invalidateQueries({ queryKey: ['managed-users'] });
       setShowCreateDialog(false);
       setCreateForm({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
@@ -115,36 +189,39 @@ export default function Users() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Usuários</h1>
-          <p className="text-muted-foreground mt-1">Gerencie admins e operadores das empresas</p>
+          <h1 className="text-xl font-semibold tracking-tight">UsuÃ¡rios</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Gerencie admins e operadores das empresas</p>
         </div>
-        <Button className="gap-2" onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4" /> Novo Usuário
+        <Button className="gap-2 rounded-lg" onClick={() => setShowCreateDialog(true)}>
+          <Plus className="h-4 w-4" />
+          Novo UsuÃ¡rio
         </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row">
         <Input
+          name="search_users"
           placeholder="Buscar por nome ou e-mail..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="max-w-xs"
+          onChange={(event) => setSearch(event.target.value)}
+          className="h-10 max-w-xs rounded-lg"
+          autoComplete="off"
         />
         <Select value={filterCompany} onValueChange={setFilterCompany}>
-          <SelectTrigger className="w-[220px]">
+          <SelectTrigger className="h-10 w-[220px] rounded-lg" aria-label="Filtrar por empresa">
             <SelectValue placeholder="Filtrar por empresa" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as empresas</SelectItem>
-            {companies.map(c => (
-              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            {companies.map((company) => (
+              <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={filterRole} onValueChange={setFilterRole}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="h-10 w-[180px] rounded-lg" aria-label="Filtrar por perfil">
             <SelectValue placeholder="Filtrar por perfil" />
           </SelectTrigger>
           <SelectContent>
@@ -157,20 +234,32 @@ export default function Users() {
       </div>
 
       {isLoading ? (
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-6 space-y-3">
-            {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}
+        <Card className="overflow-hidden border-none shadow-sm">
+          <CardContent className="space-y-3 p-6">
+            {[1, 2, 3].map((item) => <Skeleton key={item} className="h-14 w-full rounded-lg" />)}
+          </CardContent>
+        </Card>
+      ) : error ? (
+        <Card className="overflow-hidden border-none shadow-sm">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
+            <p className="font-medium text-foreground">Nao foi possivel carregar os usuarios</p>
+            <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado ao consultar usuarios.'}</p>
+            <Button variant="outline" className="mt-4 gap-2 rounded-lg" onClick={() => refetch()} disabled={isFetching}>
+              {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Tentar novamente
+            </Button>
           </CardContent>
         </Card>
       ) : filtered.length === 0 ? (
-        <Card className="border-none shadow-sm">
+        <Card className="overflow-hidden border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
-            <UsersIcon className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            Nenhum usuário encontrado.
+            <UsersIcon className="mx-auto mb-3 h-12 w-12 opacity-30" />
+            Nenhum usuÃ¡rio encontrado.
           </CardContent>
         </Card>
       ) : (
-        <Card className="border-none shadow-sm overflow-hidden">
+        <Card className="overflow-hidden border-none shadow-sm">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -179,24 +268,25 @@ export default function Users() {
                 <TableHead>Empresa</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableHead className="text-right">AÃ§Ãµes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map(user => (
+              {filtered.map((user) => (
                 <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.full_name || '—'}</TableCell>
+                  <TableCell className="font-medium">{user.full_name || 'â€”'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                   <TableCell className="text-sm">
                     <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <Building2 className="h-3 w-3" /> {getCompanyName(user.company_id)}
+                      <Building2 className="h-3 w-3" />
+                      {getCompanyName(user.company_id)}
                     </span>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      {user.roles.map(r => (
-                        <Badge key={r} variant="secondary" className="text-xs">
-                          {roleLabels[r] || r}
+                      {user.roles.map((role) => (
+                        <Badge key={role} variant="secondary" className="text-xs">
+                          {roleLabels[role] || role}
                         </Badge>
                       ))}
                     </div>
@@ -205,22 +295,29 @@ export default function Users() {
                     {user.is_banned ? (
                       <Badge variant="destructive" className="text-xs">Bloqueado</Badge>
                     ) : (
-                      <Badge className="text-xs bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">Ativo</Badge>
+                      <Badge className="border-primary/30 bg-primary/15 text-xs text-primary hover:bg-primary/15">Ativo</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg"
+                          aria-label={`AÃ§Ãµes para ${user.full_name || user.email}`}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent align="end" className="rounded-lg">
                         <DropdownMenuItem onClick={() => openEdit(user)}>
-                          <Pencil className="h-4 w-4 mr-2" /> Editar
+                          <Pencil className="mr-2 h-4 w-4" />
+                          Editar
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setResetDialog(user)}>
-                          <KeyRound className="h-4 w-4 mr-2" /> Redefinir senha
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          Redefinir senha
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -228,10 +325,23 @@ export default function Users() {
                           onClick={() => setBanDialog(user)}
                         >
                           {user.is_banned ? (
-                            <><Shield className="h-4 w-4 mr-2" /> Desbloquear</>
+                            <>
+                              <Shield className="mr-2 h-4 w-4" />
+                              Desbloquear
+                            </>
                           ) : (
-                            <><ShieldOff className="h-4 w-4 mr-2" /> Bloquear</>
+                            <>
+                              <ShieldOff className="mr-2 h-4 w-4" />
+                              Bloquear
+                            </>
                           )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteDialog(user)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Excluir
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -243,23 +353,30 @@ export default function Users() {
         </Card>
       )}
 
-      {/* Ban confirmation */}
-      <AlertDialog open={!!banDialog} onOpenChange={open => !open && setBanDialog(null)}>
+      <AlertDialog open={!!banDialog} onOpenChange={(open) => !open && setBanDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {banDialog?.is_banned ? 'Desbloquear usuário?' : 'Bloquear usuário?'}
+              {banDialog?.is_banned ? 'Desbloquear usuÃ¡rio?' : 'Bloquear usuÃ¡rio?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {banDialog?.is_banned
-                ? `${banDialog.full_name || banDialog.email} voltará a ter acesso ao sistema.`
-                : `${banDialog?.full_name || banDialog?.email} perderá acesso imediatamente ao sistema.`}
+              {banWouldRemoveLastAdmin
+                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de bloquear este usuÃ¡rio.'
+                : banDialog?.is_banned
+                  ? `${banDialog.full_name || banDialog.email} voltarÃ¡ a ter acesso ao sistema.`
+                  : `${banDialog?.full_name || banDialog?.email} perderÃ¡ acesso imediatamente ao sistema.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { if (banDialog) toggleBan.mutate({ user_id: banDialog.id, ban: !banDialog.is_banned }); setBanDialog(null); }}
+              onClick={() => {
+                if (banDialog) {
+                  toggleBan.mutate({ user_id: banDialog.id, ban: !banDialog.is_banned });
+                }
+                setBanDialog(null);
+              }}
+              disabled={banWouldRemoveLastAdmin}
               className={banDialog?.is_banned ? '' : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'}
             >
               {banDialog?.is_banned ? 'Desbloquear' : 'Bloquear'}
@@ -268,13 +385,40 @@ export default function Users() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Reset password confirmation */}
-      <AlertDialog open={!!resetDialog} onOpenChange={open => !open && setResetDialog(null)}>
+      <AlertDialog open={!!deleteDialog} onOpenChange={(open) => !open && setDeleteDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir usuÃ¡rio?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteWouldRemoveLastAdmin
+                ? 'Essa empresa ficaria sem admin ativo. Promova ou cadastre outro admin antes de excluir este usuÃ¡rio.'
+                : `${deleteDialog?.full_name || deleteDialog?.email} serÃ¡ removido permanentemente do sistema.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteDialog) {
+                  deleteUser.mutate(deleteDialog.id);
+                }
+                setDeleteDialog(null);
+              }}
+              disabled={deleteWouldRemoveLastAdmin}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!resetDialog} onOpenChange={(open) => !open && setResetDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
             <AlertDialogDescription>
-              Uma nova senha temporária será gerada para {resetDialog?.full_name || resetDialog?.email}. A senha atual será invalidada imediatamente.
+              Um link unico de redefinicao serÃ¡ gerado para {resetDialog?.full_name || resetDialog?.email}. O acesso atual serÃ¡ invalidado assim que a nova senha for definida.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -286,100 +430,162 @@ export default function Users() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Dialog */}
-      <Dialog open={!!editUser} onOpenChange={open => !open && setEditUser(null)}>
+      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Editar Usuário</DialogTitle>
+            <DialogTitle>Editar UsuÃ¡rio</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleEdit} className="space-y-4 mt-4">
+          <form onSubmit={handleEdit} className="mt-4 space-y-4">
             <div>
-              <Label>Nome completo</Label>
-              <Input value={editForm.full_name} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} />
+              <Label htmlFor="users-edit-full-name">Nome completo</Label>
+              <Input
+                id="users-edit-full-name"
+                name="full_name"
+                value={editForm.full_name}
+                onChange={(event) => setEditForm({ ...editForm, full_name: event.target.value })}
+                autoComplete="name"
+              />
             </div>
             <div>
-              <Label>E-mail</Label>
-              <Input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
+              <Label htmlFor="users-edit-email">E-mail</Label>
+              <Input
+                id="users-edit-email"
+                name="email"
+                type="email"
+                value={editForm.email}
+                onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
+                autoComplete="email"
+                inputMode="email"
+                spellCheck={false}
+              />
             </div>
             <div>
-              <Label>Telefone</Label>
-              <Input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+              <Label htmlFor="users-edit-phone">Telefone</Label>
+              <Input
+                id="users-edit-phone"
+                name="phone"
+                type="tel"
+                value={editForm.phone}
+                onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
+                autoComplete="tel"
+                inputMode="tel"
+              />
             </div>
             <div>
               <Label>Empresa</Label>
-              <Select value={editForm.company_id || 'none'} onValueChange={v => setEditForm({ ...editForm, company_id: v === 'none' ? '' : v })}>
-                <SelectTrigger><SelectValue placeholder="Selecione a empresa" /></SelectTrigger>
+              <Select value={editForm.company_id || 'none'} onValueChange={(value) => setEditForm({ ...editForm, company_id: value === 'none' ? '' : value })}>
+                <SelectTrigger aria-label="Empresa do usuario">
+                  <SelectValue placeholder="Selecione a empresa" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem empresa</SelectItem>
-                  {companies.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>Perfil</Label>
-              <Select value={editForm.role} onValueChange={v => setEditForm({ ...editForm, role: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })}>
+                <SelectTrigger aria-label="Perfil do usuario">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="operator">Operador</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {editWouldRemoveLastAdmin && (
+              <p className="text-sm text-destructive">
+                Essa alteraÃ§Ã£o removeria o Ãºltimo admin ativo da empresa.
+              </p>
+            )}
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancelar</Button>
-              <Button type="submit" disabled={updateUser.isPending}>Salvar</Button>
+              <Button type="submit" disabled={updateUser.isPending || editWouldRemoveLastAdmin}>Salvar</Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Create User Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Novo Usuário</DialogTitle>
+            <DialogTitle>Novo UsuÃ¡rio</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-4 mt-4">
+          <form onSubmit={handleCreate} className="mt-4 space-y-4">
             <div>
-              <Label>Nome completo *</Label>
-              <Input value={createForm.full_name} onChange={e => setCreateForm({ ...createForm, full_name: e.target.value })} placeholder="Nome do usuário" required />
+              <Label htmlFor="users-create-full-name">Nome completo *</Label>
+              <Input
+                id="users-create-full-name"
+                name="full_name"
+                value={createForm.full_name}
+                onChange={(event) => setCreateForm({ ...createForm, full_name: event.target.value })}
+                placeholder="Nome do usuÃ¡rio"
+                autoComplete="name"
+                required
+              />
             </div>
             <div>
-              <Label>E-mail *</Label>
-              <Input type="email" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} placeholder="email@empresa.com" required />
+              <Label htmlFor="users-create-email">E-mail *</Label>
+              <Input
+                id="users-create-email"
+                name="email"
+                type="email"
+                value={createForm.email}
+                onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })}
+                placeholder="email@empresa.com"
+                autoComplete="email"
+                inputMode="email"
+                spellCheck={false}
+                required
+              />
             </div>
             <div>
-              <Label>Telefone</Label>
-              <Input value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} placeholder="(11) 99999-9999" />
+              <Label htmlFor="users-create-phone">Telefone</Label>
+              <Input
+                id="users-create-phone"
+                name="phone"
+                type="tel"
+                value={createForm.phone}
+                onChange={(event) => setCreateForm({ ...createForm, phone: event.target.value })}
+                placeholder="(11) 99999-9999"
+                autoComplete="tel"
+                inputMode="tel"
+              />
             </div>
             <div>
               <Label>Empresa *</Label>
-              <Select value={createForm.company_id} onValueChange={v => setCreateForm({ ...createForm, company_id: v })}>
-                <SelectTrigger><SelectValue placeholder="Selecione a empresa" /></SelectTrigger>
+              <Select value={createForm.company_id} onValueChange={(value) => setCreateForm({ ...createForm, company_id: value })}>
+                <SelectTrigger aria-label="Empresa do novo usuario">
+                  <SelectValue placeholder="Selecione a empresa" />
+                </SelectTrigger>
                 <SelectContent>
-                  {companies.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>Perfil *</Label>
-              <Select value={createForm.role} onValueChange={v => setCreateForm({ ...createForm, role: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })}>
+                <SelectTrigger aria-label="Perfil do novo usuario">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="operator">Operador</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-muted-foreground">Uma senha temporária será gerada automaticamente.</p>
+            <p className="text-xs text-muted-foreground">Um link unico de acesso serÃ¡ gerado automaticamente.</p>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
               <Button type="submit" disabled={creating}>
-                {creating ? 'Criando...' : 'Criar Usuário'}
+                {creating ? 'Criando...' : 'Criar UsuÃ¡rio'}
               </Button>
             </div>
           </form>

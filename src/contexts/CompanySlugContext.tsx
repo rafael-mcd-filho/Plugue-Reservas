@@ -1,8 +1,10 @@
-import { createContext, useContext, ReactNode, useMemo } from 'react';
+import { createContext, useContext, ReactNode } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/hooks/useImpersonation';
+import { isValidCompanySlug } from '@/lib/validation';
 import { Loader2 } from 'lucide-react';
 
 interface CompanySlugContextType {
@@ -16,19 +18,23 @@ const CompanySlugContext = createContext<CompanySlugContextType | undefined>(und
 export function CompanySlugProvider({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const { profile, roles, loading: authLoading } = useAuth();
+  const { isImpersonatingCompany, impersonatedCompanyId } = useImpersonation();
+  const slugIsValid = isValidCompanySlug(slug);
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-by-slug', slug],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('companies' as any)
-        .select('id, name, slug, status')
+        .select('id, name, slug')
         .eq('slug', slug!)
         .maybeSingle();
       if (error) throw error;
       return data as any;
     },
-    enabled: !!slug,
+    enabled: slugIsValid,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   if (authLoading || isLoading) {
@@ -39,12 +45,16 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  if (error || !company) {
+  if (!slugIsValid || error || !company) {
     return <Navigate to="/acesso-negado" replace />;
   }
 
   // Check access: superadmin can access any company, others only their own
   const isSuperadmin = roles.includes('superadmin');
+  if (isSuperadmin && (!isImpersonatingCompany || impersonatedCompanyId !== company.id)) {
+    return <Navigate to="/empresas" replace />;
+  }
+
   if (!isSuperadmin && profile?.company_id !== company.id) {
     return <Navigate to="/acesso-negado" replace />;
   }
@@ -60,4 +70,8 @@ export function useCompanySlug() {
   const context = useContext(CompanySlugContext);
   if (!context) throw new Error('useCompanySlug must be used within CompanySlugProvider');
   return context;
+}
+
+export function useMaybeCompanySlug() {
+  return useContext(CompanySlugContext);
 }

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { UtensilsCrossed, Loader2 } from 'lucide-react';
+import { MIN_PASSWORD_LENGTH } from '@/lib/validation';
 import { toast } from 'sonner';
 
 export default function Signup() {
@@ -22,8 +23,8 @@ export default function Signup() {
       toast.error('Preencha todos os campos');
       return;
     }
-    if (password.length < 6) {
-      toast.error('A senha deve ter pelo menos 6 caracteres');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      toast.error(`A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`);
       return;
     }
     setLoading(true);
@@ -39,16 +40,16 @@ export default function Signup() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-none shadow-lg">
+      <Card className="w-full max-w-md border-none shadow-sm">
         <CardHeader className="text-center space-y-4">
           <div className="flex justify-center">
-            <div className="p-3 rounded-2xl bg-primary/10">
+            <div className="p-3 rounded-lg bg-primary/10">
               <UtensilsCrossed className="h-8 w-8 text-primary" />
             </div>
           </div>
           <div>
-            <CardTitle className="text-2xl" style={{ fontFamily: 'var(--font-display)' }}>
-              Reserva<span className="text-primary">Fácil</span>
+            <CardTitle className="text-xl">
+              Plug<span className="text-primary"> Guest</span>
             </CardTitle>
             <CardDescription className="mt-2">Crie sua conta para acessar o sistema</CardDescription>
           </div>
@@ -82,15 +83,20 @@ export default function Signup() {
               <Input
                 id="password"
                 type="password"
-                placeholder="Mínimo 6 caracteres"
+                placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 autoComplete="new-password"
+                minLength={MIN_PASSWORD_LENGTH}
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Criar Conta
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Criando conta...
+                </>
+              ) : 'Criar Conta'}
             </Button>
           </form>
           <p className="text-sm text-center text-muted-foreground mt-6">

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useMemo, type ReactNode } from 'react';
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FUNNEL_STEPS, STEP_LABELS, type FunnelStep } from '@/hooks/useFunnelTracking';
 
 interface FunnelData {
@@ -12,6 +13,8 @@ interface ReservationFunnelChartProps {
   data: FunnelData[];
   title?: string;
   description?: string;
+  headerActions?: ReactNode;
+  measurementLabel?: string;
 }
 
 const FUNNEL_COLORS = [
@@ -25,19 +28,22 @@ const FUNNEL_COLORS = [
 export default function ReservationFunnelChart({
   data,
   title = 'Funil de Reservas',
-  description = 'Conversão por etapa do processo de reserva',
+  description = 'Conversao por etapa do processo de reserva',
+  headerActions,
+  measurementLabel = 'Sessoes',
 }: ReservationFunnelChartProps) {
   const chartData = useMemo(() => {
-    return FUNNEL_STEPS.map((step, i) => {
-      const found = data.find(d => d.step === step);
+    return FUNNEL_STEPS.map((step, index) => {
+      const found = data.find((item) => item.step === step);
       const count = found?.count ?? 0;
-      const firstCount = data.find(d => d.step === 'page_view')?.count ?? 1;
+      const firstCount = data.find((item) => item.step === 'page_view')?.count ?? 1;
       const rate = firstCount > 0 ? Math.round((count / firstCount) * 100) : 0;
+
       return {
         step: STEP_LABELS[step],
         count,
         rate,
-        fill: FUNNEL_COLORS[i],
+        fill: FUNNEL_COLORS[index],
       };
     });
   }, [data]);
@@ -49,8 +55,21 @@ export default function ReservationFunnelChart({
   return (
     <Card className="border border-border shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="text-base">
+              <span className="inline-flex items-center gap-1.5">
+                <span>{title}</span>
+                <InfoTooltip
+                  content={`Mostra quantas ${measurementLabel.toLowerCase()} avancaram em cada etapa do processo de reserva online.`}
+                  ariaLabel={`Entender o grafico ${title}`}
+                />
+              </span>
+            </CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          {headerActions}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="h-[300px]">
@@ -72,21 +91,27 @@ export default function ReservationFunnelChart({
                   borderRadius: '0.5rem',
                   fontSize: '0.875rem',
                 }}
-                formatter={(value: number, _name: string, props: any) =>
-                  [`${value} visitantes (${props.payload.rate}%)`, 'Visitantes']
-                }
+                formatter={(value: number, _name: string, props: any) => [
+                  `${value} ${measurementLabel.toLowerCase()} (${props.payload.rate}%)`,
+                  measurementLabel,
+                ]}
               />
-              <Bar dataKey="count" name="Visitantes" radius={[0, 4, 4, 0]}>
+              <Bar dataKey="count" name={measurementLabel} radius={[0, 4, 4, 0]}>
                 {chartData.map((entry, index) => (
                   <Cell key={index} fill={entry.fill} />
                 ))}
-                <LabelList dataKey="rate" position="right" formatter={(v: number) => `${v}%`} style={{ fontSize: 12, fill: 'hsl(20, 10%, 48%)' }} />
+                <LabelList
+                  dataKey="rate"
+                  position="right"
+                  formatter={(value: number) => `${value}%`}
+                  style={{ fontSize: 12, fill: 'hsl(20, 10%, 48%)' }}
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <p className="text-center text-sm text-muted-foreground mt-2">
-          Taxa de conversão geral: <span className="font-semibold text-foreground">{overallConversion}%</span>
+        <p className="mt-2 text-center text-sm text-muted-foreground">
+          Taxa de conversao geral: <span className="font-semibold text-foreground">{overallConversion}%</span>
         </p>
       </CardContent>
     </Card>

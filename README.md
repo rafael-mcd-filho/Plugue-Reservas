@@ -1,73 +1,50 @@
-# Welcome to your Lovable project
+# Plug Guest
 
-## Project info
+Sistema multi-tenant de reservas para restaurantes com pagina publica por empresa, painel administrativo por unidade, painel global de superadmin e automacoes via WhatsApp integradas ao Supabase.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Stack
 
-## How can I edit this code?
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- shadcn/ui
+- Supabase
+- Vitest
+- Playwright
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Rodando localmente
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Aplicacao local: `http://127.0.0.1:8080`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Scripts
 
-**Use GitHub Codespaces**
+- `npm run dev` inicia o servidor local
+- `npm run build` gera o build de producao
+- `npm run preview` abre o build localmente
+- `npm run lint` executa o ESLint
+- `npm run test` executa a suite do Vitest
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Estrutura principal
 
-## What technologies are used for this project?
+- `src/` frontend React
+- `supabase/migrations/` migracoes SQL
+- `supabase/functions/` edge functions
+- `public/` assets estaticos
 
-This project is built with:
+## Dominios do produto
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- Pagina publica por empresa em `/:slug`
+- Painel administrativo por unidade em `/:slug/admin/...`
+- Painel global em rotas como `/dashboard`, `/empresas` e `/configuracoes`
 
-## How can I deploy this project?
+## Observacoes
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- O branding exibido no sistema pode ser configurado em `system_settings`
+- A integracao de dados e autenticacao e feita via Supabase
+- O deploy operacional do novo tracking e da Meta CAPI esta documentado em `supabase/TRACKING_DEPLOY_RUNBOOK.md`

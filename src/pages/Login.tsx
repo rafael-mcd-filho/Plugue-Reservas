@@ -25,9 +25,10 @@ export default function Login() {
     const { error } = await signIn(email, password);
     setLoading(false);
     if (error) {
-      toast.error(error.message === 'Invalid login credentials'
+      const message = error.message === 'Invalid login credentials'
         ? 'Email ou senha incorretos'
-        : error.message);
+        : error.message;
+      toast.error(message);
     } else {
       navigate('/');
     }
@@ -35,16 +36,16 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-none shadow-lg">
+      <Card className="w-full max-w-md border-none shadow-sm">
         <CardHeader className="text-center space-y-4">
           <div className="flex justify-center">
-            <div className="p-3 rounded-2xl bg-primary/10">
+            <div className="p-3 rounded-lg bg-primary/10">
               <UtensilsCrossed className="h-8 w-8 text-primary" />
             </div>
           </div>
           <div>
-            <CardTitle className="text-2xl" style={{ fontFamily: 'var(--font-display)' }}>
-              Reserva<span className="text-primary">Fácil</span>
+            <CardTitle className="text-2xl">
+              Plug<span className="text-primary"> Guest</span>
             </CardTitle>
             <CardDescription className="mt-2">Entre na sua conta para continuar</CardDescription>
           </div>
@@ -74,8 +75,12 @@ export default function Login() {
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Entrar
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Entrando...
+                </>
+              ) : 'Entrar'}
             </Button>
           </form>
           <p className="text-sm text-center text-muted-foreground mt-6">

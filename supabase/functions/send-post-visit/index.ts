@@ -1,8 +1,8 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
 };
 
 function replaceTemplateVars(template: string, reservation: any): string {
@@ -31,10 +31,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    if (!isAuthorizedInternalJob(req)) {
+      return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
 
     const { data: settings } = await supabaseAdmin
       .from('system_settings')
@@ -52,28 +56,41 @@ Deno.serve(async (req) => {
 
     const now = new Date();
 
-    // Find reservations marked as 'completed' where updated_at is ~12h ago
-    // Window: between 12h and 12h30min ago (to catch within the cron interval)
+    // Find successful visits roughly 12h after check-in.
+    // Keep legacy support for old reservations that still used status = 'completed'.
     const h12ago = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
     const h12_30ago = new Date(now.getTime() - (12 * 60 + 30) * 60 * 1000).toISOString();
 
-    console.log(`Post-visit: checking completed reservations updated between ${h12_30ago} and ${h12ago}`);
+    console.log(`Post-visit: checking successful reservations between ${h12_30ago} and ${h12ago}`);
 
-    const { data: reservations } = await supabaseAdmin
-      .from('reservations')
-      .select('*')
-      .eq('status', 'completed')
-      .gte('updated_at', h12_30ago)
-      .lte('updated_at', h12ago);
+    const [{ data: checkedInReservations }, { data: completedReservations }] = await Promise.all([
+      supabaseAdmin
+        .from('reservations')
+        .select('*')
+        .eq('status', 'checked_in')
+        .gte('checked_in_at', h12_30ago)
+        .lte('checked_in_at', h12ago),
+      supabaseAdmin
+        .from('reservations')
+        .select('*')
+        .eq('status', 'completed')
+        .gte('updated_at', h12_30ago)
+        .lte('updated_at', h12ago),
+    ]);
+
+    const reservations = [
+      ...(checkedInReservations || []),
+      ...(completedReservations || []),
+    ];
 
     if (!reservations || reservations.length === 0) {
-      console.log('No completed reservations in 12h window');
+      console.log('No successful reservations in 12h window');
       return new Response(JSON.stringify({ sent: 0 }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    console.log(`Found ${reservations.length} reservations completed ~12h ago`);
+    console.log(`Found ${reservations.length} successful reservations ~12h ago`);
 
     const companyIds = [...new Set(reservations.map((r: any) => r.company_id))];
 

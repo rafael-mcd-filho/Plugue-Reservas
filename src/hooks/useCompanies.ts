@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import type { CompanyPlanTier } from '@/lib/companyFeatures';
 
 export type CompanyStatus = 'active' | 'paused';
 
@@ -8,6 +9,7 @@ export interface Company {
   id: string;
   name: string;
   slug: string;
+  plan_tier: CompanyPlanTier;
   razao_social: string | null;
   cnpj: string | null;
   phone: string | null;
@@ -18,17 +20,23 @@ export interface Company {
   responsible_phone: string | null;
   instagram: string | null;
   whatsapp: string | null;
+  show_public_whatsapp_button?: boolean | null;
+  public_waitlist_enabled?: boolean | null;
   google_maps_url: string | null;
   description: string | null;
   logo_url: string | null;
   opening_hours: any[] | null;
   payment_methods: Record<string, boolean> | null;
+  reservation_duration: number | null;
+  max_guests_per_slot: number | null;
   status: CompanyStatus;
   created_at: string;
   updated_at: string;
 }
 
-export type CompanyInsert = Omit<Company, 'id' | 'created_at' | 'updated_at'>;
+export type CompanyInsert = Omit<Company, 'id' | 'created_at' | 'updated_at' | 'plan_tier'> & {
+  plan_tier?: CompanyPlanTier;
+};
 
 export function useCompanies() {
   return useQuery({
@@ -49,7 +57,7 @@ export function useCreateCompany() {
   return useMutation({
     mutationFn: async (company: CompanyInsert) => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Não autenticado');
+      if (!session) throw new Error('NÃ£o autenticado');
 
       const response = await supabase.functions.invoke('create-company', {
         body: company,
@@ -60,24 +68,33 @@ export function useCreateCompany() {
       if (result?.error) throw new Error(result.error);
       return result;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       qc.invalidateQueries({ queryKey: ['companies'] });
-      if (data?.admin_user?.temp_password) {
-        toast.success(`Empresa criada! Senha temporária do admin: ${data.admin_user.temp_password}`, {
-          duration: 15000,
-        });
-      } else {
-        toast.success('Empresa criada com sucesso!');
+      if (data?.warning) {
+        toast.warning(data.warning);
       }
+
+      if (data?.admin_user?.access_link) {
+        try {
+          await navigator.clipboard.writeText(data.admin_user.access_link);
+          toast.success('Empresa criada. Link unico do admin copiado.');
+          return;
+        } catch {
+          toast.success('Empresa criada. Link unico do admin gerado.');
+          return;
+        }
+      }
+
+      toast.success('Empresa criada com sucesso!');
     },
     onError: (err: any) => {
       const msg = err.message || '';
       if (msg.includes('companies_cnpj_key')) {
-        toast.error('Já existe uma empresa com este CNPJ');
+        toast.error('JÃ¡ existe uma empresa com este CNPJ');
       } else if (msg.includes('companies_slug_key')) {
-        toast.error('Já existe uma empresa com este slug');
+        toast.error('JÃ¡ existe uma empresa com este slug');
       } else if (msg.includes('already been registered')) {
-        toast.error('Este email já está cadastrado no sistema');
+        toast.error('Este email jÃ¡ estÃ¡ cadastrado no sistema');
       } else {
         toast.error(`Erro ao criar empresa: ${msg}`);
       }

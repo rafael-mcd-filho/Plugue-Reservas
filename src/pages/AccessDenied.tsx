@@ -6,14 +6,14 @@ import { Card, CardContent } from '@/components/ui/card';
 export default function AccessDenied() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-none shadow-lg text-center">
+      <Card className="w-full max-w-md border-none shadow-sm text-center">
         <CardContent className="pt-12 pb-8 space-y-4">
           <div className="flex justify-center">
-            <div className="p-4 rounded-2xl bg-destructive/10">
-              <ShieldX className="h-10 w-10 text-destructive" />
+            <div className="p-3 rounded-lg bg-destructive/10">
+              <ShieldX className="h-8 w-8 text-destructive" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+          <h1 className="text-xl font-bold">
             Acesso Negado
           </h1>
           <p className="text-muted-foreground">

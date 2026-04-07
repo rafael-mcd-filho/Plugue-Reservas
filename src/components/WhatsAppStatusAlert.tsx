@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Wifi, WifiOff } from 'lucide-react';
+import { WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 
 export default function WhatsAppStatusAlert() {
   const { companyId } = useCompanySlug();
+  const { data: featureFlags } = useCompanyFeatureFlags(companyId);
 
   const { data: instance } = useQuery({
     queryKey: ['whatsapp-instance-status', companyId],
@@ -35,18 +37,17 @@ export default function WhatsAppStatusAlert() {
     enabled: instance?.status === 'disconnected',
   });
 
-  // No instance configured or connected — no alert
-  if (!instance || instance.status === 'connected') return null;
+  if (!featureFlags?.features.whatsapp_integration || !instance || instance.status === 'connected') {
+    return null;
+  }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm">
-      <WifiOff className="h-4 w-4 text-destructive shrink-0" />
-      <span className="text-destructive font-medium">
-        WhatsApp desconectado
-      </span>
+    <div className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2 text-sm">
+      <WifiOff className="h-4 w-4 shrink-0 text-destructive" />
+      <span className="font-medium text-destructive">WhatsApp desconectado</span>
       {queueCount > 0 && (
         <span className="text-destructive/70">
-          — {queueCount} {queueCount === 1 ? 'mensagem' : 'mensagens'} na fila
+          {' - '} {queueCount} {queueCount === 1 ? 'mensagem' : 'mensagens'} na fila
         </span>
       )}
     </div>

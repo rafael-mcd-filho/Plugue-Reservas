@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, addDays, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { getVisitorId } from '@/hooks/useFunnelTracking';
+import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
 
 interface OpeningHour {
   day: string;
@@ -26,6 +26,7 @@ interface OpeningHour {
 interface ReservationModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  slug: string;
   companyId: string;
   companyName: string;
   openingHours: OpeningHour[];
@@ -34,9 +35,14 @@ interface ReservationModalProps {
   initialDate?: string | null;
   initialPartySize?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
+  getTrackingSnapshot?: () => Promise<TrackingSnapshot>;
+  trackLeadCapture?: (userData: TrackingUserData) => Promise<void>;
+  clearTrackingJourney?: () => void;
 }
 
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
+
+const MIN_PREFILL_PHONE_DIGITS = 10;
 
 const DAY_MAP: Record<string, number> = {
   'Dom': 0, 'Seg': 1, 'Ter': 2, 'Qua': 3, 'Qui': 4, 'Sex': 5, 'Sáb': 6,
@@ -57,12 +63,40 @@ function generateTimeSlots(open: string, close: string, interval: number = 30): 
   return slots;
 }
 
+function normalizePhone(phone: string): string {
+  return phone.replace(/\D/g, '');
+}
+
+function splitGuestName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return { first_name: null, last_name: null };
+  }
+
+  const [firstName, ...rest] = trimmed.split(/\s+/);
+  return {
+    first_name: firstName || null,
+    last_name: rest.length > 0 ? rest.join(' ') : null,
+  };
+}
+
 
 interface AvailableTable {
   id: string;
   number: number;
   capacity: number;
   section: string;
+  table_map_id: string;
+}
+
+interface TableMapRow {
+  id: string;
+  name: string;
+  is_default: boolean;
+  is_enabled: boolean;
+  active_from: string | null;
+  active_to: string | null;
+  priority: number;
 }
 
 interface SlotAvailability {
@@ -73,6 +107,8 @@ interface SlotAvailability {
 
 interface ConfirmedReservation {
   id: string;
+  trackingCode: string;
+  trackingUrl: string;
   date: string;
   time: string;
   partySize: number;
@@ -84,6 +120,7 @@ interface ConfirmedReservation {
 export default function ReservationModal({
   open,
   onOpenChange,
+  slug,
   companyId,
   companyName,
   openingHours,
@@ -92,12 +129,16 @@ export default function ReservationModal({
   initialDate,
   initialPartySize = 2,
   onStepChange,
+  getTrackingSnapshot,
+  trackLeadCapture,
+  clearTrackingJourney,
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
   const [selectedPartySize, setSelectedPartySize] = useState(2);
   const [selectedTableId, setSelectedTableId] = useState('');
+  const [selectedTableMapId, setSelectedTableMapId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
   const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
@@ -108,6 +149,7 @@ export default function ReservationModal({
   const [form, setForm] = useState({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
+  const whatsappDigits = normalizePhone(form.whatsapp);
 
   useEffect(() => {
     if (!open) return;
@@ -117,6 +159,7 @@ export default function ReservationModal({
     setSelectedTime('');
     setSelectedPartySize(initialPartySize);
     setSelectedTableId('');
+    setSelectedTableMapId('');
     setShowCalendar(false);
     setAvailableTables([]);
     setSlotAvailability({});
@@ -134,12 +177,30 @@ export default function ReservationModal({
     onStepChange?.('form_fill');
   }, [onStepChange, open, step]);
 
+  const { data: companyTableMaps = [], isLoading: tableMapsLoading } = useQuery({
+    queryKey: ['public-table-maps', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('table_maps' as any)
+        .select('id, name, is_default, is_enabled, active_from, active_to, priority')
+        .eq('company_id', companyId)
+        .order('is_default', { ascending: false })
+        .order('priority', { ascending: true });
+      if (error) throw error;
+      return (data as any[]) as TableMapRow[];
+    },
+    enabled: !!companyId,
+    staleTime: 0,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: 'always',
+  });
+
   const { data: allTables = [], isLoading: tablesLoading } = useQuery({
     queryKey: ['public-available-tables', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('restaurant_tables' as any)
-        .select('id, number, capacity, section')
+        .select('id, number, capacity, section, table_map_id')
         .eq('company_id', companyId)
         .eq('status', 'available')
         .order('capacity', { ascending: true });
@@ -147,8 +208,9 @@ export default function ReservationModal({
       return (data as any[]) as AvailableTable[];
     },
     enabled: !!companyId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
     gcTime: 15 * 60 * 1000,
+    refetchOnMount: 'always',
   });
 
   const { data: blockedDates = [] } = useQuery({
@@ -189,13 +251,34 @@ export default function ReservationModal({
     return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
   }, [selectedDayHours, reservationDuration]);
 
+  const resolveActiveTableMap = (date: Date, time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const reservationAt = new Date(date);
+    reservationAt.setHours(hours, minutes, 0, 0);
+
+    const specialMap = companyTableMaps
+      .filter((tableMap) =>
+        !tableMap.is_default &&
+        tableMap.is_enabled &&
+        tableMap.active_from &&
+        new Date(tableMap.active_from).getTime() <= reservationAt.getTime() &&
+        (!tableMap.active_to || new Date(tableMap.active_to).getTime() > reservationAt.getTime()))
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return (b.active_from ? new Date(b.active_from).getTime() : 0) - (a.active_from ? new Date(a.active_from).getTime() : 0);
+      })[0];
+
+    if (specialMap) return specialMap;
+    return companyTableMaps.find((tableMap) => tableMap.is_default) ?? null;
+  };
+
   // Fetch slot availability when date changes (for step 2 vacancy indicators)
   useEffect(() => {
     if (!selectedDate || !companyId || timeSlots.length === 0) {
       setSlotAvailability({});
       return;
     }
-    if (tablesLoading) return;
+    if (tablesLoading || tableMapsLoading) return;
     
     const fetchSlotAvailability = async () => {
       setLoadingSlots(true);
@@ -207,8 +290,6 @@ export default function ReservationModal({
         });
         if (slotOccupancyError) throw slotOccupancyError;
 
-        const totalTables = allTables.filter((table) => table.capacity >= selectedPartySize).length;
-        
         // Count occupied tables and total guests per time slot from RPC
         const occupiedBySlot: Record<string, number> = {};
         const guestsBySlot: Record<string, number> = {};
@@ -223,6 +304,11 @@ export default function ReservationModal({
 
         const availability: Record<string, SlotAvailability> = {};
         timeSlots.forEach(slot => {
+          const activeTableMap = resolveActiveTableMap(selectedDate, slot);
+          const eligibleTables = activeTableMap
+            ? allTables.filter((table) => table.table_map_id === activeTableMap.id && table.capacity >= selectedPartySize)
+            : [];
+          const totalTables = eligibleTables.length;
           const occupied = occupiedBySlot[slot] || 0;
           let available = Math.max(0, totalTables - occupied);
 
@@ -253,16 +339,17 @@ export default function ReservationModal({
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, allTables, tablesLoading]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, allTables, tablesLoading, companyTableMaps, tableMapsLoading]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) return;
-    if (tablesLoading) return;
+    if (tablesLoading || tableMapsLoading) return;
 
     if (allTables.length === 0) {
       setAvailableTables([]);
       setSelectedTableId('');
+      setSelectedTableMapId('');
       return;
     }
     
@@ -280,10 +367,16 @@ export default function ReservationModal({
         if (resErr) throw resErr;
 
         const occupiedIds = new Set((occupiedTableIds as string[]) || []);
+        const activeTableMap = resolveActiveTableMap(selectedDate, selectedTime);
+        const activeTableMapId = activeTableMap?.id ?? '';
         const available = allTables
-          .filter((table) => !occupiedIds.has(table.id) && table.capacity >= selectedPartySize);
+          .filter((table) =>
+            table.table_map_id === activeTableMapId &&
+            !occupiedIds.has(table.id) &&
+            table.capacity >= selectedPartySize);
         
         setAvailableTables(available);
+        setSelectedTableMapId(activeTableMapId);
         // Auto-select the smallest table that fits the party (best-fit)
         if (available.length > 0) {
           setSelectedTableId(available[0].id);
@@ -294,13 +387,14 @@ export default function ReservationModal({
         console.error('Error fetching availability:', err);
         setAvailableTables([]);
         setSelectedTableId('');
+        setSelectedTableMapId('');
       } finally {
         setLoadingTables(false);
       }
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables, tablesLoading]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables, tablesLoading, companyTableMaps, tableMapsLoading]);
 
   const handleReset = () => {
     setStep(1);
@@ -308,6 +402,7 @@ export default function ReservationModal({
     setSelectedTime('');
     setSelectedPartySize(2);
     setSelectedTableId('');
+    setSelectedTableMapId('');
     setShowCalendar(false);
     setAvailableTables([]);
     setSlotAvailability({});
@@ -316,7 +411,10 @@ export default function ReservationModal({
   };
 
   const handleClose = (v: boolean) => {
-    if (!v) handleReset();
+    if (!v) {
+      handleReset();
+      clearTrackingJourney?.();
+    }
     onOpenChange(v);
   };
 
@@ -331,9 +429,77 @@ export default function ReservationModal({
     setSubmitting(true);
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const reservationId = crypto.randomUUID();
+      const trackingCode = crypto.randomUUID().replace(/-/g, '');
+      const trackingSnapshot: TrackingSnapshot = getTrackingSnapshot
+        ? await getTrackingSnapshot()
+        : {
+            anonymous_id: getVisitorId(),
+            session_id: null,
+            journey_id: null,
+            company_id: companyId,
+            company_slug: slug,
+            fbp: null,
+            fbc: null,
+            fbclid: null,
+            utm_source: null,
+            utm_medium: null,
+            utm_campaign: null,
+            utm_content: null,
+            utm_term: null,
+            page_url: typeof window !== 'undefined' ? window.location.href : null,
+            path: typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : null,
+            referrer: typeof document !== 'undefined' ? document.referrer || null : null,
+            event_source_url: typeof window !== 'undefined' ? window.location.href : null,
+            attribution_snapshot: {
+              tracking_source: 'public_web',
+            },
+          };
+      const guestNameParts = splitGuestName(form.name);
+      const leadCapturePayload: TrackingUserData = {
+        first_name: guestNameParts.first_name,
+        last_name: guestNameParts.last_name,
+        email: form.email || null,
+        phone: form.whatsapp || null,
+        zip: null,
+        city: null,
+        state: null,
+        country: null,
+        external_id: trackingSnapshot.anonymous_id,
+      };
+
+      try {
+        await trackLeadCapture?.(leadCapturePayload);
+      } catch (leadCaptureError) {
+        console.warn('[ReservationModal] Lead capture tracking error:', leadCaptureError);
+      }
+
+      const attributionSnapshot = {
+        ...trackingSnapshot.attribution_snapshot,
+        tracking_source: 'public_web',
+        anonymous_id: trackingSnapshot.anonymous_id,
+        session_id: trackingSnapshot.session_id,
+        journey_id: trackingSnapshot.journey_id,
+        page_url: trackingSnapshot.page_url,
+        path: trackingSnapshot.path,
+        referrer: trackingSnapshot.referrer,
+        event_source_url: trackingSnapshot.event_source_url,
+        fbp: trackingSnapshot.fbp,
+        fbc: trackingSnapshot.fbc,
+        fbclid: trackingSnapshot.fbclid,
+        utm_source: trackingSnapshot.utm_source,
+        utm_medium: trackingSnapshot.utm_medium,
+        utm_campaign: trackingSnapshot.utm_campaign,
+        utm_content: trackingSnapshot.utm_content,
+        utm_term: trackingSnapshot.utm_term,
+        user_data: leadCapturePayload,
+      };
       const reservationData = {
+        id: reservationId,
+        public_tracking_code: trackingCode,
         company_id: companyId,
         table_id: selectedTableId || null,
+        table_map_id: selectedTableMapId || null,
         guest_name: form.name,
         guest_phone: form.whatsapp,
         guest_email: form.email || null,
@@ -344,15 +510,19 @@ export default function ReservationModal({
         duration_minutes: reservationDuration,
         occasion: form.occasion || null,
         notes: form.observation || null,
-        visitor_id: getVisitorId(),
+        visitor_id: trackingSnapshot.anonymous_id,
+        origin_tracking_session_id: trackingSnapshot.session_id,
+        origin_tracking_journey_id: trackingSnapshot.journey_id,
+        origin_anonymous_id: trackingSnapshot.anonymous_id,
+        origin_fbp: trackingSnapshot.fbp,
+        origin_fbc: trackingSnapshot.fbc,
+        attribution_snapshot: attributionSnapshot,
         status: 'confirmed',
       };
 
-      const { data: inserted, error } = await supabase
+      const { error } = await supabase
         .from('reservations' as any)
         .insert(reservationData as any)
-        .select('*')
-        .single();
       
       if (error) throw error;
 
@@ -361,8 +531,8 @@ export default function ReservationModal({
         body: {
           event: 'reservation_created',
           reservation: {
-            id: (inserted as any).id,
-            visitor_id: (inserted as any).visitor_id,
+            id: reservationId,
+            visitor_id: reservationData.visitor_id,
           },
         },
       }).catch(err => console.warn('Reservation events error:', err));
@@ -370,7 +540,9 @@ export default function ReservationModal({
       const tableName = availableTables.find(t => t.id === selectedTableId)?.number?.toString() || '';
 
       setConfirmedReservation({
-        id: (inserted as any).id,
+        id: reservationId,
+        trackingCode,
+        trackingUrl: `${window.location.origin}/${slug}/reserva/${trackingCode}`,
         date: dateStr,
         time: selectedTime,
         partySize: selectedPartySize,
@@ -379,7 +551,7 @@ export default function ReservationModal({
         companyName,
       });
 
-      onStepChange?.('completed');
+      clearTrackingJourney?.();
       setStep(4);
     } catch (err: any) {
       const message: string = err?.message ?? '';
@@ -418,6 +590,13 @@ export default function ReservationModal({
     }
   };
 
+  const copyTrackingLink = () => {
+    if (confirmedReservation) {
+      navigator.clipboard.writeText(confirmedReservation.trackingUrl);
+      toast.success('Link de acompanhamento copiado!');
+    }
+  };
+
   const addToCalendarUrl = () => {
     if (!confirmedReservation || !selectedDate) return '#';
     const [h, m] = confirmedReservation.time.split(':').map(Number);
@@ -449,7 +628,7 @@ export default function ReservationModal({
                 <div
                   key={s}
                   className={cn(
-                    'h-2 rounded-full transition-all',
+                    'h-2 rounded-full transition-[width,background-color] duration-200',
                     s === step ? 'w-8 bg-primary' : s < step ? 'w-6 bg-primary/50' : 'w-6 bg-muted'
                   )}
                 />
@@ -460,16 +639,16 @@ export default function ReservationModal({
 
         {/* Step 1: Date + Party Size */}
         {step === 1 && (
-          <div className="space-y-4 pt-2">
+          <div className="animate-fade-in space-y-4 pt-2">
             <p className="text-sm text-muted-foreground text-center">Escolha a data e número de pessoas</p>
 
             <div className="flex items-center justify-center gap-3">
-              <Label className="text-sm">Pessoas:</Label>
+              <span className="text-sm font-medium text-foreground">Pessoas</span>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Diminuir número de pessoas"
                   onClick={() => setSelectedPartySize(Math.max(1, selectedPartySize - 1))}>-</Button>
-                <span className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
+                <span id="reservation-party-size-value" className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Aumentar número de pessoas"
                   onClick={() => setSelectedPartySize(Math.min(20, selectedPartySize + 1))}>+</Button>
@@ -482,14 +661,19 @@ export default function ReservationModal({
                   {next7Days.map(date => {
                     const closed = isDayClosed(date);
                     const isSelected = selectedDate?.toDateString() === date.toDateString();
+                    const todayLabel = isToday(date) ? 'Hoje' : isTomorrow(date) ? 'Amanhã' : null;
                     return (
                       <button key={date.toISOString()} disabled={closed} onClick={() => setSelectedDate(date)}
                         className={cn(
-                          'flex flex-col items-center p-3 rounded-xl border text-sm transition-all',
+                          'relative flex flex-col items-center p-3 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
                           closed && 'opacity-40 cursor-not-allowed',
                           isSelected ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-border hover:border-primary/50 text-foreground'
                         )}>
-                        <span className="text-xs uppercase text-muted-foreground">{format(date, 'EEE', { locale: ptBR })}</span>
+                        {todayLabel ? (
+                          <span className={cn('text-[10px] font-semibold uppercase tracking-wide', isSelected ? 'text-primary' : 'text-primary/70')}>{todayLabel}</span>
+                        ) : (
+                          <span className="text-xs uppercase text-muted-foreground">{format(date, 'EEE', { locale: ptBR })}</span>
+                        )}
                         <span className="text-lg font-bold">{format(date, 'dd')}</span>
                         <span className="text-xs text-muted-foreground">{format(date, 'MMM', { locale: ptBR })}</span>
                       </button>
@@ -499,7 +683,7 @@ export default function ReservationModal({
 
                 {/* Show selected calendar date if outside next 7 days */}
                 {selectedDate && !isDateInQuickSelect && (
-                  <div className="flex items-center justify-center gap-2 p-3 rounded-xl border border-primary bg-primary/10">
+                  <div className="flex items-center justify-center gap-2 p-3 rounded-md border border-primary bg-primary/10">
                     <CalendarIcon className="h-4 w-4 text-primary" />
                     <span className="text-sm font-semibold text-primary">
                       {format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}
@@ -537,7 +721,7 @@ export default function ReservationModal({
 
         {/* Step 2: Time + Table */}
         {step === 2 && (
-          <div className="space-y-4 pt-2">
+          <div className="animate-fade-in space-y-4 pt-2">
             <Button variant="ghost" size="sm" onClick={() => { setStep(1); setSelectedTime(''); setSelectedTableId(''); }}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
@@ -563,7 +747,7 @@ export default function ReservationModal({
                     <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
                       disabled={isFull}
                       className={cn(
-                        'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border text-sm transition-all',
+                        'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
                         isFull && 'opacity-40 cursor-not-allowed bg-muted',
                         selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border'
                       )}>
@@ -573,7 +757,7 @@ export default function ReservationModal({
                       {avail && (
                         <span className={cn(
                           'text-[10px] font-medium',
-                          isFull ? 'text-destructive' : status === 'low' ? 'text-amber-600' : 'text-muted-foreground'
+                          isFull ? 'text-destructive' : status === 'low' ? 'text-warning' : 'text-muted-foreground'
                         )}>
                           {isFull ? 'Lotado' : `${avail.available} ${avail.available === 1 ? 'vaga' : 'vagas'}`}
                         </span>
@@ -606,7 +790,7 @@ export default function ReservationModal({
 
         {/* Step 3: Personal Info */}
         {step === 3 && (
-          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <form onSubmit={handleSubmit} className="animate-fade-in space-y-4 pt-2">
             <Button variant="ghost" size="sm" type="button" onClick={() => setStep(2)}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
@@ -614,19 +798,27 @@ export default function ReservationModal({
               {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime} · Mesa {availableTables.find(t => t.id === selectedTableId)?.number} · {selectedPartySize} pessoas
             </p>
 
+            <p className="text-xs text-muted-foreground">* Campos obrigatórios</p>
+
             <div className="space-y-3">
               <div>
-                <Label className="text-sm font-medium">WhatsApp *</Label>
+                <Label htmlFor="public-reservation-whatsapp" className="text-sm font-medium">WhatsApp *</Label>
                 <div className="flex gap-2">
-                  <Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
+                  <Input
+                    id="public-reservation-whatsapp"
+                    name="guest_phone"
+                    value={form.whatsapp}
+                    onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
                     placeholder="(11) 99999-9999" required maxLength={20} autoComplete="tel" inputMode="tel"
-                    onBlur={async () => {
-                      if (form.whatsapp.replace(/\D/g, '').length >= 10) {
+                    onBlur={async (event) => {
+                      const normalizedPhone = normalizePhone(event.currentTarget.value);
+
+                      if (normalizedPhone.length >= MIN_PREFILL_PHONE_DIGITS) {
                         try {
                           const { data, error } = await (supabase.rpc as any)('get_public_reservation_prefill', {
                             _company_id: companyId,
                             _visitor_id: getVisitorId(),
-                            _guest_phone: form.whatsapp,
+                            _guest_phone: normalizedPhone,
                           });
                           if (error) throw error;
                           const row = Array.isArray(data) ? data[0] : data;
@@ -645,21 +837,43 @@ export default function ReservationModal({
                     }}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Digite seu WhatsApp para preencher automaticamente</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS
+                    ? 'Digite o WhatsApp completo com DDD para buscar os dados.'
+                    : 'Digite o WhatsApp completo. A busca acontece ao sair do campo.'}
+                </p>
               </div>
               <div>
-                <Label className="text-sm font-medium">Nome Completo *</Label>
-                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Seu nome" required maxLength={100} autoComplete="name" />
+                <Label htmlFor="public-reservation-name" className="text-sm font-medium">Nome Completo *</Label>
+                <Input
+                  id="public-reservation-name"
+                  name="guest_name"
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Seu nome"
+                  required
+                  maxLength={100}
+                  autoComplete="name"
+                />
               </div>
               <div>
-                <Label className="text-sm font-medium">E-mail</Label>
-                <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="seu@email.com" maxLength={255} autoComplete="email" inputMode="email" />
+                <Label htmlFor="public-reservation-email" className="text-sm font-medium">E-mail</Label>
+                <Input
+                  id="public-reservation-email"
+                  name="guest_email"
+                  type="email"
+                  value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="seu@email.com"
+                  maxLength={255}
+                  autoComplete="email"
+                  inputMode="email"
+                  spellCheck={false}
+                />
               </div>
-              <div>
-                <Label className="text-sm font-medium">Data de Nascimento</Label>
-                <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-2" role="group" aria-labelledby="public-reservation-birthdate-label">
+                <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de Nascimento</p>
+                <div className="grid grid-cols-3 gap-1.5 xs:gap-2">
                   <Select
                     value={form.birthdate ? form.birthdate.split('-')[2] : ''}
                     onValueChange={d => {
@@ -667,7 +881,7 @@ export default function ReservationModal({
                       setForm(f => ({ ...f, birthdate: `${y || '2000'}-${m || '01'}-${d}` }));
                     }}
                   >
-                    <SelectTrigger><SelectValue placeholder="Dia" /></SelectTrigger>
+                    <SelectTrigger aria-label="Selecionar dia do nascimento"><SelectValue placeholder="Dia" /></SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0')).map(d => (
                         <SelectItem key={d} value={d}>{d}</SelectItem>
@@ -695,7 +909,7 @@ export default function ReservationModal({
                       setForm(f => ({ ...f, birthdate: `${y}-${m || '01'}-${d || '01'}` }));
                     }}
                   >
-                    <SelectTrigger><SelectValue placeholder="Ano" /></SelectTrigger>
+                    <SelectTrigger aria-label="Selecionar ano do nascimento"><SelectValue placeholder="Ano" /></SelectTrigger>
                     <SelectContent>
                       {Array.from({ length: 80 }, (_, i) => String(new Date().getFullYear() - i)).map(y => (
                         <SelectItem key={y} value={y}>{y}</SelectItem>
@@ -707,7 +921,9 @@ export default function ReservationModal({
               <div>
                 <Label className="text-sm font-medium">Ocasião</Label>
                 <Select value={form.occasion} onValueChange={v => setForm(f => ({ ...f, occasion: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                  <SelectTrigger id="public-reservation-occasion-trigger" aria-label="Selecionar ocasiao da reserva">
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
                   <SelectContent>
                     {OCCASIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                   </SelectContent>
@@ -715,7 +931,7 @@ export default function ReservationModal({
               </div>
               <div>
                 <Label className="text-sm font-medium">Observação</Label>
-                <Textarea value={form.observation} onChange={e => setForm(f => ({ ...f, observation: e.target.value }))}
+                <Textarea id="public-reservation-observation" name="notes" value={form.observation} onChange={e => setForm(f => ({ ...f, observation: e.target.value }))}
                   placeholder="Alguma observação especial?" maxLength={500} rows={3} />
               </div>
             </div>
@@ -727,7 +943,7 @@ export default function ReservationModal({
               </button>
             </p>
 
-            <Button type="submit" className="w-full py-5 text-base rounded-xl" disabled={submitting}>
+            <Button type="submit" className="w-full text-base rounded-md" disabled={submitting}>
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Confirmar Reserva
             </Button>
@@ -736,9 +952,9 @@ export default function ReservationModal({
 
         {/* Step 4: Success */}
         {step === 4 && confirmedReservation && (
-          <div className="space-y-6 pt-4 text-center">
-            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-              <Check className="h-8 w-8 text-primary" />
+          <div className="animate-fade-in space-y-6 pt-4 text-center">
+            <div className="mx-auto w-16 h-16 rounded-full bg-success/10 flex items-center justify-center">
+              <Check className="h-8 w-8 text-success" />
             </div>
 
             <div className="space-y-1">
@@ -756,6 +972,17 @@ export default function ReservationModal({
                   <span className="text-muted-foreground">Código</span>
                   <button onClick={copyReservationCode} className="flex items-center gap-1.5 font-mono font-bold text-primary hover:text-primary/80">
                     {confirmedReservation.id.substring(0, 8).toUpperCase()}
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex justify-between gap-4 text-sm">
+                  <span className="text-muted-foreground">Acompanhamento</span>
+                  <button
+                    type="button"
+                    onClick={copyTrackingLink}
+                    className="flex items-center gap-1.5 font-medium text-primary hover:text-primary/80"
+                  >
+                    Copiar link
                     <Copy className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -783,13 +1010,19 @@ export default function ReservationModal({
             </Card>
 
             <div className="space-y-2">
+              <a href={confirmedReservation.trackingUrl} target="_blank" rel="noopener noreferrer">
+                <Button className="w-full gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Acompanhar reserva
+                </Button>
+              </a>
               <a href={addToCalendarUrl()} target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" className="w-full gap-2">
                   <CalendarPlus className="h-4 w-4" />
                   Adicionar ao Google Calendar
                 </Button>
               </a>
-              <Button className="w-full" onClick={() => handleClose(false)}>
+              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => handleClose(false)}>
                 Fechar
               </Button>
             </div>

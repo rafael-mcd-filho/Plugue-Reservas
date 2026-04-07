@@ -1,31 +1,17 @@
-import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Bot, Webhook } from 'lucide-react';
 import AutomationsTab from '@/components/company/AutomationsTab';
 import WebhooksTab from '@/components/company/WebhooksTab';
-import type { Company } from '@/hooks/useCompanies';
+import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
+import { useCompanySlug } from '@/contexts/CompanySlugContext';
 
 export default function CompanyAutomations() {
-  const { slug } = useParams<{ slug: string }>();
+  const { companyId, companyName } = useCompanySlug();
+  const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(companyId);
+  const whatsappEnabled = featureFlags?.features.whatsapp_integration ?? false;
 
-  const { data: company, isLoading } = useQuery({
-    queryKey: ['company-automations', slug],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies' as any)
-        .select('*')
-        .eq('slug', slug!)
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as Company | null;
-    },
-    enabled: !!slug,
-  });
-
-  if (isLoading) {
+  if (featureFlagsLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-64" />
@@ -37,22 +23,33 @@ export default function CompanyAutomations() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Automações</h1>
-        <p className="text-muted-foreground mt-1">Integrações e automações da unidade {company?.name}</p>
+        <h1 className="text-xl font-semibold tracking-tight">Automações</h1>
+        <p className="mt-1 text-muted-foreground">Integrações e automações da unidade {companyName}</p>
       </div>
 
-      <Tabs defaultValue="automations" className="space-y-6">
+      <Tabs defaultValue={whatsappEnabled ? 'automations' : 'webhooks'} className="space-y-6">
         <TabsList>
-          <TabsTrigger value="automations" className="gap-2"><Bot className="h-4 w-4" /> Automações</TabsTrigger>
-          <TabsTrigger value="webhooks" className="gap-2"><Webhook className="h-4 w-4" /> Webhooks</TabsTrigger>
+          <TabsTrigger value="automations" className="gap-2">
+            <Bot className="h-4 w-4" /> Automações
+          </TabsTrigger>
+          <TabsTrigger value="webhooks" className="gap-2">
+            <Webhook className="h-4 w-4" /> Webhooks
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="automations">
-          {company && <AutomationsTab companyId={company.id} />}
+          {whatsappEnabled ? (
+            <AutomationsTab companyId={companyId} />
+          ) : (
+            <div className="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm text-warning">
+              A integração com WhatsApp está desabilitada para esta empresa. Libere a feature no perfil da empresa para
+              ativar conexão, automações e histórico de mensagens.
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="webhooks">
-          {company && <WebhooksTab companyId={company.id} />}
+          <WebhooksTab companyId={companyId} />
         </TabsContent>
       </Tabs>
     </div>

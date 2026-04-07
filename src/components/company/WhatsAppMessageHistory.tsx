@@ -307,7 +307,9 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
                 onClick={async () => {
                   setProcessing(true);
                   try {
-                    const { error } = await supabase.functions.invoke('process-message-queue');
+                    const { error } = await supabase.functions.invoke('process-message-queue', {
+                      body: { company_id: companyId },
+                    });
                     if (error) throw error;
                     toast.success('Fila processada!');
                     qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });

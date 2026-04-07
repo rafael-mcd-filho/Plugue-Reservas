@@ -1,197 +1,224 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  assertUserCanAccessCompany,
+  createSupabaseAdminClient,
+  isAuthorizedInternalJob,
+} from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
-function formatPhoneForWhatsApp(phone: string): string {
-  let digits = phone.replace(/\D/g, '');
-  if (!digits.startsWith('55') && digits.length <= 11) {
-    digits = '55' + digits;
+function formatPhoneForWhatsApp(phone: string) {
+  let digits = phone.replace(/\D/g, "");
+  if (!digits.startsWith("55") && digits.length <= 11) {
+    digits = `55${digits}`;
   }
   return digits;
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    const body = await req.json().catch(() => ({}));
+    const requestedCompanyId = typeof body.company_id === "string" ? body.company_id : null;
+    const internalJob = isAuthorizedInternalJob(req);
 
-    // Simple lock: check if there's a message currently being processed (last_attempt_at within last 3 min and status pending)
+    if (!internalJob) {
+      if (!requestedCompanyId) {
+        return new Response(JSON.stringify({ error: "company_id e obrigatorio" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      await assertUserCanAccessCompany(req, requestedCompanyId, ["superadmin", "admin", "operator"]);
+    }
+
+    const supabaseAdmin = createSupabaseAdminClient();
+
     const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    const { data: processing } = await supabaseAdmin
-      .from('whatsapp_message_queue')
-      .select('id')
-      .eq('status', 'pending')
-      .gte('last_attempt_at', threeMinAgo)
+    const processingQuery = supabaseAdmin
+      .from("whatsapp_message_queue")
+      .select("id")
+      .eq("status", "pending")
+      .gte("last_attempt_at", threeMinAgo)
       .limit(1);
 
+    const { data: processing } = requestedCompanyId
+      ? await processingQuery.eq("company_id", requestedCompanyId)
+      : await processingQuery;
+
     if (processing && processing.length > 0) {
-      console.log('Another process appears to be running, skipping');
-      return new Response(JSON.stringify({ skipped: true, reason: 'another_process_running' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ skipped: true, reason: "another_process_running" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Get Evolution API settings
     const { data: settings } = await supabaseAdmin
-      .from('system_settings')
-      .select('key, value')
-      .in('key', ['evolution_api_url', 'evolution_api_token']);
+      .from("system_settings")
+      .select("key, value")
+      .in("key", ["evolution_api_url", "evolution_api_token"]);
 
-    const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
-    const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
+    const evolutionUrl = settings?.find((setting: any) => setting.key === "evolution_api_url")?.value?.replace(/\/+$/, "");
+    const evolutionToken = settings?.find((setting: any) => setting.key === "evolution_api_token")?.value;
 
     if (!evolutionUrl || !evolutionToken) {
-      return new Response(JSON.stringify({ skipped: true, reason: 'Evolution API not configured' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ skipped: true, reason: "Evolution API not configured" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Get all connected whatsapp instances
-    const { data: instances } = await supabaseAdmin
-      .from('company_whatsapp_instances')
-      .select('company_id, instance_name, status')
-      .eq('status', 'connected');
+    const instancesQuery = supabaseAdmin
+      .from("company_whatsapp_instances")
+      .select("company_id, instance_name, status")
+      .eq("status", "connected");
+
+    const { data: instances } = requestedCompanyId
+      ? await instancesQuery.eq("company_id", requestedCompanyId)
+      : await instancesQuery;
 
     if (!instances || instances.length === 0) {
-      console.log('No connected instances, nothing to process');
-      return new Response(JSON.stringify({ processed: 0, reason: 'no_connected_instances' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ processed: 0, reason: "no_connected_instances" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const connectedCompanyIds = instances.map(i => i.company_id);
-    const instanceMap = new Map(instances.map(i => [i.company_id, i.instance_name]));
+    const connectedCompanyIds = instances.map((instance) => instance.company_id);
+    const instanceMap = new Map(instances.map((instance) => [instance.company_id, instance.instance_name]));
 
-    // Expire old messages first
     await supabaseAdmin
-      .from('whatsapp_message_queue')
-      .update({ status: 'failed', error_details: 'Expired after 2 hours' })
-      .eq('status', 'pending')
-      .lt('expires_at', new Date().toISOString());
+      .from("whatsapp_message_queue")
+      .update({ status: "failed", error_details: "Expired after 2 hours" })
+      .eq("status", "pending")
+      .lt("expires_at", new Date().toISOString())
+      .in("company_id", connectedCompanyIds);
 
-    // Get pending messages for connected companies that haven't expired
-    const { data: pendingMessages } = await supabaseAdmin
-      .from('whatsapp_message_queue')
-      .select('*')
-      .in('company_id', connectedCompanyIds)
-      .eq('status', 'pending')
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: true })
+    const queueQuery = supabaseAdmin
+      .from("whatsapp_message_queue")
+      .select("*")
+      .in("company_id", connectedCompanyIds)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true })
       .limit(10);
+
+    const { data: pendingMessages } = await queueQuery;
 
     if (!pendingMessages || pendingMessages.length === 0) {
       return new Response(JSON.stringify({ processed: 0 }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     let sent = 0;
     let failed = 0;
 
-    for (const msg of pendingMessages) {
-      const instanceName = instanceMap.get(msg.company_id);
+    for (const message of pendingMessages) {
+      const instanceName = instanceMap.get(message.company_id);
       if (!instanceName) continue;
 
-      // Mark as being processed (lock)
-      await supabaseAdmin.from('whatsapp_message_queue').update({
-        last_attempt_at: new Date().toISOString(),
-      }).eq('id', msg.id);
+      await supabaseAdmin
+        .from("whatsapp_message_queue")
+        .update({ last_attempt_at: new Date().toISOString() })
+        .eq("id", message.id);
 
-      // Dedup: check if this exact message was already sent recently
-      if (msg.reservation_id) {
+      if (message.reservation_id) {
         const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const { data: alreadySent } = await supabaseAdmin
-          .from('whatsapp_message_logs')
-          .select('id')
-          .eq('company_id', msg.company_id)
-          .eq('reservation_id', msg.reservation_id)
-          .eq('type', msg.type)
-          .eq('status', 'sent')
-          .gte('created_at', fiveMinAgo)
+          .from("whatsapp_message_logs")
+          .select("id")
+          .eq("company_id", message.company_id)
+          .eq("reservation_id", message.reservation_id)
+          .eq("type", message.type)
+          .eq("status", "sent")
+          .gte("created_at", fiveMinAgo)
           .limit(1);
 
         if (alreadySent && alreadySent.length > 0) {
-          console.log(`Skipping duplicate queue message ${msg.id}`);
-          await supabaseAdmin.from('whatsapp_message_queue').update({ status: 'sent', error_details: 'Skipped: already sent' }).eq('id', msg.id);
+          await supabaseAdmin
+            .from("whatsapp_message_queue")
+            .update({ status: "sent", error_details: "Skipped: already sent" })
+            .eq("id", message.id);
           continue;
         }
       }
 
-      // Random delay between 40 seconds and 2 minutes (only between messages, not the first)
-      if (sent > 0) {
-        const delayMs = Math.floor(Math.random() * (120000 - 40000 + 1)) + 40000;
-        console.log(`Waiting ${Math.round(delayMs/1000)}s before next message...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
-
       try {
         const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-          body: JSON.stringify({ number: msg.phone, text: msg.message }),
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: evolutionToken },
+          body: JSON.stringify({ number: formatPhoneForWhatsApp(message.phone), text: message.message }),
         });
 
-        const data = await res.json();
+        const responseData = await res.json();
 
         if (res.ok) {
-          // Mark as sent
-          await supabaseAdmin.from('whatsapp_message_queue').update({
-            status: 'sent',
-            last_attempt_at: new Date().toISOString(),
-            attempts: msg.attempts + 1,
-          }).eq('id', msg.id);
+          await supabaseAdmin
+            .from("whatsapp_message_queue")
+            .update({
+              status: "sent",
+              last_attempt_at: new Date().toISOString(),
+              attempts: message.attempts + 1,
+            })
+            .eq("id", message.id);
 
-          // Log success
-          await supabaseAdmin.from('whatsapp_message_logs').insert({
-            company_id: msg.company_id,
-            reservation_id: msg.reservation_id,
-            phone: msg.phone,
-            message: msg.message,
-            type: msg.type,
-            status: 'sent',
+          await supabaseAdmin.from("whatsapp_message_logs").insert({
+            company_id: message.company_id,
+            reservation_id: message.reservation_id,
+            phone: message.phone,
+            message: message.message,
+            type: message.type,
+            status: "sent",
           });
 
           sent++;
-          console.log(`Queue message sent: ${msg.id}`);
         } else {
-          const newAttempts = msg.attempts + 1;
-          await supabaseAdmin.from('whatsapp_message_queue').update({
-            attempts: newAttempts,
-            last_attempt_at: new Date().toISOString(),
-            error_details: JSON.stringify(data),
-            status: newAttempts >= msg.max_attempts ? 'failed' : 'pending',
-          }).eq('id', msg.id);
+          const nextAttempts = message.attempts + 1;
+          await supabaseAdmin
+            .from("whatsapp_message_queue")
+            .update({
+              attempts: nextAttempts,
+              last_attempt_at: new Date().toISOString(),
+              error_details: JSON.stringify(responseData),
+              status: nextAttempts >= message.max_attempts ? "failed" : "pending",
+            })
+            .eq("id", message.id);
           failed++;
         }
-      } catch (err) {
-        const newAttempts = msg.attempts + 1;
-        await supabaseAdmin.from('whatsapp_message_queue').update({
-          attempts: newAttempts,
-          last_attempt_at: new Date().toISOString(),
-          error_details: String(err),
-          status: newAttempts >= msg.max_attempts ? 'failed' : 'pending',
-        }).eq('id', msg.id);
+      } catch (error) {
+        const nextAttempts = message.attempts + 1;
+        await supabaseAdmin
+          .from("whatsapp_message_queue")
+          .update({
+            attempts: nextAttempts,
+            last_attempt_at: new Date().toISOString(),
+            error_details: String(error),
+            status: nextAttempts >= message.max_attempts ? "failed" : "pending",
+          })
+          .eq("id", message.id);
         failed++;
       }
     }
 
     return new Response(JSON.stringify({ processed: pendingMessages.length, sent, failed }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (error: unknown) {
-    console.error('process-message-queue error:', error);
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message || "Erro interno" }), {
+      status: error.message === "Nao autorizado"
+        ? 401
+        : error.message === "Sem permissao para esta empresa"
+          ? 403
+          : 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
