@@ -52,9 +52,10 @@ import {
   normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
+import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
+import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
 
-type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
 type CalendarRangeMode = 'future' | 'past';
 
 interface Reservation {
@@ -85,13 +86,6 @@ interface ReservationCompanionForm {
   phone: string;
   email: string;
   birthdate: string;
-}
-
-function normalizeReservationStatus(status: string | null | undefined): ReservationStatus {
-  if (status === 'completed') return 'checked_in';
-  if (status === 'no_show') return 'no-show';
-  if (status === 'checked_in' || status === 'cancelled' || status === 'no-show') return status;
-  return 'confirmed';
 }
 
 function createCompanionForm(values?: Partial<ReservationCompanionForm>): ReservationCompanionForm {
@@ -128,17 +122,7 @@ function normalizePhone(phone: string | null | undefined) {
 }
 
 function formatReservationStatusLabel(status: ReservationStatus) {
-  switch (status) {
-    case 'checked_in':
-    case 'completed':
-      return 'Check-in realizado';
-    case 'cancelled':
-      return 'Cancelada';
-    case 'no-show':
-      return 'Nao compareceu';
-    default:
-      return 'Confirmada';
-  }
+  return getReservationStatusLabel(status);
 }
 
 function getNextHalfHourDate() {
@@ -594,9 +578,7 @@ export default function Reservations() {
 
     return days.map((day) => {
       const dateString = format(day, 'yyyy-MM-dd');
-      const dayReservations = (reservationsByDate.get(dateString) ?? []).filter(
-        (reservation) => reservation.status !== 'cancelled',
-      );
+      const dayReservations = reservationsByDate.get(dateString) ?? [];
 
       return {
         date: day,

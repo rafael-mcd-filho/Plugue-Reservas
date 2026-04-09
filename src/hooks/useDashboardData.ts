@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { differenceInCalendarDays, differenceInDays, eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -14,7 +15,6 @@ export interface DailyStats {
   scheduledCompleted: number;
   waitlistCompleted: number;
   confirmed: number;
-  pending: number;
   cancellations: number;
   noShows: number;
 }
@@ -67,12 +67,6 @@ export interface HeatmapCellBreakdown {
   total: number;
   scheduled: number;
   waitlist: number;
-}
-
-function normalizeReservationStatus(status: string | null | undefined) {
-  if (status === 'no_show') return 'no-show';
-  if (status === 'checked_in' || status === 'completed') return 'completed';
-  return status || 'confirmed';
 }
 
 function normalizeReservationSource(source: string | null | undefined) {
@@ -233,7 +227,6 @@ export function useDashboardData(
           scheduledCompleted: 0,
           waitlistCompleted: 0,
           confirmed: 0,
-          pending: 0,
           cancellations: 0,
           noShows: 0,
         };
@@ -247,7 +240,7 @@ export function useDashboardData(
         dayStats.scheduledReservations += 1;
       }
 
-      if (normalizedStatus === 'completed') {
+      if (normalizedStatus === 'checked_in') {
         dayStats.completed += 1;
         if (normalizedSource === 'waitlist') {
           dayStats.waitlistCompleted += 1;
@@ -256,7 +249,6 @@ export function useDashboardData(
         }
       } else if (normalizedSource === 'reservation') {
         if (normalizedStatus === 'confirmed') dayStats.confirmed += 1;
-        else if (normalizedStatus === 'pending') dayStats.pending += 1;
         else if (normalizedStatus === 'cancelled') dayStats.cancellations += 1;
         else if (normalizedStatus === 'no-show') dayStats.noShows += 1;
       }
@@ -272,7 +264,6 @@ export function useDashboardData(
         scheduledCompleted: 0,
         waitlistCompleted: 0,
         confirmed: 0,
-        pending: 0,
         cancellations: 0,
         noShows: 0,
       };
@@ -295,7 +286,6 @@ export function useDashboardData(
         scheduledCompleted: acc.scheduledCompleted + day.scheduledCompleted,
         waitlistCompleted: acc.waitlistCompleted + day.waitlistCompleted,
         confirmed: acc.confirmed + day.confirmed,
-        pending: acc.pending + day.pending,
         cancellations: acc.cancellations + day.cancellations,
         noShows: acc.noShows + day.noShows,
       }),
@@ -307,7 +297,6 @@ export function useDashboardData(
         scheduledCompleted: 0,
         waitlistCompleted: 0,
         confirmed: 0,
-        pending: 0,
         cancellations: 0,
         noShows: 0,
       },
@@ -326,7 +315,6 @@ export function useDashboardData(
       scheduledCompleted: 0,
       waitlistCompleted: 0,
       confirmed: 0,
-      pending: 0,
       cancellations: 0,
       noShows: 0,
       totalGuests: 0,
@@ -343,7 +331,7 @@ export function useDashboardData(
         acc.scheduledReservations++;
       }
 
-      if (normalizedStatus === 'completed') {
+      if (normalizedStatus === 'checked_in') {
         acc.completed++;
         if (normalizedSource === 'waitlist') {
           acc.waitlistCompleted++;
@@ -352,7 +340,6 @@ export function useDashboardData(
         }
       } else if (normalizedSource === 'reservation') {
         if (normalizedStatus === 'confirmed') acc.confirmed++;
-        else if (normalizedStatus === 'pending') acc.pending++;
         else if (normalizedStatus === 'cancelled') acc.cancellations++;
         else if (normalizedStatus === 'no-show') acc.noShows++;
       }

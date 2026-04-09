@@ -19,7 +19,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { isValidCompanySlug } from '@/lib/validation';
+import type { ReservationStatus } from '@/types/restaurant';
 
 interface ReservationEntry {
   id: string;
@@ -43,7 +45,7 @@ interface CancelReservationResult {
   cancelled: boolean;
 }
 
-const statusMessages: Record<string, { icon: typeof CheckCircle2; title: string; description: string; color: string }> = {
+const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon: typeof CheckCircle2; title: string; description: string; color: string }> = {
   confirmed: {
     icon: CheckCircle2,
     title: 'Reserva confirmada',
@@ -202,9 +204,10 @@ export default function ReservationTracking() {
     );
   }
 
-  const status = statusMessages[entry.status] || statusMessages.confirmed;
+  const normalizedStatus = normalizeReservationStatus(entry.status);
+  const status = statusMessages[normalizedStatus] || statusMessages.confirmed;
   const StatusIcon = status.icon;
-  const canCancel = entry.status === 'confirmed';
+  const canCancel = normalizedStatus === 'confirmed';
 
   return (
     <>
@@ -221,13 +224,13 @@ export default function ReservationTracking() {
           <Card className="overflow-hidden border border-border shadow-sm">
             <div
               className={`h-1.5 ${
-                entry.status === 'cancelled'
+                normalizedStatus === 'cancelled'
                   ? 'bg-destructive'
-                  : entry.status === 'confirmed'
+                  : normalizedStatus === 'confirmed'
                     ? 'bg-primary'
-                    : entry.status === 'checked_in' || entry.status === 'completed'
+                    : normalizedStatus === 'checked_in'
                       ? 'bg-info'
-                      : 'bg-success'
+                      : 'bg-muted-foreground/30'
               }`}
             />
             <CardContent className="space-y-4 p-6 text-center">

@@ -35,6 +35,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 import { formatBrazilPhone } from '@/lib/validation';
 import { toast } from 'sonner';
@@ -256,15 +257,11 @@ function compareReservationDateTime(
 }
 
 function normalizeVisitStatus(status: string) {
-  if (status === 'completed') {
-    return 'checked_in';
+  if (status === 'seated') {
+    return 'seated';
   }
 
-  if (status === 'no_show') {
-    return 'no-show';
-  }
-
-  return status;
+  return normalizeReservationStatus(status);
 }
 
 function formatLeadState(lead: Pick<Lead, 'stateCode' | 'stateName'>) {
@@ -299,6 +296,13 @@ function getLeadSourceFromVisits(visits: LeadVisitRecord[]): LeadSource {
 }
 
 function formatReservationStatus(status: string) {
+  const normalizedStatus = normalizeVisitStatus(status);
+  if (normalizedStatus === 'seated') {
+    return 'Sentado';
+  }
+
+  return getReservationStatusLabel(normalizedStatus);
+
   switch (normalizeVisitStatus(status)) {
     case 'confirmed':
       return 'Confirmada';

@@ -1,13 +1,12 @@
+import { getReservationStatusLabel, normalizeReservationStatus, type ReservationStatusInput } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
-import { ReservationStatus, TableStatus } from '@/types/restaurant';
+import type { ReservationStatus, TableStatus } from '@/types/restaurant';
 
-const reservationStatusConfig: Record<string, { label: string; className: string }> = {
-  confirmed: { label: 'Confirmada', className: 'bg-primary-soft text-primary border-primary/20' },
-  checked_in: { label: 'Check-in realizado', className: 'bg-info-soft text-info border-info/20' },
-  cancelled: { label: 'Cancelada', className: 'bg-destructive-soft text-destructive border-destructive/20' },
-  completed: { label: 'Check-in realizado', className: 'bg-info-soft text-info border-info/20' },
-  'no-show': { label: 'Não compareceu', className: 'bg-destructive-soft text-destructive border-destructive/20' },
-  no_show: { label: 'Não compareceu', className: 'bg-destructive-soft text-destructive border-destructive/20' },
+const reservationStatusConfig: Record<ReservationStatus, { className: string }> = {
+  confirmed: { className: 'bg-primary-soft text-primary border-primary/20' },
+  checked_in: { className: 'bg-info-soft text-info border-info/20' },
+  cancelled: { className: 'bg-destructive-soft text-destructive border-destructive/20' },
+  'no-show': { className: 'bg-destructive-soft text-destructive border-destructive/20' },
 };
 
 const reservationSourceConfig: Record<string, { label: string; className: string }> = {
@@ -16,17 +15,19 @@ const reservationSourceConfig: Record<string, { label: string; className: string
 };
 
 const tableStatusConfig: Record<TableStatus, { label: string; className: string }> = {
-  available: { label: 'Disponível', className: 'bg-success-soft text-success border-success/20' },
+  available: { label: 'Disponivel', className: 'bg-success-soft text-success border-success/20' },
   occupied: { label: 'Ocupada', className: 'bg-info-soft text-info border-info/20' },
   reserved: { label: 'Reservada', className: 'bg-primary-soft text-primary border-primary/20' },
-  maintenance: { label: 'Manutenção', className: 'bg-muted text-muted-foreground border-border' },
+  maintenance: { label: 'Manutencao', className: 'bg-muted text-muted-foreground border-border' },
 };
 
-export function ReservationStatusBadge({ status }: { status: ReservationStatus | 'no_show' }) {
-  const config = reservationStatusConfig[status] ?? reservationStatusConfig.confirmed;
+export function ReservationStatusBadge({ status }: { status: ReservationStatusInput }) {
+  const normalizedStatus = normalizeReservationStatus(status);
+  const config = reservationStatusConfig[normalizedStatus];
+
   return (
     <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', config.className)}>
-      {config.label}
+      {getReservationStatusLabel(normalizedStatus)}
     </span>
   );
 }

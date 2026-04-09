@@ -13,10 +13,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
+import type { ReservationStatus } from '@/types/restaurant';
 import { formatBrazilPhone } from '@/lib/validation';
-
-type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
 
 interface Reservation {
   id: string;
@@ -36,13 +36,6 @@ interface Reservation {
   checked_in_party_size: number | null;
   created_at: string;
   updated_at: string;
-}
-
-function normalizeReservationStatus(status: string | null | undefined): ReservationStatus {
-  if (status === 'completed') return 'checked_in';
-  if (status === 'no_show') return 'no-show';
-  if (status === 'checked_in' || status === 'cancelled' || status === 'no-show') return status;
-  return 'confirmed';
 }
 
 function normalizeReservationRecord(reservation: Reservation) {

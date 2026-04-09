@@ -34,8 +34,8 @@ import {
   normalizeEmail,
 } from '@/lib/validation';
 import { cn } from '@/lib/utils';
-
-type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
+import type { ReservationStatus } from '@/types/restaurant';
 
 interface Reservation {
   id: string;
@@ -66,13 +66,6 @@ interface ReservationEditForm {
   party_size: string;
   occasion: string;
   notes: string;
-}
-
-function normalizeReservationStatus(status: string | null | undefined): ReservationStatus {
-  if (status === 'completed') return 'checked_in';
-  if (status === 'no_show') return 'no-show';
-  if (status === 'checked_in' || status === 'cancelled' || status === 'no-show') return status;
-  return 'confirmed';
 }
 
 function normalizeReservationRecord(reservation: Reservation) {
