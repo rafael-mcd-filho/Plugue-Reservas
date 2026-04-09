@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, eachDayOfInterval, format, isToday, parseISO, startOfDay } from 'date-fns';
+import { addDays, eachDayOfInterval, format, isToday, parseISO, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   CalendarIcon,
@@ -55,6 +55,7 @@ import {
 import type { DateRange } from 'react-day-picker';
 
 type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
+type CalendarRangeMode = 'future' | 'past';
 
 interface Reservation {
   id: string;
@@ -174,10 +175,12 @@ export default function Reservations() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [detailsDialog, setDetailsDialog] = useState(false);
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
+  const [detailsReturnDay, setDetailsReturnDay] = useState<string | null>(null);
   const [editStatus, setEditStatus] = useState<ReservationStatus>('confirmed');
   const [checkedInPartySize, setCheckedInPartySize] = useState('1');
   const [companionForms, setCompanionForms] = useState<ReservationCompanionForm[]>([]);
@@ -211,34 +214,6 @@ export default function Reservations() {
     },
     enabled: !!companyId,
     refetchInterval: 30000,
-  });
-
-  const { data: tables = [] } = useQuery({
-    queryKey: ['tables-for-reservations', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('restaurant_tables' as any)
-        .select('id, number, table_map_id')
-        .eq('company_id', companyId);
-
-      if (error) throw error;
-      return data as any[];
-    },
-    enabled: !!companyId,
-  });
-
-  const { data: tableMaps = [] } = useQuery({
-    queryKey: ['table-maps-for-reservations', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('table_maps' as any)
-        .select('id, name')
-        .eq('company_id', companyId);
-
-      if (error) throw error;
-      return data as any[];
-    },
-    enabled: !!companyId,
   });
 
   const { data: reservationSettings } = useQuery({
@@ -316,28 +291,6 @@ export default function Reservations() {
     },
     enabled: !!companyId && exportDialogOpen,
   });
-
-  const tableMapNameMap = useMemo(
-    () => new Map(tableMaps.map((tableMap: any) => [tableMap.id, tableMap.name])),
-    [tableMaps],
-  );
-
-  const tableLabelMap = useMemo(
-    () =>
-      new Map(
-        tables.map((table: any) => {
-          const mapName = table.table_map_id ? tableMapNameMap.get(table.table_map_id) : null;
-          const label = mapName ? `Mesa ${table.number} - ${mapName}` : `Mesa ${table.number}`;
-          return [table.id, label];
-        }),
-      ),
-    [tableMapNameMap, tables],
-  );
-
-  const getReservationTableLabel = (reservation: Reservation) => {
-    if (!reservation.table_id) return '-';
-    return tableLabelMap.get(reservation.table_id) ?? 'Mesa ?';
-  };
 
   const reservationsByDate = useMemo(() => {
     const map = new Map<string, Reservation[]>();
@@ -631,10 +584,13 @@ export default function Reservations() {
     };
   }, [exportedReservations]);
 
-  const upcomingDays = useMemo(() => {
+  const calendarDays = useMemo(() => {
     const today = startOfDay(new Date());
-    const rangeEnd = addDays(today, 14);
-    const days = eachDayOfInterval({ start: today, end: rangeEnd });
+    const range =
+      calendarRangeMode === 'future'
+        ? { start: today, end: addDays(today, 14) }
+        : { start: subDays(today, 14), end: today };
+    const days = eachDayOfInterval(range);
 
     return days.map((day) => {
       const dateString = format(day, 'yyyy-MM-dd');
@@ -649,7 +605,7 @@ export default function Reservations() {
         totalGuests: dayReservations.reduce((sum, reservation) => sum + reservation.party_size, 0),
       };
     });
-  }, [reservationsByDate]);
+  }, [calendarRangeMode, reservationsByDate]);
 
   const dayModalReservations = useMemo(() => {
     if (!dayModal) return [];
@@ -672,9 +628,21 @@ export default function Reservations() {
     setEditDialog(true);
   };
 
-  const openDetails = (reservation: Reservation) => {
+  const openDetails = (reservation: Reservation, options?: { returnDay?: string | null }) => {
     setDetailsReservation(reservation);
+    setDetailsReturnDay(options?.returnDay ?? null);
     setDetailsDialog(true);
+  };
+
+  const closeDetails = (options?: { returnToDay?: boolean }) => {
+    const returnDay = options?.returnToDay ? detailsReturnDay : null;
+    setDetailsDialog(false);
+    setDetailsReservation(null);
+    setDetailsReturnDay(null);
+
+    if (returnDay) {
+      setDayModal(returnDay);
+    }
   };
 
   const clearDateFilters = () => {
@@ -708,7 +676,6 @@ export default function Reservations() {
         format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy'),
         reservation.time.slice(0, 5),
         reservation.party_size,
-        getReservationTableLabel(reservation),
         reservation.occasion ?? '',
         formatReservationStatusLabel(reservation.status),
         format(new Date(reservation.created_at), 'dd/MM/yyyy HH:mm'),
@@ -729,7 +696,6 @@ export default function Reservations() {
         'Data da reserva',
         'Horario',
         'Pessoas',
-        'Mesa',
         'Ocasiao',
         'Status',
         'Criada em',
@@ -887,12 +853,33 @@ export default function Reservations() {
         </TabsList>
 
         <TabsContent value="calendar" className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Proximos 15 dias
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {calendarRangeMode === 'future' ? 'Proximos 15 dias' : 'Ultimos 15 dias'}
+            </p>
+
+            <div className="inline-flex w-full rounded-xl border border-border bg-card p-1 sm:w-auto">
+              <Button
+                type="button"
+                variant={calendarRangeMode === 'future' ? 'default' : 'ghost'}
+                className="flex-1 rounded-lg px-4 sm:flex-none"
+                onClick={() => setCalendarRangeMode('future')}
+              >
+                Proximos 15 dias
+              </Button>
+              <Button
+                type="button"
+                variant={calendarRangeMode === 'past' ? 'default' : 'ghost'}
+                className="flex-1 rounded-lg px-4 sm:flex-none"
+                onClick={() => setCalendarRangeMode('past')}
+              >
+                Ultimos 15 dias
+              </Button>
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7">
-            {upcomingDays.map((day) => (
+            {calendarDays.map((day) => (
               <button
                 key={day.dateString}
                 onClick={() => setDayModal(day.dateString)}
@@ -1035,9 +1022,6 @@ export default function Reservations() {
                   <TableHead className="hidden h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:table-cell">
                     Pessoas
                   </TableHead>
-                  <TableHead className="hidden h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground md:table-cell">
-                    Mesa
-                  </TableHead>
                   <TableHead className="hidden h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:table-cell">
                     Ocasião
                   </TableHead>
@@ -1053,7 +1037,7 @@ export default function Reservations() {
               <TableBody>
                 {filteredReservations.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="py-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={6} className="py-16 text-center text-sm text-muted-foreground">
                       Nenhuma reserva encontrada.
                     </TableCell>
                   </TableRow>
@@ -1092,10 +1076,6 @@ export default function Reservations() {
 
                         <TableCell className="hidden px-4 py-4 font-medium text-foreground sm:table-cell">
                           {reservation.party_size}
-                        </TableCell>
-
-                        <TableCell className="hidden px-4 py-4 text-sm text-muted-foreground md:table-cell">
-                          {getReservationTableLabel(reservation)}
                         </TableCell>
 
                         <TableCell className="hidden px-4 py-4 text-sm text-muted-foreground lg:table-cell">
@@ -1355,18 +1335,16 @@ export default function Reservations() {
       <ReservationDetailsDialog
         open={detailsDialog}
         onOpenChange={(open) => {
-          setDetailsDialog(open);
-          if (!open) setDetailsReservation(null);
+          if (open) {
+            setDetailsDialog(true);
+            return;
+          }
+
+          closeDetails({ returnToDay: !!detailsReturnDay });
         }}
-        reservation={
-          detailsReservation
-            ? {
-                ...detailsReservation,
-                table_label: getReservationTableLabel(detailsReservation),
-                table_map_name: null,
-              }
-            : null
-        }
+        onBackToList={detailsReturnDay ? () => closeDetails({ returnToDay: true }) : undefined}
+        backLabel={detailsReturnDay ? 'Voltar para as reservas do dia' : undefined}
+        reservation={detailsReservation}
         slug={slug}
       />
 
@@ -1742,9 +1720,9 @@ export default function Reservations() {
       </AlertDialog>
 
       <Dialog open={!!dayModal} onOpenChange={(open) => !open && setDayModal(null)}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[80vh] w-[calc(100vw-2rem)] max-w-3xl overflow-x-hidden overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="pr-10 text-left leading-tight">
               Reservas - {dayModal && format(new Date(`${dayModal}T12:00:00`), "EEEE, dd 'de' MMMM", { locale: ptBR })}
             </DialogTitle>
           </DialogHeader>
@@ -1756,55 +1734,75 @@ export default function Reservations() {
               </p>
             ) : (
               dayModalReservations.map((reservation) => (
-                <div key={reservation.id} className="flex items-center gap-4 rounded-2xl border border-border bg-card p-3">
-                  <div className="min-w-[56px] text-center">
-                    <div className="text-lg font-semibold text-primary">
-                      {reservation.time.slice(0, 5)}
+                <div key={reservation.id} className="rounded-[24px] border border-border bg-card p-4 shadow-sm">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+                    <div className="flex items-center gap-3 lg:w-28 lg:flex-col lg:items-start lg:gap-2">
+                      <div className="inline-flex min-w-[78px] items-center justify-center rounded-2xl bg-primary/10 px-4 py-3 text-xl font-semibold text-primary">
+                        {reservation.time.slice(0, 5)}
+                      </div>
+                      <ReservationStatusBadge status={reservation.status} />
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0">
+                          <div className="break-words text-base font-semibold text-foreground">{reservation.guest_name}</div>
+                          <div className="mt-1 text-sm tabular-nums text-muted-foreground">
+                            {formatBrazilPhone(reservation.guest_phone)}
+                          </div>
+                        </div>
+
+                        {reservation.source && (
+                          <div className="shrink-0">
+                            <ReservationSourceBadge source={reservation.source} />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+                          <Users className="h-3 w-3" />
+                          {reservation.party_size} {reservation.party_size === 1 ? 'pessoa' : 'pessoas'}
+                        </span>
+                        {reservation.occasion && (
+                          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+                            {reservation.occasion}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-foreground">{reservation.guest_name}</div>
-                    <div className="text-xs text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        <Users className="h-3 w-3" />
-                        {reservation.party_size} pessoas
-                      </span>
-                      <span>{getReservationTableLabel(reservation)}</span>
-                      {reservation.occasion && <span>{reservation.occasion}</span>}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <ReservationStatusBadge status={reservation.status} />
+                  <div className="mt-4 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row sm:flex-wrap sm:justify-end">
                     {reservation.status === 'confirmed' && (
                       <Button
                         variant="outline"
-                        className="h-8 rounded-xl px-3 text-xs"
+                        className="h-9 rounded-xl px-4 text-sm"
                         onClick={() => openCheckIn(reservation)}
                       >
                         Realizar check-in
                       </Button>
                     )}
+
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8 rounded-xl"
+                      className="h-9 gap-2 rounded-xl px-4 text-sm"
                       onClick={() => {
                         setDayModal(null);
-                        openDetails(reservation);
+                        openDetails(reservation, { returnDay: dayModal });
                       }}
                     >
-                      <Eye className="h-3.5 w-3.5" />
+                      <Eye className="h-4 w-4" />
+                      Ver reserva
                     </Button>
+
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8 rounded-xl"
+                      className="h-9 gap-2 rounded-xl px-4 text-sm"
                       onClick={() => openEdit(reservation)}
                     >
-                      <Pencil className="h-3.5 w-3.5" />
+                      <Pencil className="h-4 w-4" />
+                      Editar
                     </Button>
                   </div>
                 </div>

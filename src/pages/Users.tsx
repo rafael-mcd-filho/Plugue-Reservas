@@ -38,15 +38,16 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import UserPasswordDialog from '@/components/users/UserPasswordDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUsers, useToggleBan, useUpdateUser, useSetUserPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
+import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 import { useCompanies } from '@/hooks/useCompanies';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
+  getPasswordValidationMessage,
   getPhoneValidationMessage,
   normalizeEmail,
+  PASSWORD_REQUIREMENTS_TEXT,
 } from '@/lib/validation';
 
 const roleLabels: Record<string, string> = {
@@ -65,6 +66,7 @@ export default function Users() {
   const setUserPassword = useSetUserPassword();
   const deleteUser = useDeleteUser();
   const qc = useQueryClient();
+  const { invokeManageUser } = useManageUserInvoker();
 
   const [filterCompany, setFilterCompany] = useState<string>('all');
   const [filterRole, setFilterRole] = useState<string>('all');
@@ -76,7 +78,15 @@ export default function Users() {
   const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
+  const [createForm, setCreateForm] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    company_id: '',
+    role: 'admin',
+    password: '',
+    confirmPassword: '',
+  });
 
   const filtered = users.filter((user) => {
     if (filterCompany !== 'all' && user.company_id !== filterCompany) return false;
@@ -209,23 +219,31 @@ export default function Users() {
       return;
     }
 
+    const passwordError = getPasswordValidationMessage(createForm.password);
+    if (passwordError) {
+      toast.error(passwordError);
+      return;
+    }
+
+    if (createForm.password !== createForm.confirmPassword) {
+      toast.error('As senhas precisam ser iguais.');
+      return;
+    }
+
     setCreating(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'seed_users',
-          users: [{
-            full_name: createForm.full_name,
-            email: normalizeEmail(createForm.email),
-            phone: formatBrazilPhone(createForm.phone) || null,
-            company_id: createForm.company_id,
-            role: createForm.role,
-          }],
-        },
+      const data = await invokeManageUser<{ results?: Array<{ error?: string; warning?: string }> }>({
+        action: 'seed_users',
+        users: [{
+          full_name: createForm.full_name,
+          email: normalizeEmail(createForm.email),
+          phone: formatBrazilPhone(createForm.phone) || null,
+          company_id: createForm.company_id,
+          role: createForm.role,
+          password: createForm.password,
+        }],
       });
-
-      if (error) throw new Error(await getFunctionErrorMessage(error));
       const result = data?.results?.[0];
       if (result?.error) throw new Error(result.error);
 
@@ -246,7 +264,15 @@ export default function Users() {
 
       qc.invalidateQueries({ queryKey: ['managed-users'] });
       setShowCreateDialog(false);
-      setCreateForm({ full_name: '', email: '', phone: '', company_id: '', role: 'admin' });
+      setCreateForm({
+        full_name: '',
+        email: '',
+        phone: '',
+        company_id: '',
+        role: 'admin',
+        password: '',
+        confirmPassword: '',
+      });
     } catch (err: any) {
       toast.error(`Erro: ${err.message}`);
     } finally {
@@ -644,6 +670,33 @@ export default function Users() {
               </Select>
             </div>
             <p className="text-xs text-muted-foreground">Um link unico de acesso será gerado automaticamente.</p>
+            <div>
+              <Label htmlFor="users-create-password">Senha inicial *</Label>
+              <Input
+                id="users-create-password"
+                name="password"
+                type="password"
+                value={createForm.password}
+                onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })}
+                placeholder="Defina a senha de acesso"
+                autoComplete="new-password"
+                required
+              />
+              <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS_TEXT}</p>
+            </div>
+            <div>
+              <Label htmlFor="users-create-confirm-password">Confirmar senha *</Label>
+              <Input
+                id="users-create-confirm-password"
+                name="confirm_password"
+                type="password"
+                value={createForm.confirmPassword}
+                onChange={(event) => setCreateForm({ ...createForm, confirmPassword: event.target.value })}
+                placeholder="Repita a senha"
+                autoComplete="new-password"
+                required
+              />
+            </div>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
               <Button type="submit" disabled={creating}>

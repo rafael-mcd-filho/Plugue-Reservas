@@ -43,7 +43,8 @@ function normalizeFullNameValue(value: unknown) {
 }
 
 function normalizeEmailValue(value: unknown) {
-  return normalizeOptionalText(value);
+  const normalized = normalizeOptionalText(value);
+  return normalized ? normalized.toLowerCase() : null;
 }
 
 function normalizePhoneValue(value: unknown) {
@@ -255,10 +256,12 @@ async function buildAuthUserUpdates(
 
   if (input.email !== undefined) {
     authUpdates.email = input.email;
+    authUpdates.email_confirm = true;
   }
 
   if (input.password !== undefined) {
     authUpdates.password = input.password;
+    authUpdates.email_confirm = true;
   }
 
   if (input.full_name !== undefined) {
@@ -799,6 +802,7 @@ Deno.serve(async (req) => {
 
         const { error: passwordError } = await context.supabaseAdmin.auth.admin.updateUserById(user_id, {
           password: normalizedPassword,
+          email_confirm: true,
         });
         if (passwordError) throw new Error(passwordError.message);
 
@@ -954,6 +958,7 @@ Deno.serve(async (req) => {
         for (const userPayload of seedUsers) {
           const normalizedEmail = normalizeEmailValue(userPayload.email);
           const normalizedPhone = normalizePhoneValue(userPayload.phone);
+          const normalizedPassword = normalizePasswordValue(userPayload.password);
 
           if (!userPayload.company_id) {
             results.push({ email: userPayload.email, error: "company_id e obrigatorio" });
@@ -967,6 +972,11 @@ Deno.serve(async (req) => {
 
           if (normalizedPhone && !isValidBrazilPhone(normalizedPhone)) {
             results.push({ email: normalizedEmail, error: "Informe um telefone valido com DDD" });
+            continue;
+          }
+
+          if (normalizedPassword && !isStrongPassword(normalizedPassword)) {
+            results.push({ email: normalizedEmail, error: PASSWORD_REQUIREMENTS_ERROR });
             continue;
           }
 
@@ -988,9 +998,10 @@ Deno.serve(async (req) => {
           }
 
           const tempPassword = crypto.randomUUID().slice(0, 12) + "Aa1!";
+          const initialPassword = normalizedPassword ?? tempPassword;
           const { data: newUser, error: userError } = await context.supabaseAdmin.auth.admin.createUser({
             email: normalizedEmail,
-            password: tempPassword,
+            password: initialPassword,
             email_confirm: true,
             user_metadata: { full_name: userPayload.full_name },
           });
@@ -1056,10 +1067,12 @@ Deno.serve(async (req) => {
           let accessLink: string | null = null;
           let warning: string | null = null;
 
-          try {
-            accessLink = await generateRecoveryAccessLink(context.supabaseAdmin, req, normalizedEmail);
-          } catch (linkError: any) {
-            warning = `Usuario criado, mas o link de acesso nao foi gerado automaticamente: ${linkError.message}`;
+          if (!normalizedPassword) {
+            try {
+              accessLink = await generateRecoveryAccessLink(context.supabaseAdmin, req, normalizedEmail);
+            } catch (linkError: any) {
+              warning = `Usuario criado, mas o link de acesso nao foi gerado automaticamente: ${linkError.message}`;
+            }
           }
 
           results.push({

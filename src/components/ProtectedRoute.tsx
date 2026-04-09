@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { Loader2 } from 'lucide-react';
@@ -14,6 +14,7 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { user, roles, loading } = useAuth();
   const { isImpersonatingCompany, effectiveRoles } = useImpersonation();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -24,7 +25,8 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    const redirectTo = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to="/login" replace state={{ redirectTo }} />;
   }
 
   if (allowedRoles && allowedRoles.length > 0) {

@@ -43,17 +43,18 @@ import {
 import UserPasswordDialog from '@/components/users/UserPasswordDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
+  getPasswordValidationMessage,
   getPhoneValidationMessage,
   normalizeEmail,
+  PASSWORD_REQUIREMENTS_TEXT,
 } from '@/lib/validation';
 import type { ManagedUser } from '@/hooks/useUsers';
+import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -92,6 +93,7 @@ export default function CompanyUsers() {
   const { user: currentUser, signOut } = useAuth();
   const { companyId, companyName } = useCompanySlug();
   const qc = useQueryClient();
+  const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
 
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
@@ -103,7 +105,14 @@ export default function CompanyUsers() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [creating, setCreating] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  const [createForm, setCreateForm] = useState({ full_name: '', email: '', phone: '', role: 'operator' });
+  const [createForm, setCreateForm] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    role: 'operator',
+    password: '',
+    confirmPassword: '',
+  });
 
   const {
     data: users = [],
@@ -112,16 +121,12 @@ export default function CompanyUsers() {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ['company-users', companyId],
+    queryKey: ['company-users', companyId, manageUserScopeKey],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'list_users' },
+      const data = await invokeManageUser<{ users?: ManagedUser[] }>({
+        action: 'list_users',
+        company_id: companyId,
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
-
       const allUsers = (data?.users ?? []) as ManagedUser[];
       return allUsers.filter((user) => user.company_id === companyId);
     },
@@ -193,20 +198,14 @@ export default function CompanyUsers() {
       const shouldReauthenticate = editUser.id === currentUser?.id
         && normalizedEmail !== normalizeEmail(editUser.email);
 
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'update_user',
-          user_id: editUser.id,
-          full_name: editForm.full_name,
-          email: normalizedEmail,
-          phone: formatBrazilPhone(editForm.phone),
-          role: editForm.role,
-        },
+      await invokeManageUser({
+        action: 'update_user',
+        user_id: editUser.id,
+        full_name: editForm.full_name,
+        email: normalizedEmail,
+        phone: formatBrazilPhone(editForm.phone),
+        role: editForm.role,
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
 
       toast.success('Usuário atualizado.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
@@ -224,17 +223,11 @@ export default function CompanyUsers() {
 
   const handleToggleBan = async (user: ManagedUser) => {
     try {
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'toggle_ban',
-          user_id: user.id,
-          ban: !user.is_banned,
-        },
+      await invokeManageUser({
+        action: 'toggle_ban',
+        user_id: user.id,
+        ban: !user.is_banned,
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
 
       toast.success(user.is_banned ? 'Usuário desbloqueado.' : 'Usuário bloqueado.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
@@ -252,17 +245,11 @@ export default function CompanyUsers() {
       setChangingPassword(true);
       const targetUser = passwordDialog;
 
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'set_user_password',
-          user_id: targetUser.id,
-          password,
-        },
+      await invokeManageUser({
+        action: 'set_user_password',
+        user_id: targetUser.id,
+        password,
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
 
       toast.success('Senha atualizada.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
@@ -282,16 +269,10 @@ export default function CompanyUsers() {
 
   const handleDeleteUser = async (user: ManagedUser) => {
     try {
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'delete_user',
-          user_id: user.id,
-        },
+      await invokeManageUser({
+        action: 'delete_user',
+        user_id: user.id,
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
 
       toast.success('Usuario excluido.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
@@ -322,27 +303,33 @@ export default function CompanyUsers() {
       return;
     }
 
+    const passwordError = getPasswordValidationMessage(createForm.password);
+    if (passwordError) {
+      toast.error(passwordError);
+      return;
+    }
+
+    if (createForm.password !== createForm.confirmPassword) {
+      toast.error('As senhas precisam ser iguais.');
+      return;
+    }
+
     setCreating(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'seed_users',
-          users: [
-            {
-              full_name: createForm.full_name,
-              email: normalizeEmail(createForm.email),
-              phone: formatBrazilPhone(createForm.phone) || null,
-              company_id: companyId,
-              role: createForm.role,
-            },
-          ],
-        },
+      const data = await invokeManageUser<{ results?: Array<{ error?: string; warning?: string }> }>({
+        action: 'seed_users',
+        users: [
+          {
+            full_name: createForm.full_name,
+            email: normalizeEmail(createForm.email),
+            phone: formatBrazilPhone(createForm.phone) || null,
+            company_id: companyId,
+            role: createForm.role,
+            password: createForm.password,
+          },
+        ],
       });
-
-      if (error) {
-        throw new Error(await getFunctionErrorMessage(error));
-      }
 
       const result = data?.results?.[0];
       if (result?.error) {
@@ -353,19 +340,17 @@ export default function CompanyUsers() {
         toast.warning(result.warning);
       }
 
-      if (result?.access_link) {
-        try {
-          await navigator.clipboard.writeText(result.access_link);
-          toast.success('Usuario criado. Link unico copiado.');
-        } catch {
-          toast.success('Usuario criado. Link unico gerado.');
-        }
-      } else {
-        toast.success('Usuario criado com sucesso.');
-      }
+      toast.success('Usuario criado com senha definida.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
       setShowCreateDialog(false);
-      setCreateForm({ full_name: '', email: '', phone: '', role: 'operator' });
+      setCreateForm({
+        full_name: '',
+        email: '',
+        phone: '',
+        role: 'operator',
+        password: '',
+        confirmPassword: '',
+      });
     } catch (err: any) {
       toast.error(`Erro: ${err.message}`);
     } finally {
@@ -755,6 +740,33 @@ export default function CompanyUsers() {
             <p className="text-xs text-muted-foreground">
               O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
             </p>
+            <div>
+              <Label htmlFor="create-user-password">Senha inicial *</Label>
+              <Input
+                id="create-user-password"
+                name="password"
+                type="password"
+                value={createForm.password}
+                onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })}
+                placeholder="Defina a senha de acesso"
+                autoComplete="new-password"
+                required
+              />
+              <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS_TEXT}</p>
+            </div>
+            <div>
+              <Label htmlFor="create-user-confirm-password">Confirmar senha *</Label>
+              <Input
+                id="create-user-confirm-password"
+                name="confirm_password"
+                type="password"
+                value={createForm.confirmPassword}
+                onChange={(event) => setCreateForm({ ...createForm, confirmPassword: event.target.value })}
+                placeholder="Repita a senha"
+                autoComplete="new-password"
+                required
+              />
+            </div>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>
                 Cancelar

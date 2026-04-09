@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Copy, ExternalLink, Loader2, Send, Users } from 'lucide-react';
+import { Activity, ChevronLeft, Copy, ExternalLink, Loader2, Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { ReservationSourceBadge, ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
@@ -39,8 +39,6 @@ interface ReservationDetails {
   created_at: string;
   updated_at: string;
   public_tracking_code: string;
-  table_label?: string | null;
-  table_map_name?: string | null;
 }
 
 interface ReservationTimelineItem {
@@ -60,6 +58,10 @@ interface ReservationDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   reservation: ReservationDetails | null;
   slug: string;
+  onBackToList?: () => void;
+  backLabel?: string;
+  actions?: ReactNode;
+  showEventHistory?: boolean;
 }
 
 function formatTimelineSource(source: string) {
@@ -80,6 +82,10 @@ export default function ReservationDetailsDialog({
   onOpenChange,
   reservation,
   slug,
+  onBackToList,
+  backLabel,
+  actions,
+  showEventHistory = true,
 }: ReservationDetailsDialogProps) {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const trackingUrl = reservation
@@ -121,8 +127,16 @@ export default function ReservationDetailsDialog({
       if (error) throw error;
       return ((data as any[]) ?? []) as ReservationTimelineItem[];
     },
-    enabled: open && !!reservation?.id,
+    enabled: showEventHistory && open && !!reservation?.id,
   });
+
+  const sortedTimeline = useMemo(
+    () =>
+      [...timeline].sort(
+        (left, right) => new Date(right.occurred_at).getTime() - new Date(left.occurred_at).getTime(),
+      ),
+    [timeline],
+  );
 
   const copyTrackingLink = async () => {
     if (!trackingUrl) return;
@@ -138,9 +152,24 @@ export default function ReservationDetailsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Detalhes da reserva</DialogTitle>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-4xl overflow-x-hidden overflow-y-auto">
+          <DialogHeader className="space-y-3">
+            {onBackToList && (
+              <div className="flex justify-start">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-2 gap-2 text-muted-foreground hover:text-foreground"
+                  onClick={onBackToList}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  {backLabel ?? 'Voltar'}
+                </Button>
+              </div>
+            )}
+            <DialogTitle className="text-left">Detalhes da reserva</DialogTitle>
+            {actions && <div className="flex flex-wrap gap-2 pt-1">{actions}</div>}
           </DialogHeader>
 
           {reservation ? (
@@ -186,15 +215,6 @@ export default function ReservationDetailsDialog({
                     <p className="mt-1 font-medium text-foreground">{reservation.checked_in_party_size}</p>
                   </div>
                 )}
-                {(reservation.table_label || reservation.table_map_name) && (
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Mesa / mapa</p>
-                    <p className="mt-1 font-medium text-foreground">
-                      {reservation.table_label ?? 'Sem mesa'}
-                      {reservation.table_map_name ? ` · ${reservation.table_map_name}` : ''}
-                    </p>
-                  </div>
-                )}
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Criada em</p>
                   <p className="mt-1 font-medium text-foreground">
@@ -228,14 +248,15 @@ export default function ReservationDetailsDialog({
                 </div>
               )}
 
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
+              {showEventHistory && (
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
                     <p className="text-sm font-medium text-foreground">Histórico de eventos</p>
                   </div>
                   {!timelineLoading && (
-                    <p className="text-xs text-muted-foreground">{timeline.length} registros</p>
+                    <p className="text-xs text-muted-foreground">{sortedTimeline.length} registros</p>
                   )}
                 </div>
 
@@ -246,11 +267,11 @@ export default function ReservationDetailsDialog({
                   </div>
                 ) : timelineError ? (
                   <p className="mt-3 text-sm text-destructive">Não foi possível carregar o histórico desta reserva.</p>
-                ) : timeline.length === 0 ? (
+                ) : sortedTimeline.length === 0 ? (
                   <p className="mt-3 text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
                 ) : (
                   <div className="mt-3 space-y-3">
-                    {timeline.map((item) => (
+                    {sortedTimeline.map((item) => (
                       <div key={`${item.source}-${item.id}`} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="space-y-1">
@@ -294,7 +315,8 @@ export default function ReservationDetailsDialog({
                     ))}
                   </div>
                 )}
-              </div>
+                </div>
+              )}
 
               {(reservation.checked_in_at || companions.length > 0 || companionsLoading) && (
                 <div className="rounded-lg border border-border bg-muted/20 p-4">

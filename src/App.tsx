@@ -11,6 +11,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { supabase } from "@/integrations/supabase/client";
+import { useImpersonation } from "@/hooks/useImpersonation";
 
 type AppRole = "superadmin" | "admin" | "operator";
 
@@ -25,6 +26,7 @@ const CompanyEvents = lazy(() => import("@/pages/CompanyEvents"));
 const CompanyAutomations = lazy(() => import("@/pages/CompanyAutomations"));
 const CompanyUsers = lazy(() => import("@/pages/CompanyUsers"));
 const CompanyWaitlist = lazy(() => import("@/pages/CompanyWaitlist"));
+const OperatorTodayReservations = lazy(() => import("@/pages/OperatorTodayReservations"));
 const PublicWaitlistPage = lazy(() => import("@/pages/PublicWaitlistPage"));
 const WaitlistTracking = lazy(() => import("@/pages/WaitlistTracking"));
 const ReservationTracking = lazy(() => import("@/pages/ReservationTracking"));
@@ -199,6 +201,15 @@ function CompanySlugRedirect({ companyId }: { companyId: string }) {
   return <Navigate to={`/${company.slug}/admin`} replace />;
 }
 
+function CompanyAdminHome() {
+  const { roles } = useAuth();
+  const { isImpersonatingCompany, effectiveRoles } = useImpersonation();
+  const activeRoles = isImpersonatingCompany ? effectiveRoles : roles;
+  const canAccessDashboard = activeRoles.includes("admin") || activeRoles.includes("superadmin");
+
+  return canAccessDashboard ? <Dashboard /> : <OperatorTodayReservations />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -340,14 +351,14 @@ const App = () => (
                 path="/:slug/admin"
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
-                    <Dashboard />
+                    <CompanyAdminHome />
                   </CompanyAdminRoute>
                 }
               />
               <Route
                 path="/:slug/admin/reservas"
                 element={
-                  <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
+                  <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
                     <Reservations />
                   </CompanyAdminRoute>
                 }
@@ -355,7 +366,7 @@ const App = () => (
               <Route
                 path="/:slug/admin/mesas"
                 element={
-                  <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
+                  <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
                     <TableMap />
                   </CompanyAdminRoute>
                 }
@@ -363,7 +374,7 @@ const App = () => (
               <Route
                 path="/:slug/admin/calendario"
                 element={
-                  <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
+                  <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
                     <CalendarView />
                   </CompanyAdminRoute>
                 }

@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { getFunctionErrorMessage } from '@/lib/functionErrors';
+import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 
 export interface ManagedUser {
   id: string;
@@ -15,16 +14,11 @@ export interface ManagedUser {
   created_at: string;
 }
 
-async function invokeManageUser(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke('manage-user', { body });
-  if (error) throw new Error(await getFunctionErrorMessage(error));
-  if (data?.error) throw new Error(data.error);
-  return data;
-}
-
 export function useUsers() {
+  const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
+
   return useQuery({
-    queryKey: ['managed-users'],
+    queryKey: ['managed-users', manageUserScopeKey],
     queryFn: async () => {
       const result = await invokeManageUser({ action: 'list_users' });
       return (result.users ?? []) as ManagedUser[];
@@ -35,6 +29,8 @@ export function useUsers() {
 
 export function useToggleBan() {
   const qc = useQueryClient();
+  const { invokeManageUser } = useManageUserInvoker();
+
   return useMutation({
     mutationFn: async ({ user_id, ban }: { user_id: string; ban: boolean }) => {
       return invokeManageUser({ action: 'toggle_ban', user_id, ban });
@@ -49,6 +45,8 @@ export function useToggleBan() {
 
 export function useUpdateUser() {
   const qc = useQueryClient();
+  const { invokeManageUser } = useManageUserInvoker();
+
   return useMutation({
     mutationFn: async (data: { user_id: string; full_name?: string; email?: string; phone?: string; company_id?: string | null; role?: string }) => {
       return invokeManageUser({ action: 'update_user', ...data });
@@ -63,6 +61,8 @@ export function useUpdateUser() {
 
 export function useSetUserPassword() {
   const qc = useQueryClient();
+  const { invokeManageUser } = useManageUserInvoker();
+
   return useMutation({
     mutationFn: async ({ user_id, password }: { user_id: string; password: string }) => {
       return invokeManageUser({ action: 'set_user_password', user_id, password });
@@ -76,6 +76,8 @@ export function useSetUserPassword() {
 
 export function useDeleteUser() {
   const qc = useQueryClient();
+  const { invokeManageUser } = useManageUserInvoker();
+
   return useMutation({
     mutationFn: async (user_id: string) => {
       return invokeManageUser({ action: 'delete_user', user_id });

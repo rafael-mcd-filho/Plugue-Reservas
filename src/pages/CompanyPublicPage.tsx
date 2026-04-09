@@ -13,6 +13,7 @@ import {
   MapPin,
   Phone,
   QrCode,
+  Star,
   Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -102,6 +103,42 @@ function RatingStarsLink({ href, className }: { href: string; className?: string
         ★★★★★
       </span>
     </a>
+  );
+}
+
+function RefinedRatingStarsLink({ href, className }: { href: string; className?: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Avaliacoes no Google"
+      className={cn(
+        'group inline-flex items-center rounded-full border border-[#A46A1D]/45 bg-[linear-gradient(180deg,rgba(66,34,9,0.88)_0%,rgba(29,15,4,0.94)_100%)] px-3 py-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,236,201,0.18)] ring-1 ring-black/18 backdrop-blur-md transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-[#D69A42]/55 hover:shadow-[0_14px_34px_rgba(0,0,0,0.42),0_0_24px_rgba(214,154,66,0.16)]',
+        className,
+      )}
+    >
+      <span className="flex items-center gap-0.5 text-[#F5D08A]">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <span
+            key={index}
+            className="flex h-4 w-4 items-center justify-center rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,229,163,0.34),rgba(168,102,26,0.08)_70%)]"
+          >
+            <Star className="h-3 w-3 fill-current text-current drop-shadow-[0_1px_4px_rgba(255,208,138,0.45)]" />
+          </span>
+        ))}
+      </span>
+    </a>
+  );
+}
+
+function HeroOrnamentDivider({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex items-center justify-center gap-3', className)} aria-hidden="true">
+      <span className="h-px w-14 bg-gradient-to-r from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
+      <span className="h-2.5 w-2.5 rotate-45 rounded-[2px] border border-[#E3B36A]/70 bg-[radial-gradient(circle_at_30%_30%,rgba(255,224,173,0.65),rgba(96,49,11,0.9))] shadow-[0_0_14px_rgba(201,138,58,0.2)]" />
+      <span className="h-px w-14 bg-gradient-to-l from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
+    </div>
   );
 }
 
@@ -504,6 +541,23 @@ export default function CompanyPublicPage() {
   const instagramUrl = company?.instagram
     ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
     : null;
+  const instagramLabel = useMemo(() => {
+    if (!company?.instagram) return null;
+
+    const rawValue = company.instagram.trim();
+    if (!rawValue) return null;
+
+    if (rawValue.startsWith('http')) {
+      try {
+        const pathname = new URL(rawValue).pathname.replace(/^\/+|\/+$/g, '');
+        return pathname ? `@${pathname.split('/')[0]}` : '@instagram';
+      } catch {
+        return '@instagram';
+      }
+    }
+
+    return rawValue.startsWith('@') ? rawValue : `@${rawValue}`;
+  }, [company?.instagram]);
   const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
   const mapsEmbedUrl = getGoogleMapsEmbedUrl(company?.google_maps_url, company?.address || company?.name || null);
   const openingHours = useMemo(
@@ -753,39 +807,43 @@ export default function CompanyPublicPage() {
               <img
                 src={company.logo_url}
                 alt={company.name}
-                className="h-[5.6rem] w-[5.6rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-20 md:w-20"
+                className="h-[6.2rem] w-[6.2rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-[5.5rem] md:w-[5.5rem]"
               />
             ) : (
-              <div className="flex h-[5.6rem] w-[5.6rem] shrink-0 items-center justify-center rounded-full bg-primary text-3xl font-bold text-primary-foreground shadow-lg md:h-20 md:w-20 md:text-2xl">
+              <div className="flex h-[6.2rem] w-[6.2rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-lg md:h-[5.5rem] md:w-[5.5rem] md:text-[2.2rem]">
                 {company.name.charAt(0)}
               </div>
             )}
             {googleMapsSearchUrl && (
-              <RatingStarsLink href={googleMapsSearchUrl} className="mt-3 md:hidden" />
+              <RefinedRatingStarsLink href={googleMapsSearchUrl} className="mt-4 md:hidden" />
             )}
+            {googleMapsSearchUrl && <HeroOrnamentDivider className="mt-4 md:hidden" />}
           </div>
 
           <div className="mt-5 md:grid md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
-            <div className="space-y-4 animate-slide-up">
+            <div className="space-y-5 animate-slide-up">
               {googleMapsSearchUrl && (
-                <RatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
+                <RefinedRatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
               )}
 
-              <div>
-                <div className="flex items-center gap-3">
-                  {instagramUrl && (
-                    <a
-                      href={instagramUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="Instagram"
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-pink-200 transition-colors hover:bg-white/15 hover:text-white"
-                    >
-                      <InstagramIcon className="h-4 w-4" />
-                    </a>
-                  )}
-                  <h2 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">{company.name}</h2>
-                </div>
+              <div className="space-y-3 text-center md:text-left">
+                <h2 className="mx-auto w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(1.7rem,6.2vw,2.15rem)] font-bold leading-tight tracking-tight md:mx-0 md:text-[clamp(2rem,3vw,2.7rem)]">
+                  {company.name}
+                </h2>
+                {instagramUrl && instagramLabel && (
+                  <a
+                    href={instagramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Instagram"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[0.72rem] font-medium text-[#F1D6DE] transition-[background-color,border-color,color] hover:border-white/20 hover:bg-white/10 hover:text-white"
+                  >
+                    <span className="inline-flex h-5.5 w-5.5 items-center justify-center rounded-full bg-white/10 text-pink-200">
+                      <InstagramIcon className="h-[0.7rem] w-[0.7rem]" />
+                    </span>
+                    <span className="text-[0.72rem] tracking-[0.01em]">{instagramLabel}</span>
+                  </a>
+                )}
                 {showDescription && (
                   <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
                     <RichTextContent

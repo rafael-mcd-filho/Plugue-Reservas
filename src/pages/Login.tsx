@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,12 +9,47 @@ import { UtensilsCrossed, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getEmailValidationMessage, normalizeEmail } from '@/lib/validation';
 
+interface LoginLocationState {
+  redirectTo?: string;
+}
+
+function getSafeRedirectPath(value: unknown) {
+  if (typeof value !== 'string') return '/';
+  if (!value.startsWith('/') || value.startsWith('//')) return '/';
+  if (value === '/login' || value.startsWith('/login?')) return '/';
+  return value;
+}
+
+function getRedirectMessage(path: string) {
+  if (path === '/') {
+    return 'O sistema direciona voce automaticamente para o painel correto apos o login.';
+  }
+
+  const companyAdminMatch = path.match(/^\/([^/]+)\/admin(?:\/|$)/i);
+  if (companyAdminMatch) {
+    return 'Depois do login, voce sera direcionado para o painel da unidade.';
+  }
+
+  return 'Depois do login, voce sera direcionado automaticamente para a tela solicitada.';
+}
+
 export default function Login() {
-  const { signIn } = useAuth();
+  const { signIn, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const redirectTo = useMemo(
+    () => getSafeRedirectPath((location.state as LoginLocationState | null)?.redirectTo),
+    [location.state],
+  );
+  const helperMessage = useMemo(() => getRedirectMessage(redirectTo), [redirectTo]);
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    navigate(redirectTo, { replace: true });
+  }, [authLoading, navigate, redirectTo, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +73,7 @@ export default function Login() {
         : error.message;
       toast.error(message);
     } else {
-      navigate('/');
+      navigate(redirectTo, { replace: true });
     }
   };
 
@@ -92,7 +127,7 @@ export default function Login() {
             </Button>
           </form>
           <p className="text-sm text-center text-muted-foreground mt-6">
-            Acesso liberado pelo administrador da unidade.
+            {helperMessage}
           </p>
         </CardContent>
       </Card>

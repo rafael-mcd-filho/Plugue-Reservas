@@ -71,7 +71,7 @@ export function toBrazilWhatsAppNumber(value: string | null | undefined) {
 }
 
 export function normalizeEmail(value: string | null | undefined) {
-  return (value || '').trim();
+  return (value || '').trim().toLowerCase();
 }
 
 export function isValidEmail(value: string | null | undefined) {

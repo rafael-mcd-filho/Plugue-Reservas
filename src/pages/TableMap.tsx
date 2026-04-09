@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarRange,
   CheckCircle2,
-  Clock,
   CopyPlus,
   Layers3,
   Pencil,
@@ -83,40 +82,11 @@ interface RestaurantTable {
   status: TableStatus;
 }
 
-interface EnrichedTable extends RestaurantTable {
-  displayStatus: TableStatus;
-  reservation?: TodayReservation;
-}
-
-interface TodayReservation {
-  id: string;
-  table_id: string;
-  guest_name: string;
-  time: string;
-  duration_minutes: number;
-  party_size: number;
-  status: string;
-}
-
-const STATUS_COLORS: Record<TableStatus, string> = {
-  available: 'border-success/25 bg-success-soft',
-  occupied: 'border-info/25 bg-info-soft',
-  reserved: 'border-primary/25 bg-primary-soft',
-  maintenance: 'border-muted-foreground/30 bg-muted opacity-60',
-};
-
 const STATUS_LABELS: Record<TableStatus, string> = {
   available: 'Disponivel',
   occupied: 'Ocupada',
   reserved: 'Reservada',
   maintenance: 'Manutenção',
-};
-
-const STATUS_DOT: Record<TableStatus, string> = {
-  available: 'bg-success',
-  occupied: 'bg-info',
-  reserved: 'bg-primary',
-  maintenance: 'bg-muted-foreground/40',
 };
 
 const ACTIVATION_OPTIONS: Array<{
@@ -419,24 +389,6 @@ export default function TableMap() {
     [rawTables, tableSections],
   );
 
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const { data: todayReservations = [] } = useQuery({
-    queryKey: ['today-reservations', companyId, today, selectedMapId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('reservations' as any)
-        .select('id, table_id, guest_name, time, duration_minutes, party_size, status')
-        .eq('company_id', companyId)
-        .eq('date', today)
-        .eq('table_map_id', selectedMapId)
-        .in('status', ['confirmed', 'checked_in']);
-      if (error) throw error;
-      return (data as TodayReservation[]) ?? [];
-    },
-    enabled: !!companyId && !!selectedMapId,
-    refetchInterval: 30000,
-  });
-
   const { data: selectedMapReservationCount = 0 } = useQuery({
     queryKey: ['table-map-reservations-count', companyId, selectedMapId],
     queryFn: async () => {
@@ -450,64 +402,6 @@ export default function TableMap() {
     },
     enabled: !!companyId && !!selectedMapId && !!selectedMap && !selectedMap.is_default,
   });
-
-  const tableStatusMap = useMemo(() => {
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const reservationsByTable = new Map<string, TodayReservation[]>();
-    const map: Record<string, { status: TableStatus; reservation?: TodayReservation }> = {};
-
-    for (const reservation of todayReservations) {
-      const current = reservationsByTable.get(reservation.table_id) ?? [];
-      current.push(reservation);
-      reservationsByTable.set(reservation.table_id, current);
-    }
-
-    for (const table of tables) {
-      if (table.status === 'maintenance') {
-        map[table.id] = { status: 'maintenance' };
-        continue;
-      }
-
-      const tableReservations = reservationsByTable.get(table.id) ?? [];
-      const activeReservation = tableReservations.find((reservation) => {
-        const [hours, minutes] = reservation.time.split(':').map(Number);
-        const startMinutes = hours * 60 + minutes;
-        const endMinutes = startMinutes + (reservation.duration_minutes || 30);
-        return nowMinutes >= startMinutes && nowMinutes < endMinutes;
-      });
-
-      if (activeReservation) {
-        map[table.id] = { status: 'occupied', reservation: activeReservation };
-        continue;
-      }
-
-      const upcomingReservation = tableReservations.find((reservation) => {
-        const [hours, minutes] = reservation.time.split(':').map(Number);
-        const startMinutes = hours * 60 + minutes;
-        return startMinutes > nowMinutes && startMinutes <= nowMinutes + 60;
-      });
-
-      if (upcomingReservation) {
-        map[table.id] = { status: 'reserved', reservation: upcomingReservation };
-        continue;
-      }
-
-      map[table.id] = { status: 'available' };
-    }
-
-    return map;
-  }, [tables, todayReservations]);
-
-  const enrichedTables = useMemo<EnrichedTable[]>(
-    () =>
-      tables.map((table) => ({
-        ...table,
-        displayStatus: tableStatusMap[table.id]?.status ?? table.status,
-        reservation: tableStatusMap[table.id]?.reservation,
-      })),
-    [tableStatusMap, tables],
-  );
 
   const displaySections = useMemo<DisplaySection[]>(() => {
     const managed = tableSections.map((section) => ({
@@ -533,13 +427,6 @@ export default function TableMap() {
       })),
     ].sort((first, second) => first.sort_order - second.sort_order || first.name.localeCompare(second.name));
   }, [tableSections, tables]);
-
-  const summary = {
-    available: enrichedTables.filter((table) => table.displayStatus === 'available').length,
-    occupied: enrichedTables.filter((table) => table.displayStatus === 'occupied').length,
-    reserved: enrichedTables.filter((table) => table.displayStatus === 'reserved').length,
-    maintenance: enrichedTables.filter((table) => table.displayStatus === 'maintenance').length,
-  };
 
   const isLoading = mapsLoading || sectionsLoading || (selectedMapId ? tablesLoading : false);
 
@@ -898,7 +785,6 @@ export default function TableMap() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['table-maps', companyId] });
       qc.invalidateQueries({ queryKey: ['restaurant-tables', companyId] });
-      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
       setDeleteMapConfirmOpen(false);
       toast.success('Mapa excluido!');
     },
@@ -1242,18 +1128,11 @@ export default function TableMap() {
             </CardContent>
           </Card>
 
-          <div className="flex flex-wrap gap-4">
-            {(Object.entries(summary) as [TableStatus, number][]).map(([status, count]) => (
-              <div key={status} className="flex items-center gap-2 text-sm">
-                <div className={cn('h-3 w-3 rounded-full', STATUS_DOT[status])} />
-                <span className="text-muted-foreground">{STATUS_LABELS[status]}</span>
-                <span className="text-muted-foreground">({count})</span>
-              </div>
-            ))}
-            <span className="ml-auto text-sm font-medium text-foreground">Total: {enrichedTables.length} mesas</span>
+          <div className="flex justify-end">
+            <span className="text-sm font-medium text-foreground">Total: {tables.length} mesas</span>
           </div>
 
-          {enrichedTables.length === 0 ? (
+          {tables.length === 0 ? (
             <Card className="rounded-[24px] border-dashed">
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <p className="mb-4 text-muted-foreground">Nenhuma mesa cadastrada neste mapa.</p>
@@ -1265,7 +1144,7 @@ export default function TableMap() {
             </Card>
           ) : (
             displaySections.map((section) => {
-              const sectionTables = enrichedTables.filter((table) => table.section === section.code);
+              const sectionTables = tables.filter((table) => table.section === section.code);
               if (sectionTables.length === 0) return null;
 
               return (
@@ -1282,46 +1161,34 @@ export default function TableMap() {
                       {sectionTables.map((table) => (
                         <div
                           key={table.id}
-                          className={cn('group relative rounded-2xl border-2 p-4 transition-all', STATUS_COLORS[table.displayStatus])}
+                          className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-card p-4 shadow-sm"
                         >
-                          <div className="mb-2 flex items-center justify-between">
-                            <span className="text-lg font-bold">Mesa {table.number}</span>
-                            <div className="flex items-center gap-1 text-muted-foreground">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <span className="text-lg font-bold text-foreground">Mesa {table.number}</span>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Capacidade para {table.capacity} {table.capacity === 1 ? 'pessoa' : 'pessoas'}
+                              </p>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
                               <Users className="h-3.5 w-3.5" />
-                              <span className="text-xs">{table.capacity}</span>
+                              <span className="text-sm font-medium">{table.capacity}</span>
                             </div>
                           </div>
 
-                          <span
-                            className={cn(
-                              'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                              table.displayStatus === 'available' && 'bg-success/15 text-success',
-                              table.displayStatus === 'occupied' && 'bg-info/15 text-info',
-                              table.displayStatus === 'reserved' && 'bg-primary/15 text-primary',
-                              table.displayStatus === 'maintenance' && 'bg-muted text-muted-foreground',
-                            )}
-                          >
-                            {STATUS_LABELS[table.displayStatus]}
-                          </span>
-
-                          {table.reservation && (
-                            <div className="mt-2 space-y-0.5 border-t border-border/50 pt-2">
-                              <p className="truncate text-xs font-medium text-foreground">{table.reservation.guest_name}</p>
-                              <div className="flex items-center gap-1 text-muted-foreground">
-                                <Clock className="h-3 w-3" />
-                                <span className="text-xs">{table.reservation.time.slice(0, 5)}</span>
-                                <span className="text-xs">- {table.reservation.party_size}p</span>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                            <button onClick={() => openEdit(table.id)} className="rounded p-1 hover:bg-background/80">
-                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                            </button>
-                            <button onClick={() => deleteMutation.mutate(table.id)} className="rounded p-1 hover:bg-background/80">
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </button>
+                          <div className="mt-4 flex justify-end gap-1 border-t border-border/70 pt-3">
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(table.id)} aria-label={`Editar mesa ${table.number}`}>
+                              <Pencil className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => deleteMutation.mutate(table.id)}
+                              aria-label={`Excluir mesa ${table.number}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
                           </div>
                         </div>
                       ))}
