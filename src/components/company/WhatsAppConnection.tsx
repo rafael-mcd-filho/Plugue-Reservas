@@ -88,8 +88,25 @@ export default function WhatsAppConnection({ companyId }: Props) {
   // Poll status when QR is showing
   useEffect(() => {
     if (!polling) return;
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void checkStatus();
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void checkStatus();
+      }
+    }, 5000);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [polling]);
 
   const isConnected = instance?.status === 'connected';

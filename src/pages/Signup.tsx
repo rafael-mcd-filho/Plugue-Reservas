@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { UtensilsCrossed, Loader2 } from 'lucide-react';
-import { MIN_PASSWORD_LENGTH } from '@/lib/validation';
+import { getEmailValidationMessage, getPasswordValidationMessage, MIN_PASSWORD_LENGTH, normalizeEmail, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
 import { toast } from 'sonner';
 
 export default function Signup() {
@@ -23,12 +23,18 @@ export default function Signup() {
       toast.error('Preencha todos os campos');
       return;
     }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      toast.error(`A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`);
+    const emailError = getEmailValidationMessage(email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+    const passwordError = getPasswordValidationMessage(password);
+    if (passwordError) {
+      toast.error(passwordError);
       return;
     }
     setLoading(true);
-    const { error } = await signUp(email, password, fullName);
+    const { error } = await signUp(normalizeEmail(email), password, fullName);
     setLoading(false);
     if (error) {
       toast.error(error.message);
@@ -89,6 +95,7 @@ export default function Signup() {
                 autoComplete="new-password"
                 minLength={MIN_PASSWORD_LENGTH}
               />
+              <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS_TEXT}</p>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (

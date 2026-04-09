@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
+import { formatBrazilPhone } from '@/lib/validation';
 
 type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
 
@@ -147,7 +148,7 @@ export default function ReservationDetailsDialog({
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
-                  <p className="text-sm text-muted-foreground">{reservation.guest_phone}</p>
+                  <p className="text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</p>
                   {reservation.guest_email && (
                     <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
                   )}
@@ -317,7 +318,7 @@ export default function ReservationDetailsDialog({
                         <div key={companion.id} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
                           <p className="font-medium text-foreground">{companion.name}</p>
                           <div className="mt-1 space-y-1 text-muted-foreground">
-                            {companion.phone && <p>{companion.phone}</p>}
+                            {companion.phone && <p>{formatBrazilPhone(companion.phone)}</p>}
                             {companion.email && <p>{companion.email}</p>}
                             {companion.birthdate && (
                               <p>

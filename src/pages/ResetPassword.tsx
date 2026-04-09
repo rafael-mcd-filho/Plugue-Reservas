@@ -8,13 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-
-function isStrongPassword(value: string) {
-  return value.length >= 10
-    && /[a-z]/.test(value)
-    && /[A-Z]/.test(value)
-    && /\d/.test(value);
-}
+import { getPasswordValidationMessage, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -29,8 +23,9 @@ export default function ResetPassword() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!isStrongPassword(password)) {
-      toast.error('Use ao menos 10 caracteres com letra maiúscula, minúscula e número.');
+    const passwordError = getPasswordValidationMessage(password);
+    if (passwordError) {
+      toast.error(passwordError);
       return;
     }
 
@@ -97,7 +92,7 @@ export default function ResetPassword() {
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Use ao menos 10 caracteres com letra maiúscula, minúscula e número.
+                  {PASSWORD_REQUIREMENTS_TEXT}
                 </p>
               </div>
 

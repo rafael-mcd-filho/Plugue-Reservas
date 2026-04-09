@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -15,19 +15,20 @@ import {
   QrCode,
   Wallet,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { RichTextContent } from '@/components/ui/rich-text-editor';
-import { useAuth } from '@/contexts/AuthContext';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
 import { getGoogleMapsEmbedUrl } from '@/lib/maps';
-import { isValidCompanySlug } from '@/lib/validation';
+import {
+  formatBrazilPhone,
+  isValidCompanySlug,
+  normalizeBrazilPhoneDigits,
+  toBrazilWhatsAppNumber,
+} from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
@@ -37,6 +38,7 @@ const ReservationModal = lazy(loadReservationModal);
 const FunnelDebugPanel = lazy(() => import('@/components/FunnelDebugPanel'));
 const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
+const PUBLIC_WHATSAPP_MESSAGE = 'Ol\u00E1, vim pela p\u00E1gina de reservas e gostaria de ajuda.';
 
 interface OpeningHour {
   day: string;
@@ -393,16 +395,17 @@ function toAbsoluteUrl(url: string | null | undefined) {
   }
 }
 
+function buildPublicWhatsappUrl(phone: string | null | undefined) {
+  const whatsappNumber = toBrazilWhatsAppNumber(phone);
+  if (!whatsappNumber) return null;
+
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(PUBLIC_WHATSAPP_MESSAGE)}`;
+}
+
 export default function CompanyPublicPage() {
   const { slug } = useParams<{ slug: string }>();
-  const navigate = useNavigate();
   const slugIsValid = isValidCompanySlug(slug);
-  const { signIn } = useAuth();
-  const [showLogin, setShowLogin] = useState(false);
   const [showReservation, setShowReservation] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
   const [statusNow, setStatusNow] = useState(() => new Date());
   const [dismissedNoticeId, setDismissedNoticeId] = useState<string | null>(null);
 
@@ -452,24 +455,6 @@ export default function CompanyPublicPage() {
     if (company?.id) trackStep('page_view');
   }, [company?.id, trackStep]);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginLoading(true);
-    const { error: loginErr } = await signIn(email, password, { slug: slug ?? null });
-    setLoginLoading(false);
-
-    if (loginErr) {
-      toast.error(
-        loginErr.message === 'Invalid login credentials'
-          ? 'Email ou senha inv\u00E1lidos'
-          : loginErr.message,
-      );
-      return;
-    }
-
-    navigate(`/${slug}/admin`);
-  };
-
   const { data: blockedDates = [] } = useQuery({
     queryKey: ['blocked-dates-public-page', company?.id],
     queryFn: async () => {
@@ -515,9 +500,7 @@ export default function CompanyPublicPage() {
     setDismissedNoticeId(null);
   }, [company?.id, publicNotice?.id]);
 
-  const whatsappUrl = company?.whatsapp
-    ? `https://wa.me/${company.whatsapp.replace(/\D/g, '')}`
-    : null;
+  const whatsappUrl = buildPublicWhatsappUrl(company?.whatsapp);
   const instagramUrl = company?.instagram
     ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
     : null;
@@ -620,7 +603,7 @@ export default function CompanyPublicPage() {
       description: seoDescription,
       url: canonicalUrl,
       image: seoImage,
-      telephone: company.phone,
+      telephone: formatBrazilPhone(company.phone),
       address: company.address
         ? compactJsonLd({
           '@type': 'PostalAddress',
@@ -689,9 +672,7 @@ export default function CompanyPublicPage() {
 
   if (!slugIsValid || error || !company) {
     if (companyStatus && companyStatus.status === 'paused') {
-      const contactWhatsapp = companyStatus.whatsapp
-        ? `https://wa.me/${companyStatus.whatsapp.replace(/\D/g, '')}`
-        : null;
+      const contactWhatsapp = buildPublicWhatsappUrl(companyStatus.whatsapp);
 
       return (
         <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#130D06] to-[#2E1800] p-6 text-center">
@@ -704,11 +685,11 @@ export default function CompanyPublicPage() {
             <div className="space-y-3">
               {companyStatus.phone && (
                 <a
-                  href={`tel:${companyStatus.phone}`}
+                  href={`tel:${normalizeBrazilPhoneDigits(companyStatus.phone)}`}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-4 py-3 text-white transition-colors hover:bg-white/20"
                 >
                   <Phone className="h-4 w-4" />
-                  Ligar: {companyStatus.phone}
+                  Ligar: {formatBrazilPhone(companyStatus.phone)}
                 </a>
               )}
               {contactWhatsapp && (
@@ -913,16 +894,16 @@ export default function CompanyPublicPage() {
                     )}
                   </div>
                   {company.phone && (
-                    <a href={`tel:${company.phone}`} className="shrink-0 text-sm font-medium text-primary hover:text-primary/80">
+                    <a href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`} className="shrink-0 text-sm font-medium text-primary hover:text-primary/80">
                       Ligar
                     </a>
                   )}
                 </div>
 
                 {company.phone && (
-                  <a href={`tel:${company.phone}`} className="flex items-center gap-3 text-foreground transition-colors hover:text-primary">
+                  <a href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`} className="flex items-center gap-3 text-foreground transition-colors hover:text-primary">
                     <Phone className="h-5 w-5 text-primary" />
-                    <span className="text-base font-medium">{company.phone}</span>
+                    <span className="text-base font-medium">{formatBrazilPhone(company.phone)}</span>
                   </a>
                 )}
 
@@ -985,62 +966,6 @@ export default function CompanyPublicPage() {
           </Card>
         )}
 
-        {showLogin && (
-          <Card className="rounded-lg border-none shadow-sm md:mx-auto md:max-w-md">
-            <CardContent className="pb-5 pt-5">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Acesso administrativo</h3>
-              <form onSubmit={handleLogin} className="space-y-3">
-                <div>
-                  <Label htmlFor="company-login-email" className="text-xs">Email</Label>
-                  <Input
-                    id="company-login-email"
-                    name="email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="admin@empresa.com"
-                    autoComplete="email"
-                    inputMode="email"
-                    spellCheck={false}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="company-login-password" className="text-xs">Senha</Label>
-                  <Input
-                    id="company-login-password"
-                    name="password"
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="********"
-                    autoComplete="current-password"
-                    required
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={loginLoading}>
-                  {loginLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Entrar
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="flex flex-col items-center gap-2 pb-4 pt-1 text-center">
-          <button
-            type="button"
-            onClick={() => setShowLogin((current) => !current)}
-            aria-expanded={showLogin}
-            className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {showLogin ? 'Ocultar acesso administrativo' : 'Acesso administrativo'}
-          </button>
-          <p className="text-xs text-muted-foreground">
-            {'Powered by '}
-            <span className="font-semibold text-primary">{DEFAULT_SYSTEM_NAME}</span>
-          </p>
-        </div>
       </div>
 
       <Suspense fallback={null}>

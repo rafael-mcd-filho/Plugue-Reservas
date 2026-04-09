@@ -42,6 +42,15 @@ import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchL
 import { normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { toast } from 'sonner';
+import {
+  formatBrazilPhone,
+  formatCnpj,
+  getCnpjValidationMessage,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeCnpjDigits,
+  normalizeEmail,
+} from '@/lib/validation';
 
 interface CompanyDialogProps {
   open: boolean;
@@ -180,15 +189,15 @@ function buildFormFromCompany(company: Company): CompanyInsert {
     name: company.name,
     slug: company.slug,
     razao_social: company.razao_social || '',
-    cnpj: company.cnpj || '',
-    phone: company.phone || '',
+    cnpj: formatCnpj(company.cnpj),
+    phone: formatBrazilPhone(company.phone),
     email: company.email || '',
     address: company.address || '',
     responsible_name: company.responsible_name || '',
     responsible_email: company.responsible_email || '',
-    responsible_phone: company.responsible_phone || '',
+    responsible_phone: formatBrazilPhone(company.responsible_phone),
     instagram: company.instagram || '',
-    whatsapp: company.whatsapp || '',
+    whatsapp: formatBrazilPhone(company.whatsapp),
     google_maps_url: company.google_maps_url || '',
     description: company.description || '',
     logo_url: company.logo_url || '',
@@ -384,11 +393,52 @@ export default function CompanyDialog({
     if (!form.name || !form.slug) return;
     if (!isEditing && !form.responsible_email) return;
 
+    const cnpjError = getCnpjValidationMessage(form.cnpj, 'um CNPJ');
+    if (cnpjError) {
+      toast.error(cnpjError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(form.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
+    const emailError = getEmailValidationMessage(form.email, 'um e-mail');
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const responsibleEmailError = getEmailValidationMessage(form.responsible_email, 'o e-mail do responsável', !isEditing);
+    if (responsibleEmailError) {
+      toast.error(responsibleEmailError);
+      return;
+    }
+
+    const responsiblePhoneError = getPhoneValidationMessage(form.responsible_phone, 'o telefone do responsável');
+    if (responsiblePhoneError) {
+      toast.error(responsiblePhoneError);
+      return;
+    }
+
+    const whatsappError = getPhoneValidationMessage(form.whatsapp, 'um WhatsApp');
+    if (whatsappError) {
+      toast.error(whatsappError);
+      return;
+    }
+
     const payload: CompanyInsert = {
       ...form,
+      cnpj: normalizeCnpjDigits(form.cnpj),
+      phone: formatBrazilPhone(form.phone),
+      email: normalizeEmail(form.email),
+      responsible_email: normalizeEmail(form.responsible_email),
+      responsible_phone: formatBrazilPhone(form.responsible_phone),
       logo_url: publicCustomizationLocked ? (company?.logo_url || '') : (form.logo_url || ''),
       description: publicCustomizationLocked ? (company?.description || '') : toSafeRichTextHtml(form.description || ''),
-      whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : (form.whatsapp || ''),
+      whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : formatBrazilPhone(form.whatsapp),
       google_maps_url: normalizeGoogleMapsEmbedInput(form.google_maps_url) || '',
       opening_hours: normalizeOpeningHours(form.opening_hours),
       payment_methods: normalizePaymentMethods(form.payment_methods),
@@ -476,11 +526,19 @@ export default function CompanyDialog({
                       </div>
                       <div>
                         <Label>CNPJ</Label>
-                        <Input value={form.cnpj || ''} onChange={(event) => setForm((current) => ({ ...current, cnpj: event.target.value }))} />
+                        <Input
+                          value={form.cnpj || ''}
+                          onChange={(event) => setForm((current) => ({ ...current, cnpj: formatCnpj(event.target.value) }))}
+                          maxLength={18}
+                        />
                       </div>
                       <div>
                         <Label>Telefone</Label>
-                        <Input value={form.phone || ''} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+                        <Input
+                          value={form.phone || ''}
+                          onChange={(event) => setForm((current) => ({ ...current, phone: formatBrazilPhone(event.target.value) }))}
+                          maxLength={15}
+                        />
                       </div>
                       <div>
                         <Label>Email</Label>
@@ -578,7 +636,11 @@ export default function CompanyDialog({
                         </div>
                         <div>
                           <Label>Telefone do Responsável</Label>
-                          <Input value={form.responsible_phone || ''} onChange={(event) => setForm((current) => ({ ...current, responsible_phone: event.target.value }))} />
+                          <Input
+                            value={form.responsible_phone || ''}
+                            onChange={(event) => setForm((current) => ({ ...current, responsible_phone: formatBrazilPhone(event.target.value) }))}
+                            maxLength={15}
+                          />
                         </div>
                       </div>
                     </div>
@@ -608,7 +670,13 @@ export default function CompanyDialog({
                         </div>
                         <div>
                           <Label>WhatsApp</Label>
-                          <Input value={form.whatsapp || ''} onChange={(event) => setForm((current) => ({ ...current, whatsapp: event.target.value }))} placeholder="5584999999999" disabled={publicCustomizationLocked} />
+                          <Input
+                            value={form.whatsapp || ''}
+                            onChange={(event) => setForm((current) => ({ ...current, whatsapp: formatBrazilPhone(event.target.value) }))}
+                            placeholder="(84) 99999-9999"
+                            disabled={publicCustomizationLocked}
+                            maxLength={15}
+                          />
                         </div>
                         <div className="md:col-span-2">
                           <Label>Endereço</Label>
@@ -758,7 +826,7 @@ export default function CompanyDialog({
                     </CardHeader>
                     <CardContent className="grid gap-4 md:grid-cols-2">
                       <InfoRow icon={<Mail className="h-4 w-4 text-muted-foreground" />} label="Email principal" value={company.email} />
-                      <InfoRow icon={<Phone className="h-4 w-4 text-muted-foreground" />} label="Telefone principal" value={company.phone} />
+                      <InfoRow icon={<Phone className="h-4 w-4 text-muted-foreground" />} label="Telefone principal" value={formatBrazilPhone(company.phone)} />
                       <InfoRow icon={<MapPin className="h-4 w-4 text-muted-foreground" />} label="Endereço" value={company.address} />
                       <InfoRow icon={<Globe className="h-4 w-4 text-muted-foreground" />} label="Slug" value={company.slug} />
                       <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Criada em" value={format(new Date(company.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} />

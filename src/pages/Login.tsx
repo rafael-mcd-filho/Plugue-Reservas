@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { UtensilsCrossed, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getEmailValidationMessage, normalizeEmail } from '@/lib/validation';
 
 export default function Login() {
   const { signIn } = useAuth();
@@ -21,8 +22,15 @@ export default function Login() {
       toast.error('Preencha todos os campos');
       return;
     }
+
+    const emailError = getEmailValidationMessage(email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
     setLoading(true);
-    const { error } = await signIn(email, password);
+    const { error } = await signIn(normalizeEmail(email), password);
     setLoading(false);
     if (error) {
       const message = error.message === 'Invalid login credentials'

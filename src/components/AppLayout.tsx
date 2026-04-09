@@ -227,6 +227,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     ...visibleManagementNavItems,
     ...(visibleCompanySettingsNavItem ? [visibleCompanySettingsNavItem] : []),
   ];
+  const profilePath = slug ? `/${slug}/admin/perfil` : '/perfil';
 
   const isNavItemActive = (item: NavItem) => {
     if (item.matchPrefix) {
@@ -240,11 +241,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     () => visibleNavItems.find((item) => isNavItemActive(item)) ?? null,
     [location.pathname, visibleNavItems],
   );
+  const isProfileRoute = location.pathname === profilePath;
   const hasCompanySettingsNav = !!visibleCompanySettingsNavItem;
   const isCompanySettingsRouteActive = visibleCompanySettingsNavItem ? isNavItemActive(visibleCompanySettingsNavItem) : false;
 
-  const headerTitle = activeNavItem?.label || (slug ? 'Painel da unidade' : 'Painel administrativo');
-  const headerDescription = activeNavItem?.description || (
+  const headerTitle = isProfileRoute
+    ? 'Meu Perfil'
+    : activeNavItem?.label || (slug ? 'Painel da unidade' : 'Painel administrativo');
+  const headerDescription = isProfileRoute
+    ? 'Atualize seus dados de acesso e senha.'
+    : activeNavItem?.description || (
     slug
       ? 'Acompanhe a opera\u00E7\u00E3o da unidade com navega\u00E7\u00E3o centralizada.'
       : 'Gerencie a plataforma a partir do painel global.'
@@ -460,6 +466,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   </p>
                 )}
               </div>
+
+              <Button
+                asChild
+                variant="ghost"
+                className="mt-2 w-full justify-start gap-2 rounded-md text-sidebar-foreground/75 hover:bg-sidebar-border hover:text-sidebar-foreground"
+              >
+                <Link to={profilePath}>
+                  <User className="h-4 w-4" />
+                  Meu perfil
+                </Link>
+              </Button>
 
               <Button
                 variant="ghost"

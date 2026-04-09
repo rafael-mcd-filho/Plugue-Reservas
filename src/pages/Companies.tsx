@@ -44,6 +44,7 @@ import type { ManagedUser } from '@/hooks/useUsers';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import { startImpersonationSession } from '@/hooks/useImpersonation';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatCnpj, normalizeCnpjDigits } from '@/lib/validation';
 
 type CompanyUserRole = 'admin' | 'operator';
 
@@ -233,11 +234,17 @@ export default function Companies() {
 
   const filteredCompanies = companies
     .filter((company) => statusFilter === 'all' || company.status === statusFilter)
-    .filter((company) =>
-      company.name.toLowerCase().includes(search.toLowerCase()) ||
-      (company.cnpj && company.cnpj.includes(search)) ||
-      (company.responsible_name && company.responsible_name.toLowerCase().includes(search.toLowerCase())),
-    )
+    .filter((company) => {
+      const normalizedSearch = search.toLowerCase();
+      const cnpjDigits = normalizeCnpjDigits(search);
+
+      return company.name.toLowerCase().includes(normalizedSearch)
+        || (!!company.cnpj && (
+          company.cnpj.includes(search)
+          || (!!cnpjDigits && normalizeCnpjDigits(company.cnpj).includes(cnpjDigits))
+        ))
+        || (!!company.responsible_name && company.responsible_name.toLowerCase().includes(normalizedSearch));
+    })
     .sort((companyA, companyB) => {
       const direction = sortDir === 'asc' ? 1 : -1;
       const valueA = companyA[sortField] ?? '';
@@ -340,7 +347,7 @@ export default function Companies() {
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-sm text-muted-foreground">
-                      {company.cnpj || '-'}
+                      {company.cnpj ? formatCnpj(company.cnpj) : '-'}
                     </TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${companyStatus.className}`}>

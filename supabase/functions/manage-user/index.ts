@@ -29,7 +29,52 @@ type CallerContext = {
   adminCompanyIds: string[];
 };
 
-async function verifyManager(req: Request): Promise<CallerContext> {
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
+const MIN_PASSWORD_LENGTH = 12;
+const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres e incluir letra maiuscula, minuscula e numero`;
+
+function normalizeOptionalText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeFullNameValue(value: unknown) {
+  return normalizeOptionalText(value);
+}
+
+function normalizeEmailValue(value: unknown) {
+  return normalizeOptionalText(value);
+}
+
+function normalizePhoneValue(value: unknown) {
+  return normalizeOptionalText(value);
+}
+
+function normalizePasswordValue(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isValidEmail(value: string) {
+  return EMAIL_PATTERN.test(value);
+}
+
+function isValidBrazilPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  const localDigits = digits.length > 11 && digits.startsWith("55")
+    ? digits.slice(2)
+    : digits;
+
+  return BRAZIL_PHONE_PATTERN.test(localDigits);
+}
+
+function isStrongPassword(value: string) {
+  return value.length >= MIN_PASSWORD_LENGTH
+    && /[a-z]/.test(value)
+    && /[A-Z]/.test(value)
+    && /\d/.test(value);
+}
+
+async function verifyCaller(req: Request): Promise<CallerContext> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) throw new Error("Nao autorizado");
 
@@ -58,10 +103,6 @@ async function verifyManager(req: Request): Promise<CallerContext> {
       .filter((role) => role.role === "admin" && role.company_id)
       .map((role) => role.company_id as string),
   )];
-
-  if (!isSuperadmin && adminCompanyIds.length === 0) {
-    throw new Error("Apenas admins e superadmins podem gerenciar usuarios");
-  }
 
   return { supabaseAdmin, callerId: caller.id, isSuperadmin, adminCompanyIds };
 }
@@ -162,6 +203,12 @@ function getAllowedCompanyIds(context: CallerContext, scopeCompanyId?: string | 
   return context.adminCompanyIds;
 }
 
+function assertCallerCanManageUsers(context: CallerContext) {
+  if (!context.isSuperadmin && context.adminCompanyIds.length === 0) {
+    throw new Error("Apenas admins e superadmins podem gerenciar usuarios");
+  }
+}
+
 function withImpersonationAuditDetails(
   details: Record<string, unknown>,
   scopeCompanyId?: string | null,
@@ -193,6 +240,122 @@ function assertCallerCanAccessCompany(
   if (!allowedCompanyIds.includes(companyId)) {
     throw new Error("Admins so podem gerenciar usuarios da propria empresa");
   }
+}
+
+async function buildAuthUserUpdates(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  input: {
+    full_name?: string;
+    email?: string | null;
+    password?: string;
+  },
+) {
+  const authUpdates: Record<string, unknown> = {};
+
+  if (input.email !== undefined) {
+    authUpdates.email = input.email;
+  }
+
+  if (input.password !== undefined) {
+    authUpdates.password = input.password;
+  }
+
+  if (input.full_name !== undefined) {
+    const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (error) throw new Error(error.message);
+
+    authUpdates.user_metadata = {
+      ...(data.user?.user_metadata ?? {}),
+      full_name: input.full_name,
+    };
+  }
+
+  return authUpdates;
+}
+
+async function syncProfileAndAuth(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  currentProfile: ProfileRow | null,
+  input: {
+    full_name?: string;
+    email?: string | null;
+    phone?: string | null;
+    company_id?: string | null;
+    password?: string;
+  },
+) {
+  const profileUpdates: Record<string, unknown> = {};
+  const rollbackUpdates: Record<string, unknown> = {};
+  let shouldUpdateProfile = false;
+
+  if (input.full_name !== undefined) {
+    profileUpdates.full_name = input.full_name;
+    rollbackUpdates.full_name = currentProfile?.full_name ?? "";
+    shouldUpdateProfile = true;
+  }
+
+  if (input.email !== undefined) {
+    profileUpdates.email = input.email;
+    rollbackUpdates.email = currentProfile?.email ?? null;
+    shouldUpdateProfile = true;
+  }
+
+  if (input.phone !== undefined) {
+    profileUpdates.phone = input.phone;
+    rollbackUpdates.phone = currentProfile?.phone ?? null;
+    shouldUpdateProfile = true;
+  }
+
+  if (input.company_id !== undefined) {
+    profileUpdates.company_id = input.company_id;
+    rollbackUpdates.company_id = currentProfile?.company_id ?? null;
+    shouldUpdateProfile = true;
+  }
+
+  if (shouldUpdateProfile) {
+    const { error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        ...profileUpdates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    if (profileError) throw new Error(profileError.message);
+  }
+
+  const authUpdates = await buildAuthUserUpdates(supabaseAdmin, userId, {
+    full_name: input.full_name,
+    email: input.email,
+    password: input.password,
+  });
+
+  if (Object.keys(authUpdates).length === 0) {
+    return;
+  }
+
+  const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, authUpdates);
+  if (!authError) {
+    return;
+  }
+
+  if (shouldUpdateProfile) {
+    const { error: rollbackError } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        ...rollbackUpdates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    if (rollbackError) {
+      console.error("Failed to rollback profile after auth update error", rollbackError);
+    }
+  }
+
+  throw new Error(authError.message);
 }
 
 async function assertCallerCanManageTarget(
@@ -298,7 +461,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const context = await verifyManager(req);
+    const context = await verifyCaller(req);
     const body = await req.json();
     const { action } = body;
     const scopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
@@ -313,6 +476,8 @@ Deno.serve(async (req) => {
 
     switch (action) {
       case "list_users": {
+        assertCallerCanManageUsers(context);
+
         const requestedCompanyId = normalizeOptionalCompanyId(body.company_id);
         const listCompanyId = requestedCompanyId ?? scopeCompanyId;
         assertCallerCanAccessCompany(context, listCompanyId, scopeCompanyId);
@@ -411,6 +576,8 @@ Deno.serve(async (req) => {
       }
 
       case "toggle_ban": {
+        assertCallerCanManageUsers(context);
+
         const { user_id, ban } = body;
         if (!user_id) throw new Error("user_id e obrigatorio");
 
@@ -463,8 +630,28 @@ Deno.serve(async (req) => {
       }
 
       case "update_user": {
+        assertCallerCanManageUsers(context);
+
         const { user_id, full_name, email, phone, company_id, role } = body;
         if (!user_id) throw new Error("user_id e obrigatorio");
+
+        const normalizedFullName = full_name !== undefined ? normalizeFullNameValue(full_name) : undefined;
+        const normalizedEmail = email !== undefined ? normalizeEmailValue(email) : undefined;
+        const normalizedPhone = phone !== undefined ? normalizePhoneValue(phone) : undefined;
+
+        if (full_name !== undefined && !normalizedFullName) {
+          throw new Error("Informe um nome");
+        }
+
+        if (email !== undefined) {
+          if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+            throw new Error("Informe um email valido");
+          }
+        }
+
+        if (normalizedPhone && !isValidBrazilPhone(normalizedPhone)) {
+          throw new Error("Informe um telefone valido com DDD");
+        }
 
         const { roles, profile } = await getUserContext(context.supabaseAdmin, user_id);
         await assertCallerCanManageTarget(context, roles, profile, company_id, scopeCompanyId);
@@ -492,25 +679,17 @@ Deno.serve(async (req) => {
           await ensureCompanyRetainsActiveAdmin(context.supabaseAdmin, currentCompanyId, user_id);
         }
 
-        const updates: Record<string, unknown> = {
-          updated_at: new Date().toISOString(),
-        };
-        if (full_name !== undefined) updates.full_name = full_name;
-        if (email !== undefined) updates.email = email;
-        if (phone !== undefined) updates.phone = phone;
-        if (company_id !== undefined) updates.company_id = nextCompanyId;
-
-        const { error: profileError } = await context.supabaseAdmin
-          .from("profiles")
-          .update(updates)
-          .eq("id", user_id);
-
-        if (profileError) throw new Error(profileError.message);
-
-        if (email) {
-          const { error: authError } = await context.supabaseAdmin.auth.admin.updateUserById(user_id, { email });
-          if (authError) throw new Error(authError.message);
-        }
+        await syncProfileAndAuth(
+          context.supabaseAdmin,
+          user_id,
+          profile,
+          {
+            full_name: normalizedFullName,
+            email: normalizedEmail,
+            phone: normalizedPhone,
+            company_id: company_id !== undefined ? nextCompanyId : undefined,
+          },
+        );
 
         if (role !== undefined) {
           const { error: deleteRolesError } = await context.supabaseAdmin
@@ -548,12 +727,12 @@ Deno.serve(async (req) => {
           withImpersonationAuditDetails(
             {
               target_user_id: user_id,
-              target_name: full_name ?? profile?.full_name ?? null,
-              target_email: email ?? profile?.email ?? null,
+              target_name: normalizedFullName ?? profile?.full_name ?? null,
+              target_email: normalizedEmail ?? profile?.email ?? null,
               previous_company_id: currentCompanyId,
               company_id: nextCompanyId,
               role: nextRole,
-              phone: phone ?? profile?.phone ?? null,
+              phone: normalizedPhone ?? profile?.phone ?? null,
             },
             scopeCompanyId,
             impersonatedBySuperadmin,
@@ -567,6 +746,8 @@ Deno.serve(async (req) => {
       }
 
       case "reset_password": {
+        assertCallerCanManageUsers(context);
+
         const { user_id } = body;
         if (!user_id) throw new Error("user_id e obrigatorio");
 
@@ -602,7 +783,124 @@ Deno.serve(async (req) => {
         );
       }
 
+      case "set_user_password": {
+        assertCallerCanManageUsers(context);
+
+        const { user_id, password } = body;
+        if (!user_id) throw new Error("user_id e obrigatorio");
+
+        const normalizedPassword = normalizePasswordValue(password);
+        if (!normalizedPassword || !isStrongPassword(normalizedPassword)) {
+          throw new Error(PASSWORD_REQUIREMENTS_ERROR);
+        }
+
+        const { roles, profile } = await getUserContext(context.supabaseAdmin, user_id);
+        await assertCallerCanManageTarget(context, roles, profile, undefined, scopeCompanyId);
+
+        const { error: passwordError } = await context.supabaseAdmin.auth.admin.updateUserById(user_id, {
+          password: normalizedPassword,
+        });
+        if (passwordError) throw new Error(passwordError.message);
+
+        await writeAuditLog(
+          context.supabaseAdmin,
+          context.callerId,
+          "set_user_password",
+          user_id,
+          withImpersonationAuditDetails(
+            {
+              target_user_id: user_id,
+              target_name: profile?.full_name ?? null,
+              target_email: profile?.email ?? null,
+              company_id: getManagedRole(roles)?.company_id ?? profile?.company_id ?? null,
+            },
+            scopeCompanyId,
+            impersonatedBySuperadmin,
+            impersonationEffectiveRole,
+          ),
+        );
+
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "update_my_account": {
+        const { full_name, email, password } = body;
+
+        const normalizedFullName = full_name !== undefined ? normalizeFullNameValue(full_name) : undefined;
+        const normalizedEmail = email !== undefined ? normalizeEmailValue(email) : undefined;
+        const normalizedPassword = password !== undefined ? normalizePasswordValue(password) : undefined;
+
+        if (full_name !== undefined && !normalizedFullName) {
+          throw new Error("Informe um nome");
+        }
+
+        if (email !== undefined) {
+          if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+            throw new Error("Informe um email valido");
+          }
+        }
+
+        if (password !== undefined) {
+          if (!normalizedPassword || !isStrongPassword(normalizedPassword)) {
+            throw new Error(PASSWORD_REQUIREMENTS_ERROR);
+          }
+        }
+
+        if (full_name === undefined && email === undefined && password === undefined) {
+          throw new Error("Nenhum dado foi informado para atualizacao");
+        }
+
+        const { profile } = await getUserContext(context.supabaseAdmin, context.callerId);
+        if (!profile) {
+          throw new Error("Usuario nao encontrado");
+        }
+
+        await syncProfileAndAuth(
+          context.supabaseAdmin,
+          context.callerId,
+          profile,
+          {
+            full_name: normalizedFullName,
+            email: normalizedEmail,
+            password: normalizedPassword ?? undefined,
+          },
+        );
+
+        const emailChanged = normalizedEmail !== undefined && normalizedEmail !== (profile.email ?? null);
+        const passwordChanged = normalizedPassword !== undefined;
+        const auditAction = passwordChanged && full_name === undefined && email === undefined
+          ? "change_own_password"
+          : "update_own_profile";
+
+        await writeAuditLog(
+          context.supabaseAdmin,
+          context.callerId,
+          auditAction,
+          context.callerId,
+          {
+            target_user_id: context.callerId,
+            target_name: normalizedFullName ?? profile.full_name ?? null,
+            target_email: normalizedEmail ?? profile.email ?? null,
+            email_changed: emailChanged,
+            password_changed: passwordChanged,
+          },
+        );
+
+        return new Response(JSON.stringify({
+          success: true,
+          email_changed: emailChanged,
+          password_changed: passwordChanged,
+          requires_reauth: emailChanged || passwordChanged,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       case "delete_user": {
+        assertCallerCanManageUsers(context);
+
         const { user_id } = body;
         if (!user_id) throw new Error("user_id e obrigatorio");
 
@@ -646,14 +944,29 @@ Deno.serve(async (req) => {
       }
 
       case "seed_users": {
+        assertCallerCanManageUsers(context);
+
         const { users: seedUsers } = body;
         if (!seedUsers || !Array.isArray(seedUsers)) throw new Error("users array required");
 
         const results = [];
 
         for (const userPayload of seedUsers) {
+          const normalizedEmail = normalizeEmailValue(userPayload.email);
+          const normalizedPhone = normalizePhoneValue(userPayload.phone);
+
           if (!userPayload.company_id) {
             results.push({ email: userPayload.email, error: "company_id e obrigatorio" });
+            continue;
+          }
+
+          if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+            results.push({ email: userPayload.email, error: "Informe um email valido" });
+            continue;
+          }
+
+          if (normalizedPhone && !isValidBrazilPhone(normalizedPhone)) {
+            results.push({ email: normalizedEmail, error: "Informe um telefone valido com DDD" });
             continue;
           }
 
@@ -676,14 +989,14 @@ Deno.serve(async (req) => {
 
           const tempPassword = crypto.randomUUID().slice(0, 12) + "Aa1!";
           const { data: newUser, error: userError } = await context.supabaseAdmin.auth.admin.createUser({
-            email: userPayload.email,
+            email: normalizedEmail,
             password: tempPassword,
             email_confirm: true,
             user_metadata: { full_name: userPayload.full_name },
           });
 
           if (userError) {
-            results.push({ email: userPayload.email, error: userError.message });
+            results.push({ email: normalizedEmail, error: userError.message });
             continue;
           }
 
@@ -691,7 +1004,7 @@ Deno.serve(async (req) => {
             .from("profiles")
             .update({
               company_id: userPayload.company_id,
-              phone: userPayload.phone || null,
+              phone: normalizedPhone,
               full_name: userPayload.full_name,
               is_active: true,
             })
@@ -699,7 +1012,7 @@ Deno.serve(async (req) => {
 
           if (profileError) {
             await rollbackCreatedUser(context.supabaseAdmin, newUser.user.id);
-            results.push({ email: userPayload.email, error: profileError.message });
+            results.push({ email: normalizedEmail, error: profileError.message });
             continue;
           }
 
@@ -713,7 +1026,7 @@ Deno.serve(async (req) => {
 
           if (roleError) {
             await rollbackCreatedUser(context.supabaseAdmin, newUser.user.id);
-            results.push({ email: userPayload.email, error: roleError.message });
+            results.push({ email: normalizedEmail, error: roleError.message });
             continue;
           }
 
@@ -727,7 +1040,7 @@ Deno.serve(async (req) => {
                 {
                   target_user_id: newUser.user.id,
                   target_name: userPayload.full_name,
-                  email: userPayload.email,
+                  email: normalizedEmail,
                   role: userPayload.role || "admin",
                   company_id: userPayload.company_id,
                 },
@@ -744,13 +1057,13 @@ Deno.serve(async (req) => {
           let warning: string | null = null;
 
           try {
-            accessLink = await generateRecoveryAccessLink(context.supabaseAdmin, req, userPayload.email);
+            accessLink = await generateRecoveryAccessLink(context.supabaseAdmin, req, normalizedEmail);
           } catch (linkError: any) {
             warning = `Usuario criado, mas o link de acesso nao foi gerado automaticamente: ${linkError.message}`;
           }
 
           results.push({
-            email: userPayload.email,
+            email: normalizedEmail,
             id: newUser.user.id,
             access_link: accessLink,
             warning,
@@ -774,6 +1087,7 @@ Deno.serve(async (req) => {
       : message.includes("Apenas admins e superadmins") ? 403
       : message.includes("Admins nao podem") || message.includes("Admins so podem") ? 403
       : message.includes("Este fluxo nao exclui superadmins") ? 403
+      : message.includes("Informe um") || message.includes("A senha deve") || message.includes("Nenhum dado foi informado") ? 400
       : message.includes("Cada empresa precisa") ? 409
       : 500;
 

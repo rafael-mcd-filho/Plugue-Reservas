@@ -6,6 +6,63 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
+
+function normalizeOptionalText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeEmail(value: unknown) {
+  return normalizeOptionalText(value);
+}
+
+function normalizePhone(value: unknown) {
+  return normalizeOptionalText(value);
+}
+
+function normalizeCnpj(value: unknown) {
+  const text = typeof value === "string" ? value.replace(/\D/g, "") : "";
+  return text.length > 0 ? text.slice(0, 14) : null;
+}
+
+function isValidEmail(value: string) {
+  return EMAIL_PATTERN.test(value);
+}
+
+function isValidBrazilPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  const localDigits = digits.length > 11 && digits.startsWith("55")
+    ? digits.slice(2)
+    : digits;
+
+  return BRAZIL_PHONE_PATTERN.test(localDigits);
+}
+
+function isValidCnpj(value: string) {
+  if (value.length !== 14 || /^(\d)\1{13}$/.test(value)) {
+    return false;
+  }
+
+  const calculateCheckDigit = (baseDigits: string, factor: number) => {
+    let total = 0;
+
+    for (const digit of baseDigits) {
+      total += Number(digit) * factor;
+      factor = factor === 2 ? 9 : factor - 1;
+    }
+
+    const remainder = total % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+
+  const base = value.slice(0, 12);
+  const firstCheckDigit = calculateCheckDigit(base, 5);
+  const secondCheckDigit = calculateCheckDigit(`${base}${firstCheckDigit}`, 6);
+
+  return value === `${base}${firstCheckDigit}${secondCheckDigit}`;
+}
+
 function sanitizeOrigin(value: string | null | undefined) {
   if (!value) return null;
 
@@ -101,6 +158,55 @@ Deno.serve(async (req) => {
       });
     }
 
+    const normalizedCompanyEmail = normalizeEmail(email);
+    const normalizedResponsibleEmail = normalizeEmail(responsible_email);
+    const normalizedCompanyPhone = normalizePhone(phone);
+    const normalizedResponsiblePhone = normalizePhone(responsible_phone);
+    const normalizedWhatsapp = normalizePhone(whatsapp);
+    const normalizedCnpj = normalizeCnpj(cnpj);
+
+    if (!normalizedResponsibleEmail || !isValidEmail(normalizedResponsibleEmail)) {
+      return new Response(JSON.stringify({ error: "Informe um email valido para o responsavel" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (normalizedCompanyEmail && !isValidEmail(normalizedCompanyEmail)) {
+      return new Response(JSON.stringify({ error: "Informe um email valido para a empresa" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (normalizedCompanyPhone && !isValidBrazilPhone(normalizedCompanyPhone)) {
+      return new Response(JSON.stringify({ error: "Informe um telefone valido para a empresa" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (normalizedResponsiblePhone && !isValidBrazilPhone(normalizedResponsiblePhone)) {
+      return new Response(JSON.stringify({ error: "Informe um telefone valido para o responsavel" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (normalizedWhatsapp && !isValidBrazilPhone(normalizedWhatsapp)) {
+      return new Response(JSON.stringify({ error: "Informe um WhatsApp valido" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (normalizedCnpj && !isValidCnpj(normalizedCnpj)) {
+      return new Response(JSON.stringify({ error: "Informe um CNPJ valido" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let company: any = null;
     let newUser: any = null;
     const tempPassword = crypto.randomUUID().slice(0, 12) + "Aa1!";
@@ -132,15 +238,15 @@ Deno.serve(async (req) => {
           name,
           slug,
           razao_social,
-          cnpj,
-          phone,
-          email,
+          cnpj: normalizedCnpj,
+          phone: normalizedCompanyPhone,
+          email: normalizedCompanyEmail,
           address,
           responsible_name,
-          responsible_email,
-          responsible_phone,
+          responsible_email: normalizedResponsibleEmail,
+          responsible_phone: normalizedResponsiblePhone,
           instagram,
-          whatsapp,
+          whatsapp: normalizedWhatsapp,
           google_maps_url,
           description,
           logo_url,
@@ -157,7 +263,7 @@ Deno.serve(async (req) => {
       company = createdCompany;
 
       const { data: createdUser, error: userError } = await supabaseAdmin.auth.admin.createUser({
-        email: responsible_email,
+        email: normalizedResponsibleEmail,
         password: tempPassword,
         email_confirm: true,
         user_metadata: { full_name: responsible_name || name },
@@ -170,7 +276,7 @@ Deno.serve(async (req) => {
         .from("profiles")
         .update({
           company_id: company.id,
-          phone: responsible_phone,
+          phone: normalizedResponsiblePhone,
           full_name: responsible_name || name,
         })
         .eq("id", newUser.user.id);
@@ -199,7 +305,7 @@ Deno.serve(async (req) => {
     const redirectTo = appOrigin ? `${appOrigin}/redefinir-senha` : undefined;
     const { data: recoveryLinkData, error: recoveryError } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
-      email: responsible_email,
+      email: normalizedResponsibleEmail,
       options: redirectTo ? { redirectTo } : undefined,
     });
     const accessLink = ((recoveryLinkData as any)?.properties?.action_link
@@ -215,7 +321,7 @@ Deno.serve(async (req) => {
         company_name: company.name,
         company_slug: company.slug,
         admin_user_id: newUser.user.id,
-        admin_email: responsible_email,
+        admin_email: normalizedResponsibleEmail,
         recovery_link_generated: !recoveryError,
         recovery_link_error: recoveryError?.message || null,
       },
@@ -230,7 +336,7 @@ Deno.serve(async (req) => {
         company,
         admin_user: {
           id: newUser.user.id,
-          email: responsible_email,
+          email: normalizedResponsibleEmail,
           access_link: accessLink,
         },
         warning: recoveryError ? "Empresa criada, mas o link de recuperacao nao foi gerado automaticamente." : null,

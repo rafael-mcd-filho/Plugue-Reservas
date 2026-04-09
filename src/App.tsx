@@ -28,6 +28,7 @@ const CompanyWaitlist = lazy(() => import("@/pages/CompanyWaitlist"));
 const PublicWaitlistPage = lazy(() => import("@/pages/PublicWaitlistPage"));
 const WaitlistTracking = lazy(() => import("@/pages/WaitlistTracking"));
 const ReservationTracking = lazy(() => import("@/pages/ReservationTracking"));
+const Profile = lazy(() => import("@/pages/Profile"));
 const Leads = lazy(() => import("@/pages/Leads"));
 const Users = lazy(() => import("@/pages/Users"));
 const Login = lazy(() => import("@/pages/Login"));
@@ -41,6 +42,9 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
+      // Keep polling only while the tab is active so background tab switches
+      // do not overwrite in-progress form state when the user returns.
+      refetchIntervalInBackground: false,
     },
   },
 });
@@ -283,6 +287,14 @@ const App = () => (
                 }
               />
               <Route
+                path="/perfil"
+                element={
+                  <SuperadminRoute>
+                    <Profile />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
                 path="/saude"
                 element={
                   <SuperadminRoute>
@@ -393,6 +405,14 @@ const App = () => (
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
                     <CompanyUsers />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/perfil"
+                element={
+                  <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
+                    <Profile />
                   </CompanyAdminRoute>
                 }
               />

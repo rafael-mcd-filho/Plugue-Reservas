@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   KeyRound,
@@ -39,11 +40,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import UserPasswordDialog from '@/components/users/UserPasswordDialog';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
+import {
+  formatBrazilPhone,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeEmail,
+} from '@/lib/validation';
 import type { ManagedUser } from '@/hooks/useUsers';
 
 const roleLabels: Record<string, string> = {
@@ -79,6 +88,8 @@ function getAvatarTone(user: ManagedUser) {
 }
 
 export default function CompanyUsers() {
+  const navigate = useNavigate();
+  const { user: currentUser, signOut } = useAuth();
   const { companyId, companyName } = useCompanySlug();
   const qc = useQueryClient();
 
@@ -87,10 +98,11 @@ export default function CompanyUsers() {
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', role: 'operator' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
-  const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
+  const [passwordDialog, setPasswordDialog] = useState<ManagedUser | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [createForm, setCreateForm] = useState({ full_name: '', email: '', phone: '', role: 'operator' });
 
   const {
@@ -150,7 +162,7 @@ export default function CompanyUsers() {
     setEditForm({
       full_name: user.full_name,
       email: user.email,
-      phone: user.phone,
+      phone: formatBrazilPhone(user.phone),
       role: primaryRole,
     });
   };
@@ -164,14 +176,30 @@ export default function CompanyUsers() {
       return;
     }
 
+    const emailError = getEmailValidationMessage(editForm.email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(editForm.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
     try {
+      const normalizedEmail = normalizeEmail(editForm.email);
+      const shouldReauthenticate = editUser.id === currentUser?.id
+        && normalizedEmail !== normalizeEmail(editUser.email);
+
       const { error } = await supabase.functions.invoke('manage-user', {
         body: {
           action: 'update_user',
           user_id: editUser.id,
           full_name: editForm.full_name,
-          email: editForm.email,
-          phone: editForm.phone,
+          email: normalizedEmail,
+          phone: formatBrazilPhone(editForm.phone),
           role: editForm.role,
         },
       });
@@ -183,6 +211,12 @@ export default function CompanyUsers() {
       toast.success('Usuário atualizado.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
       setEditUser(null);
+
+      if (shouldReauthenticate) {
+        toast.success('E-mail de login atualizado. Entre novamente com o novo e-mail.');
+        await signOut();
+        navigate('/login', { replace: true });
+      }
     } catch (err: any) {
       toast.error(`Erro: ${err.message}`);
     }
@@ -211,12 +245,18 @@ export default function CompanyUsers() {
     }
   };
 
-  const handleResetPassword = async (userId: string) => {
+  const handleSetPassword = async (password: string) => {
+    if (!passwordDialog) return;
+
     try {
-      const { data, error } = await supabase.functions.invoke('manage-user', {
+      setChangingPassword(true);
+      const targetUser = passwordDialog;
+
+      const { error } = await supabase.functions.invoke('manage-user', {
         body: {
-          action: 'reset_password',
-          user_id: userId,
+          action: 'set_user_password',
+          user_id: targetUser.id,
+          password,
         },
       });
 
@@ -224,21 +264,19 @@ export default function CompanyUsers() {
         throw new Error(await getFunctionErrorMessage(error));
       }
 
-      if (data?.access_link) {
-        try {
-          await navigator.clipboard.writeText(data.access_link);
-          toast.success('Link unico de redefinicao copiado.');
-        } catch {
-          toast.success('Link unico de redefinicao gerado.');
-        }
-      } else {
-        toast.success('Link unico de redefinicao gerado.');
-      }
+      toast.success('Senha atualizada.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
+
+      if (targetUser.id === currentUser?.id) {
+        toast.success('Senha atualizada. Entre novamente com a nova senha.');
+        await signOut();
+        navigate('/login', { replace: true });
+      }
     } catch (err: any) {
       toast.error(`Erro: ${err.message}`);
     } finally {
-      setResetDialog(null);
+      setChangingPassword(false);
+      setPasswordDialog(null);
     }
   };
 
@@ -272,6 +310,18 @@ export default function CompanyUsers() {
       return;
     }
 
+    const emailError = getEmailValidationMessage(createForm.email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(createForm.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
     setCreating(true);
 
     try {
@@ -281,8 +331,8 @@ export default function CompanyUsers() {
           users: [
             {
               full_name: createForm.full_name,
-              email: createForm.email,
-              phone: createForm.phone || null,
+              email: normalizeEmail(createForm.email),
+              phone: formatBrazilPhone(createForm.phone) || null,
               company_id: companyId,
               role: createForm.role,
             },
@@ -476,9 +526,9 @@ export default function CompanyUsers() {
                           <Pencil className="mr-2 h-4 w-4" />
                           Editar
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setResetDialog(user)}>
+                        <DropdownMenuItem onClick={() => setPasswordDialog(user)}>
                           <KeyRound className="mr-2 h-4 w-4" />
-                          Redefinir senha
+                          Alterar senha
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -562,22 +612,15 @@ export default function CompanyUsers() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!resetDialog} onOpenChange={(open) => !open && setResetDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Um link único de redefinição será gerado para {resetDialog?.full_name || resetDialog?.email}.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => resetDialog && handleResetPassword(resetDialog.id)}>
-              Redefinir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UserPasswordDialog
+        open={!!passwordDialog}
+        onOpenChange={(open) => !open && setPasswordDialog(null)}
+        title="Alterar senha"
+        description={`Defina uma nova senha para ${passwordDialog?.full_name || passwordDialog?.email || 'este usuario'}.`}
+        submitLabel="Salvar senha"
+        submitting={changingPassword}
+        onSubmit={handleSetPassword}
+      />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent className="max-w-md">
@@ -615,9 +658,10 @@ export default function CompanyUsers() {
                 name="phone"
                 type="tel"
                 value={editForm.phone}
-                onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
+                onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
                 autoComplete="tel"
                 inputMode="tel"
+                maxLength={15}
               />
             </div>
             <div>
@@ -689,10 +733,11 @@ export default function CompanyUsers() {
                 name="phone"
                 type="tel"
                 value={createForm.phone}
-                onChange={(event) => setCreateForm({ ...createForm, phone: event.target.value })}
+                onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
                 placeholder="(11) 99999-9999"
                 autoComplete="tel"
                 inputMode="tel"
+                maxLength={15}
               />
             </div>
             <div>

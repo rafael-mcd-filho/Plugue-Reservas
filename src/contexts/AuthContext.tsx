@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { trackAccessAudit } from '@/lib/accessAudit';
-import { MIN_PASSWORD_LENGTH } from '@/lib/validation';
+import { isStrongPassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
@@ -29,6 +29,7 @@ interface AuthContextType {
   signIn: (email: string, password: string, options?: { slug?: string | null }) => Promise<{ error: any }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
+  refreshUserData: () => Promise<void>;
   hasRole: (role: AppRole) => boolean;
   hasAnyRole: (roles: AppRole[]) => boolean;
 }
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const currentUserIdRef = useRef<string | null>(null);
 
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     const { data, error } = await supabase
@@ -91,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
     }
 
+    currentUserIdRef.current = currentSession?.user?.id ?? null;
     setSession(currentSession);
     setUser(currentSession?.user ?? null);
 
@@ -150,9 +153,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Then listen for changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, newSession) => {
-        // Only reload if session actually changed (login/logout)
-        if (_event === 'SIGNED_IN' || _event === 'SIGNED_OUT' || _event === 'PASSWORD_RECOVERY') {
+        if (_event === 'SIGNED_OUT' || _event === 'PASSWORD_RECOVERY') {
           loadUserData(newSession);
+          return;
+        }
+
+        if (_event === 'SIGNED_IN') {
+          // Supabase v2 fires SIGNED_IN on token refresh too.
+          // Only show loading spinner for genuine new sign-ins (user changed).
+          const isSameUser = !!newSession?.user?.id && newSession.user.id === currentUserIdRef.current;
+          loadUserData(newSession, { background: isSameUser });
           return;
         }
 
@@ -196,8 +206,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      return { error: { message: `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.` } };
+    if (!isStrongPassword(password)) {
+      return { error: { message: PASSWORD_REQUIREMENTS_TEXT } };
     }
 
     const { error } = await supabase.auth.signUp({
@@ -217,11 +227,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRoles([]);
   };
 
+  const refreshUserData = async () => {
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    await loadUserData(currentSession, { background: true });
+  };
+
   const hasRole = (role: AppRole) => roles.includes(role);
   const hasAnyRole = (r: AppRole[]) => r.some(role => roles.includes(role));
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, signIn, signUp, signOut, hasRole, hasAnyRole }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, signIn, signUp, signOut, refreshUserData, hasRole, hasAnyRole }}>
       {children}
     </AuthContext.Provider>
   );

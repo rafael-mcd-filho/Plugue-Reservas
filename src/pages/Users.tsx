@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Users as UsersIcon,
@@ -34,11 +35,19 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useUsers, useToggleBan, useUpdateUser, useResetPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
+import UserPasswordDialog from '@/components/users/UserPasswordDialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { useUsers, useToggleBan, useUpdateUser, useSetUserPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
 import { useCompanies } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
+import {
+  formatBrazilPhone,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeEmail,
+} from '@/lib/validation';
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -47,11 +56,13 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function Users() {
+  const navigate = useNavigate();
+  const { user: currentUser, signOut } = useAuth();
   const { data: users = [], isLoading, error, refetch, isFetching } = useUsers();
   const { data: companies = [] } = useCompanies();
   const toggleBan = useToggleBan();
   const updateUser = useUpdateUser();
-  const resetPassword = useResetPassword();
+  const setUserPassword = useSetUserPassword();
   const deleteUser = useDeleteUser();
   const qc = useQueryClient();
 
@@ -61,7 +72,7 @@ export default function Users() {
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '' });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
-  const [resetDialog, setResetDialog] = useState<ManagedUser | null>(null);
+  const [passwordDialog, setPasswordDialog] = useState<ManagedUser | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -108,7 +119,7 @@ export default function Users() {
     setEditForm({
       full_name: user.full_name,
       email: user.email,
-      phone: user.phone,
+      phone: formatBrazilPhone(user.phone),
       company_id: user.company_id || '',
       role: primaryRole,
     });
@@ -123,22 +134,78 @@ export default function Users() {
       return;
     }
 
+    const emailError = getEmailValidationMessage(editForm.email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(editForm.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
+    const normalizedEmail = normalizeEmail(editForm.email);
+    const shouldReauthenticate = editUser.id === currentUser?.id
+      && normalizedEmail !== normalizeEmail(editUser.email);
+
     await updateUser.mutateAsync({
       user_id: editUser.id,
       full_name: editForm.full_name,
-      email: editForm.email,
-      phone: editForm.phone,
+      email: normalizedEmail,
+      phone: formatBrazilPhone(editForm.phone),
       company_id: editForm.company_id || null,
       role: editForm.role,
     });
 
     setEditUser(null);
+
+    if (shouldReauthenticate) {
+      toast.success('E-mail de login atualizado. Entre novamente com o novo e-mail.');
+      await signOut();
+      navigate('/login', { replace: true });
+    }
+  };
+
+  const handleSetPassword = async (password: string) => {
+    if (!passwordDialog) return;
+
+    const targetUser = passwordDialog;
+
+    await setUserPassword.mutateAsync({
+      user_id: targetUser.id,
+      password,
+    });
+
+    setPasswordDialog(null);
+
+    if (targetUser.id === currentUser?.id) {
+      toast.success('Senha atualizada. Entre novamente com a nova senha.');
+      await signOut();
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    toast.success('Senha atualizada.');
   };
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!createForm.full_name || !createForm.email || !createForm.company_id) {
       toast.error('Preencha nome, e-mail e empresa');
+      return;
+    }
+
+    const emailError = getEmailValidationMessage(createForm.email, 'um e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(createForm.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
       return;
     }
 
@@ -150,8 +217,8 @@ export default function Users() {
           action: 'seed_users',
           users: [{
             full_name: createForm.full_name,
-            email: createForm.email,
-            phone: createForm.phone || null,
+            email: normalizeEmail(createForm.email),
+            phone: formatBrazilPhone(createForm.phone) || null,
             company_id: createForm.company_id,
             role: createForm.role,
           }],
@@ -315,9 +382,9 @@ export default function Users() {
                           <Pencil className="mr-2 h-4 w-4" />
                           Editar
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setResetDialog(user)}>
+                        <DropdownMenuItem onClick={() => setPasswordDialog(user)}>
                           <KeyRound className="mr-2 h-4 w-4" />
-                          Redefinir senha
+                          Alterar senha
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -413,22 +480,15 @@ export default function Users() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!resetDialog} onOpenChange={(open) => !open && setResetDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Um link unico de redefinicao será gerado para {resetDialog?.full_name || resetDialog?.email}. O acesso atual será invalidado assim que a nova senha for definida.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { if (resetDialog) resetPassword.mutate(resetDialog.id); setResetDialog(null); }}>
-              Redefinir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UserPasswordDialog
+        open={!!passwordDialog}
+        onOpenChange={(open) => !open && setPasswordDialog(null)}
+        title="Alterar senha"
+        description={`Defina uma nova senha para ${passwordDialog?.full_name || passwordDialog?.email || 'este usuario'}.`}
+        submitLabel="Salvar senha"
+        submitting={setUserPassword.isPending}
+        onSubmit={handleSetPassword}
+      />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent className="max-w-md">
@@ -466,9 +526,10 @@ export default function Users() {
                 name="phone"
                 type="tel"
                 value={editForm.phone}
-                onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
+                onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
                 autoComplete="tel"
                 inputMode="tel"
+                maxLength={15}
               />
             </div>
             <div>
@@ -550,10 +611,11 @@ export default function Users() {
                 name="phone"
                 type="tel"
                 value={createForm.phone}
-                onChange={(event) => setCreateForm({ ...createForm, phone: event.target.value })}
+                onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
                 placeholder="(11) 99999-9999"
                 autoComplete="tel"
                 inputMode="tel"
+                maxLength={15}
               />
             </div>
             <div>

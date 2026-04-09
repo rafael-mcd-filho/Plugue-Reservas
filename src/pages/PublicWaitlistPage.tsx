@@ -12,11 +12,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import {
+  formatBrazilPhone,
   isValidBrazilWhatsApp,
   isValidCompanySlug,
   MAX_WAITLIST_NAME_LENGTH,
   MAX_WAITLIST_NOTES_LENGTH,
-  normalizePhoneDigits,
+  normalizeBrazilPhoneDigits,
 } from '@/lib/validation';
 
 const DISABLED_MESSAGE = 'A entrada online na fila de espera está indisponível no momento. Dirija-se à unidade para entrar na fila de espera.';
@@ -79,7 +80,7 @@ export default function PublicWaitlistPage() {
     if (!slug || !slugIsValid) return;
 
     const guestName = form.guestName.trim();
-    const guestPhone = normalizePhoneDigits(form.guestPhone);
+    const guestPhone = normalizeBrazilPhoneDigits(form.guestPhone);
     const notes = form.notes.trim();
 
     if (!guestName) {
@@ -217,12 +218,12 @@ export default function PublicWaitlistPage() {
                     name="guest_phone"
                     type="tel"
                     value={form.guestPhone}
-                    onChange={(event) => setForm((current) => ({ ...current, guestPhone: event.target.value }))}
+                    onChange={(event) => setForm((current) => ({ ...current, guestPhone: formatBrazilPhone(event.target.value) }))}
                     placeholder="(11) 99999-9999"
                     autoComplete="tel"
                     inputMode="tel"
                     spellCheck={false}
-                    maxLength={20}
+                    maxLength={15}
                     required
                   />
                 </div>

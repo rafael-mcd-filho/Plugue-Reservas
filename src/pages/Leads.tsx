@@ -36,6 +36,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
 import { cn } from '@/lib/utils';
+import { formatBrazilPhone } from '@/lib/validation';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
@@ -866,7 +867,7 @@ export default function Leads() {
   const exportLeadsCsv = () => {
     const rows = exportedLeads.map(({ lead, matchedVisits, matchedSource }) => [
       lead.guest_name,
-      lead.guest_phone,
+      formatBrazilPhone(lead.guest_phone),
       lead.guest_email || '',
       lead.stateCode ? `${lead.stateName} (${lead.stateCode})` : '',
       lead.guest_birthdate || '',
@@ -1068,7 +1069,7 @@ export default function Leads() {
                       <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Phone className="h-3 w-3" />
-                          {lead.guest_phone}
+                          {formatBrazilPhone(lead.guest_phone)}
                         </span>
                         {lead.guest_email && (
                           <span className="flex items-center gap-1">
@@ -1355,7 +1356,7 @@ export default function Leads() {
                   </div>
                   <div>
                     <p>{selectedLead.guest_name}</p>
-                    <p className="text-sm font-normal text-muted-foreground">{selectedLead.guest_phone}</p>
+                    <p className="text-sm font-normal text-muted-foreground">{formatBrazilPhone(selectedLead.guest_phone)}</p>
                   </div>
                 </DialogTitle>
               </DialogHeader>

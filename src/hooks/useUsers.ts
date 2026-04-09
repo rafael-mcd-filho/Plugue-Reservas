@@ -61,27 +61,14 @@ export function useUpdateUser() {
   });
 }
 
-export function useResetPassword() {
+export function useSetUserPassword() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (user_id: string) => {
-      return invokeManageUser({ action: 'reset_password', user_id });
+    mutationFn: async ({ user_id, password }: { user_id: string; password: string }) => {
+      return invokeManageUser({ action: 'set_user_password', user_id, password });
     },
-    onSuccess: async (data) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['managed-users'] });
-
-      if (data?.access_link) {
-        try {
-          await navigator.clipboard.writeText(data.access_link);
-          toast.success('Link unico de redefinicao copiado.');
-          return;
-        } catch {
-          toast.success('Link unico de redefinicao gerado.');
-          return;
-        }
-      }
-
-      toast.success('Link unico de redefinicao gerado.');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });

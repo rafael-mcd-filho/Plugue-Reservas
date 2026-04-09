@@ -41,6 +41,7 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { getGoogleMapsEmbedUrl, normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
+import { formatBrazilPhone, getPhoneValidationMessage } from '@/lib/validation';
 
 interface OpeningHour {
   day: string;
@@ -196,9 +197,9 @@ export default function CompanySettings() {
     setDescription(company.description || '');
     setLogoUrl(company.logo_url || '');
     setAddress(company.address || '');
-    setPhone(company.phone || '');
+    setPhone(formatBrazilPhone(company.phone));
     setInstagram(company.instagram || '');
-    setWhatsapp(company.whatsapp || '');
+    setWhatsapp(formatBrazilPhone(company.whatsapp));
     setShowPublicWhatsappButton((company.show_public_whatsapp_button ?? true) ? 'show' : 'hide');
     setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
     setGoogleMapsUrl(company.google_maps_url || '');
@@ -243,6 +244,16 @@ export default function CompanySettings() {
         throw new Error('Use um link de incorporação válido do Google Maps.');
       }
 
+      const phoneError = getPhoneValidationMessage(phone, 'um telefone');
+      if (phoneError) {
+        throw new Error(phoneError);
+      }
+
+      const whatsappError = getPhoneValidationMessage(whatsapp, 'um WhatsApp');
+      if (whatsappError) {
+        throw new Error(whatsappError);
+      }
+
       const trimmedNoticeText = noticeText.trim();
       const hasNoticeContent = !!trimmedNoticeText || !!noticeImageUrl;
       const noticeActiveUntilIso = fromDateTimeLocalValue(noticeActiveUntil);
@@ -269,9 +280,9 @@ export default function CompanySettings() {
           description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
           logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
           address,
-          phone,
+          phone: formatBrazilPhone(phone),
           instagram,
-          whatsapp: publicCustomizationLocked ? (company.whatsapp || '') : whatsapp,
+          whatsapp: publicCustomizationLocked ? (company.whatsapp || '') : formatBrazilPhone(whatsapp),
           show_public_whatsapp_button: publicCustomizationLocked
             ? (company.show_public_whatsapp_button ?? true)
             : showPublicWhatsappButton === 'show',
@@ -759,11 +770,12 @@ export default function CompanySettings() {
                     id="company-settings-phone"
                     name="phone"
                     value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
+                    onChange={(event) => setPhone(formatBrazilPhone(event.target.value))}
                     placeholder="(84) 3333-4444"
                     className={settingsFieldClassName}
                     autoComplete="tel"
                     inputMode="tel"
+                    maxLength={15}
                   />
                 </div>
 
@@ -787,12 +799,13 @@ export default function CompanySettings() {
                     id="company-settings-whatsapp"
                     name="whatsapp"
                     value={whatsapp}
-                    onChange={(event) => setWhatsapp(event.target.value)}
-                    placeholder="5584999999999"
+                    onChange={(event) => setWhatsapp(formatBrazilPhone(event.target.value))}
+                    placeholder="(84) 99999-9999"
                     disabled={publicCustomizationLocked}
                     className={settingsFieldClassName}
                     autoComplete="tel"
                     inputMode="tel"
+                    maxLength={15}
                   />
                   {publicCustomizationLocked && (
                     <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>

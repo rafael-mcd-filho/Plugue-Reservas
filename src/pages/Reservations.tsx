@@ -45,6 +45,13 @@ import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimest
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import {
+  formatBrazilPhone,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeBrazilPhoneDigits,
+  normalizeEmail,
+} from '@/lib/validation';
 import type { DateRange } from 'react-day-picker';
 
 type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'completed' | 'no-show';
@@ -471,9 +478,19 @@ export default function Reservations() {
   const createReservationMutation = useMutation({
     mutationFn: async () => {
       const parsedPartySize = Number.parseInt(manualReservationForm.party_size, 10);
+      const guestPhoneError = getPhoneValidationMessage(manualReservationForm.guest_phone, 'o WhatsApp do cliente', true);
+      const guestEmailError = getEmailValidationMessage(manualReservationForm.guest_email, 'o e-mail do cliente');
 
       if (!manualReservationForm.guest_name.trim() || !manualReservationForm.guest_phone.trim()) {
         throw new Error('Informe nome e WhatsApp do cliente.');
+      }
+
+      if (guestPhoneError) {
+        throw new Error(guestPhoneError);
+      }
+
+      if (guestEmailError) {
+        throw new Error(guestEmailError);
       }
 
       if (!manualReservationForm.date || !manualReservationForm.time) {
@@ -493,8 +510,8 @@ export default function Reservations() {
         table_id: null,
         table_map_id: null,
         guest_name: manualReservationForm.guest_name.trim(),
-        guest_phone: manualReservationForm.guest_phone.trim(),
-        guest_email: manualReservationForm.guest_email.trim() || null,
+        guest_phone: normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
+        guest_email: normalizeEmail(manualReservationForm.guest_email) || null,
         guest_birthdate: manualReservationForm.guest_birthdate || null,
         date: manualReservationForm.date,
         time: `${manualReservationForm.time}:00`,
@@ -563,9 +580,11 @@ export default function Reservations() {
       })
       .filter((reservation) => {
         const query = search.toLowerCase();
+        const queryDigits = normalizePhone(search);
         return (
           reservation.guest_name.toLowerCase().includes(query) ||
-          reservation.guest_phone.includes(search)
+          reservation.guest_phone.includes(search) ||
+          (!!queryDigits && normalizePhone(reservation.guest_phone).includes(queryDigits))
         );
       });
   }, [dateFrom, dateTo, search, sortedReservations, statusFilter]);
@@ -684,7 +703,7 @@ export default function Reservations() {
       return [
         reservation.guest_name,
         reservation.source === 'waitlist' ? 'Fila convertida' : 'Agendada',
-        reservation.guest_phone,
+        formatBrazilPhone(reservation.guest_phone),
         reservation.guest_email ?? '',
         format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy'),
         reservation.time.slice(0, 5),
@@ -734,7 +753,7 @@ export default function Reservations() {
     setCompanionForms((current) =>
       current.map((companion) =>
         companion.key === key
-          ? { ...companion, [field]: value }
+          ? { ...companion, [field]: field === 'phone' ? formatBrazilPhone(value) : value }
           : companion,
       ),
     );
@@ -769,6 +788,20 @@ export default function Reservations() {
         return;
       }
 
+      for (const [index, companion] of companions.entries()) {
+        const phoneError = getPhoneValidationMessage(companion.phone, `o telefone do acompanhante ${index + 1}`);
+        if (phoneError) {
+          toast.error(phoneError);
+          return;
+        }
+
+        const emailError = getEmailValidationMessage(companion.email, `o e-mail do acompanhante ${index + 1}`);
+        if (emailError) {
+          toast.error(emailError);
+          return;
+        }
+      }
+
       if (companions.length > Math.max(parsedCheckedInCount - 1, 0)) {
         toast.error('A quantidade de acompanhantes excede o total presente informado.');
         return;
@@ -778,7 +811,11 @@ export default function Reservations() {
         id: editingReservation.id,
         status: editStatus,
         checkedInCount: parsedCheckedInCount,
-        companions,
+        companions: companions.map((companion) => ({
+          ...companion,
+          phone: normalizeBrazilPhoneDigits(companion.phone),
+          email: normalizeEmail(companion.email),
+        })),
       });
       return;
     }
@@ -1044,7 +1081,7 @@ export default function Reservations() {
 
                         <TableCell className="px-4 py-4">
                           <div className="font-medium text-foreground">{reservation.guest_name}</div>
-                          <div className="mt-1 text-sm text-muted-foreground">{reservation.guest_phone}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
                           <div className="mt-2">
                             <ReservationSourceBadge source={reservation.source} />
                           </div>
@@ -1463,6 +1500,7 @@ export default function Reservations() {
                               placeholder="WhatsApp"
                               autoComplete="tel"
                               inputMode="tel"
+                              maxLength={15}
                             />
                             <Input
                               id={`reservation-companion-email-${companion.key}`}
@@ -1548,11 +1586,12 @@ export default function Reservations() {
                   type="tel"
                   value={manualReservationForm.guest_phone}
                   onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, guest_phone: event.target.value }))
+                    setManualReservationForm((current) => ({ ...current, guest_phone: formatBrazilPhone(event.target.value) }))
                   }
                   placeholder="(11) 99999-9999"
                   autoComplete="tel"
                   inputMode="tel"
+                  maxLength={15}
                   required
                 />
               </div>
@@ -1726,7 +1765,7 @@ export default function Reservations() {
 
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium text-foreground">{reservation.guest_name}</div>
-                    <div className="text-xs text-muted-foreground">{reservation.guest_phone}</div>
+                    <div className="text-xs text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
                         <Users className="h-3 w-3" />

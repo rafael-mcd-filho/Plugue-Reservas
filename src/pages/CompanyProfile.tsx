@@ -34,6 +34,16 @@ import {
   normalizeCompanyPlanTier,
 } from '@/lib/companyFeatures';
 import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchList';
+import { toast } from 'sonner';
+import {
+  formatBrazilPhone,
+  formatCnpj,
+  getCnpjValidationMessage,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeCnpjDigits,
+  normalizeEmail,
+} from '@/lib/validation';
 
 interface CompanyActivityEvent {
   event_key: string;
@@ -155,13 +165,13 @@ export default function CompanyProfile() {
       name: company.name,
       slug: company.slug,
       razao_social: company.razao_social || '',
-      cnpj: company.cnpj || '',
-      phone: company.phone || '',
+      cnpj: formatCnpj(company.cnpj),
+      phone: formatBrazilPhone(company.phone),
       email: company.email || '',
       address: company.address || '',
       responsible_name: company.responsible_name || '',
       responsible_email: company.responsible_email || '',
-      responsible_phone: company.responsible_phone || '',
+      responsible_phone: formatBrazilPhone(company.responsible_phone),
       status: company.status,
     });
     setModalFeatures(getCurrentFeatures(company, featureFlags?.features));
@@ -171,7 +181,46 @@ export default function CompanyProfile() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!company) return;
-    await updateCompany.mutateAsync({ id: company.id, ...form });
+
+    const cnpjError = getCnpjValidationMessage(form.cnpj, 'um CNPJ');
+    if (cnpjError) {
+      toast.error(cnpjError);
+      return;
+    }
+
+    const phoneError = getPhoneValidationMessage(form.phone, 'um telefone');
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
+    const emailError = getEmailValidationMessage(form.email, 'um e-mail');
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    const responsibleEmailError = getEmailValidationMessage(form.responsible_email, 'o e-mail do responsável');
+    if (responsibleEmailError) {
+      toast.error(responsibleEmailError);
+      return;
+    }
+
+    const responsiblePhoneError = getPhoneValidationMessage(form.responsible_phone, 'o telefone do responsável');
+    if (responsiblePhoneError) {
+      toast.error(responsiblePhoneError);
+      return;
+    }
+
+    await updateCompany.mutateAsync({
+      id: company.id,
+      ...form,
+      cnpj: normalizeCnpjDigits(form.cnpj),
+      phone: formatBrazilPhone(form.phone),
+      email: normalizeEmail(form.email),
+      responsible_email: normalizeEmail(form.responsible_email),
+      responsible_phone: formatBrazilPhone(form.responsible_phone),
+    });
     if (modalFeatures) {
       await saveCompanyFeatures.mutateAsync({
         companyId: company.id,
@@ -291,7 +340,7 @@ export default function CompanyProfile() {
           <CardContent className="space-y-4">
             <InfoRow label="Nome Fantasia" value={company.name} />
             <InfoRow label="Razao Social" value={company.razao_social} />
-            <InfoRow label="CNPJ" value={company.cnpj} mono />
+            <InfoRow label="CNPJ" value={formatCnpj(company.cnpj)} mono />
             <InfoRow label="Slug" value={company.slug} mono />
             <Separator />
             {company.email && (
@@ -303,7 +352,7 @@ export default function CompanyProfile() {
             {company.phone && (
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{company.phone}</span>
+                <span>{formatBrazilPhone(company.phone)}</span>
               </div>
             )}
             {company.address && (
@@ -332,7 +381,7 @@ export default function CompanyProfile() {
             {company.responsible_phone && (
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{company.responsible_phone}</span>
+                <span>{formatBrazilPhone(company.responsible_phone)}</span>
               </div>
             )}
             <Separator />
@@ -506,7 +555,11 @@ export default function CompanyProfile() {
               </div>
               <div>
                 <Label>CNPJ</Label>
-                <Input value={form.cnpj || ''} onChange={(e) => setForm({ ...form, cnpj: e.target.value })} />
+                <Input
+                  value={form.cnpj || ''}
+                  onChange={(e) => setForm({ ...form, cnpj: formatCnpj(e.target.value) })}
+                  maxLength={18}
+                />
               </div>
               <div>
                 <Label>Slug</Label>
@@ -514,7 +567,11 @@ export default function CompanyProfile() {
               </div>
               <div>
                 <Label>Telefone</Label>
-                <Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                <Input
+                  value={form.phone || ''}
+                  onChange={(e) => setForm({ ...form, phone: formatBrazilPhone(e.target.value) })}
+                  maxLength={15}
+                />
               </div>
               <div>
                 <Label>Email</Label>
@@ -534,7 +591,11 @@ export default function CompanyProfile() {
               </div>
               <div>
                 <Label>Telefone do Responsável</Label>
-                <Input value={form.responsible_phone || ''} onChange={(e) => setForm({ ...form, responsible_phone: e.target.value })} />
+                <Input
+                  value={form.responsible_phone || ''}
+                  onChange={(e) => setForm({ ...form, responsible_phone: formatBrazilPhone(e.target.value) })}
+                  maxLength={15}
+                />
               </div>
               <div>
                 <Label>Status</Label>

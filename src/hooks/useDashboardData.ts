@@ -111,7 +111,7 @@ export function useDashboardData(
       return (data as any[]) as RawReservation[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const waitlistQuery = useQuery({
@@ -130,7 +130,7 @@ export function useDashboardData(
       return (data as any[]) as RawWaitlistEntry[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const waitlistSeatedQuery = useQuery({
@@ -150,7 +150,7 @@ export function useDashboardData(
       return (data as any[]) as RawWaitlistEntry[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const waitlistDroppedQuery = useQuery({
@@ -169,7 +169,7 @@ export function useDashboardData(
       return (data as any[]) as RawWaitlistEntry[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const previousReservationsQuery = useQuery({
@@ -188,7 +188,7 @@ export function useDashboardData(
       return (data as any[]) as RawReservation[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const createdReservationsQuery = useQuery({
@@ -207,7 +207,7 @@ export function useDashboardData(
       return (data as any[]) as RawReservation[];
     },
     refetchInterval: 30000,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
 
   const rawReservations = reservationsQuery.data ?? EMPTY_RESERVATIONS;

@@ -15,6 +15,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
+import {
+  formatBrazilPhone,
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  normalizeBrazilPhoneDigits,
+  normalizeEmail,
+} from '@/lib/validation';
 
 interface OpeningHour {
   day: string;
@@ -63,7 +70,7 @@ function generateTimeSlots(open: string, close: string, interval: number = 30): 
 }
 
 function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '');
+  return normalizeBrazilPhoneDigits(phone);
 }
 
 function splitGuestName(name: string) {
@@ -483,11 +490,26 @@ export default function ReservationModal({
       toast.error('Preencha nome e WhatsApp');
       return;
     }
+
+    const phoneError = getPhoneValidationMessage(form.whatsapp, 'um WhatsApp', true);
+    if (phoneError) {
+      toast.error(phoneError);
+      return;
+    }
+
+    const emailError = getEmailValidationMessage(form.email, 'um e-mail');
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
     if (!selectedDate || !selectedTime) return;
 
     setSubmitting(true);
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const normalizedEmail = normalizeEmail(form.email);
+      const normalizedPhone = normalizeBrazilPhoneDigits(form.whatsapp);
       const reservationId = crypto.randomUUID();
       const trackingCode = crypto.randomUUID().replace(/-/g, '');
       const trackingSnapshot: TrackingSnapshot = getTrackingSnapshot
@@ -518,8 +540,8 @@ export default function ReservationModal({
       const reservationUserData: TrackingUserData = {
         first_name: guestNameParts.first_name,
         last_name: guestNameParts.last_name,
-        email: form.email || null,
-        phone: form.whatsapp || null,
+        email: normalizedEmail || null,
+        phone: normalizedPhone || null,
         zip: null,
         city: null,
         state: null,
@@ -554,8 +576,8 @@ export default function ReservationModal({
         table_id: selectedTableId || null,
         table_map_id: selectedTableMapId || null,
         guest_name: form.name,
-        guest_phone: form.whatsapp,
-        guest_email: form.email || null,
+        guest_phone: normalizedPhone,
+        guest_email: normalizedEmail || null,
         guest_birthdate: form.birthdate || null,
         date: dateStr,
         time: selectedTime + ':00',
@@ -965,8 +987,8 @@ export default function ReservationModal({
                     id="public-reservation-whatsapp"
                     name="guest_phone"
                     value={form.whatsapp}
-                    onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))}
-                    placeholder="(11) 99999-9999" required maxLength={20} autoComplete="tel" inputMode="tel"
+                    onChange={e => setForm(f => ({ ...f, whatsapp: formatBrazilPhone(e.target.value) }))}
+                    placeholder="(11) 99999-9999" required maxLength={15} autoComplete="tel" inputMode="tel"
                     onBlur={handleWhatsappBlur}
                   />
                 </div>
