@@ -86,6 +86,19 @@ function splitGuestName(name: string) {
   };
 }
 
+function formatBirthdateLabel(birthdate: string) {
+  if (!birthdate) {
+    return '';
+  }
+
+  const [year, month, day] = birthdate.split('-');
+  if (!year || !month || !day) {
+    return birthdate;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
 
 interface AvailableTable {
   id: string;
@@ -160,7 +173,11 @@ export default function ReservationModal({
     name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '',
   });
   const [prefilledPhoneDigits, setPrefilledPhoneDigits] = useState('');
+  const [prefillStatus, setPrefillStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
+  const [identityFieldsCollapsed, setIdentityFieldsCollapsed] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const prefillRequestIdRef = useRef(0);
+  const lastPrefillLookupRef = useRef('');
   const whatsappDigits = normalizePhone(form.whatsapp);
   const customerFoundForCurrentPhone = !!prefilledPhoneDigits && prefilledPhoneDigits === whatsappDigits;
 
@@ -179,6 +196,10 @@ export default function ReservationModal({
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
     setPrefilledPhoneDigits('');
+    setPrefillStatus('idle');
+    setIdentityFieldsCollapsed(false);
+    prefillRequestIdRef.current = 0;
+    lastPrefillLookupRef.current = '';
   }, [initialDate, initialPartySize, open]);
 
   useEffect(() => {
@@ -430,6 +451,10 @@ export default function ReservationModal({
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
     setPrefilledPhoneDigits('');
+    setPrefillStatus('idle');
+    setIdentityFieldsCollapsed(false);
+    prefillRequestIdRef.current = 0;
+    lastPrefillLookupRef.current = '';
   };
 
   const handleClose = (v: boolean) => {
@@ -440,23 +465,8 @@ export default function ReservationModal({
     onOpenChange(v);
   };
 
-  const focusConfirmButton = () => {
-    window.setTimeout(() => {
-      const button = confirmButtonRef.current;
-      if (!button) return;
-
-      button.focus({ preventScroll: true });
-      button.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 0);
-  };
-
-  const handleWhatsappBlur = async (event: React.FocusEvent<HTMLInputElement>) => {
-    const normalizedPhone = normalizePhone(event.currentTarget.value);
-
-    if (normalizedPhone.length < MIN_PREFILL_PHONE_DIGITS) {
-      setPrefilledPhoneDigits('');
-      return;
-    }
+  const lookupCustomerPrefill = useCallback(async (normalizedPhone: string, requestId: number) => {
+    setPrefillStatus('searching');
 
     try {
       const { data, error } = await (supabase.rpc as any)('get_public_reservation_prefill', {
@@ -464,15 +474,26 @@ export default function ReservationModal({
         _visitor_id: getVisitorId(),
         _guest_phone: normalizedPhone,
       });
-      if (error) throw error;
+
+      if (requestId !== prefillRequestIdRef.current) {
+        return;
+      }
+
+      if (error) {
+        throw error;
+      }
 
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) {
         setPrefilledPhoneDigits('');
+        setPrefillStatus('not_found');
+        setIdentityFieldsCollapsed(false);
         return;
       }
 
       const d = row as any;
+      const canCollapseIdentityFields = Boolean(d.guest_name);
+
       setForm(f => ({
         ...f,
         name: f.name || d.guest_name || '',
@@ -480,9 +501,54 @@ export default function ReservationModal({
         birthdate: f.birthdate || d.guest_birthdate || '',
       }));
       setPrefilledPhoneDigits(normalizedPhone);
-      focusConfirmButton();
-    } catch { /* silent */ }
-  };
+      setPrefillStatus('found');
+      setIdentityFieldsCollapsed(canCollapseIdentityFields);
+    } catch {
+      if (requestId !== prefillRequestIdRef.current) {
+        return;
+      }
+
+      setPrefillStatus('idle');
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!open || step !== 3) {
+      return;
+    }
+
+    prefillRequestIdRef.current += 1;
+    const requestId = prefillRequestIdRef.current;
+
+    if (!whatsappDigits) {
+      setPrefilledPhoneDigits('');
+      setPrefillStatus('idle');
+      setIdentityFieldsCollapsed(false);
+      lastPrefillLookupRef.current = '';
+      return;
+    }
+
+    if (whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS) {
+      setPrefilledPhoneDigits('');
+      setPrefillStatus('idle');
+      setIdentityFieldsCollapsed(false);
+      lastPrefillLookupRef.current = '';
+      return;
+    }
+
+    if (whatsappDigits === lastPrefillLookupRef.current) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      lastPrefillLookupRef.current = whatsappDigits;
+      lookupCustomerPrefill(whatsappDigits, requestId);
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [lookupCustomerPrefill, open, step, whatsappDigits]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -711,6 +777,26 @@ export default function ReservationModal({
     && selectedSlotAvailability.occupied > 0
     && selectedSlotAvailability.available > 0;
   const hasCriticalUrgency = urgencySlots.some((slot) => slot.available <= 2);
+  const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
+  const whatsappHelperText = (() => {
+    if (prefillStatus === 'searching') {
+      return 'Buscando cadastro para esse WhatsApp...';
+    }
+
+    if (customerFoundForCurrentPhone) {
+      return 'Cadastro encontrado. Se precisar, voce ainda pode editar seus dados.';
+    }
+
+    if (prefillStatus === 'not_found') {
+      return 'Ainda nao encontramos cadastro. Preencha seus dados para continuar.';
+    }
+
+    if (whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS) {
+      return 'Digite o WhatsApp completo com DDD. A busca acontece automaticamente.';
+    }
+
+    return 'Digite o WhatsApp completo com DDD. Se houver cadastro, os dados aparecem automaticamente.';
+  })();
 
   const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
     const avail = slotAvailability[slot];
@@ -730,8 +816,8 @@ export default function ReservationModal({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle className="text-center text-lg font-bold text-foreground">
+        <DialogHeader className="px-12">
+          <DialogTitle className="mx-auto max-w-full text-center text-lg font-bold leading-snug text-foreground">
             {step === 4 ? 'Reserva Confirmada!' : `Reservar Mesa — ${companyName}`}
           </DialogTitle>
           {step !== 4 && (
@@ -989,22 +1075,73 @@ export default function ReservationModal({
                     value={form.whatsapp}
                     onChange={e => setForm(f => ({ ...f, whatsapp: formatBrazilPhone(e.target.value) }))}
                     placeholder="(11) 99999-9999" required maxLength={15} autoComplete="tel" inputMode="tel"
-                    onBlur={handleWhatsappBlur}
                   />
                 </div>
-                {customerFoundForCurrentPhone && (
-                  <div className="mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900" role="status" aria-live="polite">
+                {customerFoundForCurrentPhone && !shouldCollapseIdentityFields && (
+                  <div className="hidden mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900" role="status" aria-live="polite">
                     <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>Cadastro encontrado. Conferimos seus dados e você já pode confirmar a reserva.</span>
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="hidden text-xs text-muted-foreground mt-1">
                   {whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS
                     ? 'Digite o WhatsApp completo com DDD para buscar os dados.'
                     : 'Digite o WhatsApp completo. A busca acontece ao sair do campo.'}
                 </p>
               </div>
-              <div>
+              {customerFoundForCurrentPhone && !shouldCollapseIdentityFields && (
+                <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900" role="status" aria-live="polite">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>Cadastro encontrado. Ajuste os dados abaixo apenas se precisar.</span>
+                </div>
+              )}
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                {prefillStatus === 'searching' && <Loader2 className="h-3 w-3 animate-spin" />}
+                <span>{whatsappHelperText}</span>
+              </p>
+              {shouldCollapseIdentityFields && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-emerald-950">Cadastro encontrado</p>
+                        <p className="text-xs text-emerald-900/80">
+                          Preenchemos seus dados principais para agilizar a reserva.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto px-2 py-1 text-xs text-emerald-900 hover:bg-emerald-100 hover:text-emerald-950"
+                      onClick={() => setIdentityFieldsCollapsed(false)}
+                    >
+                      Editar dados
+                    </Button>
+                  </div>
+                  <div className="mt-3 space-y-2 rounded-md border border-emerald-100 bg-white/85 px-3 py-2 text-sm">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Nome</p>
+                      <p className="font-medium text-foreground">{form.name}</p>
+                    </div>
+                    {form.email && (
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">E-mail</p>
+                        <p className="text-foreground">{form.email}</p>
+                      </div>
+                    )}
+                    {form.birthdate && (
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Nascimento</p>
+                        <p className="text-foreground">{formatBirthdateLabel(form.birthdate)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className={cn(shouldCollapseIdentityFields && 'hidden')}>
                 <Label htmlFor="public-reservation-name" className="text-sm font-medium">Nome Completo *</Label>
                 <Input
                   id="public-reservation-name"
@@ -1017,7 +1154,7 @@ export default function ReservationModal({
                   autoComplete="name"
                 />
               </div>
-              <div>
+              <div className={cn(shouldCollapseIdentityFields && 'hidden')}>
                 <Label htmlFor="public-reservation-email" className="text-sm font-medium">E-mail</Label>
                 <Input
                   id="public-reservation-email"
@@ -1032,7 +1169,7 @@ export default function ReservationModal({
                   spellCheck={false}
                 />
               </div>
-              <div className="space-y-2" role="group" aria-labelledby="public-reservation-birthdate-label">
+              <div className={cn('space-y-2', shouldCollapseIdentityFields && 'hidden')} role="group" aria-labelledby="public-reservation-birthdate-label">
                 <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de Nascimento</p>
                 <div className="grid grid-cols-3 gap-1.5 xs:gap-2">
                   <Select
