@@ -148,7 +148,7 @@ export default function Profile() {
         </p>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card className="border-none shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -188,8 +188,8 @@ export default function Profile() {
                 />
               </div>
 
-              <div className="flex justify-end">
-                <Button type="submit" disabled={savingProfile}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="submit" className="w-full sm:w-auto" disabled={savingProfile}>
                   {savingProfile ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -246,8 +246,8 @@ export default function Profile() {
                 />
               </div>
 
-              <div className="flex justify-end">
-                <Button type="submit" disabled={savingPassword}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="submit" className="w-full sm:w-auto" disabled={savingPassword}>
                   {savingPassword ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -275,9 +275,9 @@ export default function Profile() {
               : 'Voce esta acessando o perfil no painel global.'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <CardContent className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
           <p><span className="font-medium text-foreground">Nome:</span> {profile?.full_name || '-'}</p>
-          <p><span className="font-medium text-foreground">E-mail:</span> {profile?.email || '-'}</p>
+          <p className="break-all"><span className="font-medium text-foreground">E-mail:</span> {profile?.email || '-'}</p>
         </CardContent>
       </Card>
     </div>

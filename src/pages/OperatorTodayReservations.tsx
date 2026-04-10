@@ -2,7 +2,7 @@ import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInMinutes, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CheckCircle2, Clock3, Loader2, Users } from 'lucide-react';
+import { CheckCircle2, Clock3, Loader2, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -16,7 +16,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 import type { ReservationStatus } from '@/types/restaurant';
-import { formatBrazilPhone } from '@/lib/validation';
+import { formatBrazilPhone, normalizePhoneDigits } from '@/lib/validation';
 
 interface Reservation {
   id: string;
@@ -81,6 +81,7 @@ export default function OperatorTodayReservations() {
   const { companyId, slug } = useCompanySlug();
   const qc = useQueryClient();
   const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const [search, setSearch] = useState('');
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [checkInReservation, setCheckInReservation] = useState<Reservation | null>(null);
@@ -158,6 +159,25 @@ export default function OperatorTodayReservations() {
       issues: reservations.filter((reservation) => reservation.status === 'cancelled' || reservation.status === 'no-show').length,
     }),
     [pendingReservations.length, reservations],
+  );
+  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearchDigits = normalizePhoneDigits(search);
+  const matchesSearch = (reservation: Reservation) => {
+    if (!normalizedSearch && !normalizedSearchDigits) return true;
+
+    const matchesName = reservation.guest_name.toLowerCase().includes(normalizedSearch);
+    const matchesPhone = normalizedSearchDigits.length > 0
+      && normalizePhoneDigits(reservation.guest_phone).includes(normalizedSearchDigits);
+
+    return matchesName || matchesPhone;
+  };
+  const filteredPendingReservations = useMemo(
+    () => pendingReservations.filter(matchesSearch),
+    [pendingReservations, normalizedSearch, normalizedSearchDigits],
+  );
+  const filteredProcessedReservations = useMemo(
+    () => processedReservations.filter(matchesSearch),
+    [processedReservations, normalizedSearch, normalizedSearchDigits],
   );
   const now = new Date();
   const summaryItems = [
@@ -272,15 +292,34 @@ export default function OperatorTodayReservations() {
           </div>
         </div>
 
+        <div className="rounded-2xl bg-card/95 p-3 shadow-sm">
+          <div className="relative max-w-xl">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar reserva por nome ou telefone..."
+              className="h-11 rounded-xl border-border/50 bg-background/80 pl-10"
+              autoComplete="off"
+              inputMode="search"
+            />
+          </div>
+          {search.trim() && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Filtrando as reservas de hoje por nome ou telefone.
+            </p>
+          )}
+        </div>
+
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]">
           <Card className="border-none bg-card/95 shadow-sm">
-            <CardHeader className="flex-row items-end justify-between space-y-0 pb-3">
+            <CardHeader className="flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="space-y-1">
                 <CardTitle className="text-lg">Aguardando chegada</CardTitle>
                 <p className="text-sm text-muted-foreground">Toque em uma reserva para abrir os detalhes.</p>
               </div>
               <span className="inline-flex min-w-10 items-center justify-center rounded-full bg-primary-soft px-3 py-1 text-sm font-semibold text-primary">
-                {pendingReservations.length}
+                {filteredPendingReservations.length}
               </span>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -289,8 +328,13 @@ export default function OperatorTodayReservations() {
                   <p className="text-sm font-medium text-foreground">Nenhuma reserva pendente de check-in.</p>
                   <p className="mt-1 text-sm text-muted-foreground">As proximas reservas confirmadas de hoje aparecerao aqui.</p>
                 </div>
+              ) : filteredPendingReservations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/45 bg-muted/15 px-6 py-10 text-center">
+                  <p className="text-sm font-medium text-foreground">Nenhuma reserva encontrada para essa busca.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Tente buscar por outro nome ou telefone.</p>
+                </div>
               ) : (
-                pendingReservations.map((reservation) => {
+                filteredPendingReservations.map((reservation) => {
                   const lateMinutes = getLateMinutes(reservation, now);
 
                   return (
@@ -336,8 +380,13 @@ export default function OperatorTodayReservations() {
                           </div>
                         </div>
 
-                        <div className="flex items-center sm:justify-end" onClick={(event) => event.stopPropagation()}>
-                          <Button type="button" size="sm" className="min-w-28 gap-2" onClick={() => openCheckIn(reservation)}>
+                      <div className="flex w-full items-center sm:w-auto sm:justify-end" onClick={(event) => event.stopPropagation()}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="w-full gap-2 sm:min-w-28 sm:w-auto"
+                            onClick={() => openCheckIn(reservation)}
+                          >
                             <CheckCircle2 className="h-4 w-4" />
                             Check-in
                           </Button>
@@ -351,13 +400,13 @@ export default function OperatorTodayReservations() {
           </Card>
 
           <Card className="border-none bg-card/80 shadow-sm">
-            <CardHeader className="flex-row items-end justify-between space-y-0 pb-3">
+            <CardHeader className="flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="space-y-1">
                 <CardTitle className="text-lg">Ja atualizadas</CardTitle>
                 <p className="text-sm text-muted-foreground">Historico do dia com check-ins e ocorrencias.</p>
               </div>
               <span className="inline-flex min-w-10 items-center justify-center rounded-full bg-background px-3 py-1 text-sm font-semibold text-foreground">
-                {processedReservations.length}
+                {filteredProcessedReservations.length}
               </span>
             </CardHeader>
             <CardContent>
@@ -366,9 +415,14 @@ export default function OperatorTodayReservations() {
                   <p className="text-sm font-medium text-foreground">Nenhuma reserva atualizada hoje.</p>
                   <p className="mt-1 text-sm text-muted-foreground">Check-ins, cancelamentos e No Show do dia aparecem aqui.</p>
                 </div>
+              ) : filteredProcessedReservations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/45 bg-background/70 px-6 py-10 text-center">
+                  <p className="text-sm font-medium text-foreground">Nenhum resultado encontrado.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">A busca atual nao encontrou reservas nesta lista.</p>
+                </div>
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-border/35 bg-background/78 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-                  {processedReservations.map((reservation, index) => (
+                  {filteredProcessedReservations.map((reservation, index) => (
                     <div
                       key={reservation.id}
                       role="button"
@@ -377,7 +431,7 @@ export default function OperatorTodayReservations() {
                       onKeyDown={(event) => handleCardKeyDown(event, reservation)}
                       className={cn(
                         'group w-full px-3 py-3 text-left transition hover:bg-accent/20',
-                        index !== processedReservations.length - 1 && 'border-b border-border/35',
+                        index !== filteredProcessedReservations.length - 1 && 'border-b border-border/35',
                       )}
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
@@ -419,7 +473,7 @@ export default function OperatorTodayReservations() {
       />
 
       <Dialog open={!!checkInReservation} onOpenChange={handleCheckInDialogChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md overflow-x-hidden sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Realizar check-in</DialogTitle>
           </DialogHeader>
@@ -455,16 +509,21 @@ export default function OperatorTodayReservations() {
                 </p>
               </div>
 
-              <Button className="w-full" onClick={handleConfirmCheckIn} disabled={checkInMutation.isPending}>
-                {checkInMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Registrando...
-                  </>
-                ) : (
-                  'Confirmar check-in'
-                )}
-              </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => handleCheckInDialogChange(false)}>
+                  Cancelar
+                </Button>
+                <Button className="w-full sm:w-auto" onClick={handleConfirmCheckIn} disabled={checkInMutation.isPending}>
+                  {checkInMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Registrando...
+                    </>
+                  ) : (
+                    'Confirmar check-in'
+                  )}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

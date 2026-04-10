@@ -786,7 +786,7 @@ export default function CompanyWaitlist() {
                         {entry.status === 'called' && (
                           <div
                             className={cn(
-                              'mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium tabular-nums',
+                              'mt-3 inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs font-medium tabular-nums',
                               calledExpired
                                 ? 'border-destructive/30 bg-destructive-soft text-destructive'
                                 : 'border-info/30 bg-info-soft text-info',
@@ -810,11 +810,11 @@ export default function CompanyWaitlist() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    <div className="grid w-full gap-2 sm:flex sm:flex-wrap sm:items-center xl:w-auto xl:justify-end">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="gap-2 rounded-lg"
+                        className="w-full gap-2 rounded-lg sm:w-auto"
                         onClick={(event) => {
                           stopRowAction(event);
                           copyTrackingLink(entry.tracking_code);
@@ -829,7 +829,7 @@ export default function CompanyWaitlist() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="gap-2 rounded-lg"
+                            className="w-full gap-2 rounded-lg sm:w-auto"
                             onClick={(event) => {
                               stopRowAction(event);
                               updateStatus.mutate({ id: entry.id, status: 'called' });
@@ -841,7 +841,7 @@ export default function CompanyWaitlist() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="gap-2 rounded-lg text-destructive hover:text-destructive"
+                            className="w-full gap-2 rounded-lg text-destructive hover:text-destructive sm:w-auto"
                             onClick={(event) => {
                               stopRowAction(event);
                               setRemoveEntry(entry);
@@ -857,7 +857,7 @@ export default function CompanyWaitlist() {
                         <>
                           <Button
                             size="sm"
-                            className="gap-2 rounded-lg"
+                            className="w-full gap-2 rounded-lg sm:w-auto"
                             onClick={(event) => {
                               stopRowAction(event);
                               openSeatDialog(entry);
@@ -870,7 +870,7 @@ export default function CompanyWaitlist() {
                             variant="outline"
                             size="sm"
                             className={cn(
-                              'gap-2 rounded-lg',
+                              'w-full gap-2 rounded-lg sm:w-auto',
                               calledExpired && 'border-destructive/30 text-destructive hover:text-destructive',
                             )}
                             onClick={(event) => {
@@ -893,7 +893,7 @@ export default function CompanyWaitlist() {
       </Card>
 
       <Dialog open={showSeatedToday} onOpenChange={setShowSeatedToday}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Sentados hoje</DialogTitle>
           </DialogHeader>
@@ -962,7 +962,7 @@ export default function CompanyWaitlist() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="gap-2 rounded-lg"
+                            className="w-full gap-2 rounded-lg sm:w-auto"
                             onClick={() => copyTrackingLink(entry.tracking_code)}
                           >
                             <Copy className="h-3.5 w-3.5" />
@@ -980,7 +980,7 @@ export default function CompanyWaitlist() {
       </Dialog>
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Adicionar a fila</DialogTitle>
           </DialogHeader>
@@ -1076,11 +1076,11 @@ export default function CompanyWaitlist() {
                 maxLength={MAX_WAITLIST_NOTES_LENGTH}
               />
             </div>
-            <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setShowAdd(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={addMutation.isPending}>
+              <Button type="submit" className="w-full sm:w-auto" disabled={addMutation.isPending}>
                 {addMutation.isPending ? 'Adicionando...' : 'Adicionar'}
               </Button>
             </div>
@@ -1089,7 +1089,7 @@ export default function CompanyWaitlist() {
       </Dialog>
 
       <Dialog open={!!selectedEntry} onOpenChange={(open) => !open && closeDetailsDialog()}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Resumo da fila</DialogTitle>
           </DialogHeader>
@@ -1142,7 +1142,7 @@ export default function CompanyWaitlist() {
               {selectedEntry.status === 'called' && (
                 <div
                   className={cn(
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium tabular-nums',
+                    'inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs font-medium tabular-nums',
                     selectedEntryCalledExpired
                       ? 'border-destructive/30 bg-destructive-soft text-destructive'
                       : 'border-info/30 bg-info-soft text-info',
@@ -1166,7 +1166,7 @@ export default function CompanyWaitlist() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="gap-2 self-start rounded-lg"
+                    className="w-full gap-2 self-start rounded-lg sm:w-auto"
                     onClick={() => copyTrackingLink(selectedEntry.tracking_code)}
                   >
                     <Copy className="h-4 w-4" />
@@ -1271,11 +1271,11 @@ export default function CompanyWaitlist() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3">
-                <Button type="button" variant="outline" onClick={closeDetailsDialog}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={closeDetailsDialog}>
                   Fechar
                 </Button>
-                <Button type="button" className="gap-2" onClick={handleSaveDetails} disabled={updateEntryDetails.isPending}>
+                <Button type="button" className="w-full gap-2 sm:w-auto" onClick={handleSaveDetails} disabled={updateEntryDetails.isPending}>
                   <Save className="h-4 w-4" />
                   {updateEntryDetails.isPending ? 'Salvando...' : 'Salvar alterações'}
                 </Button>
@@ -1286,7 +1286,7 @@ export default function CompanyWaitlist() {
       </Dialog>
 
       <Dialog open={!!seatEntry} onOpenChange={(open) => !open && closeSeatDialog()}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Sentar cliente da fila</DialogTitle>
           </DialogHeader>
@@ -1358,7 +1358,7 @@ export default function CompanyWaitlist() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-medium text-foreground">Acompanhantes</p>
                     <p className="text-xs text-muted-foreground">
@@ -1369,7 +1369,7 @@ export default function CompanyWaitlist() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="gap-2"
+                    className="w-full gap-2 sm:w-auto"
                     onClick={() => setSeatCompanionForms((current) => [...current, createCompanionForm()])}
                   >
                     <Plus className="h-4 w-4" />
@@ -1445,11 +1445,11 @@ export default function CompanyWaitlist() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-3">
-                <Button type="button" variant="outline" onClick={closeSeatDialog}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={closeSeatDialog}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSeatEntry} disabled={seatEntryMutation.isPending}>
+                <Button className="w-full sm:w-auto" onClick={handleSeatEntry} disabled={seatEntryMutation.isPending}>
                   {seatEntryMutation.isPending ? 'Salvando...' : 'Confirmar entrada'}
                 </Button>
               </div>

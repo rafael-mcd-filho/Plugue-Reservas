@@ -170,7 +170,7 @@ export default function ReservationDetailsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-4xl overflow-x-hidden overflow-y-auto">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-4xl overflow-x-hidden overflow-y-auto">
           <DialogHeader className="space-y-3">
             {onBackToList && (
               <div className="flex justify-start">
@@ -190,26 +190,26 @@ export default function ReservationDetailsDialog({
             {actions ? (
               <div className="flex flex-wrap gap-2 pt-1">{actions}</div>
             ) : reservation && (onEdit || onCheckIn || onStatusChange || onCancel) ? (
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap">
                 {onEdit && (
-                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => onEdit(reservation)}>
+                  <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onEdit(reservation)}>
                     <Pencil className="h-3.5 w-3.5" />
                     Editar reserva
                   </Button>
                 )}
                 {onCheckIn && reservation.status === 'confirmed' && (
-                  <Button type="button" size="sm" className="gap-2" onClick={() => onCheckIn(reservation)}>
+                  <Button type="button" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onCheckIn(reservation)}>
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     Realizar check-in
                   </Button>
                 )}
                 {onStatusChange && (
-                  <Button type="button" variant="outline" size="sm" onClick={() => onStatusChange(reservation)}>
+                  <Button type="button" variant="outline" size="sm" className="w-full justify-start sm:w-auto" onClick={() => onStatusChange(reservation)}>
                     Alterar status
                   </Button>
                 )}
                 {onCancel && reservation.status === 'confirmed' && (
-                  <Button type="button" variant="destructive" size="sm" className="gap-2" onClick={() => onCancel(reservation)}>
+                  <Button type="button" variant="destructive" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onCancel(reservation)}>
                     <Ban className="h-3.5 w-3.5" />
                     Cancelar reserva
                   </Button>
@@ -220,7 +220,7 @@ export default function ReservationDetailsDialog({
 
           {reservation ? (
             <div className="space-y-5 pt-2">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
                   <p className="text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</p>
@@ -228,7 +228,9 @@ export default function ReservationDetailsDialog({
                     <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
                   )}
                 </div>
-                <ReservationStatusBadge status={reservation.status} />
+                <div className="sm:pt-0.5">
+                  <ReservationStatusBadge status={reservation.status} />
+                </div>
               </div>
 
               <div className="grid gap-3 text-sm sm:grid-cols-2">
@@ -320,7 +322,7 @@ export default function ReservationDetailsDialog({
 
                       return (
                       <div key={`${item.source}-${item.id}`} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium text-foreground">{timelineTitle}</p>
@@ -343,6 +345,7 @@ export default function ReservationDetailsDialog({
                               type="button"
                               variant="outline"
                               size="sm"
+                              className="w-full sm:w-auto"
                               onClick={() =>
                                 setSelectedPayload({
                                   title: `${timelineTitle} (${formatTimelineSource(item.source)})`,
@@ -369,7 +372,7 @@ export default function ReservationDetailsDialog({
 
               {(reservation.checked_in_at || companions.length > 0 || companionsLoading) && (
                 <div className="rounded-lg border border-border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-primary" />
                       <p className="text-sm font-medium text-foreground">Acompanhantes</p>
@@ -415,11 +418,11 @@ export default function ReservationDetailsDialog({
                   </div>
                 </div>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <Button type="button" variant="outline" className="gap-2" onClick={copyTrackingLink}>
+                  <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={copyTrackingLink}>
                     <Copy className="h-4 w-4" />
                     Copiar link
                   </Button>
-                  <Button type="button" variant="outline" className="gap-2" onClick={openTrackingLink}>
+                  <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={openTrackingLink}>
                     <ExternalLink className="h-4 w-4" />
                     Abrir acompanhamento
                   </Button>
@@ -431,7 +434,7 @@ export default function ReservationDetailsDialog({
       </Dialog>
 
       <Dialog open={!!selectedPayload} onOpenChange={(nextOpen) => !nextOpen && setSelectedPayload(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send className="h-4 w-4" />
