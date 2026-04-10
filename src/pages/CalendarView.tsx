@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Ban, CheckCircle2, Pencil } from 'lucide-react';
+import { CheckCircle2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -386,8 +386,8 @@ export default function CalendarView() {
               {dayReservations.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma reserva nesta data</p>
               ) : (
-                <div className="space-y-3">
-                  {dayReservations.map((reservation) => {
+                <div className="overflow-hidden rounded-xl border border-border">
+                  {dayReservations.map((reservation, index) => {
                     const detail = reservation.occasion || reservation.notes;
 
                     return (
@@ -395,37 +395,25 @@ export default function CalendarView() {
                         key={reservation.id}
                         type="button"
                         onClick={() => openDetails(reservation)}
-                        className="group w-full rounded-2xl border border-border bg-card/90 p-4 text-left shadow-sm transition hover:border-primary/35 hover:bg-accent/30"
+                        className={cn(
+                          'group w-full bg-card px-4 py-3 text-left transition hover:bg-accent/20',
+                          index !== dayReservations.length - 1 && 'border-b border-border/60',
+                        )}
                       >
-                        <div className="flex flex-col gap-4 md:flex-row md:items-center">
-                          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-semibold text-primary">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
                             {reservation.time.slice(0, 5)}
                           </div>
 
-                          <div className="min-w-0 flex-1 space-y-3">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                              <div className="min-w-0">
-                                <p className="truncate text-lg font-semibold text-foreground">{reservation.guest_name}</p>
-                                <p className="text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</p>
-                              </div>
-
-                              <div className="flex items-center gap-2 self-start">
-                                <ReservationStatusBadge status={reservation.status} />
-                              </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
+                              <ReservationStatusBadge status={reservation.status} />
                             </div>
-
-                            <div className="flex flex-wrap gap-2 text-sm">
-                              <span className="rounded-full bg-muted px-3 py-1 text-muted-foreground">
-                                {reservation.party_size} pessoas
-                              </span>
-                              {detail && (
-                                <span className="rounded-full bg-muted px-3 py-1 text-muted-foreground">
-                                  {detail}
-                                </span>
-                              )}
-                              <span className="rounded-full border border-dashed border-primary/30 px-3 py-1 font-medium text-primary/80">
-                                Clique para ver detalhes
-                              </span>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                              <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                              <span>{reservation.party_size} pessoas</span>
+                              {detail && <span>{detail}</span>}
                             </div>
                           </div>
                         </div>
@@ -444,36 +432,9 @@ export default function CalendarView() {
         onOpenChange={setDetailsDialogOpen}
         reservation={detailsReservation}
         slug={slug}
-        actions={
-          detailsReservation ? (
-            <>
-              {detailsReservation.status === 'confirmed' && (
-                <Button type="button" className="gap-2" onClick={() => openStatusDialog(detailsReservation, 'checked_in')}>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Realizar check-in
-                </Button>
-              )}
-              <Button type="button" variant="outline" className="gap-2" onClick={() => openEditDialog(detailsReservation)}>
-                <Pencil className="h-4 w-4" />
-                Editar reserva
-              </Button>
-              <Button type="button" variant="outline" onClick={() => openStatusDialog(detailsReservation)}>
-                Alterar status
-              </Button>
-              {detailsReservation.status !== 'cancelled' && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="gap-2"
-                  onClick={() => setCancelReservation(detailsReservation)}
-                >
-                  <Ban className="h-4 w-4" />
-                  Cancelar reserva
-                </Button>
-              )}
-            </>
-          ) : undefined
-        }
+        onEdit={(r) => openEditDialog(r as Reservation)}
+        onStatusChange={(r) => openStatusDialog(r as Reservation)}
+        onCancel={(r) => setCancelReservation(r as Reservation)}
       />
 
       <Dialog open={!!statusDialogReservation} onOpenChange={handleStatusDialogChange}>

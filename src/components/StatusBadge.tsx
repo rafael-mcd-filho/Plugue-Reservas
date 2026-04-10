@@ -9,11 +9,6 @@ const reservationStatusConfig: Record<ReservationStatus, { className: string }> 
   'no-show': { className: 'bg-destructive-soft text-destructive border-destructive/20' },
 };
 
-const reservationSourceConfig: Record<string, { label: string; className: string }> = {
-  reservation: { label: 'Agendada', className: 'bg-primary-soft text-primary border-primary/20' },
-  waitlist: { label: 'Fila convertida', className: 'bg-success-soft text-success border-success/20' },
-};
-
 const tableStatusConfig: Record<TableStatus, { label: string; className: string }> = {
   available: { label: 'Disponivel', className: 'bg-success-soft text-success border-success/20' },
   occupied: { label: 'Ocupada', className: 'bg-info-soft text-info border-info/20' },
@@ -28,15 +23,6 @@ export function ReservationStatusBadge({ status }: { status: ReservationStatusIn
   return (
     <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', config.className)}>
       {getReservationStatusLabel(normalizedStatus)}
-    </span>
-  );
-}
-
-export function ReservationSourceBadge({ source }: { source: string | null | undefined }) {
-  const config = reservationSourceConfig[source === 'waitlist' ? 'waitlist' : 'reservation'];
-  return (
-    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', config.className)}>
-      {config.label}
     </span>
   );
 }

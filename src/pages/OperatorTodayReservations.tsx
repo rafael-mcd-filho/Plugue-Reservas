@@ -415,14 +415,7 @@ export default function OperatorTodayReservations() {
         reservation={detailsReservation}
         slug={slug}
         showEventHistory={false}
-        actions={
-          detailsReservation?.status === 'confirmed' ? (
-            <Button type="button" className="gap-2" onClick={() => openCheckIn(detailsReservation)}>
-              <CheckCircle2 className="h-4 w-4" />
-              Realizar check-in
-            </Button>
-          ) : undefined
-        }
+        onCheckIn={(r) => openCheckIn(r as Reservation)}
       />
 
       <Dialog open={!!checkInReservation} onOpenChange={handleCheckInDialogChange}>

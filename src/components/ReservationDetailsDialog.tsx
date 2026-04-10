@@ -2,9 +2,9 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, ChevronLeft, Copy, ExternalLink, Loader2, Send, Users } from 'lucide-react';
+import { Activity, Ban, CheckCircle2, ChevronDown, ChevronLeft, Copy, ExternalLink, Loader2, Pencil, Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { ReservationSourceBadge, ReservationStatusBadge } from '@/components/StatusBadge';
+import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -59,7 +59,12 @@ interface ReservationDetailsDialogProps {
   slug: string;
   onBackToList?: () => void;
   backLabel?: string;
+  /** @deprecated Use onEdit/onCheckIn/onStatusChange/onCancel instead */
   actions?: ReactNode;
+  onEdit?: (reservation: ReservationDetails) => void;
+  onCheckIn?: (reservation: ReservationDetails) => void;
+  onStatusChange?: (reservation: ReservationDetails) => void;
+  onCancel?: (reservation: ReservationDetails) => void;
   showEventHistory?: boolean;
 }
 
@@ -84,9 +89,14 @@ export default function ReservationDetailsDialog({
   onBackToList,
   backLabel,
   actions,
+  onEdit,
+  onCheckIn,
+  onStatusChange,
+  onCancel,
   showEventHistory = true,
 }: ReservationDetailsDialogProps) {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
+  const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
   const trackingUrl = reservation
     ? `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`
     : '';
@@ -94,6 +104,7 @@ export default function ReservationDetailsDialog({
   useEffect(() => {
     if (!open) {
       setSelectedPayload(null);
+      setEventHistoryOpen(false);
     }
   }, [open]);
 
@@ -168,7 +179,35 @@ export default function ReservationDetailsDialog({
               </div>
             )}
             <DialogTitle className="text-left">Detalhes da reserva</DialogTitle>
-            {actions && <div className="flex flex-wrap gap-2 pt-1">{actions}</div>}
+            {actions ? (
+              <div className="flex flex-wrap gap-2 pt-1">{actions}</div>
+            ) : reservation && (onEdit || onCheckIn || onStatusChange || onCancel) ? (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {onEdit && (
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => onEdit(reservation)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    Editar reserva
+                  </Button>
+                )}
+                {onCheckIn && reservation.status === 'confirmed' && (
+                  <Button type="button" size="sm" className="gap-2" onClick={() => onCheckIn(reservation)}>
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Realizar check-in
+                  </Button>
+                )}
+                {onStatusChange && (
+                  <Button type="button" variant="outline" size="sm" onClick={() => onStatusChange(reservation)}>
+                    Alterar status
+                  </Button>
+                )}
+                {onCancel && reservation.status !== 'cancelled' && (
+                  <Button type="button" variant="destructive" size="sm" className="gap-2" onClick={() => onCancel(reservation)}>
+                    <Ban className="h-3.5 w-3.5" />
+                    Cancelar reserva
+                  </Button>
+                )}
+              </div>
+            ) : null}
           </DialogHeader>
 
           {reservation ? (
@@ -181,19 +220,10 @@ export default function ReservationDetailsDialog({
                     <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
                   )}
                 </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ReservationSourceBadge source={reservation.source} />
-                  <ReservationStatusBadge status={reservation.status} />
-                </div>
+                <ReservationStatusBadge status={reservation.status} />
               </div>
 
               <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem</p>
-                  <div className="mt-1">
-                    <ReservationSourceBadge source={reservation.source} />
-                  </div>
-                </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Data</p>
                   <p className="mt-1 font-medium text-foreground">
@@ -248,28 +278,35 @@ export default function ReservationDetailsDialog({
               )}
 
               {showEventHistory && (
-                <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
+                <div className="rounded-lg border border-border bg-muted/20">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-muted/30"
+                  onClick={() => setEventHistoryOpen((v) => !v)}
+                >
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
                     <p className="text-sm font-medium text-foreground">Histórico de eventos</p>
+                    {!timelineLoading && (
+                      <span className="text-xs text-muted-foreground">({sortedTimeline.length})</span>
+                    )}
                   </div>
-                  {!timelineLoading && (
-                    <p className="text-xs text-muted-foreground">{sortedTimeline.length} registros</p>
-                  )}
-                </div>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${eventHistoryOpen ? 'rotate-180' : ''}`} />
+                </button>
 
+                {eventHistoryOpen && (
+                  <div className="border-t border-border px-4 pb-4 pt-3">
                 {timelineLoading ? (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Carregando histórico...
                   </div>
                 ) : timelineError ? (
-                  <p className="mt-3 text-sm text-destructive">Não foi possível carregar o histórico desta reserva.</p>
+                  <p className="text-sm text-destructive">Não foi possível carregar o histórico desta reserva.</p>
                 ) : sortedTimeline.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
+                  <p className="text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
                 ) : (
-                  <div className="mt-3 space-y-3">
+                  <div className="space-y-3">
                     {sortedTimeline.map((item) => (
                       <div key={`${item.source}-${item.id}`} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -312,6 +349,8 @@ export default function ReservationDetailsDialog({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
                   </div>
                 )}
                 </div>

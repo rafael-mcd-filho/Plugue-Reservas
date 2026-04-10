@@ -5,6 +5,8 @@ import { ptBR } from 'date-fns/locale';
 import {
   CalendarIcon,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Download,
   Eye,
@@ -39,7 +41,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { ReservationSourceBadge, ReservationStatusBadge } from '@/components/StatusBadge';
+import { ReservationStatusBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
 import { cn } from '@/lib/utils';
@@ -162,6 +164,18 @@ export default function Reservations() {
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
+  const [dataEditDialog, setDataEditDialog] = useState(false);
+  const [dataEditReservation, setDataEditReservation] = useState<Reservation | null>(null);
+  const [dataEditForm, setDataEditForm] = useState({
+    guest_name: '',
+    guest_phone: '',
+    guest_email: '',
+    date: '',
+    time: '',
+    party_size: '',
+    occasion: '',
+    notes: '',
+  });
   const [detailsDialog, setDetailsDialog] = useState(false);
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
   const [detailsReturnDay, setDetailsReturnDay] = useState<string | null>(null);
@@ -179,6 +193,8 @@ export default function Reservations() {
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
   const [exportStatuses, setExportStatuses] = useState<ReservationStatus[]>([]);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
+  const [listPage, setListPage] = useState(1);
+  const LIST_PAGE_SIZE = 15;
 
   const { data: reservations = [], isLoading } = useQuery({
     queryKey: ['reservations', companyId],
@@ -394,6 +410,46 @@ export default function Reservations() {
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
 
+  const updateDataMutation = useMutation({
+    mutationFn: async () => {
+      if (!dataEditReservation) throw new Error('Reserva nao selecionada.');
+
+      const parsedPartySize = Number.parseInt(dataEditForm.party_size, 10);
+      const phoneError = getPhoneValidationMessage(dataEditForm.guest_phone, 'o WhatsApp do cliente', true);
+      if (phoneError) throw new Error(phoneError);
+      const emailError = getEmailValidationMessage(dataEditForm.guest_email, 'o e-mail do cliente');
+      if (emailError) throw new Error(emailError);
+      if (!dataEditForm.guest_name.trim()) throw new Error('Informe o nome do cliente.');
+      if (!dataEditForm.date || !dataEditForm.time) throw new Error('Informe data e horario.');
+      if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) throw new Error('Quantidade invalida de pessoas.');
+
+      const { error } = await supabase
+        .from('reservations' as any)
+        .update({
+          guest_name: dataEditForm.guest_name.trim(),
+          guest_phone: normalizeBrazilPhoneDigits(dataEditForm.guest_phone),
+          guest_email: normalizeEmail(dataEditForm.guest_email) || null,
+          date: dataEditForm.date,
+          time: `${dataEditForm.time}:00`,
+          party_size: parsedPartySize,
+          occasion: dataEditForm.occasion.trim() || null,
+          notes: dataEditForm.notes.trim() || null,
+        })
+        .eq('id', dataEditReservation.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
+      toast.success('Reserva atualizada.');
+      setDataEditDialog(false);
+      setDataEditReservation(null);
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
@@ -508,7 +564,7 @@ export default function Reservations() {
   }, [reservations]);
 
   const filteredReservations = useMemo(() => {
-    return sortedReservations
+    const result = sortedReservations
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
       .filter((reservation) => {
         if (dateFrom && reservation.date < format(dateFrom, 'yyyy-MM-dd')) return false;
@@ -524,7 +580,18 @@ export default function Reservations() {
           (!!queryDigits && normalizePhone(reservation.guest_phone).includes(queryDigits))
         );
       });
+    return result;
   }, [dateFrom, dateTo, search, sortedReservations, statusFilter]);
+
+  const listTotalPages = Math.max(1, Math.ceil(filteredReservations.length / LIST_PAGE_SIZE));
+  const paginatedReservations = useMemo(
+    () => filteredReservations.slice((listPage - 1) * LIST_PAGE_SIZE, listPage * LIST_PAGE_SIZE),
+    [filteredReservations, listPage],
+  );
+
+  useEffect(() => {
+    setListPage(1);
+  }, [search, statusFilter, dateFrom, dateTo]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -600,6 +667,21 @@ export default function Reservations() {
     setCheckedInPartySize(String(reservation.checked_in_party_size ?? reservation.party_size));
     setCompanionForms([]);
     setEditDialog(true);
+  };
+
+  const openDataEdit = (reservation: Reservation) => {
+    setDataEditReservation(reservation);
+    setDataEditForm({
+      guest_name: reservation.guest_name,
+      guest_phone: formatBrazilPhone(reservation.guest_phone),
+      guest_email: reservation.guest_email ?? '',
+      date: reservation.date,
+      time: reservation.time.slice(0, 5),
+      party_size: String(reservation.party_size),
+      occasion: reservation.occasion ?? '',
+      notes: reservation.notes ?? '',
+    });
+    setDataEditDialog(true);
   };
 
   const openCheckIn = (reservation: Reservation) => {
@@ -1017,14 +1099,14 @@ export default function Reservations() {
               </TableHeader>
 
               <TableBody>
-                {filteredReservations.length === 0 ? (
+                {paginatedReservations.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={6} className="py-16 text-center text-sm text-muted-foreground">
                       Nenhuma reserva encontrada.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredReservations.map((reservation) => {
+                  paginatedReservations.map((reservation) => {
                     const todayString = format(new Date(), 'yyyy-MM-dd');
                     const isPastReservation = reservation.date < todayString;
 
@@ -1036,76 +1118,71 @@ export default function Reservations() {
                           isPastReservation && 'opacity-70',
                         )}
                       >
-                        <TableCell className="px-4 py-4">
-                          <div className={cn('font-semibold text-foreground', reservation.date === todayString && 'text-primary')}>
+                        <TableCell className="px-4 py-3">
+                          <div className={cn('text-sm font-semibold text-foreground', reservation.date === todayString && 'text-primary')}>
                             {format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy')}
                           </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
+                          <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
                             {reservation.time.slice(0, 5)}
                           </div>
                         </TableCell>
 
-                        <TableCell className="px-4 py-4">
-                          <div className="font-medium text-foreground">{reservation.guest_name}</div>
-                          <div className="mt-1 text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
-                          <div className="mt-2">
-                            <ReservationSourceBadge source={reservation.source} />
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            Criada em {format(new Date(reservation.created_at), 'dd/MM/yyyy HH:mm')}
-                          </div>
+                        <TableCell className="px-4 py-3">
+                          <div className="text-sm font-medium text-foreground">{reservation.guest_name}</div>
+                          <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
                         </TableCell>
 
-                        <TableCell className="hidden px-4 py-4 font-medium text-foreground sm:table-cell">
+                        <TableCell className="hidden px-4 py-3 text-sm font-medium text-foreground sm:table-cell">
                           {reservation.party_size}
                         </TableCell>
 
-                        <TableCell className="hidden px-4 py-4 text-sm text-muted-foreground lg:table-cell">
+                        <TableCell className="hidden px-4 py-3 text-xs text-muted-foreground lg:table-cell">
                           {reservation.occasion || '-'}
                         </TableCell>
 
-                        <TableCell className="px-4 py-4">
+                        <TableCell className="px-4 py-3">
                           <ReservationStatusBadge status={reservation.status} />
                         </TableCell>
 
-                        <TableCell className="px-4 py-4">
-                          <div className="flex items-center gap-2">
+                        <TableCell className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
                             <Button
                               variant="outline"
                               size="icon"
-                              className="h-9 w-9 rounded-lg bg-card"
+                              className="h-8 w-8 rounded-lg"
                               aria-label="Ver detalhes"
                               onClick={() => openDetails(reservation)}
                             >
-                              <Eye className="h-4 w-4" />
+                              <Eye className="h-3.5 w-3.5" />
                             </Button>
                             {reservation.status === 'confirmed' && (
                               <Button
                                 variant="outline"
-                                className="h-9 rounded-lg bg-card px-3 text-xs font-medium"
+                                size="sm"
+                                className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
                                 onClick={() => openCheckIn(reservation)}
                               >
-                                <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                                Realizar check-in
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Check-in
                               </Button>
                             )}
                             <Button
                               variant="outline"
                               size="icon"
-                              className="h-9 w-9 rounded-lg bg-card"
+                              className="h-8 w-8 rounded-lg"
                               aria-label="Editar reserva"
-                              onClick={() => openEdit(reservation)}
+                              onClick={() => openDataEdit(reservation)}
                             >
-                              <Pencil className="h-4 w-4" />
+                              <Pencil className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="outline"
                               size="icon"
-                              className="h-9 w-9 rounded-lg bg-card text-destructive hover:text-destructive"
+                              className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
                               aria-label="Excluir reserva"
                               onClick={() => setDeleteConfirmId(reservation.id)}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -1116,6 +1193,39 @@ export default function Reservations() {
               </TableBody>
             </Table>
             </div>
+
+            {filteredReservations.length > LIST_PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-border px-4 py-3">
+                <p className="text-xs text-muted-foreground">
+                  {(listPage - 1) * LIST_PAGE_SIZE + 1}–{Math.min(listPage * LIST_PAGE_SIZE, filteredReservations.length)} de {filteredReservations.length}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg"
+                    disabled={listPage <= 1}
+                    onClick={() => setListPage((p) => p - 1)}
+                    aria-label="Pagina anterior"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="min-w-[4rem] text-center text-xs font-medium text-foreground">
+                    {listPage} / {listTotalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg"
+                    disabled={listPage >= listTotalPages}
+                    onClick={() => setListPage((p) => p + 1)}
+                    aria-label="Proxima pagina"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </TabsContent>
       </Tabs>
@@ -1328,6 +1438,15 @@ export default function Reservations() {
         backLabel={detailsReturnDay ? 'Voltar para as reservas do dia' : undefined}
         reservation={detailsReservation}
         slug={slug}
+        onEdit={(r) => openDataEdit(r as Reservation)}
+        onCheckIn={detailsReturnDay ? undefined : (r) => openCheckIn(r as Reservation)}
+        onStatusChange={(r) => openEdit(r as Reservation)}
+        onCancel={(r) => {
+          const res = r as Reservation;
+          setEditingReservation(res);
+          setEditStatus('cancelled');
+          setEditDialog(true);
+        }}
       />
 
       <Dialog open={editDialog} onOpenChange={handleEditDialogChange}>
@@ -1497,6 +1616,121 @@ export default function Reservations() {
                 {saveStatusMutation.isPending ? 'Salvando...' : editStatus === 'checked_in' ? 'Confirmar check-in' : 'Salvar'}
               </Button>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={dataEditDialog}
+        onOpenChange={(open) => {
+          setDataEditDialog(open);
+          if (!open) setDataEditReservation(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar reserva</DialogTitle>
+          </DialogHeader>
+
+          {dataEditReservation && (
+            <form
+              className="space-y-4 pt-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                updateDataMutation.mutate();
+              }}
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-name">Nome *</Label>
+                  <Input
+                    id="data-edit-name"
+                    value={dataEditForm.guest_name}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, guest_name: e.target.value }))}
+                    autoComplete="name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-phone">WhatsApp *</Label>
+                  <Input
+                    id="data-edit-phone"
+                    value={dataEditForm.guest_phone}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, guest_phone: formatBrazilPhone(e.target.value) }))}
+                    autoComplete="tel"
+                    inputMode="tel"
+                    maxLength={15}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-email">E-mail</Label>
+                  <Input
+                    id="data-edit-email"
+                    type="email"
+                    value={dataEditForm.guest_email}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, guest_email: e.target.value }))}
+                    autoComplete="email"
+                    inputMode="email"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-party-size">Pessoas *</Label>
+                  <Input
+                    id="data-edit-party-size"
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={dataEditForm.party_size}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, party_size: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-date">Data *</Label>
+                  <Input
+                    id="data-edit-date"
+                    type="date"
+                    value={dataEditForm.date}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, date: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-time">Horario *</Label>
+                  <Input
+                    id="data-edit-time"
+                    type="time"
+                    value={dataEditForm.time}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, time: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="data-edit-occasion">Ocasiao</Label>
+                  <Input
+                    id="data-edit-occasion"
+                    value={dataEditForm.occasion}
+                    onChange={(e) => setDataEditForm((f) => ({ ...f, occasion: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="data-edit-notes">Observacoes</Label>
+                <Textarea
+                  id="data-edit-notes"
+                  value={dataEditForm.notes}
+                  onChange={(e) => setDataEditForm((f) => ({ ...f, notes: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => setDataEditDialog(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={updateDataMutation.isPending}>
+                  {updateDataMutation.isPending ? 'Salvando...' : 'Salvar alteracoes'}
+                </Button>
+              </div>
+            </form>
           )}
         </DialogContent>
       </Dialog>
@@ -1709,86 +1943,71 @@ export default function Reservations() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-3 pt-2">
+          <div className="pt-1">
             {dayModalReservations.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 Nenhuma reserva para este dia.
               </p>
             ) : (
-              dayModalReservations.map((reservation) => (
-                <div key={reservation.id} className="rounded-[24px] border border-border bg-card p-4 shadow-sm">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-                    <div className="flex items-center gap-3 lg:w-28 lg:flex-col lg:items-start lg:gap-2">
-                      <div className="inline-flex min-w-[78px] items-center justify-center rounded-2xl bg-primary/10 px-4 py-3 text-xl font-semibold text-primary">
+              <div className="overflow-hidden rounded-xl border border-border">
+                {dayModalReservations.map((reservation, index) => (
+                  <div
+                    key={reservation.id}
+                    className={cn(
+                      'bg-card px-4 py-3 transition hover:bg-accent/20',
+                      index !== dayModalReservations.length - 1 && 'border-b border-border/60',
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
                         {reservation.time.slice(0, 5)}
                       </div>
-                      <ReservationStatusBadge status={reservation.status} />
-                    </div>
 
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0">
-                          <div className="break-words text-base font-semibold text-foreground">{reservation.guest_name}</div>
-                          <div className="mt-1 text-sm tabular-nums text-muted-foreground">
-                            {formatBrazilPhone(reservation.guest_phone)}
-                          </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
+                          <ReservationStatusBadge status={reservation.status} />
                         </div>
-
-                        {reservation.source && (
-                          <div className="shrink-0">
-                            <ReservationSourceBadge source={reservation.source} />
-                          </div>
-                        )}
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                          <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="h-3 w-3" />
+                            {reservation.party_size}
+                          </span>
+                          {reservation.occasion && <span>{reservation.occasion}</span>}
+                        </div>
                       </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-                          <Users className="h-3 w-3" />
-                          {reservation.party_size} {reservation.party_size === 1 ? 'pessoa' : 'pessoas'}
-                        </span>
-                        {reservation.occasion && (
-                          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-                            {reservation.occasion}
-                          </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {reservation.status === 'confirmed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg px-3 text-xs"
+                            onClick={() => openCheckIn(reservation)}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Check-in
+                          </Button>
                         )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 rounded-lg px-3 text-xs"
+                          aria-label="Ver reserva"
+                          onClick={() => {
+                            setDayModal(null);
+                            openDetails(reservation, { returnDay: dayModal });
+                          }}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Ver reserva
+                        </Button>
                       </div>
                     </div>
                   </div>
-
-                  <div className="mt-4 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row sm:flex-wrap sm:justify-end">
-                    {reservation.status === 'confirmed' && (
-                      <Button
-                        variant="outline"
-                        className="h-9 rounded-xl px-4 text-sm"
-                        onClick={() => openCheckIn(reservation)}
-                      >
-                        Realizar check-in
-                      </Button>
-                    )}
-
-                    <Button
-                      variant="outline"
-                      className="h-9 gap-2 rounded-xl px-4 text-sm"
-                      onClick={() => {
-                        setDayModal(null);
-                        openDetails(reservation, { returnDay: dayModal });
-                      }}
-                    >
-                      <Eye className="h-4 w-4" />
-                      Ver reserva
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-9 gap-2 rounded-xl px-4 text-sm"
-                      onClick={() => openEdit(reservation)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Editar
-                    </Button>
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         </DialogContent>
