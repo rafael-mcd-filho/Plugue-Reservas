@@ -134,7 +134,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     ? [
         {
           label: 'Automa\u00E7\u00F5es',
-          description: 'WhatsApp e webhooks',
+          description: 'Envios autom\u00E1ticos via WhatsApp',
           icon: Bot,
           path: `/${slug}/admin/automacoes`,
           showFor: ['admin', 'superadmin'],

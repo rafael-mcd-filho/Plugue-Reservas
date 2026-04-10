@@ -84,6 +84,19 @@ const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon
   },
 };
 
+function getStatusMessage(status: ReservationStatus | 'completed' | 'no_show') {
+  if (status === 'no-show' || status === 'no_show') {
+    return {
+      icon: AlertCircle,
+      title: 'No Show',
+      description: 'Esta reserva foi marcada como No Show.',
+      color: 'text-muted-foreground',
+    };
+  }
+
+  return statusMessages[status];
+}
+
 export default function ReservationTracking() {
   const { slug, code } = useParams<{ slug: string; code: string }>();
   const queryClient = useQueryClient();
@@ -205,7 +218,7 @@ export default function ReservationTracking() {
   }
 
   const normalizedStatus = normalizeReservationStatus(entry.status);
-  const status = statusMessages[normalizedStatus] || statusMessages.confirmed;
+  const status = getStatusMessage(normalizedStatus) || statusMessages.confirmed;
   const StatusIcon = status.icon;
   const canCancel = normalizedStatus === 'confirmed';
 

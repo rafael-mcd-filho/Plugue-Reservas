@@ -182,7 +182,7 @@ export default function OperatorTodayReservations() {
     {
       label: 'Ocorrencias',
       value: summary.issues,
-      hint: 'canceladas ou no-show',
+      hint: 'canceladas ou No Show',
       className: 'bg-destructive-soft text-destructive',
     },
   ];
@@ -364,7 +364,7 @@ export default function OperatorTodayReservations() {
               {processedReservations.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/45 bg-background/70 px-6 py-10 text-center">
                   <p className="text-sm font-medium text-foreground">Nenhuma reserva atualizada hoje.</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Check-ins, cancelamentos e no-show do dia aparecem aqui.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Check-ins, cancelamentos e No Show do dia aparecem aqui.</p>
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-border/35 bg-background/78 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">

@@ -77,21 +77,23 @@ export function useSystemBranding() {
 export function useUpdateSetting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ key, value }: { key: string; value: string | null }) => {
+    mutationFn: async ({ key, value }: { key: string; value: string | null; silent?: boolean }) => {
       const { data: { session } } = await supabase.auth.getSession();
       const { error } = await supabase
         .from('system_settings' as any)
-        .update({
+        .upsert({
+          key,
           value,
           updated_at: new Date().toISOString(),
           updated_by: session?.user?.id ?? null,
-        } as any)
-        .eq('key', key);
+        } as any, { onConflict: 'key' });
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: ['system-settings'] });
-      toast.success('Configuracao salva!');
+      if (!variables.silent) {
+        toast.success('Configuracao salva!');
+      }
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });

@@ -1,4 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildEvolutionNotConfiguredFailure,
+  buildInstanceDisconnectedFailure,
+  buildInstanceNotConfiguredFailure,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -99,6 +106,28 @@ Deno.serve(async (req) => {
     const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
 
     if (!evolutionUrl || !evolutionToken) {
+      if (action === 'send_message' || action === 'resend_message') {
+        const failure = buildEvolutionNotConfiguredFailure();
+        if (action === 'resend_message' && log_id && !failure.ok) {
+          await supabaseAdmin.from('whatsapp_message_logs')
+            .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
+            .eq('id', log_id);
+        }
+
+        return new Response(JSON.stringify(
+          failure.ok
+            ? { ok: true, data: failure.data }
+            : {
+                ok: false,
+                error_code: failure.error.code,
+                error_title: failure.error.title,
+                error_message: failure.error.message,
+              }
+        ), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       return new Response(JSON.stringify({ error: 'Evolution API não configurada. Configure URL e token nas configurações do sistema.' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -299,32 +328,102 @@ Deno.serve(async (req) => {
       case 'resend_message': {
         const { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
-          .select('instance_name')
+          .select('instance_name, status')
           .eq('company_id', company_id)
           .maybeSingle();
 
         if (!instance) {
-          return new Response(JSON.stringify({ error: 'WhatsApp não conectado' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          const failure = buildInstanceNotConfiguredFailure();
+          if (action === 'resend_message' && log_id && !failure.ok) {
+            await supabaseAdmin.from('whatsapp_message_logs')
+              .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
+              .eq('id', log_id);
+          }
+          result = failure.ok ? { ok: true, data: failure.data } : {
+            ok: false,
+            error_code: failure.error.code,
+            error_title: failure.error.title,
+            error_message: failure.error.message,
+          };
+          break;
+        }
+
+        if (instance.status !== 'connected') {
+          const failure = buildInstanceDisconnectedFailure();
+          if (action === 'resend_message' && log_id && !failure.ok) {
+            await supabaseAdmin.from('whatsapp_message_logs')
+              .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
+              .eq('id', log_id);
+          }
+          result = failure.ok ? { ok: true, data: failure.data } : {
+            ok: false,
+            error_code: failure.error.code,
+            error_title: failure.error.title,
+            error_message: failure.error.message,
+          };
+          break;
+        }
+
+        const sendResult = await sendWhatsAppText(
+          evolutionUrl,
+          evolutionToken,
+          instance.instance_name,
+          phone,
+          message,
+        );
+
+        if (action === 'resend_message' && log_id) {
+          if (sendResult.ok) {
+            await supabaseAdmin.from('whatsapp_message_logs')
+              .update({ status: 'sent', error_details: null })
+              .eq('id', log_id);
+          } else {
+            await supabaseAdmin.from('whatsapp_message_logs')
+              .update({ status: 'error', error_details: serializeWhatsAppFailure(sendResult.error) })
+              .eq('id', log_id);
+          }
+        }
+
+        result = sendResult.ok ? { ok: true, data: sendResult.data } : {
+          ok: false,
+          error_code: sendResult.error.code,
+          error_title: sendResult.error.title,
+          error_message: sendResult.error.message,
+          provider_status: sendResult.error.provider_status,
+          provider_message: sendResult.error.provider_message,
+        };
+        break;
+      }
+
+      case 'clear_logs': {
+        const { error } = await supabaseAdmin
+          .from('whatsapp_message_logs')
+          .delete()
+          .eq('company_id', company_id);
+
+        if (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
 
-        const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            number: phone,
-            text: message,
-          }),
-        });
-        result = await res.json();
+        result = { ok: true };
+        break;
+      }
 
-        // If resend and successful, update the original log status
-        if (action === 'resend_message' && log_id && res.ok) {
-          await supabaseAdmin.from('whatsapp_message_logs')
-            .update({ status: 'sent', error_details: null })
-            .eq('id', log_id);
+      case 'clear_queue': {
+        const { error } = await supabaseAdmin
+          .from('whatsapp_message_queue')
+          .delete()
+          .eq('company_id', company_id);
+
+        if (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
+
+        result = { ok: true };
         break;
       }
 

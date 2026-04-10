@@ -3,19 +3,16 @@ import {
   createSupabaseAdminClient,
   isAuthorizedInternalJob,
 } from "../_shared/internal-auth.ts";
+import {
+  formatPhoneForWhatsApp,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
-
-function formatPhoneForWhatsApp(phone: string) {
-  let digits = phone.replace(/\D/g, "");
-  if (!digits.startsWith("55") && digits.length <= 11) {
-    digits = `55${digits}`;
-  }
-  return digits;
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -25,7 +22,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const requestedCompanyId = typeof body.company_id === "string" ? body.company_id : null;
-    const internalJob = isAuthorizedInternalJob(req);
+    const internalJob = await isAuthorizedInternalJob(req);
 
     if (!internalJob) {
       if (!requestedCompanyId) {
@@ -94,7 +91,14 @@ Deno.serve(async (req) => {
 
     await supabaseAdmin
       .from("whatsapp_message_queue")
-      .update({ status: "failed", error_details: "Expired after 2 hours" })
+      .update({
+        status: "failed",
+        error_details: serializeWhatsAppFailure({
+          code: "unknown_error",
+          title: "Mensagem expirada na fila",
+          message: "A mensagem expirou na fila após 2 horas sem envio.",
+        }),
+      })
       .eq("status", "pending")
       .lt("expires_at", new Date().toISOString())
       .in("company_id", connectedCompanyIds);
@@ -144,22 +148,29 @@ Deno.serve(async (req) => {
         if (alreadySent && alreadySent.length > 0) {
           await supabaseAdmin
             .from("whatsapp_message_queue")
-            .update({ status: "sent", error_details: "Skipped: already sent" })
+            .update({
+              status: "sent",
+              error_details: serializeWhatsAppFailure({
+                code: "unknown_error",
+                title: "Mensagem ja enviada",
+                message: "A fila identificou um envio recente e marcou esta mensagem como concluida sem reenviar.",
+              }),
+            })
             .eq("id", message.id);
           continue;
         }
       }
 
       try {
-        const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: evolutionToken },
-          body: JSON.stringify({ number: formatPhoneForWhatsApp(message.phone), text: message.message }),
-        });
+        const responseData = await sendWhatsAppText(
+          evolutionUrl,
+          evolutionToken,
+          instanceName,
+          formatPhoneForWhatsApp(message.phone),
+          message.message,
+        );
 
-        const responseData = await res.json();
-
-        if (res.ok) {
+        if (responseData.ok) {
           await supabaseAdmin
             .from("whatsapp_message_queue")
             .update({
@@ -181,12 +192,13 @@ Deno.serve(async (req) => {
           sent++;
         } else {
           const nextAttempts = message.attempts + 1;
+          const serializedError = serializeWhatsAppFailure(responseData.error);
           await supabaseAdmin
             .from("whatsapp_message_queue")
             .update({
               attempts: nextAttempts,
               last_attempt_at: new Date().toISOString(),
-              error_details: JSON.stringify(responseData),
+              error_details: serializedError,
               status: nextAttempts >= message.max_attempts ? "failed" : "pending",
             })
             .eq("id", message.id);
@@ -199,7 +211,11 @@ Deno.serve(async (req) => {
           .update({
             attempts: nextAttempts,
             last_attempt_at: new Date().toISOString(),
-            error_details: String(error),
+            error_details: serializeWhatsAppFailure({
+              code: "unknown_error",
+              title: "Falha ao processar a fila",
+              message: error instanceof Error ? error.message : "Erro desconhecido ao processar a fila.",
+            }),
             status: nextAttempts >= message.max_attempts ? "failed" : "pending",
           })
           .eq("id", message.id);

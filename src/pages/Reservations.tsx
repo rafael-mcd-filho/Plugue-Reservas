@@ -116,7 +116,7 @@ const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: strin
   { value: 'confirmed', label: 'Confirmada' },
   { value: 'checked_in', label: 'Check-in realizado' },
   { value: 'cancelled', label: 'Cancelada' },
-  { value: 'no-show', label: 'Nao compareceu' },
+  { value: 'no-show', label: 'No Show' },
 ];
 
 function normalizePhone(phone: string | null | undefined) {
@@ -1006,7 +1006,7 @@ export default function Reservations() {
                   <SelectItem value="confirmed">Confirmada</SelectItem>
                   <SelectItem value="checked_in">Check-in realizado</SelectItem>
                   <SelectItem value="cancelled">Cancelada</SelectItem>
-                  <SelectItem value="no-show">Nao compareceu</SelectItem>
+                  <SelectItem value="no-show">No Show</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1469,7 +1469,7 @@ export default function Reservations() {
                   <SelectItem value="confirmed">Confirmada</SelectItem>
                   <SelectItem value="checked_in">Check-in realizado</SelectItem>
                   <SelectItem value="cancelled">Cancelada</SelectItem>
-                  <SelectItem value="no-show">Nao compareceu</SelectItem>
+                  <SelectItem value="no-show">No Show</SelectItem>
                 </SelectContent>
               </Select>
 

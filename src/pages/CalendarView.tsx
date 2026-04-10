@@ -462,7 +462,7 @@ export default function CalendarView() {
                     <SelectItem value="confirmed">Confirmada</SelectItem>
                     <SelectItem value="checked_in">Check-in realizado</SelectItem>
                     <SelectItem value="cancelled">Cancelada</SelectItem>
-                    <SelectItem value="no-show">Nao compareceu</SelectItem>
+                    <SelectItem value="no-show">No Show</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

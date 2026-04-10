@@ -3,6 +3,14 @@ import {
   getAuthenticatedUser,
   getUserRoleRows,
 } from "../_shared/internal-auth.ts";
+import {
+  buildEvolutionNotConfiguredFailure,
+  buildInstanceDisconnectedFailure,
+  buildInstanceNotConfiguredFailure,
+  formatPhoneForWhatsApp,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,14 +65,6 @@ function replaceTemplateVars(
     .replace(/\{hora\}/g, timeFormatted)
     .replace(/\{link_acompanhamento\}/g, trackingUrl || "")
     .replace(/\{telefone\}/g, reservation.guest_phone || "");
-}
-
-function formatPhoneForWhatsApp(phone: string) {
-  let digits = phone.replace(/\D/g, "");
-  if (!digits.startsWith("55") && digits.length <= 11) {
-    digits = `55${digits}`;
-  }
-  return digits;
 }
 
 function sanitizeOrigin(value: string | null | undefined) {
@@ -246,7 +246,7 @@ async function sendReservationAutomation(
   event: string,
   reservation: ReservationData,
   trackingUrl: string | null,
-  results: { whatsapp?: string; webhooks?: string[] },
+  results: { whatsapp?: string },
 ) {
   if (!["reservation_created", "reservation_cancelled"].includes(event)) return;
 
@@ -279,17 +279,6 @@ async function sendReservationAutomation(
   }
 
   const { evolutionUrl, evolutionToken } = await getEvolutionConfig(supabaseAdmin);
-  if (!evolutionUrl || !evolutionToken) {
-    results.whatsapp = "evolution_not_configured";
-    return;
-  }
-
-  const { data: instance } = await supabaseAdmin
-    .from("company_whatsapp_instances")
-    .select("instance_name, status")
-    .eq("company_id", reservation.company_id)
-    .maybeSingle();
-
   let message = replaceTemplateVars(automation.message_template, reservation, trackingUrl);
   if (
     event === "reservation_created" &&
@@ -300,67 +289,97 @@ async function sendReservationAutomation(
   }
   const phone = formatPhoneForWhatsApp(reservation.guest_phone);
 
-  if (instance?.status !== "connected") {
-    results.whatsapp = "queued";
+  if (!evolutionUrl || !evolutionToken) {
+    const failure = buildEvolutionNotConfiguredFailure();
+    results.whatsapp = failure.error.code;
     await supabaseAdmin.from("whatsapp_message_queue").insert({
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
       message,
       type: logType,
+      error_details: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
 
-  try {
-    const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: evolutionToken },
-      body: JSON.stringify({ number: phone, text: message }),
-    });
-    const data = await res.json();
-    const status = res.ok ? "sent" : "error";
+  const { data: instance } = await supabaseAdmin
+    .from("company_whatsapp_instances")
+    .select("instance_name, status")
+    .eq("company_id", reservation.company_id)
+    .maybeSingle();
 
-    results.whatsapp = status;
-
-    await supabaseAdmin.from("whatsapp_message_logs").insert({
-      company_id: reservation.company_id,
-      reservation_id: reservation.id,
-      phone,
-      message,
-      type: logType,
-      status,
-      error_details: res.ok ? null : JSON.stringify(data),
-    });
-
-    if (!res.ok) {
-      await supabaseAdmin.from("whatsapp_message_queue").insert({
-        company_id: reservation.company_id,
-        reservation_id: reservation.id,
-        phone,
-        message,
-        type: logType,
-      });
-    }
-  } catch (error) {
-    results.whatsapp = "error";
-    await supabaseAdmin.from("whatsapp_message_logs").insert({
-      company_id: reservation.company_id,
-      reservation_id: reservation.id,
-      phone,
-      message,
-      type: logType,
-      status: "error",
-      error_details: String(error),
-    });
+  if (!instance) {
+    const failure = buildInstanceNotConfiguredFailure();
+    results.whatsapp = failure.error.code;
     await supabaseAdmin.from("whatsapp_message_queue").insert({
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
       message,
       type: logType,
+      error_details: serializeWhatsAppFailure(failure.error),
     });
+    return;
   }
+
+  if (instance.status !== "connected") {
+    const failure = buildInstanceDisconnectedFailure();
+    results.whatsapp = failure.error.code;
+    await supabaseAdmin.from("whatsapp_message_queue").insert({
+      company_id: reservation.company_id,
+      reservation_id: reservation.id,
+      phone,
+      message,
+      type: logType,
+      error_details: serializeWhatsAppFailure(failure.error),
+    });
+    return;
+  }
+
+  const sendResult = await sendWhatsAppText(
+    evolutionUrl,
+    evolutionToken,
+    instance.instance_name,
+    phone,
+    message,
+  );
+
+  if (sendResult.ok) {
+    results.whatsapp = "sent";
+    await supabaseAdmin.from("whatsapp_message_logs").insert({
+      company_id: reservation.company_id,
+      reservation_id: reservation.id,
+      phone,
+      message,
+      type: logType,
+      status: "sent",
+      error_details: null,
+    });
+    return;
+  }
+
+  results.whatsapp = sendResult.error.code;
+  const serializedError = serializeWhatsAppFailure(sendResult.error);
+
+  await supabaseAdmin.from("whatsapp_message_logs").insert({
+    company_id: reservation.company_id,
+    reservation_id: reservation.id,
+    phone,
+    message,
+    type: logType,
+    status: "error",
+    error_details: serializedError,
+  });
+
+  await supabaseAdmin.from("whatsapp_message_queue").insert({
+    company_id: reservation.company_id,
+    reservation_id: reservation.id,
+    phone,
+    message,
+    type: logType,
+    error_details: serializedError,
+  });
 }
 
 async function sendWaitlistAutomation(
@@ -368,7 +387,7 @@ async function sendWaitlistAutomation(
   event: string,
   waitlist: WaitlistData,
   trackingUrl: string | null,
-  results: { whatsapp?: string; webhooks?: string[] },
+  results: { whatsapp?: string },
 ) {
   if (!["waitlist_added", "waitlist_called"].includes(event) || !waitlist?.guest_phone) return;
 
@@ -410,7 +429,15 @@ async function sendWaitlistAutomation(
 
   const { evolutionUrl, evolutionToken } = await getEvolutionConfig(supabaseAdmin);
   if (!evolutionUrl || !evolutionToken) {
-    results.whatsapp = "evolution_not_configured";
+    const failure = buildEvolutionNotConfiguredFailure();
+    results.whatsapp = failure.error.code;
+    await supabaseAdmin.from("whatsapp_message_queue").insert({
+      company_id: waitlist.company_id,
+      phone,
+      message,
+      type: messageType,
+      error_details: serializeWhatsAppFailure(failure.error),
+    });
     return;
   }
 
@@ -420,114 +447,72 @@ async function sendWaitlistAutomation(
     .eq("company_id", waitlist.company_id)
     .maybeSingle();
 
-  if (instance?.status !== "connected") {
-    results.whatsapp = "queued";
+  if (!instance) {
+    const failure = buildInstanceNotConfiguredFailure();
+    results.whatsapp = failure.error.code;
     await supabaseAdmin.from("whatsapp_message_queue").insert({
       company_id: waitlist.company_id,
       phone,
       message,
       type: messageType,
+      error_details: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
 
-  try {
-    const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: evolutionToken },
-      body: JSON.stringify({ number: phone, text: message }),
+  if (instance.status !== "connected") {
+    const failure = buildInstanceDisconnectedFailure();
+    results.whatsapp = failure.error.code;
+    await supabaseAdmin.from("whatsapp_message_queue").insert({
+      company_id: waitlist.company_id,
+      phone,
+      message,
+      type: messageType,
+      error_details: serializeWhatsAppFailure(failure.error),
     });
-    const data = await res.json();
-    const status = res.ok ? "sent" : "error";
-    results.whatsapp = status;
+    return;
+  }
 
+  const sendResult = await sendWhatsAppText(
+    evolutionUrl,
+    evolutionToken,
+    instance.instance_name,
+    phone,
+    message,
+  );
+
+  if (sendResult.ok) {
+    results.whatsapp = "sent";
     await supabaseAdmin.from("whatsapp_message_logs").insert({
       company_id: waitlist.company_id,
       phone,
       message,
       type: messageType,
-      status,
-      error_details: res.ok ? null : JSON.stringify(data),
+      status: "sent",
+      error_details: null,
     });
-
-    if (!res.ok) {
-      await supabaseAdmin.from("whatsapp_message_queue").insert({
-        company_id: waitlist.company_id,
-        phone,
-        message,
-        type: messageType,
-      });
-    }
-  } catch (error) {
-    results.whatsapp = "error";
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
-      company_id: waitlist.company_id,
-      phone,
-      message,
-      type: messageType,
-    });
+    return;
   }
-}
 
-async function fireReservationWebhooks(
-  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
-  event: string,
-  reservation: ReservationData,
-  results: { whatsapp?: string; webhooks?: string[] },
-) {
-  const webhookEvent = event === "reservation_created"
-    ? "reservation_created"
-    : event === "reservation_cancelled"
-      ? "reservation_cancelled"
-      : "status_changed";
+  results.whatsapp = sendResult.error.code;
+  const serializedError = serializeWhatsAppFailure(sendResult.error);
 
-  const { data: webhooks } = await supabaseAdmin
-    .from("webhook_configs")
-    .select("*")
-    .eq("company_id", reservation.company_id)
-    .eq("enabled", true);
-
-  const matchingWebhooks = (webhooks || []).filter((webhook: any) => {
-    const events = webhook.events as string[];
-    return events.includes(webhookEvent);
+  await supabaseAdmin.from("whatsapp_message_logs").insert({
+    company_id: waitlist.company_id,
+    phone,
+    message,
+    type: messageType,
+    status: "error",
+    error_details: serializedError,
   });
 
-  results.webhooks = [];
-
-  for (const webhook of matchingWebhooks) {
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (webhook.secret) {
-        headers["X-Webhook-Secret"] = webhook.secret;
-      }
-
-      const res = await fetch(webhook.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          event: webhookEvent,
-          timestamp: new Date().toISOString(),
-          data: {
-            id: reservation.id,
-            company_id: reservation.company_id,
-            guest_name: reservation.guest_name,
-            guest_phone: reservation.guest_phone,
-            guest_email: reservation.guest_email,
-            date: reservation.date,
-            time: reservation.time,
-            party_size: reservation.party_size,
-            status: reservation.status,
-            occasion: reservation.occasion,
-          },
-        }),
-      });
-
-      await res.text();
-      results.webhooks.push(`${webhook.url}: ${res.status}`);
-    } catch {
-      results.webhooks.push(`${webhook.url}: error`);
-    }
-  }
+  await supabaseAdmin.from("whatsapp_message_queue").insert({
+    company_id: waitlist.company_id,
+    phone,
+    message,
+    type: messageType,
+    error_details: serializedError,
+  });
 }
 
 Deno.serve(async (req) => {
@@ -590,11 +575,10 @@ Deno.serve(async (req) => {
       publicReservationTrackingCode,
     );
 
-    const results: { whatsapp?: string; webhooks?: string[] } = {};
+    const results: { whatsapp?: string } = {};
 
     if (reservation) {
       await sendReservationAutomation(supabaseAdmin, event, reservation, reservationTrackingUrl, results);
-      await fireReservationWebhooks(supabaseAdmin, event, reservation, results);
     }
 
     if (waitlist) {

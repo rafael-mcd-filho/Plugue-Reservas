@@ -947,8 +947,8 @@ export default function Dashboard() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
                   <SectionTitle
-                    title="Cancelamentos e No-Shows das agendadas"
-                    tooltip="Mostra as perdas do período por cancelamento e por cliente que não compareceu nas reservas agendadas."
+                    title="Cancelamentos e No Show das agendadas"
+                    tooltip="Mostra as perdas do periodo por cancelamento e por reservas que viraram No Show."
                   />
                 </CardTitle>
                 <CardDescription>Acompanhamento diário das perdas nas reservas agendadas</CardDescription>
@@ -963,7 +963,7 @@ export default function Dashboard() {
                       <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
                       <Legend />
                       <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="noShows" name="No-Shows" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="noShows" name="No Show" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

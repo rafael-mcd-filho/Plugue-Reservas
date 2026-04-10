@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const requestedCompanyId = normalizeText(body.company_id);
-    const internalJob = isAuthorizedInternalJob(req);
+    const internalJob = await isAuthorizedInternalJob(req);
 
     if (!internalJob) {
       if (!requestedCompanyId) {

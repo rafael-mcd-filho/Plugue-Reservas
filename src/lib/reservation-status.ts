@@ -13,7 +13,7 @@ const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
   confirmed: 'Confirmada',
   checked_in: 'Check-in realizado',
   cancelled: 'Cancelada',
-  'no-show': 'Nao compareceu',
+  'no-show': 'No Show',
 };
 
 export function normalizeReservationStatus(status: ReservationStatusInput): ReservationStatus {

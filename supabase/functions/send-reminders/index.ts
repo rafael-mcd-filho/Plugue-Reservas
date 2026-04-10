@@ -1,172 +1,163 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import {
+  buildInstanceDisconnectedFailure,
+  buildInstanceNotConfiguredFailure,
+  formatPhoneForWhatsApp,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
+import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
 function replaceTemplateVars(template: string, reservation: any): string {
-  const [h, m] = (reservation.time || '').split(':');
-  const timeFormatted = h && m ? `${h}:${m}` : reservation.time;
-  const [y, mo, d] = (reservation.date || '').split('-');
-  const dateFormatted = d && mo && y ? `${d}/${mo}/${y}` : reservation.date;
+  const [hours, minutes] = (reservation.time || "").split(":");
+  const timeFormatted = hours && minutes ? `${hours}:${minutes}` : reservation.time;
+  const [year, month, day] = (reservation.date || "").split("-");
+  const dateFormatted = day && month && year ? `${day}/${month}/${year}` : reservation.date;
 
   return template
-    .replace(/\{nome\}/g, reservation.guest_name || '')
+    .replace(/\{nome\}/g, reservation.guest_name || "")
     .replace(/\{pessoas\}/g, String(reservation.party_size || 1))
     .replace(/\{data\}/g, dateFormatted)
     .replace(/\{hora\}/g, timeFormatted)
-    .replace(/\{telefone\}/g, reservation.guest_phone || '');
-}
-
-function formatPhoneForWhatsApp(phone: string): string {
-  let digits = phone.replace(/\D/g, '');
-  if (!digits.startsWith('55') && digits.length <= 11) digits = '55' + digits;
-  return digits;
+    .replace(/\{telefone\}/g, reservation.guest_phone || "");
 }
 
 async function getEvolutionConfig(supabaseAdmin: any) {
   const { data: settings } = await supabaseAdmin
-    .from('system_settings')
-    .select('key, value')
-    .in('key', ['evolution_api_url', 'evolution_api_token']);
+    .from("system_settings")
+    .select("key, value")
+    .in("key", ["evolution_api_url", "evolution_api_token"]);
 
-  const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
-  const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
+  const evolutionUrl = settings?.find((setting: any) => setting.key === "evolution_api_url")?.value?.replace(/\/+$/, "");
+  const evolutionToken = settings?.find((setting: any) => setting.key === "evolution_api_token")?.value;
   return { evolutionUrl, evolutionToken };
 }
 
-async function sendWhatsAppMessage(
-  evolutionUrl: string, evolutionToken: string, instanceName: string,
-  phone: string, message: string
-): Promise<{ ok: boolean; data: any }> {
-  const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-    body: JSON.stringify({ number: phone, text: message }),
-  });
-  const data = await res.json();
-  return { ok: res.ok, data };
+function getReservationDateTime(date: string, time: string) {
+  const [hours = "00", minutes = "00"] = time.split(":");
+  return new Date(`${date}T${hours}:${minutes}:00-03:00`);
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    if (!isAuthorizedInternalJob(req)) {
-      return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
+    if (!(await isAuthorizedInternalJob(req))) {
+      return new Response(JSON.stringify({ error: "Nao autorizado" }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
-
     const { evolutionUrl, evolutionToken } = await getEvolutionConfig(supabaseAdmin);
+
     if (!evolutionUrl || !evolutionToken) {
-      console.log('Evolution API not configured, skipping reminders');
-      return new Response(JSON.stringify({ skipped: true, reason: 'evolution_not_configured' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      console.log("Evolution API not configured, skipping reminders");
+      return new Response(JSON.stringify({ skipped: true, reason: "evolution_not_configured" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const tomorrowDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+    const todayStr = formatDateKeyInTimeZone(now);
+    const tomorrowStr = formatDateKeyInTimeZone(new Date(now.getTime() + 24 * 60 * 60 * 1000));
 
-    // === 1H REMINDERS (today, 55-65 min from now) ===
-    const min55 = new Date(now.getTime() + 55 * 60 * 1000);
-    const min65 = new Date(now.getTime() + 65 * 60 * 1000);
-    const timeFrom1h = `${String(min55.getHours()).padStart(2, '0')}:${String(min55.getMinutes()).padStart(2, '0')}:00`;
-    const timeTo1h = `${String(min65.getHours()).padStart(2, '0')}:${String(min65.getMinutes()).padStart(2, '0')}:00`;
+    console.log(`Checking reminders for ${todayStr} and ${tomorrowStr}`);
 
-    // === 24H REMINDERS (tomorrow, same time window as now ±5min) ===
-    const timeFrom24h = `${String(now.getHours()).padStart(2, '0')}:${String(Math.max(0, now.getMinutes() - 5)).padStart(2, '0')}:00`;
-    const timeTo24h = `${String(now.getHours()).padStart(2, '0')}:${String(Math.min(59, now.getMinutes() + 5)).padStart(2, '0')}:00`;
-
-    console.log(`1h reminders: ${todayStr} ${timeFrom1h}-${timeTo1h}`);
-    console.log(`24h reminders: ${tomorrowStr} all confirmed reservations`);
-
-    // Fetch both sets of reservations
-    const [res1h, res24h] = await Promise.all([
+    const [{ data: reservationsToday }, { data: reservationsTomorrow }] = await Promise.all([
       supabaseAdmin
-        .from('reservations')
-        .select('*')
-        .eq('date', todayStr)
-        .eq('status', 'confirmed')
-        .gte('time', timeFrom1h)
-        .lte('time', timeTo1h),
+        .from("reservations")
+        .select("*")
+        .eq("date", todayStr)
+        .eq("status", "confirmed"),
       supabaseAdmin
-        .from('reservations')
-        .select('*')
-        .eq('date', tomorrowStr)
-        .eq('status', 'confirmed'),
+        .from("reservations")
+        .select("*")
+        .eq("date", tomorrowStr)
+        .eq("status", "confirmed"),
     ]);
 
-    const reservations1h = res1h.data || [];
-    const reservations24h = res24h.data || [];
+    const candidateReservations = [...(reservationsToday || []), ...(reservationsTomorrow || [])];
 
-    // For 24h reminders: skip if reservation was created less than 24h before the reservation time
-    // (i.e., don't send a 24h reminder if the person just booked for tomorrow)
-    const filtered24h = reservations24h.filter((r: any) => {
-      const createdAt = new Date(r.created_at);
-      const [rh, rm] = (r.time || '00:00').split(':').map(Number);
-      const reservationDatetime = new Date(`${r.date}T${String(rh).padStart(2,'0')}:${String(rm).padStart(2,'0')}:00`);
-      const hoursUntilReservation = (reservationDatetime.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
-      // Only send 24h reminder if reservation was made at least 24h before
+    const reservations1h = candidateReservations.filter((reservation: any) => {
+      const minutesUntilReservation =
+        (getReservationDateTime(reservation.date, reservation.time).getTime() - now.getTime()) / (1000 * 60);
+      return minutesUntilReservation >= 55 && minutesUntilReservation <= 65;
+    });
+
+    const reservations24h = candidateReservations.filter((reservation: any) => {
+      const minutesUntilReservation =
+        (getReservationDateTime(reservation.date, reservation.time).getTime() - now.getTime()) / (1000 * 60);
+      return minutesUntilReservation >= 1435 && minutesUntilReservation <= 1445;
+    });
+
+    const filtered24h = reservations24h.filter((reservation: any) => {
+      const createdAt = new Date(reservation.created_at);
+      const reservationDateTime = getReservationDateTime(reservation.date, reservation.time || "00:00");
+      const hoursUntilReservation = (reservationDateTime.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+
       if (hoursUntilReservation < 24) {
-        console.log(`Skipping 24h reminder for ${r.id}: booked only ${hoursUntilReservation.toFixed(1)}h before`);
+        console.log(`Skipping 24h reminder for ${reservation.id}: booked only ${hoursUntilReservation.toFixed(1)}h before`);
         return false;
       }
+
       return true;
     });
 
-    console.log(`Found ${reservations1h.length} 1h reminders, ${filtered24h.length} 24h reminders (${reservations24h.length - filtered24h.length} skipped)`);
+    console.log(
+      `Found ${reservations1h.length} 1h reminders, ${filtered24h.length} 24h reminders (${reservations24h.length - filtered24h.length} skipped)`,
+    );
 
-    // Collect all company IDs
     const allReservations = [
-      ...reservations1h.map((r: any) => ({ ...r, _reminderType: 'reminder_1h' })),
-      ...filtered24h.map((r: any) => ({ ...r, _reminderType: 'reminder_24h' })),
+      ...reservations1h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_1h" })),
+      ...filtered24h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_24h" })),
     ];
 
     if (allReservations.length === 0) {
       return new Response(JSON.stringify({ sent: 0 }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const companyIds = [...new Set(allReservations.map((r: any) => r.company_id))];
+    const companyIds = [...new Set(allReservations.map((reservation: any) => reservation.company_id))];
 
-    // Get automations for both types
-    const { data: automations } = await supabaseAdmin
-      .from('automation_settings')
-      .select('*')
-      .in('company_id', companyIds)
-      .in('type', ['reminder_1h', 'reminder_24h'])
-      .eq('enabled', true);
+    const [{ data: automations }, { data: instances }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
+      supabaseAdmin
+        .from("automation_settings")
+        .select("*")
+        .in("company_id", companyIds)
+        .in("type", ["reminder_1h", "reminder_24h"])
+        .eq("enabled", true),
+      supabaseAdmin
+        .from("company_whatsapp_instances")
+        .select("*")
+        .in("company_id", companyIds),
+      supabaseAdmin
+        .from("whatsapp_message_logs")
+        .select("reservation_id, type")
+        .in("reservation_id", allReservations.map((reservation: any) => reservation.id))
+        .in("type", ["reminder_1h", "reminder_24h"])
+        .eq("status", "sent"),
+      supabaseAdmin
+        .from("whatsapp_message_queue")
+        .select("reservation_id, type")
+        .in("reservation_id", allReservations.map((reservation: any) => reservation.id))
+        .in("type", ["reminder_1h", "reminder_24h"]),
+    ]);
 
-    // Get WhatsApp instances
-    const { data: instances } = await supabaseAdmin
-      .from('company_whatsapp_instances')
-      .select('*')
-      .in('company_id', companyIds)
-      .eq('status', 'connected');
-
-    const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
-
-    // Check already-sent reminders to avoid duplicates
-    const reservationIds = allReservations.map((r: any) => r.id);
-    const { data: alreadySent } = await supabaseAdmin
-      .from('whatsapp_message_logs')
-      .select('reservation_id, type')
-      .in('reservation_id', reservationIds)
-      .in('type', ['reminder_1h', 'reminder_24h'])
-      .eq('status', 'sent');
-
-    const sentSet = new Set((alreadySent || []).map((l: any) => `${l.reservation_id}:${l.type}`));
+    const instanceMap = new Map((instances || []).map((instance: any) => [instance.company_id, instance]));
+    const sentSet = new Set((alreadySent || []).map((log: any) => `${log.reservation_id}:${log.type}`));
+    const queuedSet = new Set((alreadyQueued || []).map((item: any) => `${item.reservation_id}:${item.type}`));
 
     let sent = 0;
     const errors: string[] = [];
@@ -175,61 +166,105 @@ Deno.serve(async (req) => {
       const reminderType = reservation._reminderType;
       const key = `${reservation.id}:${reminderType}`;
 
-      if (sentSet.has(key)) {
+      if (sentSet.has(key) || queuedSet.has(key)) {
         console.log(`Skipping duplicate ${reminderType} for ${reservation.id}`);
         continue;
       }
 
       const automation = (automations || []).find(
-        (a: any) => a.company_id === reservation.company_id && a.type === reminderType
+        (item: any) => item.company_id === reservation.company_id && item.type === reminderType,
       );
-      const instance = instanceMap.get(reservation.company_id);
 
-      if (!automation || !instance) continue;
+      if (!automation) continue;
 
       const message = replaceTemplateVars(automation.message_template, reservation);
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const instance = instanceMap.get(reservation.company_id);
 
-      try {
-        const result = await sendWhatsAppMessage(evolutionUrl, evolutionToken, instance.instance_name, phone, message);
-        const status = result.ok ? 'sent' : 'error';
-
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
+      if (!instance) {
+        const failure = buildInstanceNotConfiguredFailure();
+        await supabaseAdmin.from("whatsapp_message_queue").insert({
           company_id: reservation.company_id,
           reservation_id: reservation.id,
-          phone, message,
+          phone,
+          message,
           type: reminderType,
-          status,
-          error_details: result.ok ? null : JSON.stringify(result.data),
+          error_details: serializeWhatsAppFailure(failure.error),
         });
-
-        if (result.ok) {
-          sent++;
-          console.log(`${reminderType} sent to ${phone} for reservation ${reservation.id}`);
-        } else {
-          errors.push(`${reservation.id}: ${JSON.stringify(result.data)}`);
-        }
-      } catch (err) {
-        errors.push(`${reservation.id}: ${err}`);
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone, message,
-          type: reminderType,
-          status: 'error',
-          error_details: String(err),
-        });
+        errors.push(`${reservation.id}: ${failure.error.message}`);
+        continue;
       }
+
+      if (instance.status !== "connected") {
+        const failure = buildInstanceDisconnectedFailure();
+        await supabaseAdmin.from("whatsapp_message_queue").insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: reminderType,
+          error_details: serializeWhatsAppFailure(failure.error),
+        });
+        errors.push(`${reservation.id}: ${failure.error.message}`);
+        continue;
+      }
+
+      const result = await sendWhatsAppText(
+        evolutionUrl,
+        evolutionToken,
+        instance.instance_name,
+        phone,
+        message,
+      );
+
+      if (result.ok) {
+        await supabaseAdmin.from("whatsapp_message_logs").insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: reminderType,
+          status: "sent",
+          error_details: null,
+        });
+        sent++;
+        console.log(`${reminderType} sent to ${phone} for reservation ${reservation.id}`);
+        continue;
+      }
+
+      const serializedError = serializeWhatsAppFailure(result.error);
+      errors.push(`${reservation.id}: ${result.error.message}`);
+
+      await supabaseAdmin.from("whatsapp_message_logs").insert({
+        company_id: reservation.company_id,
+        reservation_id: reservation.id,
+        phone,
+        message,
+        type: reminderType,
+        status: "error",
+        error_details: serializedError,
+      });
+
+      await supabaseAdmin.from("whatsapp_message_queue").insert({
+        company_id: reservation.company_id,
+        reservation_id: reservation.id,
+        phone,
+        message,
+        type: reminderType,
+        error_details: serializedError,
+      });
     }
 
     return new Response(JSON.stringify({ sent, total: allReservations.length, errors }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
-    console.error('Send reminders error:', error);
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    console.error("Send reminders error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

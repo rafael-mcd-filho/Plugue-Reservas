@@ -1,4 +1,11 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import {
+  buildInstanceDisconnectedFailure,
+  buildInstanceNotConfiguredFailure,
+  formatPhoneForWhatsApp,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,19 +26,13 @@ function replaceTemplateVars(template: string, reservation: any): string {
     .replace(/\{telefone\}/g, reservation.guest_phone || '');
 }
 
-function formatPhoneForWhatsApp(phone: string): string {
-  let digits = phone.replace(/\D/g, '');
-  if (!digits.startsWith('55') && digits.length <= 11) digits = '55' + digits;
-  return digits;
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    if (!isAuthorizedInternalJob(req)) {
+    if (!(await isAuthorizedInternalJob(req))) {
       return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -94,7 +95,7 @@ Deno.serve(async (req) => {
 
     const companyIds = [...new Set(reservations.map((r: any) => r.company_id))];
 
-    const [{ data: automations }, { data: instances }, { data: alreadySent }] = await Promise.all([
+    const [{ data: automations }, { data: instances }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
       supabaseAdmin
         .from('automation_settings')
         .select('*')
@@ -110,16 +111,22 @@ Deno.serve(async (req) => {
         .select('reservation_id')
         .in('reservation_id', reservations.map((r: any) => r.id))
         .eq('type', 'post_visit'),
+      supabaseAdmin
+        .from('whatsapp_message_queue')
+        .select('reservation_id')
+        .in('reservation_id', reservations.map((r: any) => r.id))
+        .eq('type', 'post_visit'),
     ]);
 
     const sentIds = new Set((alreadySent || []).map((l: any) => l.reservation_id));
+    const queuedIds = new Set((alreadyQueued || []).map((l: any) => l.reservation_id));
     const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
 
     let sent = 0;
     let queued = 0;
 
     for (const reservation of reservations) {
-      if (sentIds.has(reservation.id)) continue;
+      if (sentIds.has(reservation.id) || queuedIds.has(reservation.id)) continue;
 
       const automation = (automations || []).find((a: any) => a.company_id === reservation.company_id);
       if (!automation) continue;
@@ -128,52 +135,75 @@ Deno.serve(async (req) => {
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
       const instance = instanceMap.get(reservation.company_id);
 
-      if (instance?.status === 'connected') {
-        try {
-          const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-            body: JSON.stringify({ number: phone, text: message }),
-          });
-          const data = await res.json();
-
-          await supabaseAdmin.from('whatsapp_message_logs').insert({
-            company_id: reservation.company_id,
-            reservation_id: reservation.id,
-            phone, message,
-            type: 'post_visit',
-            status: res.ok ? 'sent' : 'error',
-            error_details: res.ok ? null : JSON.stringify(data),
-          });
-
-          if (res.ok) {
-            sent++;
-          } else {
-            await supabaseAdmin.from('whatsapp_message_queue').insert({
-              company_id: reservation.company_id, reservation_id: reservation.id,
-              phone, message, type: 'post_visit',
-            });
-            queued++;
-          }
-        } catch (err) {
-          await supabaseAdmin.from('whatsapp_message_logs').insert({
-            company_id: reservation.company_id, reservation_id: reservation.id,
-            phone, message, type: 'post_visit', status: 'error', error_details: String(err),
-          });
-          await supabaseAdmin.from('whatsapp_message_queue').insert({
-            company_id: reservation.company_id, reservation_id: reservation.id,
-            phone, message, type: 'post_visit',
-          });
-          queued++;
-        }
-      } else {
-        // Not connected — queue
+      if (!instance) {
+        const failure = buildInstanceNotConfiguredFailure();
         await supabaseAdmin.from('whatsapp_message_queue').insert({
-          company_id: reservation.company_id, reservation_id: reservation.id,
-          phone, message, type: 'post_visit',
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: 'post_visit',
+          error_details: serializeWhatsAppFailure(failure.error),
         });
         queued++;
+        continue;
       }
+
+      if (instance.status !== 'connected') {
+        const failure = buildInstanceDisconnectedFailure();
+        await supabaseAdmin.from('whatsapp_message_queue').insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: 'post_visit',
+          error_details: serializeWhatsAppFailure(failure.error),
+        });
+        queued++;
+        continue;
+      }
+
+      const result = await sendWhatsAppText(
+        evolutionUrl,
+        evolutionToken,
+        instance.instance_name,
+        phone,
+        message,
+      );
+
+      if (result.ok) {
+        await supabaseAdmin.from('whatsapp_message_logs').insert({
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          message,
+          type: 'post_visit',
+          status: 'sent',
+          error_details: null,
+        });
+        sent++;
+        continue;
+      }
+
+      const serializedError = serializeWhatsAppFailure(result.error);
+      await supabaseAdmin.from('whatsapp_message_logs').insert({
+        company_id: reservation.company_id,
+        reservation_id: reservation.id,
+        phone,
+        message,
+        type: 'post_visit',
+        status: 'error',
+        error_details: serializedError,
+      });
+      await supabaseAdmin.from('whatsapp_message_queue').insert({
+        company_id: reservation.company_id,
+        reservation_id: reservation.id,
+        phone,
+        message,
+        type: 'post_visit',
+        error_details: serializedError,
+      });
+      queued++;
     }
 
     return new Response(JSON.stringify({ sent, queued, total: reservations.length }), {

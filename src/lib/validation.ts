@@ -1,7 +1,7 @@
-export const MIN_PASSWORD_LENGTH = 12;
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_WAITLIST_NAME_LENGTH = 120;
 export const MAX_WAITLIST_NOTES_LENGTH = 500;
-export const PASSWORD_REQUIREMENTS_TEXT = `Use ao menos ${MIN_PASSWORD_LENGTH} caracteres com letra maiuscula, minuscula e numero.`;
+export const PASSWORD_REQUIREMENTS_TEXT = `Use ao menos ${MIN_PASSWORD_LENGTH} caracteres.`;
 
 export const COMPANY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const BRAZIL_WHATSAPP_PATTERN = /^(55)?[1-9][0-9](?:9?[0-9]{8})$/;
@@ -81,10 +81,7 @@ export function isValidEmail(value: string | null | undefined) {
 
 export function isStrongPassword(value: string | null | undefined) {
   const password = value || '';
-  return password.length >= MIN_PASSWORD_LENGTH
-    && /[a-z]/.test(password)
-    && /[A-Z]/.test(password)
-    && /\d/.test(password);
+  return password.length >= MIN_PASSWORD_LENGTH;
 }
 
 export function normalizeCnpjDigits(value: string | null | undefined) {

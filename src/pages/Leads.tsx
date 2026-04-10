@@ -144,7 +144,7 @@ const LEAD_EXPORT_STATUS_OPTIONS = [
   { value: 'confirmed', label: 'Confirmada' },
   { value: 'checked_in', label: 'Check-in realizado' },
   { value: 'cancelled', label: 'Cancelada' },
-  { value: 'no-show', label: 'Não compareceu' },
+  { value: 'no-show', label: 'No Show' },
   { value: 'seated', label: 'Sentado' },
 ] as const;
 
@@ -314,7 +314,7 @@ function formatReservationStatus(status: string) {
       return 'Check-in realizado';
     case 'no-show':
     case 'no_show':
-      return 'Não compareceu';
+      return 'No Show';
     case 'seated':
       return 'Sentado';
     default:

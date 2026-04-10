@@ -31,8 +31,8 @@ type CallerContext = {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
-const MIN_PASSWORD_LENGTH = 12;
-const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres e incluir letra maiuscula, minuscula e numero`;
+const MIN_PASSWORD_LENGTH = 8;
+const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`;
 
 function normalizeOptionalText(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -69,10 +69,7 @@ function isValidBrazilPhone(value: string) {
 }
 
 function isStrongPassword(value: string) {
-  return value.length >= MIN_PASSWORD_LENGTH
-    && /[a-z]/.test(value)
-    && /[A-Z]/.test(value)
-    && /\d/.test(value);
+  return value.length >= MIN_PASSWORD_LENGTH;
 }
 
 async function verifyCaller(req: Request): Promise<CallerContext> {

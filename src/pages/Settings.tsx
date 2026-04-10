@@ -126,8 +126,9 @@ function GeneralTab() {
   }, [settings]);
 
   const handleSave = async () => {
-    await updateSetting.mutateAsync({ key: 'system_name', value: systemName });
-    await updateSetting.mutateAsync({ key: 'system_logo_url', value: logoUrl || null });
+    await updateSetting.mutateAsync({ key: 'system_name', value: systemName, silent: true });
+    await updateSetting.mutateAsync({ key: 'system_logo_url', value: logoUrl || null, silent: true });
+    toast.success('Configurações gerais salvas!');
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -573,6 +574,8 @@ function IntegrationsTab() {
   const [evolutionUrl, setEvolutionUrl] = useState('');
   const [evolutionToken, setEvolutionToken] = useState('');
   const [showToken, setShowToken] = useState(false);
+  const [internalJobSecret, setInternalJobSecret] = useState('');
+  const [showJobSecret, setShowJobSecret] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -580,11 +583,14 @@ function IntegrationsTab() {
     if (settings.length === 0) return;
     setEvolutionUrl(getSetting('evolution_api_url'));
     setEvolutionToken(getSetting('evolution_api_token'));
+    setInternalJobSecret(getSetting('internal_job_secret'));
   }, [settings]);
 
   const handleSave = async () => {
-    await updateSetting.mutateAsync({ key: 'evolution_api_url', value: evolutionUrl || null });
-    await updateSetting.mutateAsync({ key: 'evolution_api_token', value: evolutionToken || null });
+    await updateSetting.mutateAsync({ key: 'evolution_api_url', value: evolutionUrl || null, silent: true });
+    await updateSetting.mutateAsync({ key: 'evolution_api_token', value: evolutionToken || null, silent: true });
+    await updateSetting.mutateAsync({ key: 'internal_job_secret', value: internalJobSecret || null, silent: true });
+    toast.success('Integrações salvas!');
   };
 
   const handleTestConnection = async () => {
@@ -646,6 +652,28 @@ function IntegrationsTab() {
             </button>
           </div>
           <p className="text-xs text-muted-foreground mt-1">Encontrado nas configurações da sua Evolution API</p>
+        </div>
+        <div>
+          <Label>Segredo dos Jobs Internos</Label>
+          <div className="relative">
+            <Input
+              type={showJobSecret ? 'text' : 'password'}
+              value={internalJobSecret}
+              onChange={e => setInternalJobSecret(e.target.value)}
+              placeholder="Segredo usado pelos jobs automáticos"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowJobSecret(!showJobSecret)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showJobSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Usado para autenticar os jobs automáticos de lembretes, fila, pós-visita, aniversário e monitoramento do WhatsApp.
+          </p>
         </div>
         <div className="flex gap-3">
           <Button onClick={handleSave} disabled={updateSetting.isPending} className="gap-2">

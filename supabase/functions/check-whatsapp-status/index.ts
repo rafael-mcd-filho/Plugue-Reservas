@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    if (!isAuthorizedInternalJob(req)) {
+    if (!(await isAuthorizedInternalJob(req))) {
       return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

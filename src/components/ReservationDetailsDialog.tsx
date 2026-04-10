@@ -81,6 +81,14 @@ function formatAttemptStatus(status: string | null) {
   return status ?? 'Sem status';
 }
 
+function formatTimelineTitle(item: ReservationTimelineItem) {
+  if (item.event_name === 'reservation_no_show') {
+    return 'Marcada como No Show';
+  }
+
+  return item.title;
+}
+
 export default function ReservationDetailsDialog({
   open,
   onOpenChange,
@@ -200,7 +208,7 @@ export default function ReservationDetailsDialog({
                     Alterar status
                   </Button>
                 )}
-                {onCancel && reservation.status !== 'cancelled' && (
+                {onCancel && reservation.status === 'confirmed' && (
                   <Button type="button" variant="destructive" size="sm" className="gap-2" onClick={() => onCancel(reservation)}>
                     <Ban className="h-3.5 w-3.5" />
                     Cancelar reserva
@@ -307,12 +315,15 @@ export default function ReservationDetailsDialog({
                   <p className="text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
                 ) : (
                   <div className="space-y-3">
-                    {sortedTimeline.map((item) => (
+                    {sortedTimeline.map((item) => {
+                      const timelineTitle = formatTimelineTitle(item);
+
+                      return (
                       <div key={`${item.source}-${item.id}`} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium text-foreground">{item.title}</p>
+                              <p className="font-medium text-foreground">{timelineTitle}</p>
                               <Badge variant={item.source === 'meta' ? 'outline' : 'secondary'}>
                                 {formatTimelineSource(item.source)}
                               </Badge>
@@ -334,7 +345,7 @@ export default function ReservationDetailsDialog({
                               size="sm"
                               onClick={() =>
                                 setSelectedPayload({
-                                  title: `${item.title} (${formatTimelineSource(item.source)})`,
+                                  title: `${timelineTitle} (${formatTimelineSource(item.source)})`,
                                   content: JSON.stringify(item.payload, null, 2),
                                 })
                               }
@@ -348,7 +359,7 @@ export default function ReservationDetailsDialog({
                           <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
                         )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
                   </div>

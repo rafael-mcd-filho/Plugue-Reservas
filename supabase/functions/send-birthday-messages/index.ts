@@ -1,15 +1,17 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import {
+  buildInstanceDisconnectedFailure,
+  buildInstanceNotConfiguredFailure,
+  formatPhoneForWhatsApp,
+  sendWhatsAppText,
+  serializeWhatsAppFailure,
+} from "../_shared/whatsapp.ts";
+import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
 };
-
-function formatPhoneForWhatsApp(phone: string): string {
-  let digits = phone.replace(/\D/g, '');
-  if (!digits.startsWith('55') && digits.length <= 11) digits = '55' + digits;
-  return digits;
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -17,7 +19,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    if (!isAuthorizedInternalJob(req)) {
+    if (!(await isAuthorizedInternalJob(req))) {
       return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -41,10 +43,8 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
-    const todayMonth = String(now.getMonth() + 1).padStart(2, '0');
-    const todayDay = String(now.getDate()).padStart(2, '0');
-    const todayMMDD = `${todayMonth}-${todayDay}`;
-    const todayStr = now.toISOString().split('T')[0];
+    const todayMMDD = formatMonthDayInTimeZone(now);
+    const todayStr = formatDateKeyInTimeZone(now);
 
     console.log(`Birthday check for day: ${todayMMDD}`);
 
@@ -187,50 +187,72 @@ Deno.serve(async (req) => {
 
       const instance = instanceMap.get(contact.company_id);
 
-      if (instance?.status === 'connected') {
-        try {
-          const res = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': evolutionToken },
-            body: JSON.stringify({ number: phone, text: message }),
-          });
-          const data = await res.json();
-
-          await supabaseAdmin.from('whatsapp_message_logs').insert({
-            company_id: contact.company_id,
-            phone, message,
-            type: 'birthday',
-            status: res.ok ? 'sent' : 'error',
-            error_details: res.ok ? null : JSON.stringify(data),
-          });
-
-          if (res.ok) {
-            sent++;
-          } else {
-            // Queue for retry
-            await supabaseAdmin.from('whatsapp_message_queue').insert({
-              company_id: contact.company_id, phone, message, type: 'birthday',
-            });
-            queued++;
-          }
-        } catch (err) {
-          await supabaseAdmin.from('whatsapp_message_logs').insert({
-            company_id: contact.company_id, phone, message,
-            type: 'birthday', status: 'error', error_details: String(err),
-          });
-          await supabaseAdmin.from('whatsapp_message_queue').insert({
-            company_id: contact.company_id, phone, message, type: 'birthday',
-          });
-          queued++;
-        }
-      } else {
-        // Not connected — queue directly
+      if (!instance) {
+        const failure = buildInstanceNotConfiguredFailure();
         await supabaseAdmin.from('whatsapp_message_queue').insert({
-          company_id: contact.company_id, phone, message, type: 'birthday',
+          company_id: contact.company_id,
+          phone,
+          message,
+          type: 'birthday',
+          error_details: serializeWhatsAppFailure(failure.error),
+        });
+        queued++;
+        console.log(`Queued birthday for ${phone} (instance not configured)`);
+        continue;
+      }
+
+      if (instance.status !== 'connected') {
+        const failure = buildInstanceDisconnectedFailure();
+        await supabaseAdmin.from('whatsapp_message_queue').insert({
+          company_id: contact.company_id,
+          phone,
+          message,
+          type: 'birthday',
+          error_details: serializeWhatsAppFailure(failure.error),
         });
         queued++;
         console.log(`Queued birthday for ${phone} (instance not connected)`);
+        continue;
       }
+
+      const result = await sendWhatsAppText(
+        evolutionUrl,
+        evolutionToken,
+        instance.instance_name,
+        phone,
+        message,
+      );
+
+      if (result.ok) {
+        await supabaseAdmin.from('whatsapp_message_logs').insert({
+          company_id: contact.company_id,
+          phone,
+          message,
+          type: 'birthday',
+          status: 'sent',
+          error_details: null,
+        });
+        sent++;
+        continue;
+      }
+
+      const serializedError = serializeWhatsAppFailure(result.error);
+      await supabaseAdmin.from('whatsapp_message_logs').insert({
+        company_id: contact.company_id,
+        phone,
+        message,
+        type: 'birthday',
+        status: 'error',
+        error_details: serializedError,
+      });
+      await supabaseAdmin.from('whatsapp_message_queue').insert({
+        company_id: contact.company_id,
+        phone,
+        message,
+        type: 'birthday',
+        error_details: serializedError,
+      });
+      queued++;
     }
 
     return new Response(JSON.stringify({ sent, queued, total: uniqueBirthdays.length }), {

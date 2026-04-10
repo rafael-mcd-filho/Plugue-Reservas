@@ -20,10 +20,33 @@ export function getClientIpAddress(req: Request) {
   return candidates.find((value) => typeof value === "string" && value.length > 0) || null;
 }
 
-export function isAuthorizedInternalJob(req: Request) {
-  const secret = Deno.env.get("INTERNAL_JOB_SECRET");
-  if (!secret) return false;
-  return req.headers.get("x-job-secret") === secret;
+export async function isAuthorizedInternalJob(req: Request) {
+  const providedSecret = req.headers.get("x-job-secret");
+  if (!providedSecret) return false;
+
+  const envSecret = Deno.env.get("INTERNAL_JOB_SECRET");
+  if (envSecret && providedSecret === envSecret) {
+    return true;
+  }
+
+  try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("system_settings")
+      .select("value")
+      .eq("key", "internal_job_secret")
+      .maybeSingle();
+
+    if (error) {
+      console.error("Failed to load internal job secret from system_settings", error);
+      return false;
+    }
+
+    return typeof data?.value === "string" && data.value.length > 0 && data.value === providedSecret;
+  } catch (error) {
+    console.error("Failed to validate internal job secret", error);
+    return false;
+  }
 }
 
 export async function getAuthenticatedUser(req: Request) {
