@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useEvolutionApi } from '@/hooks/useAutomations';
+import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import { WHATSAPP_MESSAGE_TYPE_LABELS, parseWhatsAppErrorDetails } from '@/lib/whatsapp-automations';
 import {
   AlertDialog,
@@ -165,7 +166,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
         toast.success('Mensagem reenviada com sucesso.');
       }
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao reenviar mensagem');
+      toast.error(await getFunctionErrorMessage(error));
     } finally {
       setResendingId(null);
       qc.invalidateQueries({ queryKey: ['whatsapp-message-logs', companyId] });
@@ -193,7 +194,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
         toast.success(`Fila processada: ${data?.sent ?? 0} enviadas, ${data?.failed ?? 0} com falha.`);
       }
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao processar a fila');
+      toast.error(await getFunctionErrorMessage(error));
     } finally {
       setProcessing(false);
       qc.invalidateQueries({ queryKey: ['whatsapp-message-logs', companyId] });
@@ -222,7 +223,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
       qc.invalidateQueries({ queryKey: ['whatsapp-message-queue', companyId] });
       setConfirmAction(null);
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao limpar registros');
+      toast.error(await getFunctionErrorMessage(error));
     } finally {
       setClearing(false);
     }

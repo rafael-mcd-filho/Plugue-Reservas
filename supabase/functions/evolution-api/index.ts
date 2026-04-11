@@ -96,6 +96,40 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === 'clear_logs') {
+      const { error } = await supabaseAdmin
+        .from('whatsapp_message_logs')
+        .delete()
+        .eq('company_id', company_id);
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (action === 'clear_queue') {
+      const { error } = await supabaseAdmin
+        .from('whatsapp_message_queue')
+        .delete()
+        .eq('company_id', company_id);
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Get Evolution API settings from system_settings
     const { data: settings } = await supabaseAdmin
       .from('system_settings')

@@ -210,6 +210,14 @@ export default function CompanyWaitlist() {
   const [seatCompanionForms, setSeatCompanionForms] = useState<WaitlistCompanionForm[]>([]);
   const [removeEntry, setRemoveEntry] = useState<WaitlistEntry | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const automationFailureMessages: Record<string, string> = {
+    evolution_not_configured: 'A automação do WhatsApp não foi enviada porque a Evolution API não está configurada.',
+    instance_not_configured: 'A automação do WhatsApp não foi enviada porque a instância desta unidade não está configurada.',
+    instance_disconnected: 'A automação do WhatsApp não foi enviada porque a instância do WhatsApp está desconectada.',
+    provider_request_failed: 'A automação do WhatsApp falhou no provedor.',
+    provider_invalid_response: 'A automação do WhatsApp recebeu uma resposta inválida do provedor.',
+    unknown_error: 'A automação do WhatsApp falhou ao processar o envio.',
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -305,12 +313,10 @@ export default function CompanyWaitlist() {
 
       toast.success('Cliente adicionado à fila.');
 
-      supabase.functions.invoke('reservation-events', {
-        body: {
-          event: 'waitlist_added',
-          waitlist: { id: data.id },
-        },
-      }).catch((error) => console.warn('Waitlist notification error:', error));
+      void triggerWaitlistAutomation('waitlist_added', data.id).catch((error) => {
+        console.warn('Waitlist notification error:', error);
+        toast.error('O cliente entrou na fila, mas a mensagem do WhatsApp não foi disparada.');
+      });
 
       setShowAdd(false);
       setAddForm({
@@ -404,6 +410,42 @@ export default function CompanyWaitlist() {
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
 
+  const triggerWaitlistAutomation = async (event: 'waitlist_added' | 'waitlist_called', waitlistId: string) => {
+    const { data, error } = await supabase.functions.invoke('reservation-events', {
+      body: {
+        event,
+        waitlist: { id: waitlistId },
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const whatsappResult = data?.results?.whatsapp;
+    if (!whatsappResult || whatsappResult === 'sent') {
+      return;
+    }
+
+    if (whatsappResult === 'skipped_duplicate') {
+      toast.message('A automação foi ignorada porque já houve um envio recente para esse WhatsApp.');
+      return;
+    }
+
+    toast.error(automationFailureMessages[whatsappResult] || 'A automação do WhatsApp não foi enviada.');
+  };
+
+  const handleCallEntry = async (entry: WaitlistEntry) => {
+    await updateStatus.mutateAsync({ id: entry.id, status: 'called' });
+
+    try {
+      await triggerWaitlistAutomation('waitlist_called', entry.id);
+    } catch (error) {
+      console.warn('Waitlist call notification error:', error);
+      toast.error('O cliente foi chamado, mas a mensagem do WhatsApp não foi disparada.');
+    }
+  };
+
   const seatEntryMutation = useMutation({
     mutationFn: async ({
       id,
@@ -488,11 +530,7 @@ export default function CompanyWaitlist() {
       return;
     }
 
-    updateStatus.mutate({ id: nextEntry.id, status: 'called' });
-
-    supabase.functions.invoke('reservation-events', {
-      body: { event: 'waitlist_called', waitlist: { id: nextEntry.id } },
-    }).catch((error) => console.warn('Waitlist call notification error:', error));
+    void handleCallEntry(nextEntry);
   };
 
   const copyTrackingLink = async (code: string) => {
@@ -832,7 +870,7 @@ export default function CompanyWaitlist() {
                             className="w-full gap-2 rounded-lg sm:w-auto"
                             onClick={(event) => {
                               stopRowAction(event);
-                              updateStatus.mutate({ id: entry.id, status: 'called' });
+                              void handleCallEntry(entry);
                             }}
                           >
                             <Bell className="h-3.5 w-3.5" />
