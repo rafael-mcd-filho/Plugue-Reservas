@@ -8,37 +8,46 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import WhatsAppConnection from './WhatsAppConnection';
 import WhatsAppMessageHistory from './WhatsAppMessageHistory';
-import { useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
+import { type AutomationSetting, useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
 import { WHATSAPP_AUTOMATIONS } from '@/lib/whatsapp-automations';
 
 interface Props {
   companyId: string;
 }
 
+type AutomationLocalState = Record<string, { enabled: boolean; message_template: string }>;
+
+function buildAutomationState(automations: AutomationSetting[] | undefined): AutomationLocalState {
+  const nextState: AutomationLocalState = {};
+
+  for (const automation of WHATSAPP_AUTOMATIONS) {
+    const existing = automations?.find((item) => item.type === automation.type);
+    nextState[automation.type] = {
+      enabled: existing?.enabled ?? false,
+      message_template: existing?.message_template || automation.defaultTemplate,
+    };
+  }
+
+  return nextState;
+}
+
 export default function AutomationsTab({ companyId }: Props) {
-  const { data: automations = [], isLoading } = useAutomationSettings(companyId);
+  const { data: automations, isLoading } = useAutomationSettings(companyId);
   const upsertAutomation = useUpsertAutomation();
-  const [localState, setLocalState] = useState<Record<string, { enabled: boolean; message_template: string }>>({});
-  const [initialized, setInitialized] = useState(false);
+  const [localState, setLocalState] = useState<AutomationLocalState>({});
+  const [hydratedCompanyId, setHydratedCompanyId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialized) return;
+    if (isLoading || hydratedCompanyId === companyId) return;
 
-    const nextState: Record<string, { enabled: boolean; message_template: string }> = {};
-    for (const automation of WHATSAPP_AUTOMATIONS) {
-      const existing = automations.find((item) => item.type === automation.type);
-      nextState[automation.type] = {
-        enabled: existing?.enabled ?? false,
-        message_template: existing?.message_template || automation.defaultTemplate,
-      };
-    }
+    setLocalState(buildAutomationState(automations));
+    setHydratedCompanyId(companyId);
+  }, [automations, companyId, hydratedCompanyId, isLoading]);
 
-    setLocalState(nextState);
-    setInitialized(true);
-  }, [automations, initialized]);
-
-  const handleSave = async (type: string) => {
-    const state = localState[type];
+  const handleSave = async (
+    type: string,
+    state: { enabled: boolean; message_template: string } | undefined = localState[type],
+  ) => {
     if (!state) return;
 
     await upsertAutomation.mutateAsync({
@@ -47,6 +56,26 @@ export default function AutomationsTab({ companyId }: Props) {
       enabled: state.enabled,
       message_template: state.message_template,
     });
+  };
+
+  const handleToggle = async (type: string, checked: boolean) => {
+    const currentState = localState[type];
+    if (!currentState) return;
+
+    const nextState = { ...currentState, enabled: checked };
+    setLocalState((prev) => ({
+      ...prev,
+      [type]: nextState,
+    }));
+
+    try {
+      await handleSave(type, nextState);
+    } catch {
+      setLocalState((prev) => ({
+        ...prev,
+        [type]: currentState,
+      }));
+    }
   };
 
   if (isLoading) {
@@ -90,12 +119,8 @@ export default function AutomationsTab({ companyId }: Props) {
                   </div>
                   <Switch
                     checked={state.enabled}
-                    onCheckedChange={(checked) =>
-                      setLocalState((prev) => ({
-                        ...prev,
-                        [automation.type]: { ...prev[automation.type], enabled: checked },
-                      }))
-                    }
+                    disabled={upsertAutomation.isPending}
+                    onCheckedChange={(checked) => void handleToggle(automation.type, checked)}
                   />
                 </div>
 
