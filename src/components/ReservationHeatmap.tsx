@@ -41,7 +41,7 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
   }
 
   return (
-    <Card className="border border-border shadow-sm">
+    <Card className="min-w-0 border border-border shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
           <span className="inline-flex items-center gap-1.5">
@@ -54,12 +54,12 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
         </CardTitle>
         <CardDescription>Total por dia da semana e horário, com detalhe da origem</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
+      <CardContent className="min-w-0">
+        <div className="-mx-1 overflow-x-auto px-1 pb-1">
           <TooltipProvider delayDuration={100}>
-            <div className="min-w-[500px]">
+            <div className="min-w-[420px] sm:min-w-[500px]">
               <div className="mb-1 flex gap-1">
-                <div className="w-10 shrink-0" />
+                <div className="w-9 shrink-0 sm:w-10" />
                 {hours.map((hour) => (
                   <div key={hour} className="flex-1 text-center text-xs font-medium text-muted-foreground">
                     {hour}
@@ -69,7 +69,7 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
 
               {dayNames.map((day, dayIdx) => (
                 <div key={day} className="mb-1 flex gap-1">
-                  <div className="flex w-10 shrink-0 items-center text-xs font-medium text-muted-foreground">
+                  <div className="flex w-9 shrink-0 items-center text-xs font-medium text-muted-foreground sm:w-10">
                     {day}
                   </div>
                   {hours.map((hour) => {
@@ -81,7 +81,7 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
                         <TooltipTrigger asChild>
                           <div
                             className={cn(
-                              'h-8 min-w-[28px] flex-1 cursor-default rounded-sm transition-colors',
+                              'h-7 min-w-[24px] flex-1 cursor-default rounded-sm transition-colors sm:h-8 sm:min-w-[28px]',
                               getIntensity(count, maxCount),
                             )}
                           />
@@ -102,7 +102,7 @@ export default function ReservationHeatmap({ counts, breakdown, maxCount, hours,
             </div>
           </TooltipProvider>
 
-          <div className="mt-3 flex items-center justify-end gap-2">
+          <div className="mt-3 flex items-center justify-start gap-2 sm:justify-end">
             <span className="text-xs text-muted-foreground">Menos</span>
             <div className="flex gap-0.5">
               {['bg-muted', 'bg-info/20', 'bg-info/40', 'bg-info/70', 'bg-info'].map((className) => (

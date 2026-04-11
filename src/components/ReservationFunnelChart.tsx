@@ -53,7 +53,7 @@ export default function ReservationFunnelChart({
     : '0';
 
   return (
-    <Card className="border border-border shadow-sm">
+    <Card className="min-w-0 border border-border shadow-sm">
       <CardHeader className="pb-2">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
@@ -71,7 +71,7 @@ export default function ReservationFunnelChart({
           {headerActions}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 40 }}>

@@ -406,7 +406,7 @@ export default function Dashboard() {
   const periodLabel = 'período anterior equivalente';
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 overflow-x-hidden">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-3">
@@ -435,10 +435,10 @@ export default function Dashboard() {
           </div>
           <p className="text-muted-foreground mt-1">Análise de reservas em tempo real</p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
           {!isCompanyContext && (
             <Select value={companyId} onValueChange={setCompanyId}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="w-full sm:w-[200px]">
                 <SelectValue placeholder="Todas as unidades" />
               </SelectTrigger>
               <SelectContent>
@@ -451,7 +451,7 @@ export default function Dashboard() {
           )}
 
           <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -466,7 +466,7 @@ export default function Dashboard() {
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className={cn("w-[280px] justify-start text-left text-sm", !customRange?.from && "text-muted-foreground")}
+                  className={cn("w-full justify-start text-left text-sm sm:w-[280px]", !customRange?.from && "text-muted-foreground")}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {formatDashboardDateRangeLabel(customRange)}
@@ -499,7 +499,7 @@ export default function Dashboard() {
       {dashLoading || (isCompanyContext && featureFlagsLoading) ? (
         <>
           {/* KPI skeleton */}
-          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 [&>*]:min-w-0">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="rounded-md border border-border bg-card p-5 shadow-sm">
                 <div className="flex items-center gap-3">
@@ -513,11 +513,11 @@ export default function Dashboard() {
             ))}
           </div>
           {/* Chart skeleton */}
-          <div className="grid gap-6 lg:grid-cols-3">
+          <div className="grid gap-6 lg:grid-cols-3 [&>*]:min-w-0">
             <div className="lg:col-span-2 h-72 animate-pulse rounded-md border border-border bg-muted" />
             <div className="h-72 animate-pulse rounded-md border border-border bg-muted" />
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
             <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
           </div>
@@ -525,15 +525,15 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 [&>*]:min-w-0">
             {dashboardStats.map(stat => (
-              <Card key={stat.label} className="border border-border shadow-sm">
+              <Card key={stat.label} className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
                   <div className={`p-2.5 rounded-md bg-muted ${stat.color}`}>
                     <stat.icon className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         current={stat.compareCurrent ?? stat.value}
@@ -553,13 +553,13 @@ export default function Dashboard() {
 
           {/* Waitlist KPIs */}
           {isCompanyContext && (
-            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-              <Card className="border border-border shadow-sm">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+              <Card className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
                   <div className="rounded-md bg-primary-soft p-2.5 text-primary">
                     <ClipboardList className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xl font-bold">{waitlistTotals.total}</p>
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
@@ -570,12 +570,12 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border border-border shadow-sm">
+              <Card className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
                   <div className="rounded-md bg-success-soft p-2.5 text-success">
                     <CheckCircle className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xl font-bold">{waitlistTotals.seated}</p>
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
@@ -586,12 +586,12 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border border-border shadow-sm">
+              <Card className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
                   <div className="rounded-md bg-destructive-soft p-2.5 text-destructive">
                     <UserX className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xl font-bold">{waitlistTotals.expired}</p>
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
@@ -602,12 +602,12 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border border-border shadow-sm">
+              <Card className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
                   <div className="rounded-md bg-info-soft p-2.5 text-info">
                     <Clock className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xl font-bold">{waitlistTotals.avgWaitMin}min</p>
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
@@ -782,8 +782,8 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="border border-border shadow-sm">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
                   <SectionTitle
@@ -870,7 +870,7 @@ export default function Dashboard() {
             </Card>
 
             {advancedReportsEnabled && (
-              <Card className="border border-border shadow-sm">
+              <Card className="min-w-0 border border-border shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">
                     <SectionTitle
@@ -915,8 +915,8 @@ export default function Dashboard() {
           {advancedReportsEnabled ? (
             <>
           {/* Charts Row 2 */}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="border border-border shadow-sm">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
                   <SectionTitle
@@ -943,7 +943,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border border-border shadow-sm">
+            <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
                   <SectionTitle
@@ -972,7 +972,7 @@ export default function Dashboard() {
           </div>
 
           {/* Heatmap + Funnel */}
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <ReservationHeatmap {...heatmapData} />
             <ReservationFunnelChart
               data={funnelData}

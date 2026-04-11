@@ -50,7 +50,7 @@ export default function LiveFunnelPanel({
   windowMinutes,
 }: LiveFunnelPanelProps) {
   return (
-    <Card className="border border-border shadow-sm">
+    <Card className="min-w-0 border border-border shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
           <span className="inline-flex items-center gap-1.5">
@@ -65,18 +65,18 @@ export default function LiveFunnelPanel({
           {totalActive} sessões com atividade nos últimos {windowMinutes} minutos
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <CardContent className="min-w-0">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
           {data.map((item) => {
             const config = STAGE_CONFIG[item.stage];
             const Icon = config.icon;
 
             return (
-              <div key={item.stage} className="rounded-xl border border-border bg-background p-4">
+              <div key={item.stage} className="min-w-0 rounded-xl border border-border bg-background p-4">
                 <div className={`inline-flex rounded-lg p-2 ${config.color}`}>
                   <Icon className="h-4 w-4" />
                 </div>
-                <p className="mt-3 text-xs uppercase tracking-wide text-muted-foreground">{config.label}</p>
+                <p className="mt-3 break-words text-xs uppercase tracking-wide text-muted-foreground">{config.label}</p>
                 <p className="mt-2 text-3xl font-semibold text-foreground">{item.count}</p>
                 <p className="mt-1 text-xs text-muted-foreground">ultimo estado conhecido</p>
               </div>

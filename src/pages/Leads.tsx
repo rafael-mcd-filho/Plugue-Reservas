@@ -940,9 +940,9 @@ export default function Leads() {
           <h1 className="text-2xl font-bold text-foreground">Leads</h1>
           <p className="text-sm text-muted-foreground">{summaryText}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:justify-end">
           <Select value={pageSize} onValueChange={(value) => setPageSize(value as (typeof LEADS_PAGE_SIZE_OPTIONS)[number])}>
-            <SelectTrigger className="w-[130px]">
+            <SelectTrigger className="w-full sm:w-[130px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -953,7 +953,7 @@ export default function Leads() {
               ))}
             </SelectContent>
           </Select>
-          <Button onClick={() => setExportDialogOpen(true)} variant="outline" className="gap-2" disabled={leads.length === 0}>
+          <Button onClick={() => setExportDialogOpen(true)} variant="outline" className="w-full gap-2 sm:w-auto" disabled={leads.length === 0}>
             <Download className="h-4 w-4" />
             Exportar leads
           </Button>
@@ -1012,7 +1012,7 @@ export default function Leads() {
               mode="range"
               selected={createdRange}
               onSelect={setCreatedRange}
-              numberOfMonths={2}
+              numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
               initialFocus
               className="pointer-events-auto p-3"
             />
@@ -1195,7 +1195,7 @@ export default function Leads() {
                       mode="range"
                       selected={exportLeadCreatedRange}
                       onSelect={setExportLeadCreatedRange}
-                      numberOfMonths={2}
+                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
                     />
@@ -1223,7 +1223,7 @@ export default function Leads() {
                       mode="range"
                       selected={exportVisitRange}
                       onSelect={setExportVisitRange}
-                      numberOfMonths={2}
+                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
                     />

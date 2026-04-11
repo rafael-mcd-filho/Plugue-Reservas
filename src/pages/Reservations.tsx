@@ -1266,7 +1266,7 @@ export default function Reservations() {
                       mode="range"
                       selected={exportCreatedRange}
                       onSelect={setExportCreatedRange}
-                      numberOfMonths={2}
+                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
                     />
@@ -1294,7 +1294,7 @@ export default function Reservations() {
                       mode="range"
                       selected={exportReservationRange}
                       onSelect={setExportReservationRange}
-                      numberOfMonths={2}
+                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
                     />
@@ -1322,7 +1322,7 @@ export default function Reservations() {
                       mode="range"
                       selected={exportLeadCreatedRange}
                       onSelect={setExportLeadCreatedRange}
-                      numberOfMonths={2}
+                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
                     />

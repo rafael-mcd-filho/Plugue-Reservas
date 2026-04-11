@@ -27,7 +27,7 @@ export default function CompanyNotificationsPopover() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[360px] p-0">
+      <PopoverContent align="end" className="w-[calc(100vw-2rem)] max-w-[360px] p-0">
         <div className="border-b px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div>

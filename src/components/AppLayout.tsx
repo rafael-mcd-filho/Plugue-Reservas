@@ -29,7 +29,7 @@ import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import { useSystemBranding } from '@/hooks/useSettings';
 import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
-import { trackAccessAudit } from '@/lib/accessAudit';
+import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 
@@ -289,7 +289,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         ...auditMetadata,
       },
     }).catch((error) => {
-      console.warn('Failed to audit panel access:', error);
+      reportAccessAuditFailure('panel access', error);
     });
   }, [auditMetadata, loading, location.pathname, location.search, slug, userId]);
 
@@ -568,7 +568,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-background px-4 py-4 lg:px-5 lg:py-4 animate-fade-in">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 py-4 lg:px-5 lg:py-4 animate-fade-in">
           {children}
         </main>
       </div>

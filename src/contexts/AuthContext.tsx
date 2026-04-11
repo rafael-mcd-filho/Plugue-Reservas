@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { trackAccessAudit } from '@/lib/accessAudit';
+import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
 import { isStrongPassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
@@ -199,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         metadata: { source: options?.slug ? 'public_company_page' : 'login_page' },
       });
     } catch (auditError) {
-      console.warn('Failed to audit login:', auditError);
+      reportAccessAuditFailure('login', auditError);
     }
 
     return { error: null };

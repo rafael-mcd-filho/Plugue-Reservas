@@ -293,17 +293,17 @@ export default function Users() {
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         <Input
           name="search_users"
           placeholder="Buscar por nome ou e-mail..."
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          className="h-10 max-w-xs rounded-lg"
+          className="h-10 w-full rounded-lg sm:max-w-xs"
           autoComplete="off"
         />
         <Select value={filterCompany} onValueChange={setFilterCompany}>
-          <SelectTrigger className="h-10 w-[220px] rounded-lg" aria-label="Filtrar por empresa">
+          <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]" aria-label="Filtrar por empresa">
             <SelectValue placeholder="Filtrar por empresa" />
           </SelectTrigger>
           <SelectContent>
@@ -314,7 +314,7 @@ export default function Users() {
           </SelectContent>
         </Select>
         <Select value={filterRole} onValueChange={setFilterRole}>
-          <SelectTrigger className="h-10 w-[180px] rounded-lg" aria-label="Filtrar por perfil">
+          <SelectTrigger className="h-10 w-full rounded-lg sm:w-[180px]" aria-label="Filtrar por perfil">
             <SelectValue placeholder="Filtrar por perfil" />
           </SelectTrigger>
           <SelectContent>
