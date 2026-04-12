@@ -18,8 +18,24 @@ const CompanySlugContext = createContext<CompanySlugContextType | undefined>(und
 export function CompanySlugProvider({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const { profile, roles, loading: authLoading } = useAuth();
-  const { isImpersonatingCompany, impersonatedCompanyId } = useImpersonation();
+  const {
+    isImpersonatingCompany,
+    impersonatedCompanyId,
+    impersonatedCompanyName,
+    impersonatedSlug,
+  } = useImpersonation();
   const slugIsValid = isValidCompanySlug(slug);
+  const impersonatedCompany = isImpersonatingCompany
+    && slugIsValid
+    && slug === impersonatedSlug
+    && impersonatedCompanyId
+    && impersonatedCompanyName
+    ? {
+        id: impersonatedCompanyId,
+        name: impersonatedCompanyName,
+        slug: impersonatedSlug,
+      }
+    : null;
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-by-slug', slug],
@@ -32,9 +48,11 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       return data as any;
     },
-    enabled: slugIsValid,
+    enabled: slugIsValid && !impersonatedCompany,
+    initialData: impersonatedCompany ?? undefined,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   if (authLoading || isLoading) {

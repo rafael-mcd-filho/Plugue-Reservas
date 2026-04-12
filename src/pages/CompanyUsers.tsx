@@ -132,6 +132,9 @@ export default function CompanyUsers() {
     },
     enabled: !!companyId,
     retry: false,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const activeAdminCount = useMemo(

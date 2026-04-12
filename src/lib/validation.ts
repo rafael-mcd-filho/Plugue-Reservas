@@ -2,22 +2,7 @@ export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_WAITLIST_NAME_LENGTH = 120;
 export const MAX_WAITLIST_NOTES_LENGTH = 500;
 export const PASSWORD_REQUIREMENTS_TEXT = `Use ao menos ${MIN_PASSWORD_LENGTH} caracteres.`;
-
-const PASSWORD_POLICY_HINTS = [
-  'character',
-  'caracter',
-  'uppercase',
-  'lowercase',
-  'maiuscula',
-  'minuscula',
-  'number',
-  'digit',
-  'numero',
-  'minimo',
-  'minimum',
-  'pelo menos',
-  'at least',
-];
+export const PASSWORD_POLICY_REJECTED_TEXT = 'A senha foi rejeitada pela politica de seguranca. Tente uma senha menos obvia e diferente de dados pessoais.';
 
 export const COMPANY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const BRAZIL_WHATSAPP_PATTERN = /^(55)?[1-9][0-9](?:9?[0-9]{8})$/;
@@ -194,8 +179,25 @@ export function normalizePasswordValidationMessage(message: string | null | unde
     .toLowerCase();
 
   const mentionsPassword = normalized.includes('password') || normalized.includes('senha');
-  const matchesPasswordPolicy = normalized.includes('weak_password')
-    || (mentionsPassword && PASSWORD_POLICY_HINTS.some((hint) => normalized.includes(hint)));
+  const mentionsLength = normalized.includes('pelo menos')
+    || normalized.includes('at least')
+    || normalized.includes('minimum')
+    || normalized.includes('minimo');
+  const mentionsCharacters = normalized.includes('character') || normalized.includes('caracter');
+  const mentionsUppercase = normalized.includes('uppercase') || normalized.includes('maiuscula');
+  const mentionsLowercase = normalized.includes('lowercase') || normalized.includes('minuscula');
+  const mentionsNumber = normalized.includes('number') || normalized.includes('digit') || normalized.includes('numero');
 
-  return matchesPasswordPolicy ? fallback : message;
+  const matchesMinLengthRule = mentionsPassword && mentionsLength && mentionsCharacters;
+  const matchesRequiredCharacterRule = mentionsPassword && (
+    (mentionsUppercase && mentionsLowercase)
+    || (mentionsUppercase && mentionsNumber)
+    || (mentionsLowercase && mentionsNumber)
+  );
+
+  if (normalized === 'weak_password') {
+    return PASSWORD_POLICY_REJECTED_TEXT;
+  }
+
+  return matchesMinLengthRule || matchesRequiredCharacterRule ? fallback : message;
 }

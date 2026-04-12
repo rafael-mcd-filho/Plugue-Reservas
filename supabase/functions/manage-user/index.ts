@@ -33,6 +33,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
 const MIN_PASSWORD_LENGTH = 8;
 const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`;
+const PASSWORD_POLICY_REJECTED_ERROR = "A senha foi rejeitada pela politica de seguranca. Tente uma senha menos obvia e diferente de dados pessoais.";
 
 function normalizePasswordErrorMessage(message: string | null | undefined) {
   if (!message) return PASSWORD_REQUIREMENTS_ERROR;
@@ -42,26 +43,28 @@ function normalizePasswordErrorMessage(message: string | null | undefined) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  const passwordPolicyHints = [
-    "character",
-    "caracter",
-    "uppercase",
-    "lowercase",
-    "maiuscula",
-    "minuscula",
-    "number",
-    "digit",
-    "numero",
-    "minimo",
-    "minimum",
-    "pelo menos",
-    "at least",
-  ];
-
   const mentionsPassword = normalized.includes("password") || normalized.includes("senha");
+  const mentionsLength = normalized.includes("pelo menos")
+    || normalized.includes("at least")
+    || normalized.includes("minimum")
+    || normalized.includes("minimo");
+  const mentionsCharacters = normalized.includes("character") || normalized.includes("caracter");
+  const mentionsUppercase = normalized.includes("uppercase") || normalized.includes("maiuscula");
+  const mentionsLowercase = normalized.includes("lowercase") || normalized.includes("minuscula");
+  const mentionsNumber = normalized.includes("number") || normalized.includes("digit") || normalized.includes("numero");
 
-  return normalized.includes("weak_password")
-    || (mentionsPassword && passwordPolicyHints.some((hint) => normalized.includes(hint)))
+  const matchesMinLengthRule = mentionsPassword && mentionsLength && mentionsCharacters;
+  const matchesRequiredCharacterRule = mentionsPassword && (
+    (mentionsUppercase && mentionsLowercase)
+    || (mentionsUppercase && mentionsNumber)
+    || (mentionsLowercase && mentionsNumber)
+  );
+
+  if (normalized === "weak_password") {
+    return PASSWORD_POLICY_REJECTED_ERROR;
+  }
+
+  return matchesMinLengthRule || matchesRequiredCharacterRule
     ? PASSWORD_REQUIREMENTS_ERROR
     : message;
 }
@@ -521,42 +524,28 @@ Deno.serve(async (req) => {
           .from("user_roles")
           .select("user_id, role, company_id");
 
-        let profilesQuery = context.supabaseAdmin
-          .from("profiles")
-          .select("id, full_name, email, phone, company_id, is_active, created_at");
-
         if (!shouldListAllUsers) {
           if (listCompanyId) {
             rolesQuery = rolesQuery.eq("company_id", listCompanyId);
-            profilesQuery = profilesQuery.eq("company_id", listCompanyId);
           } else if (allowedCompanyIds && allowedCompanyIds.length > 0) {
             rolesQuery = rolesQuery.in("company_id", allowedCompanyIds);
-            profilesQuery = profilesQuery.in("company_id", allowedCompanyIds);
           }
         }
 
-        const [rolesResult, profilesResult] = await Promise.all([rolesQuery, profilesQuery]);
-
+        const rolesResult = await rolesQuery;
         if (rolesResult.error) throw new Error(rolesResult.error.message);
-        if (profilesResult.error) throw new Error(profilesResult.error.message);
 
         const roles = (rolesResult.data ?? []) as UserRoleRow[];
-        const profiles = (profilesResult.data ?? []) as ProfileRow[];
         const roleMap = roles.reduce((acc, role) => {
           if (!acc.has(role.user_id)) acc.set(role.user_id, []);
           acc.get(role.user_id)!.push(role);
           return acc;
         }, new Map<string, UserRoleRow[]>());
-        const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
-        let userIds = [...new Set([
-          ...roles.map((role) => role.user_id),
-          ...profiles.map((profile) => profile.id),
-        ])];
+        let userIds = [...new Set(roles.map((role) => role.user_id))];
 
         if (!shouldListAllUsers) {
           userIds = userIds.filter((userId) => {
-            const profile = profileMap.get(userId);
             const userRoles = roleMap.get(userId) ?? [];
 
             if (userRoles.some((role) => role.role === "superadmin")) {
@@ -564,18 +553,29 @@ Deno.serve(async (req) => {
             }
 
             if (listCompanyId) {
-              return userRoles.some((role) => role.company_id === listCompanyId)
-                || profile?.company_id === listCompanyId;
+              return userRoles.some((role) => role.company_id === listCompanyId);
             }
 
             if (allowedCompanyIds && allowedCompanyIds.length > 0) {
-              return userRoles.some((role) => role.company_id && allowedCompanyIds.includes(role.company_id))
-                || (!!profile?.company_id && allowedCompanyIds.includes(profile.company_id));
+              return userRoles.some((role) => role.company_id && allowedCompanyIds.includes(role.company_id));
             }
 
             return false;
           });
         }
+
+        let profiles: ProfileRow[] = [];
+        if (userIds.length > 0) {
+          const profilesResult = await context.supabaseAdmin
+            .from("profiles")
+            .select("id, full_name, email, phone, company_id, is_active, created_at")
+            .in("id", userIds);
+
+          if (profilesResult.error) throw new Error(profilesResult.error.message);
+          profiles = (profilesResult.data ?? []) as ProfileRow[];
+        }
+
+        const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
         const users = userIds
           .map((uid) => {
