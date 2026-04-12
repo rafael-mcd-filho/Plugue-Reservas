@@ -24,7 +24,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Mensagem de Confirmação',
     description: 'Enviada automaticamente quando uma reserva é criada',
     icon: MessageCircle,
-    defaultTemplate: 'Olá {nome}! Sua reserva para {pessoas} pessoa(s) no dia {data} às {hora} foi confirmada. Até lá!',
+    defaultTemplate: 'Olá, {nome}! ✨ Sua reserva para {pessoas} pessoa(s) no dia {data} às {hora} está confirmada.\n\nAcompanhe sua reserva por aqui 👇\n{link_acompanhamento}',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone', 'link_acompanhamento'],
   },
   {
@@ -32,7 +32,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Lembrete 24h Antes',
     description: 'Enviado automaticamente 24 horas antes do horário da reserva',
     icon: Clock,
-    defaultTemplate: 'Olá {nome}! Lembrete: sua reserva é amanhã, dia {data} às {hora}, para {pessoas} pessoa(s). Esperamos você!',
+    defaultTemplate: 'Olá, {nome}! ⏰ Passando para lembrar da sua reserva amanhã, dia {data} às {hora}, para {pessoas} pessoa(s). Vai ser um prazer te receber! 🍽️',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],
   },
   {
@@ -40,7 +40,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Lembrete 1h Antes',
     description: 'Enviado automaticamente 1 hora antes do horário da reserva',
     icon: Clock,
-    defaultTemplate: 'Olá {nome}! Lembrete: sua reserva é hoje às {hora} para {pessoas} pessoa(s). Estamos esperando você!',
+    defaultTemplate: 'Olá, {nome}! ⏳ Falta pouco: sua reserva é hoje às {hora} para {pessoas} pessoa(s). Estamos te esperando! 🍽️',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],
   },
   {
@@ -48,7 +48,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Notificação de Cancelamento',
     description: 'Enviada quando uma reserva é cancelada',
     icon: Ban,
-    defaultTemplate: 'Olá {nome}, sua reserva do dia {data} às {hora} foi cancelada. Caso queira reagendar, acesse nosso link de reservas.',
+    defaultTemplate: 'Olá, {nome}. Sua reserva do dia {data} às {hora} foi cancelada.\n\nSe quiser acompanhar ou fazer uma nova reserva, acesse por aqui 👇\n{link_acompanhamento}',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone', 'link_acompanhamento'],
   },
   {
@@ -56,7 +56,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Mensagem Pós-Visita',
     description: 'Enviada automaticamente depois do check-in concluído',
     icon: Star,
-    defaultTemplate: 'Olá {nome}! Obrigado pela visita! Esperamos que tenha gostado. Nos vemos em breve!',
+    defaultTemplate: 'Olá, {nome}! ✨ Obrigado pela visita. Esperamos que você tenha aproveitado a experiência. Volte sempre! 💛',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],
   },
   {
@@ -64,7 +64,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Mensagem de Aniversário',
     description: 'Enviada no dia do aniversário do cliente',
     icon: PartyPopper,
-    defaultTemplate: 'Parabéns, {nome}! Desejamos um feliz aniversário! Que tal comemorar conosco? Faça sua reserva!',
+    defaultTemplate: 'Parabéns, {nome}! 🎉 Desejamos um aniversário incrível, cheio de alegria e bons momentos. Quando quiser comemorar com a gente, vai ser um prazer te receber! 🥂',
     variables: ['nome'],
   },
   {
@@ -72,7 +72,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Entrada na Lista de Espera',
     description: 'Enviada quando o cliente é adicionado à lista de espera',
     icon: Clock,
-    defaultTemplate: 'Olá {nome}! Você está na posição {posicao} da lista de espera ({pessoas} pessoa(s)).\n\nAcompanhe em tempo real:\n{link_acompanhamento}',
+    defaultTemplate: 'Olá, {nome}! ⏳ Você entrou na nossa lista de espera para {pessoas} pessoa(s).\nNo momento, sua posição é {posicao}.\n\nAcompanhe em tempo real por aqui 👇\n{link_acompanhamento}',
     variables: ['nome', 'pessoas', 'posicao', 'telefone', 'link_acompanhamento'],
   },
   {
@@ -80,7 +80,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Chamada da Lista de Espera',
     description: 'Enviada quando o cliente é chamado da lista de espera',
     icon: MessageCircle,
-    defaultTemplate: '{nome}, sua mesa está pronta! Dirija-se à recepção. Você tem 5 minutos para se apresentar.',
+    defaultTemplate: '{nome}, sua mesa está pronta! 🔔 Dirija-se à recepção. Você tem 5 minutos para se apresentar.',
     variables: ['nome', 'pessoas', 'telefone'],
   },
 ];
