@@ -7,7 +7,7 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.evolution-api]
-verify_jwt = true
+verify_jwt = false
 
 [functions.reservation-events]
 verify_jwt = false

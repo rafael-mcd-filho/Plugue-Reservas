@@ -32,6 +32,35 @@ export interface EvolutionApiPayload {
   log_id?: string;
 }
 
+async function getFreshAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw sessionError;
+  }
+
+  let session = sessionData.session;
+  if (!session) {
+    throw new Error('Sessao expirada. Entre novamente.');
+  }
+
+  const expiresAtMs = typeof session.expires_at === 'number' ? session.expires_at * 1000 : null;
+  const expiresSoon = expiresAtMs !== null && expiresAtMs - Date.now() < 60_000;
+
+  if (expiresSoon) {
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    session = refreshData.session;
+    if (!session) {
+      throw new Error('Sessao expirada. Entre novamente.');
+    }
+  }
+
+  return session.access_token;
+}
+
 export function useAutomationSettings(companyId?: string) {
   return useQuery({
     queryKey: ['automation-settings', companyId],
@@ -95,7 +124,11 @@ export function useEvolutionApi() {
 
   return useMutation({
     mutationFn: async (payload: EvolutionApiPayload) => {
+      const accessToken = await getFreshAccessToken();
       const { data, error } = await supabase.functions.invoke('evolution-api', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: {
           ...payload,
           ...(isImpersonatingCompany && scopeCompanyId
