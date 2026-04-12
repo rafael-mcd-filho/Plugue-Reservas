@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import { useImpersonation } from '@/hooks/useImpersonation';
+import { normalizePasswordValidationMessage } from '@/lib/validation';
 
 export function useManageUserInvoker() {
   const { isImpersonatingCompany, effectiveRole, scopeCompanyId } = useImpersonation();
@@ -24,7 +25,7 @@ export function useManageUserInvoker() {
     }
 
     if (data?.error) {
-      throw new Error(data.error as string);
+      throw new Error(normalizePasswordValidationMessage(data.error as string));
     }
 
     return data as T;

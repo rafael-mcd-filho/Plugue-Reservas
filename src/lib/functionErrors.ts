@@ -1,3 +1,5 @@
+import { normalizePasswordValidationMessage } from '@/lib/validation';
+
 export async function getFunctionErrorMessage(error: any) {
   if (error?.context) {
     const response = error.context;
@@ -5,14 +7,14 @@ export async function getFunctionErrorMessage(error: any) {
 
     try {
       const payload = await response.json();
-      if (payload?.error) return payload.error as string;
-      if (payload?.message) return payload.message as string;
-      if (payload?.code && typeof payload.code === 'string') return payload.code as string;
+      if (payload?.error) return normalizePasswordValidationMessage(payload.error as string);
+      if (payload?.message) return normalizePasswordValidationMessage(payload.message as string);
+      if (payload?.code && typeof payload.code === 'string') return normalizePasswordValidationMessage(payload.code as string);
     } catch {
       if (responseClone && typeof responseClone.text === 'function') {
         try {
           const text = await responseClone.text();
-          if (text?.trim()) return text.trim();
+          if (text?.trim()) return normalizePasswordValidationMessage(text.trim());
         } catch {
           // ignore parser errors and fall back to the original message
         }
@@ -20,5 +22,5 @@ export async function getFunctionErrorMessage(error: any) {
     }
   }
 
-  return error?.message || 'Erro inesperado';
+  return normalizePasswordValidationMessage(error?.message, 'Erro inesperado');
 }

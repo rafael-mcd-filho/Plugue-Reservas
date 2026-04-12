@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, ReactNode } fro
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
-import { isStrongPassword, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
+import { isStrongPassword, normalizePasswordValidationMessage, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
 
 type AppRole = 'superadmin' | 'admin' | 'operator';
 
@@ -218,7 +218,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         emailRedirectTo: window.location.origin,
       },
     });
-    return { error };
+    if (!error) {
+      return { error: null };
+    }
+
+    return {
+      error: {
+        ...error,
+        message: normalizePasswordValidationMessage(error.message),
+      },
+    };
   };
 
   const signOut = async () => {

@@ -34,6 +34,38 @@ const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
 const MIN_PASSWORD_LENGTH = 8;
 const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`;
 
+function normalizePasswordErrorMessage(message: string | null | undefined) {
+  if (!message) return PASSWORD_REQUIREMENTS_ERROR;
+
+  const normalized = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const passwordPolicyHints = [
+    "character",
+    "caracter",
+    "uppercase",
+    "lowercase",
+    "maiuscula",
+    "minuscula",
+    "number",
+    "digit",
+    "numero",
+    "minimo",
+    "minimum",
+    "pelo menos",
+    "at least",
+  ];
+
+  const mentionsPassword = normalized.includes("password") || normalized.includes("senha");
+
+  return normalized.includes("weak_password")
+    || (mentionsPassword && passwordPolicyHints.some((hint) => normalized.includes(hint)))
+    ? PASSWORD_REQUIREMENTS_ERROR
+    : message;
+}
+
 function normalizeOptionalText(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -355,7 +387,7 @@ async function syncProfileAndAuth(
     }
   }
 
-  throw new Error(authError.message);
+  throw new Error(normalizePasswordErrorMessage(authError.message));
 }
 
 async function assertCallerCanManageTarget(
@@ -801,7 +833,7 @@ Deno.serve(async (req) => {
           password: normalizedPassword,
           email_confirm: true,
         });
-        if (passwordError) throw new Error(passwordError.message);
+        if (passwordError) throw new Error(normalizePasswordErrorMessage(passwordError.message));
 
         await writeAuditLog(
           context.supabaseAdmin,
@@ -1004,7 +1036,7 @@ Deno.serve(async (req) => {
           });
 
           if (userError) {
-            results.push({ email: normalizedEmail, error: userError.message });
+            results.push({ email: normalizedEmail, error: normalizePasswordErrorMessage(userError.message) });
             continue;
           }
 

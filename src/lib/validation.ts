@@ -3,6 +3,22 @@ export const MAX_WAITLIST_NAME_LENGTH = 120;
 export const MAX_WAITLIST_NOTES_LENGTH = 500;
 export const PASSWORD_REQUIREMENTS_TEXT = `Use ao menos ${MIN_PASSWORD_LENGTH} caracteres.`;
 
+const PASSWORD_POLICY_HINTS = [
+  'character',
+  'caracter',
+  'uppercase',
+  'lowercase',
+  'maiuscula',
+  'minuscula',
+  'number',
+  'digit',
+  'numero',
+  'minimo',
+  'minimum',
+  'pelo menos',
+  'at least',
+];
+
 export const COMPANY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const BRAZIL_WHATSAPP_PATTERN = /^(55)?[1-9][0-9](?:9?[0-9]{8})$/;
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -167,4 +183,19 @@ export function getPasswordValidationMessage(value: string | null | undefined, l
   }
 
   return isStrongPassword(password) ? null : PASSWORD_REQUIREMENTS_TEXT;
+}
+
+export function normalizePasswordValidationMessage(message: string | null | undefined, fallback = PASSWORD_REQUIREMENTS_TEXT) {
+  if (!message) return fallback;
+
+  const normalized = message
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  const mentionsPassword = normalized.includes('password') || normalized.includes('senha');
+  const matchesPasswordPolicy = normalized.includes('weak_password')
+    || (mentionsPassword && PASSWORD_POLICY_HINTS.some((hint) => normalized.includes(hint)));
+
+  return matchesPasswordPolicy ? fallback : message;
 }

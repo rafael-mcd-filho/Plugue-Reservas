@@ -8,7 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { getPasswordValidationMessage, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
+import {
+  getPasswordValidationMessage,
+  normalizePasswordValidationMessage,
+  PASSWORD_REQUIREMENTS_TEXT,
+} from '@/lib/validation';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -30,7 +34,7 @@ export default function ResetPassword() {
     }
 
     if (password !== confirmPassword) {
-      toast.error('As senhas informadas não coincidem.');
+      toast.error('As senhas informadas nao coincidem.');
       return;
     }
 
@@ -44,7 +48,7 @@ export default function ResetPassword() {
       await signOut();
       navigate('/login', { replace: true });
     } catch (error: any) {
-      toast.error(error.message || 'Não foi possível atualizar a senha.');
+      toast.error(normalizePasswordValidationMessage(error.message, 'Nao foi possivel atualizar a senha.'));
     } finally {
       setSubmitting(false);
     }
@@ -67,12 +71,12 @@ export default function ResetPassword() {
           </div>
           <div className="space-y-1">
             <CardTitle className="text-xl">
-              {hasRecoverySession ? 'Definir nova senha' : 'Link indisponível'}
+              {hasRecoverySession ? 'Definir nova senha' : 'Link indisponivel'}
             </CardTitle>
             <CardDescription>
               {hasRecoverySession
-                ? 'Crie uma senha forte para concluir o acesso.'
-                : 'Este link expirou ou já foi utilizado. Solicite um novo link ao administrador.'}
+                ? 'Crie uma senha com ao menos 8 caracteres para concluir o acesso.'
+                : 'Este link expirou ou ja foi utilizado. Solicite um novo link ao administrador.'}
             </CardDescription>
           </div>
         </CardHeader>
