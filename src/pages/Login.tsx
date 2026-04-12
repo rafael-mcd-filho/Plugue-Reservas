@@ -13,6 +13,10 @@ interface LoginLocationState {
   redirectTo?: string;
 }
 
+export interface PostLoginNavigationState {
+  fromLogin?: boolean;
+}
+
 function getSafeRedirectPath(value: unknown) {
   if (typeof value !== 'string') return '/';
   if (!value.startsWith('/') || value.startsWith('//')) return '/';
@@ -48,7 +52,7 @@ export default function Login() {
 
   useEffect(() => {
     if (authLoading || !user) return;
-    navigate(redirectTo, { replace: true });
+    navigate(redirectTo, { replace: true, state: { fromLogin: true } satisfies PostLoginNavigationState });
   }, [authLoading, navigate, redirectTo, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -72,8 +76,6 @@ export default function Login() {
         ? 'Email ou senha incorretos'
         : error.message;
       toast.error(message);
-    } else {
-      navigate(redirectTo, { replace: true });
     }
   };
 

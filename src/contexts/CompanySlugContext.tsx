@@ -1,11 +1,12 @@
 import { createContext, useContext, ReactNode } from 'react';
-import { useParams, Navigate } from 'react-router-dom';
+import { useParams, Navigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { isValidCompanySlug } from '@/lib/validation';
 import { Loader2 } from 'lucide-react';
+import type { PostLoginNavigationState } from '@/pages/Login';
 
 interface CompanySlugContextType {
   slug: string;
@@ -16,6 +17,7 @@ interface CompanySlugContextType {
 const CompanySlugContext = createContext<CompanySlugContextType | undefined>(undefined);
 
 export function CompanySlugProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const { slug } = useParams<{ slug: string }>();
   const { profile, roles, loading: authLoading } = useAuth();
   const {
@@ -25,6 +27,7 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
     impersonatedSlug,
   } = useImpersonation();
   const slugIsValid = isValidCompanySlug(slug);
+  const locationState = location.state as PostLoginNavigationState | null;
   const impersonatedCompany = isImpersonatingCompany
     && slugIsValid
     && slug === impersonatedSlug
@@ -64,16 +67,25 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
   }
 
   if (!slugIsValid || error || !company) {
+    if (locationState?.fromLogin) {
+      return <Navigate to="/" replace />;
+    }
     return <Navigate to="/acesso-negado" replace />;
   }
 
   // Check access: superadmin can access any company, others only their own
   const isSuperadmin = roles.includes('superadmin');
   if (isSuperadmin && (!isImpersonatingCompany || impersonatedCompanyId !== company.id)) {
+    if (locationState?.fromLogin) {
+      return <Navigate to="/" replace />;
+    }
     return <Navigate to="/empresas" replace />;
   }
 
   if (!isSuperadmin && profile?.company_id !== company.id) {
+    if (locationState?.fromLogin) {
+      return <Navigate to="/" replace />;
+    }
     return <Navigate to="/acesso-negado" replace />;
   }
 
