@@ -292,10 +292,6 @@ export default function WaitlistTracking() {
                     {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
                   </span>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Codigo</span>
-                  <span className="font-mono font-medium">{entry.tracking_code}</span>
-                </div>
               </div>
 
               {canLeaveWaitlist && (

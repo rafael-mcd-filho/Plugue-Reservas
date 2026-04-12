@@ -224,6 +224,38 @@ export default function CompanyWaitlist() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!companyId) return;
+
+    const invalidateWaitlistQueries = () => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['waitlist-seated-today', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
+    };
+
+    const channel = supabase
+      .channel(`company-waitlist:${companyId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'waitlist',
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          invalidateWaitlistQueries();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [companyId, qc]);
+
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['waitlist', companyId],
     queryFn: async () => {
@@ -237,6 +269,7 @@ export default function CompanyWaitlist() {
       if (error) throw error;
       return data as unknown as WaitlistEntry[];
     },
+    enabled: !!companyId,
     refetchInterval: 10000,
   });
 
