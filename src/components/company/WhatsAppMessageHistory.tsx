@@ -61,7 +61,7 @@ interface MessageRecord {
 const statusConfig: Record<string, { label: string; icon: typeof CheckCircle2; className: string }> = {
   sent: { label: 'Enviado', icon: CheckCircle2, className: 'text-primary' },
   error: { label: 'Erro', icon: XCircle, className: 'text-destructive' },
-  pending: { label: 'Pendente', icon: Clock, className: 'text-amber-600' },
+  pending: { label: 'Aceita', icon: Clock, className: 'text-amber-600' },
   failed: { label: 'Falhou', icon: AlertTriangle, className: 'text-destructive' },
 };
 
@@ -163,7 +163,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
 
         toast.error(parsed?.message ?? 'Não foi possível reenviar a mensagem.');
       } else {
-        toast.success('Mensagem reenviada com sucesso.');
+        toast.success('Mensagem aceita pela Evolution e aguardando confirmacao.');
       }
     } catch (error: any) {
       toast.error(await getFunctionErrorMessage(error));
@@ -191,7 +191,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
       } else if (data?.reason === 'Evolution API not configured') {
         toast.error('A fila não foi processada porque a Evolution API não está configurada.');
       } else {
-        toast.success(`Fila processada: ${data?.sent ?? 0} enviadas, ${data?.failed ?? 0} com falha.`);
+        toast.success(`Fila processada: ${data?.sent ?? 0} aceitas pela Evolution, ${data?.failed ?? 0} com falha.`);
       }
     } catch (error: any) {
       toast.error(await getFunctionErrorMessage(error));

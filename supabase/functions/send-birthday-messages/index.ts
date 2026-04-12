@@ -3,6 +3,7 @@ import {
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
   formatPhoneForWhatsApp,
+  getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
   serializeWhatsAppFailure,
 } from "../_shared/whatsapp.ts";
@@ -224,12 +225,13 @@ Deno.serve(async (req) => {
       );
 
       if (result.ok) {
+        const logStatus = getWhatsAppAcceptedLogStatus(result);
         await supabaseAdmin.from('whatsapp_message_logs').insert({
           company_id: contact.company_id,
           phone,
           message,
           type: 'birthday',
-          status: 'sent',
+          status: logStatus,
           error_details: null,
         });
         sent++;

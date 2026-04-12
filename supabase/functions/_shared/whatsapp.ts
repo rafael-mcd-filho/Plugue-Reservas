@@ -16,11 +16,14 @@ export interface WhatsAppFailureDetails {
   raw?: string | null;
 }
 
+export type WhatsAppAcceptedLogStatus = "pending" | "sent";
+
 export type WhatsAppSendResult =
   | {
       ok: true;
       data: unknown;
       raw: string | null;
+      provider_status_text: string | null;
     }
   | {
       ok: false;
@@ -117,6 +120,18 @@ export function buildInstanceDisconnectedFailure(): WhatsAppSendResult {
   );
 }
 
+export function getWhatsAppAcceptedLogStatus(
+  result: Extract<WhatsAppSendResult, { ok: true }>,
+): WhatsAppAcceptedLogStatus {
+  const providerStatus = result.provider_status_text?.trim().toUpperCase() ?? null;
+
+  if (providerStatus === "SENT" || providerStatus === "DELIVERED" || providerStatus === "READ") {
+    return "sent";
+  }
+
+  return "pending";
+}
+
 export async function sendWhatsAppText(
   evolutionUrl: string,
   evolutionToken: string,
@@ -162,7 +177,17 @@ export async function sendWhatsAppText(
   }
 
   if (response.ok) {
-    return { ok: true, data: parsed ?? raw, raw: raw || null };
+    const providerStatusText = typeof parsed === "object" && parsed && "status" in parsed
+      && typeof (parsed as Record<string, unknown>).status === "string"
+      ? ((parsed as Record<string, unknown>).status as string)
+      : null;
+
+    return {
+      ok: true,
+      data: parsed ?? raw,
+      raw: raw || null,
+      provider_status_text: providerStatusText,
+    };
   }
 
   const providerMessage = extractMessage(parsed) ?? extractMessage(raw);

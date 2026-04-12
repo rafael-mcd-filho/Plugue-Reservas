@@ -8,6 +8,7 @@ import {
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
   formatPhoneForWhatsApp,
+  getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
   serializeWhatsAppFailure,
 } from "../_shared/whatsapp.ts";
@@ -46,6 +47,16 @@ interface WaitlistData {
   tracking_code?: string | null;
   notes?: string | null;
   created_at?: string | null;
+}
+
+interface WhatsAppMessagePayload {
+  company_id: string;
+  reservation_id?: string | null;
+  phone: string;
+  message: string;
+  type: string;
+  status?: "sent" | "error";
+  error_details?: string | null;
 }
 
 function replaceTemplateVars(
@@ -241,6 +252,55 @@ async function getEvolutionConfig(supabaseAdmin: ReturnType<typeof createSupabas
   };
 }
 
+async function insertWhatsAppLog(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  payload: WhatsAppMessagePayload,
+) {
+  const { error } = await supabaseAdmin.from("whatsapp_message_logs").insert({
+    company_id: payload.company_id,
+    reservation_id: payload.reservation_id ?? null,
+    phone: payload.phone,
+    message: payload.message,
+    type: payload.type,
+    status: payload.status ?? "sent",
+    error_details: payload.error_details ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Erro ao gravar log do WhatsApp: ${error.message}`);
+  }
+}
+
+async function enqueueWhatsAppMessage(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  payload: Omit<WhatsAppMessagePayload, "status">,
+) {
+  const { error } = await supabaseAdmin.from("whatsapp_message_queue").insert({
+    company_id: payload.company_id,
+    reservation_id: payload.reservation_id ?? null,
+    phone: payload.phone,
+    message: payload.message,
+    type: payload.type,
+    error_details: payload.error_details ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Erro ao gravar fila do WhatsApp: ${error.message}`);
+  }
+}
+
+async function recordQueuedFailure(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  payload: Omit<WhatsAppMessagePayload, "status">,
+) {
+  await insertWhatsAppLog(supabaseAdmin, {
+    ...payload,
+    status: "error",
+  });
+
+  await enqueueWhatsAppMessage(supabaseAdmin, payload);
+}
+
 async function sendReservationAutomation(
   supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
   event: string,
@@ -292,7 +352,7 @@ async function sendReservationAutomation(
   if (!evolutionUrl || !evolutionToken) {
     const failure = buildEvolutionNotConfiguredFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
@@ -312,7 +372,7 @@ async function sendReservationAutomation(
   if (!instance) {
     const failure = buildInstanceNotConfiguredFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
@@ -326,7 +386,7 @@ async function sendReservationAutomation(
   if (instance.status !== "connected") {
     const failure = buildInstanceDisconnectedFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
@@ -346,14 +406,15 @@ async function sendReservationAutomation(
   );
 
   if (sendResult.ok) {
+    const logStatus = getWhatsAppAcceptedLogStatus(sendResult);
     results.whatsapp = "sent";
-    await supabaseAdmin.from("whatsapp_message_logs").insert({
+    await insertWhatsAppLog(supabaseAdmin, {
       company_id: reservation.company_id,
       reservation_id: reservation.id,
       phone,
       message,
       type: logType,
-      status: "sent",
+      status: logStatus,
       error_details: null,
     });
     return;
@@ -362,7 +423,7 @@ async function sendReservationAutomation(
   results.whatsapp = sendResult.error.code;
   const serializedError = serializeWhatsAppFailure(sendResult.error);
 
-  await supabaseAdmin.from("whatsapp_message_logs").insert({
+  await insertWhatsAppLog(supabaseAdmin, {
     company_id: reservation.company_id,
     reservation_id: reservation.id,
     phone,
@@ -372,7 +433,7 @@ async function sendReservationAutomation(
     error_details: serializedError,
   });
 
-  await supabaseAdmin.from("whatsapp_message_queue").insert({
+  await enqueueWhatsAppMessage(supabaseAdmin, {
     company_id: reservation.company_id,
     reservation_id: reservation.id,
     phone,
@@ -419,6 +480,7 @@ async function sendWaitlistAutomation(
     .eq("company_id", waitlist.company_id)
     .eq("phone", phone)
     .eq("type", messageType)
+    .eq("message", message)
     .gte("created_at", fiveMinAgo)
     .limit(1);
 
@@ -431,7 +493,7 @@ async function sendWaitlistAutomation(
   if (!evolutionUrl || !evolutionToken) {
     const failure = buildEvolutionNotConfiguredFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
       phone,
       message,
@@ -450,7 +512,7 @@ async function sendWaitlistAutomation(
   if (!instance) {
     const failure = buildInstanceNotConfiguredFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
       phone,
       message,
@@ -463,7 +525,7 @@ async function sendWaitlistAutomation(
   if (instance.status !== "connected") {
     const failure = buildInstanceDisconnectedFailure();
     results.whatsapp = failure.error.code;
-    await supabaseAdmin.from("whatsapp_message_queue").insert({
+    await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
       phone,
       message,
@@ -482,13 +544,14 @@ async function sendWaitlistAutomation(
   );
 
   if (sendResult.ok) {
+    const logStatus = getWhatsAppAcceptedLogStatus(sendResult);
     results.whatsapp = "sent";
-    await supabaseAdmin.from("whatsapp_message_logs").insert({
+    await insertWhatsAppLog(supabaseAdmin, {
       company_id: waitlist.company_id,
       phone,
       message,
       type: messageType,
-      status: "sent",
+      status: logStatus,
       error_details: null,
     });
     return;
@@ -497,7 +560,7 @@ async function sendWaitlistAutomation(
   results.whatsapp = sendResult.error.code;
   const serializedError = serializeWhatsAppFailure(sendResult.error);
 
-  await supabaseAdmin.from("whatsapp_message_logs").insert({
+  await insertWhatsAppLog(supabaseAdmin, {
     company_id: waitlist.company_id,
     phone,
     message,
@@ -506,7 +569,7 @@ async function sendWaitlistAutomation(
     error_details: serializedError,
   });
 
-  await supabaseAdmin.from("whatsapp_message_queue").insert({
+  await enqueueWhatsAppMessage(supabaseAdmin, {
     company_id: waitlist.company_id,
     phone,
     message,

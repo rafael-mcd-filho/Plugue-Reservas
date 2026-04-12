@@ -5,6 +5,7 @@ import {
 } from "../_shared/internal-auth.ts";
 import {
   formatPhoneForWhatsApp,
+  getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
   serializeWhatsAppFailure,
 } from "../_shared/whatsapp.ts";
@@ -141,7 +142,7 @@ Deno.serve(async (req) => {
           .eq("company_id", message.company_id)
           .eq("reservation_id", message.reservation_id)
           .eq("type", message.type)
-          .eq("status", "sent")
+          .in("status", ["sent", "pending"])
           .gte("created_at", fiveMinAgo)
           .limit(1);
 
@@ -152,8 +153,8 @@ Deno.serve(async (req) => {
               status: "sent",
               error_details: serializeWhatsAppFailure({
                 code: "unknown_error",
-                title: "Mensagem ja enviada",
-                message: "A fila identificou um envio recente e marcou esta mensagem como concluida sem reenviar.",
+                title: "Mensagem ja aceita",
+                message: "A fila identificou uma mensagem aceita recentemente pela Evolution e marcou esta entrada como concluida sem reenviar.",
               }),
             })
             .eq("id", message.id);
@@ -171,6 +172,7 @@ Deno.serve(async (req) => {
         );
 
         if (responseData.ok) {
+          const logStatus = getWhatsAppAcceptedLogStatus(responseData);
           await supabaseAdmin
             .from("whatsapp_message_queue")
             .update({
@@ -186,7 +188,7 @@ Deno.serve(async (req) => {
             phone: message.phone,
             message: message.message,
             type: message.type,
-            status: "sent",
+            status: logStatus,
           });
 
           sent++;

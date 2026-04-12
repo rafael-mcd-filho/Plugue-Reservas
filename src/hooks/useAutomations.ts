@@ -91,16 +91,16 @@ export function useWhatsAppInstance(companyId?: string) {
 }
 
 export function useEvolutionApi() {
-  const { isImpersonatingCompany, effectiveRole } = useImpersonation();
+  const { isImpersonatingCompany, effectiveRole, scopeCompanyId } = useImpersonation();
 
   return useMutation({
     mutationFn: async (payload: EvolutionApiPayload) => {
       const { data, error } = await supabase.functions.invoke('evolution-api', {
         body: {
           ...payload,
-          ...(isImpersonatingCompany
+          ...(isImpersonatingCompany && scopeCompanyId
             ? {
-                scope_company_id: payload.company_id,
+                scope_company_id: scopeCompanyId,
                 impersonated_by_superadmin: true,
                 effective_role: effectiveRole,
               }

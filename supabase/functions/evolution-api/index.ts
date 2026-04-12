@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   buildEvolutionNotConfiguredFailure,
+  getWhatsAppAcceptedLogStatus,
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
   sendWhatsAppText,
@@ -408,8 +409,9 @@ Deno.serve(async (req) => {
 
         if (action === 'resend_message' && log_id) {
           if (sendResult.ok) {
+            const logStatus = getWhatsAppAcceptedLogStatus(sendResult);
             await supabaseAdmin.from('whatsapp_message_logs')
-              .update({ status: 'sent', error_details: null })
+              .update({ status: logStatus, error_details: null })
               .eq('id', log_id);
           } else {
             await supabaseAdmin.from('whatsapp_message_logs')
