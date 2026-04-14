@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
+import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
@@ -36,6 +37,7 @@ interface ReservationModalProps {
   slug: string;
   companyId: string;
   companyName: string;
+  companyWhatsapp?: string | null;
   openingHours: OpeningHour[];
   reservationDuration?: number;
   maxGuestsPerSlot?: number;
@@ -147,6 +149,7 @@ export default function ReservationModal({
   slug,
   companyId,
   companyName,
+  companyWhatsapp,
   openingHours,
   reservationDuration = 30,
   maxGuestsPerSlot = 0,
@@ -778,6 +781,8 @@ export default function ReservationModal({
     && selectedSlotAvailability.available > 0;
   const hasCriticalUrgency = urgencySlots.some((slot) => slot.available <= 2);
   const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
+  const isLargeParty = isLargePartyReservation(selectedPartySize);
+  const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp);
   const whatsappHelperText = (() => {
     if (prefillStatus === 'searching') {
       return 'Buscando cadastro para esse WhatsApp...';
@@ -853,7 +858,32 @@ export default function ReservationModal({
               </div>
             </div>
 
-            {!showCalendar ? (
+            {isLargeParty && (
+              <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-700 shadow-sm">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-base font-semibold text-foreground">
+                    Reservas a partir de 10 pessoas precisam ser confirmadas pelo WhatsApp.
+                  </p>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    O processo e rapido, e nossa equipe finaliza tudo com voce por la.
+                  </p>
+                </div>
+                {largePartyWhatsappUrl ? (
+                  <a href={largePartyWhatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <Button className="w-full">Falar no WhatsApp</Button>
+                  </a>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    O WhatsApp deste restaurante ainda nao esta configurado.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isLargeParty && (!showCalendar ? (
               <>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {next7Days.map(date => {
@@ -903,17 +933,19 @@ export default function ReservationModal({
                   <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
                 </Button>
               </div>
-            )}
+            ))}
 
-            <div className="space-y-1">
-              <Button className="w-full" disabled={!selectedDate}
-                onClick={() => { setStep(2); onStepChange?.('date_select'); }}>
-                Continuar <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-              {!selectedDate && (
-                <p className="text-xs text-muted-foreground text-center">Selecione uma data para continuar</p>
-              )}
-            </div>
+            {!isLargeParty && (
+              <div className="space-y-1">
+                <Button className="w-full" disabled={!selectedDate}
+                  onClick={() => { setStep(2); onStepChange?.('date_select'); }}>
+                  Continuar <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+                {!selectedDate && (
+                  <p className="text-xs text-muted-foreground text-center">Selecione uma data para continuar</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
