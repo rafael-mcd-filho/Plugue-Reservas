@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -15,30 +15,74 @@ import { useImpersonation } from "@/hooks/useImpersonation";
 
 type AppRole = "superadmin" | "admin" | "operator";
 
-const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const Reservations = lazy(() => import("@/pages/Reservations"));
-const TableMap = lazy(() => import("@/pages/TableMap"));
-const CalendarView = lazy(() => import("@/pages/CalendarView"));
-const Companies = lazy(() => import("@/pages/Companies"));
-const SettingsPage = lazy(() => import("@/pages/Settings"));
-const CompanySettings = lazy(() => import("@/pages/CompanySettings"));
-const CompanyEvents = lazy(() => import("@/pages/CompanyEvents"));
-const CompanyAutomations = lazy(() => import("@/pages/CompanyAutomations"));
-const CompanyUsers = lazy(() => import("@/pages/CompanyUsers"));
-const CompanyWaitlist = lazy(() => import("@/pages/CompanyWaitlist"));
-const OperatorTodayReservations = lazy(() => import("@/pages/OperatorTodayReservations"));
-const PublicWaitlistPage = lazy(() => import("@/pages/PublicWaitlistPage"));
-const WaitlistTracking = lazy(() => import("@/pages/WaitlistTracking"));
-const ReservationTracking = lazy(() => import("@/pages/ReservationTracking"));
-const Profile = lazy(() => import("@/pages/Profile"));
-const Leads = lazy(() => import("@/pages/Leads"));
-const Users = lazy(() => import("@/pages/Users"));
-const Login = lazy(() => import("@/pages/Login"));
-const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
-const AccessDenied = lazy(() => import("@/pages/AccessDenied"));
-const CompanyPublicPage = lazy(() => import("@/pages/CompanyPublicPage"));
-const SystemHealth = lazy(() => import("@/pages/SystemHealth"));
-const NotFound = lazy(() => import("@/pages/NotFound"));
+const LAZY_ROUTE_RELOAD_PREFIX = "lazy-route-reload:";
+const LAZY_ROUTE_ERROR_PATTERN = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk [\w-]+ failed|ChunkLoadError/i;
+
+function clearLazyRouteReloadMarkers() {
+  if (typeof window === "undefined") return;
+
+  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.sessionStorage.key(index);
+    if (key?.startsWith(LAZY_ROUTE_RELOAD_PREFIX)) {
+      window.sessionStorage.removeItem(key);
+    }
+  }
+}
+
+function lazyWithRouteReload<T extends ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+) {
+  return lazy(async () => {
+    try {
+      const module = await importer();
+      clearLazyRouteReloadMarkers();
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        const message = error instanceof Error ? error.message : String(error);
+
+        // Old tabs can keep stale chunk URLs after a deploy; one full reload
+        // usually resolves the route import without forcing the user to retry.
+        if (LAZY_ROUTE_ERROR_PATTERN.test(message)) {
+          const reloadKey = `${LAZY_ROUTE_RELOAD_PREFIX}${window.location.pathname}`;
+
+          if (!window.sessionStorage.getItem(reloadKey)) {
+            window.sessionStorage.setItem(reloadKey, "1");
+            window.location.reload();
+            return new Promise<never>(() => {});
+          }
+        }
+      }
+
+      throw error;
+    }
+  });
+}
+
+const Dashboard = lazyWithRouteReload(() => import("@/pages/Dashboard"));
+const Reservations = lazyWithRouteReload(() => import("@/pages/Reservations"));
+const TableMap = lazyWithRouteReload(() => import("@/pages/TableMap"));
+const CalendarView = lazyWithRouteReload(() => import("@/pages/CalendarView"));
+const Companies = lazyWithRouteReload(() => import("@/pages/Companies"));
+const SettingsPage = lazyWithRouteReload(() => import("@/pages/Settings"));
+const CompanySettings = lazyWithRouteReload(() => import("@/pages/CompanySettings"));
+const CompanyEvents = lazyWithRouteReload(() => import("@/pages/CompanyEvents"));
+const CompanyAutomations = lazyWithRouteReload(() => import("@/pages/CompanyAutomations"));
+const CompanyUsers = lazyWithRouteReload(() => import("@/pages/CompanyUsers"));
+const CompanyWaitlist = lazyWithRouteReload(() => import("@/pages/CompanyWaitlist"));
+const OperatorTodayReservations = lazyWithRouteReload(() => import("@/pages/OperatorTodayReservations"));
+const PublicWaitlistPage = lazyWithRouteReload(() => import("@/pages/PublicWaitlistPage"));
+const WaitlistTracking = lazyWithRouteReload(() => import("@/pages/WaitlistTracking"));
+const ReservationTracking = lazyWithRouteReload(() => import("@/pages/ReservationTracking"));
+const Profile = lazyWithRouteReload(() => import("@/pages/Profile"));
+const Leads = lazyWithRouteReload(() => import("@/pages/Leads"));
+const Users = lazyWithRouteReload(() => import("@/pages/Users"));
+const Login = lazyWithRouteReload(() => import("@/pages/Login"));
+const ResetPassword = lazyWithRouteReload(() => import("@/pages/ResetPassword"));
+const AccessDenied = lazyWithRouteReload(() => import("@/pages/AccessDenied"));
+const CompanyPublicPage = lazyWithRouteReload(() => import("@/pages/CompanyPublicPage"));
+const SystemHealth = lazyWithRouteReload(() => import("@/pages/SystemHealth"));
+const NotFound = lazyWithRouteReload(() => import("@/pages/NotFound"));
 
 const queryClient = new QueryClient({
   defaultOptions: {

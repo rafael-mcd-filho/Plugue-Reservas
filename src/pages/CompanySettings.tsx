@@ -190,6 +190,10 @@ export default function CompanySettings() {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
+    setInitialized(false);
+  }, [companyId]);
+
+  useEffect(() => {
     if (!company || initialized) return;
 
     setHours((company.opening_hours as OpeningHour[]) || DEFAULT_HOURS);
@@ -272,7 +276,7 @@ export default function CompanySettings() {
         }
       }
 
-      const { error } = await supabase
+      const { data: updatedCompany, error } = await supabase
         .from('companies' as any)
         .update({
           opening_hours: hours,
@@ -292,9 +296,12 @@ export default function CompanySettings() {
           max_guests_per_slot: maxGuestsPerSlot,
           updated_at: new Date().toISOString(),
         } as any)
-        .eq('id', companyId);
+        .eq('id', companyId)
+        .select('id')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!updatedCompany) throw new Error('Sem permissao para salvar as configuracoes desta unidade.');
 
       if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
         const { error: noticeError } = await supabase
@@ -313,6 +320,7 @@ export default function CompanySettings() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
+      qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
       toast.success('Configurações salvas!');
@@ -385,7 +393,7 @@ export default function CompanySettings() {
     try {
       const extension = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
       const slugBase = slugify(slug || companyName || 'empresa');
-      const filePath = `company-logos/${slugBase || 'empresa'}-${Date.now()}.${extension}`;
+      const filePath = `company-logos/${companyId}/${slugBase || 'empresa'}-${Date.now()}.${extension}`;
 
       const { error: uploadError } = await supabase.storage
         .from('system-assets')
