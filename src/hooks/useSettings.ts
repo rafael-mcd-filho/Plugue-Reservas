@@ -196,7 +196,7 @@ export function useCreateNotification() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications'] });
       qc.invalidateQueries({ queryKey: ['company-notifications'] });
-      toast.success('Notificacao enviada!');
+      toast.success('Notificação enviada!');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
@@ -235,7 +235,7 @@ export function useDeleteNotification() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications'] });
       qc.invalidateQueries({ queryKey: ['company-notifications'] });
-      toast.success('Notificacao removida!');
+      toast.success('Notificação removida!');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });

@@ -887,7 +887,7 @@ export default function CompanyDialog({
                       <CardTitle className="text-base flex items-center gap-2">
                         <Users className="h-4 w-4 text-primary" /> Auditoria de Acesso
                       </CardTitle>
-                      <CardDescription>Ultimos logins e acessos ao painel da empresa.</CardDescription>
+                      <CardDescription>Últimos logins e acessos ao painel da empresa.</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {accessLoading ? (
@@ -954,7 +954,7 @@ export default function CompanyDialog({
             </Button>
             <Button type="submit" disabled={pending}>
               {pending && <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-              {isEditing ? 'Salvar alteracoes' : 'Criar empresa'}
+              {isEditing ? 'Salvar alterações' : 'Criar empresa'}
             </Button>
           </div>
         </form>

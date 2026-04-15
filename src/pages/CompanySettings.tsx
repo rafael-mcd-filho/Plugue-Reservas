@@ -301,7 +301,7 @@ export default function CompanySettings() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!updatedCompany) throw new Error('Sem permissao para salvar as configuracoes desta unidade.');
+      if (!updatedCompany) throw new Error('Sem permissão para salvar as configurações desta unidade.');
 
       if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
         const { error: noticeError } = await supabase

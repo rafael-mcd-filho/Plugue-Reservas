@@ -241,7 +241,7 @@ export default function ReservationDetailsDialog({
                   </p>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Horario</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Horário</p>
                   <p className="mt-1 font-medium text-foreground">{reservation.time.slice(0, 5)}</p>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">

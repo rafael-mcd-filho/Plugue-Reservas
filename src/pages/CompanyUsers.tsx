@@ -365,15 +365,15 @@ export default function CompanyUsers() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">Usuarios</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Usuários</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gerencie os usuarios de {companyName}
+            Gerencie os usuários de {companyName}
           </p>
         </div>
 
         <Button className="gap-2 self-start rounded-lg px-4" onClick={() => setShowCreateDialog(true)}>
           <Plus className="h-4 w-4" />
-          Novo usuario
+          Novo usuário
         </Button>
       </div>
 
@@ -412,7 +412,7 @@ export default function CompanyUsers() {
         <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <CardContent className="py-14 text-center text-muted-foreground">
             <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
-            <p className="font-medium text-foreground">Nao foi possivel carregar os usuarios.</p>
+            <p className="font-medium text-foreground">Não foi possível carregar os usuários.</p>
             <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado.'}</p>
             <Button variant="outline" className="mt-4 gap-2 rounded-lg" onClick={() => refetch()} disabled={isFetching}>
               {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -445,7 +445,7 @@ export default function CompanyUsers() {
                   Status
                 </TableHead>
                 <TableHead className="h-12 px-5 text-right text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  Acoes
+                  Ações
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -504,7 +504,7 @@ export default function CompanyUsers() {
                           variant="outline"
                           size="icon"
                           className="h-9 w-9 rounded-lg border-border bg-card text-muted-foreground hover:bg-muted"
-                          aria-label={`Acoes para ${user.full_name || user.email}`}
+                          aria-label={`Ações para ${user.full_name || user.email}`}
                         >
                           <MoreVertical className="h-4 w-4" />
                         </Button>

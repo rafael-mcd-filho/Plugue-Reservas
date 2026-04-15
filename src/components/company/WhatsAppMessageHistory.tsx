@@ -163,7 +163,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
 
         toast.error(parsed?.message ?? 'Não foi possível reenviar a mensagem.');
       } else {
-        toast.success('Mensagem aceita pela Evolution e aguardando confirmacao.');
+        toast.success('Mensagem aceita pela Evolution e aguardando confirmação.');
       }
     } catch (error: any) {
       toast.error(await getFunctionErrorMessage(error));

@@ -336,8 +336,8 @@ export default function Users() {
         <Card className="overflow-hidden border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
             <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
-            <p className="font-medium text-foreground">Nao foi possivel carregar os usuarios</p>
-            <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado ao consultar usuarios.'}</p>
+            <p className="font-medium text-foreground">Não foi possível carregar os usuários</p>
+            <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado ao consultar usuários.'}</p>
             <Button variant="outline" className="mt-4 gap-2 rounded-lg" onClick={() => refetch()} disabled={isFetching}>
               {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Tentar novamente

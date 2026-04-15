@@ -139,7 +139,7 @@ export default function OperatorTodayReservations() {
       }).catch((error) => console.warn('Reservation events error:', error));
     },
     onError: () => {
-      toast.error('Nao foi possivel registrar o check-in.');
+      toast.error('Não foi possível registrar o check-in.');
     },
   });
 
@@ -403,7 +403,7 @@ export default function OperatorTodayReservations() {
             <CardHeader className="flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="space-y-1">
                 <CardTitle className="text-lg">Ja atualizadas</CardTitle>
-                <p className="text-sm text-muted-foreground">Historico do dia com check-ins e ocorrencias.</p>
+                <p className="text-sm text-muted-foreground">Histórico do dia com check-ins e ocorrências.</p>
               </div>
               <span className="inline-flex min-w-10 items-center justify-center rounded-full bg-background px-3 py-1 text-sm font-semibold text-foreground">
                 {filteredProcessedReservations.length}
@@ -418,7 +418,7 @@ export default function OperatorTodayReservations() {
               ) : filteredProcessedReservations.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/45 bg-background/70 px-6 py-10 text-center">
                   <p className="text-sm font-medium text-foreground">Nenhum resultado encontrado.</p>
-                  <p className="mt-1 text-sm text-muted-foreground">A busca atual nao encontrou reservas nesta lista.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">A busca atual não encontrou reservas nesta lista.</p>
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-border/35 bg-background/78 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">

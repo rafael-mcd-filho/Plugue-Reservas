@@ -948,7 +948,7 @@ export default function Dashboard() {
                 <CardTitle className="text-base">
                   <SectionTitle
                     title="Cancelamentos e No Show das agendadas"
-                    tooltip="Mostra as perdas do periodo por cancelamento e por reservas que viraram No Show."
+                    tooltip="Mostra as perdas do período por cancelamento e por reservas que viraram No Show."
                   />
                 </CardTitle>
                 <CardDescription>Acompanhamento diário das perdas nas reservas agendadas</CardDescription>

@@ -112,7 +112,7 @@ function RefinedRatingStarsLink({ href, className }: { href: string; className?:
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Avaliacoes no Google"
+      aria-label="Avaliações no Google"
       className={cn(
         'group inline-flex items-center rounded-full border border-[#A46A1D]/45 bg-[linear-gradient(180deg,rgba(66,34,9,0.88)_0%,rgba(29,15,4,0.94)_100%)] px-3 py-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,236,201,0.18)] ring-1 ring-black/18 backdrop-blur-md transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-[#D69A42]/55 hover:shadow-[0_14px_34px_rgba(0,0,0,0.42),0_0_24px_rgba(214,154,66,0.16)]',
         className,

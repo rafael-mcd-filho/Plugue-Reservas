@@ -1033,7 +1033,7 @@ export default function TableMap() {
               <CardContent className="space-y-5">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Periodo</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Período</p>
                     <p className="mt-2 text-sm font-medium text-foreground">{formatMapPeriod(selectedMap)}</p>
                   </div>
 

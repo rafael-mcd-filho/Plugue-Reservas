@@ -12,9 +12,9 @@ export const FUNNEL_STEPS = [
 export type FunnelStep = typeof FUNNEL_STEPS[number];
 
 export const STEP_LABELS: Record<FunnelStep, string> = {
-  page_view: 'Pagina Publica',
-  date_select: 'Selecao de Data',
-  time_select: 'Selecao de Horario',
+  page_view: 'Página Pública',
+  date_select: 'Seleção de Data',
+  time_select: 'Seleção de Horário',
   form_fill: 'Dados Pessoais',
   completed: 'Reserva Finalizada',
 };

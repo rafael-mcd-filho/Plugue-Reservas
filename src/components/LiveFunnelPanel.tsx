@@ -18,17 +18,17 @@ const STAGE_CONFIG: Record<LiveFunnelStage, {
   label: string;
 }> = {
   page_view: {
-    label: 'Pagina Publica',
+    label: 'Página Pública',
     icon: MousePointerClick,
     color: 'bg-primary/10 text-primary',
   },
   date_select: {
-    label: 'Selecao de Data',
+    label: 'Seleção de Data',
     icon: Activity,
     color: 'bg-amber-500/10 text-amber-700',
   },
   time_select: {
-    label: 'Selecao de Horario',
+    label: 'Seleção de Horário',
     icon: Clock3,
     color: 'bg-sky-500/10 text-sky-700',
   },

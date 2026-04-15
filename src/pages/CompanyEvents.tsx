@@ -551,7 +551,7 @@ export default function CompanyEvents() {
   }, [eventTypeFilter, eventTypeOptions]);
   const eventLogCountLabel = `${eventLog.length} ${eventLog.length === 1 ? 'resultado' : 'resultados'}`;
   const eventLogEmptyMessage = hasInvalidEventDateRange
-    ? 'Data inicial nao pode ser maior que a data final.'
+    ? 'Data inicial não pode ser maior que a data final.'
     : hasEventLogFiltersActive
       ? 'Nenhum evento encontrado para os filtros informados.'
       : 'Nenhum evento registrado ainda.';
@@ -787,7 +787,7 @@ export default function CompanyEvents() {
                 disabled={saveSettingsMutation.isPending}
               >
                 {saveSettingsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Salvar configuracoes
+                Salvar configurações
               </Button>
             </div>
           </CardContent>
@@ -801,7 +801,7 @@ export default function CompanyEvents() {
                   <MousePointerClick className="h-4 w-4" />
                   Log de eventos
                 </CardTitle>
-                <CardDescription>Ultimos eventos persistidos do site e das reservas, com filtro por tipo e periodo.</CardDescription>
+                <CardDescription>Últimos eventos persistidos do site e das reservas, com filtro por tipo e período.</CardDescription>
               </div>
               <Button
                 type="button"
@@ -876,8 +876,8 @@ export default function CompanyEvents() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className={`text-xs ${hasInvalidEventDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {hasInvalidEventDateRange
-                      ? 'Data inicial nao pode ser maior que a data final.'
-                      : `Exibindo ate ${EVENT_LOG_LIMIT} eventos mais recentes para o recorte atual.`}
+                      ? 'Data inicial não pode ser maior que a data final.'
+                      : `Exibindo até ${EVENT_LOG_LIMIT} eventos mais recentes para o recorte atual.`}
                   </p>
                   <Badge variant="outline">{eventLogCountLabel}</Badge>
                 </div>
@@ -1032,10 +1032,10 @@ export default function CompanyEvents() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
-              Historico de tentativas Meta
+              Histórico de tentativas Meta
             </CardTitle>
             <CardDescription>
-              Request payload, status HTTP e respostas recebidas da API de Conversoes.
+              Request payload, status HTTP e respostas recebidas da API de Conversões.
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -412,7 +412,7 @@ export default function Reservations() {
 
   const updateDataMutation = useMutation({
     mutationFn: async () => {
-      if (!dataEditReservation) throw new Error('Reserva nao selecionada.');
+      if (!dataEditReservation) throw new Error('Reserva não selecionada.');
 
       const parsedPartySize = Number.parseInt(dataEditForm.party_size, 10);
       const phoneError = getPhoneValidationMessage(dataEditForm.guest_phone, 'o WhatsApp do cliente', true);
@@ -420,7 +420,7 @@ export default function Reservations() {
       const emailError = getEmailValidationMessage(dataEditForm.guest_email, 'o e-mail do cliente');
       if (emailError) throw new Error(emailError);
       if (!dataEditForm.guest_name.trim()) throw new Error('Informe o nome do cliente.');
-      if (!dataEditForm.date || !dataEditForm.time) throw new Error('Informe data e horario.');
+      if (!dataEditForm.date || !dataEditForm.time) throw new Error('Informe data e horário.');
       if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) throw new Error('Quantidade invalida de pessoas.');
 
       const { error } = await supabase
@@ -758,14 +758,14 @@ export default function Reservations() {
         'WhatsApp',
         'Email',
         'Data da reserva',
-        'Horario',
+        'Horário',
         'Pessoas',
-        'Ocasiao',
+        'Ocasião',
         'Status',
         'Criada em',
         'Lead criado em',
         'Check-in em',
-        'Observacoes',
+        'Observações',
         'Link de acompanhamento',
       ],
       rows,
@@ -919,7 +919,7 @@ export default function Reservations() {
         <TabsContent value="calendar" className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              {calendarRangeMode === 'future' ? 'Proximos 15 dias' : 'Ultimos 15 dias'}
+              {calendarRangeMode === 'future' ? 'Próximos 15 dias' : 'Últimos 15 dias'}
             </p>
 
             <div className="inline-flex w-full rounded-xl border border-border bg-card p-1 sm:w-auto">
@@ -929,7 +929,7 @@ export default function Reservations() {
                 className="flex-1 rounded-lg px-4 sm:flex-none"
                 onClick={() => setCalendarRangeMode('future')}
               >
-                Proximos 15 dias
+                Próximos 15 dias
               </Button>
               <Button
                 type="button"
@@ -937,7 +937,7 @@ export default function Reservations() {
                 className="flex-1 rounded-lg px-4 sm:flex-none"
                 onClick={() => setCalendarRangeMode('past')}
               >
-                Ultimos 15 dias
+                Últimos 15 dias
               </Button>
             </div>
           </div>
@@ -1218,7 +1218,7 @@ export default function Reservations() {
                     className="h-8 w-8 rounded-lg"
                     disabled={listPage <= 1}
                     onClick={() => setListPage((p) => p - 1)}
-                    aria-label="Pagina anterior"
+                    aria-label="Página anterior"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
@@ -1231,7 +1231,7 @@ export default function Reservations() {
                     className="h-8 w-8 rounded-lg"
                     disabled={listPage >= listTotalPages}
                     onClick={() => setListPage((p) => p + 1)}
-                    aria-label="Proxima pagina"
+                    aria-label="Próxima página"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </Button>
@@ -1259,7 +1259,7 @@ export default function Reservations() {
           <div className="space-y-6 pt-2">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <Label>Periodo de criacao da reserva</Label>
+                <Label>Período de criação da reserva</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -1287,7 +1287,7 @@ export default function Reservations() {
               </div>
 
               <div className="space-y-2">
-                <Label>Periodo da reserva</Label>
+                <Label>Período da reserva</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -1315,7 +1315,7 @@ export default function Reservations() {
               </div>
 
               <div className="space-y-2 lg:col-span-2">
-                <Label>Periodo de criacao do lead</Label>
+                <Label>Período de criação do lead</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -1367,8 +1367,8 @@ export default function Reservations() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-muted-foreground">
                 {leadCreatedAtByPhoneLoading && exportLeadCreatedRange?.from
-                  ? 'Carregando base de leads para aplicar o filtro de criacao.'
-                  : 'Os filtros podem ser usados juntos. O resumo so aparece depois de Buscar.'}
+                  ? 'Carregando base de leads para aplicar o filtro de criação.'
+                  : 'Os filtros podem ser usados juntos. O resumo só aparece depois de Buscar.'}
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="ghost" onClick={clearExportFilters}>
@@ -1419,7 +1419,7 @@ export default function Reservations() {
                   <p className="text-sm text-muted-foreground">
                     {exportedReservations.length === 0
                       ? 'Nenhuma reserva encontrada com os filtros informados.'
-                      : 'A exportacao vai gerar uma planilha com dados da reserva, criacao, lead, check-in e link de acompanhamento.'}
+                      : 'A exportação vai gerar uma planilha com dados da reserva, criação, lead, check-in e link de acompanhamento.'}
                   </p>
                   <Button
                     className="gap-2"
@@ -1531,7 +1531,7 @@ export default function Reservations() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Acompanhantes</p>
                       <p className="text-xs text-muted-foreground">
-                        Preencha nome e, quando possivel, WhatsApp, email e aniversario.
+                        Preencha nome e, quando possível, WhatsApp, email e aniversário.
                       </p>
                     </div>
                     <Button
@@ -1706,7 +1706,7 @@ export default function Reservations() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="data-edit-time">Horario *</Label>
+                  <Label htmlFor="data-edit-time">Horário *</Label>
                   <Input
                     id="data-edit-time"
                     type="time"
@@ -1715,7 +1715,7 @@ export default function Reservations() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="data-edit-occasion">Ocasiao</Label>
+                  <Label htmlFor="data-edit-occasion">Ocasião</Label>
                   <Input
                     id="data-edit-occasion"
                     value={dataEditForm.occasion}
@@ -1725,7 +1725,7 @@ export default function Reservations() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="data-edit-notes">Observacoes</Label>
+                <Label htmlFor="data-edit-notes">Observações</Label>
                 <Textarea
                   id="data-edit-notes"
                   value={dataEditForm.notes}
@@ -1739,7 +1739,7 @@ export default function Reservations() {
                   Cancelar
                 </Button>
                 <Button type="submit" disabled={updateDataMutation.isPending}>
-                  {updateDataMutation.isPending ? 'Salvando...' : 'Salvar alteracoes'}
+                  {updateDataMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
                 </Button>
               </div>
             </form>
@@ -1848,7 +1848,7 @@ export default function Reservations() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="manual-reservation-time">Horario *</Label>
+                <Label htmlFor="manual-reservation-time">Horário *</Label>
                 <Input
                   id="manual-reservation-time"
                   name="time"
@@ -1878,7 +1878,7 @@ export default function Reservations() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="manual-reservation-occasion">Ocasiao</Label>
+                <Label htmlFor="manual-reservation-occasion">Ocasião</Label>
                 <Input
                   id="manual-reservation-occasion"
                   name="occasion"
@@ -1886,7 +1886,7 @@ export default function Reservations() {
                   onChange={(event) =>
                     setManualReservationForm((current) => ({ ...current, occasion: event.target.value }))
                   }
-                  placeholder="Ex: aniversario"
+                  placeholder="Ex: aniversário"
                   autoComplete="off"
                   spellCheck={false}
                 />
@@ -1894,7 +1894,7 @@ export default function Reservations() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="manual-reservation-notes">Observacoes</Label>
+              <Label htmlFor="manual-reservation-notes">Observações</Label>
               <Textarea
                 id="manual-reservation-notes"
                 name="notes"

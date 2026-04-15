@@ -34,7 +34,7 @@ export default function ResetPassword() {
     }
 
     if (password !== confirmPassword) {
-      toast.error('As senhas informadas nao coincidem.');
+      toast.error('As senhas informadas não coincidem.');
       return;
     }
 
@@ -48,7 +48,7 @@ export default function ResetPassword() {
       await signOut();
       navigate('/login', { replace: true });
     } catch (error: any) {
-      toast.error(normalizePasswordValidationMessage(error.message, 'Nao foi possivel atualizar a senha.'));
+      toast.error(normalizePasswordValidationMessage(error.message, 'Não foi possível atualizar a senha.'));
     } finally {
       setSubmitting(false);
     }

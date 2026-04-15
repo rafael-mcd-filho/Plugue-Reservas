@@ -114,7 +114,7 @@ export function useUpsertCompanyFeatureOverride() {
       toast.success('Permissao atualizada.');
     },
     onError: (error: any) => {
-      toast.error(`Erro ao atualizar permissao: ${error.message}`);
+      toast.error(`Erro ao atualizar permissão: ${error.message}`);
     },
   });
 }

@@ -82,7 +82,7 @@ export default function Profile() {
       await refreshUserData();
       toast.success('Perfil atualizado.');
     } catch (submitError: any) {
-      toast.error(submitError.message || 'Nao foi possivel atualizar seu perfil.');
+      toast.error(submitError.message || 'Não foi possível atualizar seu perfil.');
     } finally {
       setSavingProfile(false);
     }
@@ -125,7 +125,7 @@ export default function Profile() {
       setPasswordForm({ password: '', confirmPassword: '' });
       toast.success('Senha atualizada.');
     } catch (submitError: any) {
-      toast.error(submitError.message || 'Nao foi possivel atualizar sua senha.');
+      toast.error(submitError.message || 'Não foi possível atualizar sua senha.');
     } finally {
       setSavingPassword(false);
     }

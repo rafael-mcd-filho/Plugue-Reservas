@@ -30,7 +30,7 @@ export default function ReservationFunnelChart({
   title = 'Funil de Reservas',
   description = 'Conversao por etapa do processo de reserva',
   headerActions,
-  measurementLabel = 'Sessoes',
+  measurementLabel = 'Sessões',
 }: ReservationFunnelChartProps) {
   const chartData = useMemo(() => {
     return FUNNEL_STEPS.map((step, index) => {

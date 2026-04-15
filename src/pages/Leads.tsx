@@ -1176,7 +1176,7 @@ export default function Leads() {
           <div className="space-y-6 pt-2">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <Label>Criacao do lead</Label>
+                <Label>Criação do lead</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -1204,7 +1204,7 @@ export default function Leads() {
               </div>
 
               <div className="space-y-2">
-                <Label>Periodo das visitas</Label>
+                <Label>Período das visitas</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button

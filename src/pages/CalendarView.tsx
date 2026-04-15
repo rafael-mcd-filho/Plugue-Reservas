@@ -136,7 +136,7 @@ export default function CalendarView() {
   const updateReservationMutation = useMutation({
     mutationFn: async () => {
       if (!editDialogReservation || !editForm) {
-        throw new Error('Reserva nao selecionada.');
+        throw new Error('Reserva não selecionada.');
       }
 
       const parsedPartySize = Number.parseInt(editForm.party_size, 10);
@@ -170,7 +170,7 @@ export default function CalendarView() {
       toast.success('Reserva atualizada.');
     },
     onError: () => {
-      toast.error('Nao foi possivel atualizar a reserva.');
+      toast.error('Não foi possível atualizar a reserva.');
     },
   });
 
@@ -208,7 +208,7 @@ export default function CalendarView() {
       toast.success(updated.status === 'checked_in' ? 'Check-in registrado.' : 'Status atualizado.');
     },
     onError: () => {
-      toast.error('Nao foi possivel atualizar a reserva.');
+      toast.error('Não foi possível atualizar a reserva.');
     },
   });
 
@@ -315,7 +315,7 @@ export default function CalendarView() {
     }
 
     if (!editForm.date || !editForm.time) {
-      toast.error('Informe a data e o horario da reserva.');
+      toast.error('Informe a data e o horário da reserva.');
       return;
     }
 
@@ -574,7 +574,7 @@ export default function CalendarView() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="calendar-edit-time">Horario</Label>
+                  <Label htmlFor="calendar-edit-time">Horário</Label>
                   <Input
                     id="calendar-edit-time"
                     type="time"
@@ -586,7 +586,7 @@ export default function CalendarView() {
                 </div>
 
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="calendar-edit-occasion">Ocasiao</Label>
+                  <Label htmlFor="calendar-edit-occasion">Ocasião</Label>
                   <Input
                     id="calendar-edit-occasion"
                     value={editForm.occasion}
@@ -598,7 +598,7 @@ export default function CalendarView() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="calendar-edit-notes">Observacoes</Label>
+                <Label htmlFor="calendar-edit-notes">Observações</Label>
                 <Textarea
                   id="calendar-edit-notes"
                   value={editForm.notes}
@@ -614,7 +614,7 @@ export default function CalendarView() {
                   Fechar
                 </Button>
                 <Button type="button" onClick={handleSaveReservation} disabled={updateReservationMutation.isPending}>
-                  {updateReservationMutation.isPending ? 'Salvando...' : 'Salvar alteracoes'}
+                  {updateReservationMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
                 </Button>
               </div>
             </div>

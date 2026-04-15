@@ -793,7 +793,7 @@ export default function ReservationModal({
     }
 
     if (prefillStatus === 'not_found') {
-      return 'Ainda nao encontramos cadastro. Preencha seus dados para continuar.';
+      return 'Ainda não encontramos cadastro. Preencha seus dados para continuar.';
     }
 
     if (whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS) {
@@ -877,7 +877,7 @@ export default function ReservationModal({
                   </a>
                 ) : (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    O WhatsApp deste restaurante ainda nao esta configurado.
+                    O WhatsApp deste restaurante ainda não está configurado.
                   </div>
                 )}
               </div>
