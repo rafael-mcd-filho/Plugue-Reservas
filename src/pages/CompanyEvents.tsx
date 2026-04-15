@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, subDays } from 'date-fns';
+import { endOfDay, format, parseISO, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Activity,
@@ -22,6 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -113,6 +114,9 @@ interface MetaAttemptRow {
 
 type ClearEventDataScope = 'meta_queue' | 'event_log';
 
+const EVENT_LOG_LIMIT = 100;
+const EVENT_TYPE_FILTER_ALL = 'all';
+
 function createDefaultSettings(): TrackingSettingsForm {
   return {
     pixel_id: '',
@@ -162,6 +166,11 @@ function formatEventDisplay(eventName: string) {
   return eventName;
 }
 
+function formatEventOptionLabel(eventName: string) {
+  const display = formatEventDisplay(eventName);
+  return display === eventName ? eventName : `${eventName} - ${display}`;
+}
+
 function formatMetaMapping(eventName: string) {
   if (eventName === 'page_view') return 'PageView';
   if (eventName === 'time_select') return 'InitiateCheckout';
@@ -206,8 +215,12 @@ export default function CompanyEvents() {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<TrackingEventRow | null>(null);
   const [tokenVisible, setTokenVisible] = useState(false);
+  const [eventTypeFilter, setEventTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
+  const [eventStartDate, setEventStartDate] = useState('');
+  const [eventEndDate, setEventEndDate] = useState('');
 
   const since = useMemo(() => subDays(new Date(), 7).toISOString(), []);
+  const hasInvalidEventDateRange = !!eventStartDate && !!eventEndDate && eventStartDate > eventEndDate;
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['company-tracking-settings', companyId],
@@ -251,7 +264,6 @@ export default function CompanyEvents() {
         reservationsResult,
         metaSentResult,
         metaFailedResult,
-        recentEventsResult,
         metaQueueResult,
         metaAttemptsResult,
       ] = await Promise.all([
@@ -294,12 +306,6 @@ export default function CompanyEvents() {
           .eq('status', 'failed')
           .gte('created_at', since),
         supabase
-          .from('tracking_events' as any)
-          .select('id, session_id, journey_id, reservation_id, anonymous_id, event_id, event_name, tracking_source, step, occurred_at, path, page_url, referrer, event_source_url, metadata, user_data_snapshot')
-          .eq('company_id', companyId)
-          .order('occurred_at', { ascending: false })
-          .limit(30),
-        supabase
           .from('meta_event_queue' as any)
           .select('id, reservation_id, event_name, meta_event_name, status, attempts, last_response_status, last_error, payload, sent_at, created_at')
           .eq('company_id', companyId)
@@ -320,31 +326,12 @@ export default function CompanyEvents() {
         reservationsResult,
         metaSentResult,
         metaFailedResult,
-        recentEventsResult,
         metaQueueResult,
         metaAttemptsResult,
       ];
 
       const firstError = results.find((result) => result.error)?.error;
       if (firstError) throw firstError;
-
-      const recentEvents = ((recentEventsResult.data as TrackingEventRow[]) ?? []);
-      const recentSessionIds = Array.from(new Set(
-        recentEvents.map((event) => event.session_id).filter((value): value is string => !!value),
-      ));
-      const sessionDetailsResult = recentSessionIds.length > 0
-        ? await supabase
-          .from('tracking_sessions' as any)
-          .select('id, anonymous_id, first_page_url, last_page_url, landing_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, fbclid, fbp, fbc, ip_address, user_agent, accept_language, started_at, last_seen_at')
-          .eq('company_id', companyId)
-          .in('id', recentSessionIds)
-        : { data: [], error: null };
-
-      if (sessionDetailsResult.error) throw sessionDetailsResult.error;
-
-      const sessionsById = new Map(
-        ((sessionDetailsResult.data as TrackingSessionRow[]) ?? []).map((session) => [session.id, session]),
-      );
 
       const metrics: DashboardMetricCard[] = [
         {
@@ -381,15 +368,88 @@ export default function CompanyEvents() {
 
       return {
         metrics,
-        recentEvents: recentEvents.map((event) => ({
-          ...event,
-          session: event.session_id ? sessionsById.get(event.session_id) ?? null : null,
-        })),
         metaQueue: ((metaQueueResult.data as MetaQueueRow[]) ?? []),
         metaAttempts: ((metaAttemptsResult.data as MetaAttemptRow[]) ?? []),
       };
     },
     enabled: !!companyId,
+    refetchInterval: 30_000,
+  });
+
+  const { data: eventTypeOptions = [] } = useQuery({
+    queryKey: ['company-event-types', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tracking_events' as any)
+        .select('event_name')
+        .eq('company_id', companyId)
+        .order('occurred_at', { ascending: false })
+        .limit(500);
+
+      if (error) throw error;
+
+      return Array.from(
+        new Set(
+          (((data as Pick<TrackingEventRow, 'event_name'>[]) ?? [])
+            .map((event) => event.event_name)
+            .filter((eventName): eventName is string => typeof eventName === 'string' && eventName.trim().length > 0)),
+        ),
+      ).sort((left, right) => left.localeCompare(right));
+    },
+    enabled: !!companyId,
+    refetchInterval: 30_000,
+  });
+
+  const { data: eventLog = [], isLoading: eventLogLoading } = useQuery({
+    queryKey: ['company-event-log', companyId, eventTypeFilter, eventStartDate, eventEndDate],
+    queryFn: async () => {
+      let query = supabase
+        .from('tracking_events' as any)
+        .select('id, session_id, journey_id, reservation_id, anonymous_id, event_id, event_name, tracking_source, step, occurred_at, path, page_url, referrer, event_source_url, metadata, user_data_snapshot')
+        .eq('company_id', companyId)
+        .order('occurred_at', { ascending: false })
+        .limit(EVENT_LOG_LIMIT);
+
+      if (eventTypeFilter !== EVENT_TYPE_FILTER_ALL) {
+        query = query.eq('event_name', eventTypeFilter);
+      }
+
+      if (eventStartDate) {
+        query = query.gte('occurred_at', startOfDay(parseISO(eventStartDate)).toISOString());
+      }
+
+      if (eventEndDate) {
+        query = query.lte('occurred_at', endOfDay(parseISO(eventEndDate)).toISOString());
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const events = (data as TrackingEventRow[]) ?? [];
+      const sessionIds = Array.from(new Set(
+        events.map((event) => event.session_id).filter((value): value is string => !!value),
+      ));
+      const sessionDetailsResult = sessionIds.length > 0
+        ? await supabase
+          .from('tracking_sessions' as any)
+          .select('id, anonymous_id, first_page_url, last_page_url, landing_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, fbclid, fbp, fbc, ip_address, user_agent, accept_language, started_at, last_seen_at')
+          .eq('company_id', companyId)
+          .in('id', sessionIds)
+        : { data: [], error: null };
+
+      if (sessionDetailsResult.error) throw sessionDetailsResult.error;
+
+      const sessionsById = new Map(
+        ((sessionDetailsResult.data as TrackingSessionRow[]) ?? []).map((session) => [session.id, session]),
+      );
+
+      return events.map((event) => ({
+        ...event,
+        session: event.session_id ? sessionsById.get(event.session_id) ?? null : null,
+      }));
+    },
+    enabled: !!companyId && !hasInvalidEventDateRange,
+    placeholderData: (previousData) => previousData,
     refetchInterval: 30_000,
   });
 
@@ -459,7 +519,15 @@ export default function CompanyEvents() {
     },
     onSuccess: (result, scope) => {
       queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
+      queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
       const total = Object.values(result ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
+      if (scope === 'event_log') {
+        setSelectedEvent(null);
+        setEventTypeFilter(EVENT_TYPE_FILTER_ALL);
+        setEventStartDate('');
+        setEventEndDate('');
+      }
       toast.success(scope === 'meta_queue'
         ? `Fila Meta limpa. ${total} registro(s) removido(s).`
         : `Log de eventos limpo. ${total} registro(s) removido(s).`,
@@ -470,10 +538,36 @@ export default function CompanyEvents() {
     },
   });
 
-  const recentEvents = eventsDashboard?.recentEvents ?? [];
   const metaQueue = eventsDashboard?.metaQueue ?? [];
   const metaAttempts = eventsDashboard?.metaAttempts ?? [];
   const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
+  const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL || !!eventStartDate || !!eventEndDate;
+  const selectableEventTypes = useMemo(() => {
+    if (eventTypeFilter === EVENT_TYPE_FILTER_ALL || eventTypeOptions.includes(eventTypeFilter)) {
+      return eventTypeOptions;
+    }
+
+    return [eventTypeFilter, ...eventTypeOptions];
+  }, [eventTypeFilter, eventTypeOptions]);
+  const eventLogCountLabel = `${eventLog.length} ${eventLog.length === 1 ? 'resultado' : 'resultados'}`;
+  const eventLogEmptyMessage = hasInvalidEventDateRange
+    ? 'Data inicial nao pode ser maior que a data final.'
+    : hasEventLogFiltersActive
+      ? 'Nenhum evento encontrado para os filtros informados.'
+      : 'Nenhum evento registrado ainda.';
+  const hasAnyEventLogEntries = eventLog.length > 0 || eventTypeOptions.length > 0;
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
+    queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
+  };
+
+  const handleResetEventFilters = () => {
+    setEventTypeFilter(EVENT_TYPE_FILTER_ALL);
+    setEventStartDate('');
+    setEventEndDate('');
+  };
 
   const handleClearEventData = (scope: ClearEventDataScope) => {
     const confirmed = window.confirm(
@@ -507,7 +601,7 @@ export default function CompanyEvents() {
               type="button"
               variant="outline"
               className="gap-2"
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] })}
+              onClick={handleRefresh}
             >
               <RefreshCcw className="h-4 w-4" />
               Atualizar
@@ -707,7 +801,7 @@ export default function CompanyEvents() {
                   <MousePointerClick className="h-4 w-4" />
                   Log de eventos
                 </CardTitle>
-                <CardDescription>Ultimos eventos persistidos do site e das reservas.</CardDescription>
+                <CardDescription>Ultimos eventos persistidos do site e das reservas, com filtro por tipo e periodo.</CardDescription>
               </div>
               <Button
                 type="button"
@@ -715,13 +809,80 @@ export default function CompanyEvents() {
                 size="sm"
                 className="gap-2"
                 onClick={() => handleClearEventData('event_log')}
-                disabled={clearEventDataMutation.isPending || recentEvents.length === 0}
+                disabled={clearEventDataMutation.isPending || !hasAnyEventLogEntries}
               >
                 <Trash2 className="h-4 w-4" />
                 Limpar
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_180px_180px_160px]">
+                  <div className="space-y-2">
+                    <Label htmlFor="event-type-filter">Tipo de evento</Label>
+                    <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
+                      <SelectTrigger id="event-type-filter" className="h-9">
+                        <SelectValue placeholder="Todos os tipos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
+                        {selectableEventTypes.map((eventName) => (
+                          <SelectItem key={eventName} value={eventName}>
+                            {formatEventOptionLabel(eventName)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="event-start-date">Data inicial</Label>
+                    <Input
+                      id="event-start-date"
+                      type="date"
+                      className="h-9"
+                      value={eventStartDate}
+                      max={eventEndDate || undefined}
+                      onChange={(event) => setEventStartDate(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="event-end-date">Data final</Label>
+                    <Input
+                      id="event-end-date"
+                      type="date"
+                      className="h-9"
+                      value={eventEndDate}
+                      min={eventStartDate || undefined}
+                      onChange={(event) => setEventEndDate(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-full"
+                      onClick={handleResetEventFilters}
+                      disabled={!hasEventLogFiltersActive}
+                    >
+                      Limpar filtros
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className={`text-xs ${hasInvalidEventDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {hasInvalidEventDateRange
+                      ? 'Data inicial nao pode ser maior que a data final.'
+                      : `Exibindo ate ${EVENT_LOG_LIMIT} eventos mais recentes para o recorte atual.`}
+                  </p>
+                  <Badge variant="outline">{eventLogCountLabel}</Badge>
+                </div>
+              </div>
+
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -732,14 +893,20 @@ export default function CompanyEvents() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recentEvents.length === 0 ? (
+                  {eventLogLoading && eventLog.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        Nenhum evento registrado ainda.
+                        Carregando eventos...
+                      </TableCell>
+                    </TableRow>
+                  ) : eventLog.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        {eventLogEmptyMessage}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    recentEvents.map((event) => (
+                    eventLog.map((event) => (
                       <TableRow
                         key={event.id}
                         role="button"
