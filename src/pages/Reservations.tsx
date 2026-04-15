@@ -1078,7 +1078,10 @@ export default function Reservations() {
               <TableHeader className="bg-muted/55">
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Data/Hora
+                    Reserva
+                  </TableHead>
+                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Criada em
                   </TableHead>
                   <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Cliente
@@ -1101,7 +1104,7 @@ export default function Reservations() {
               <TableBody>
                 {paginatedReservations.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={6} className="py-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={7} className="py-16 text-center text-sm text-muted-foreground">
                       Nenhuma reserva encontrada.
                     </TableCell>
                   </TableRow>
@@ -1118,12 +1121,21 @@ export default function Reservations() {
                           isPastReservation && 'opacity-70',
                         )}
                       >
-                        <TableCell className="px-4 py-3">
+                        <TableCell className="px-4 py-3 align-top">
                           <div className={cn('text-sm font-semibold text-foreground', reservation.date === todayString && 'text-primary')}>
                             {format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy')}
                           </div>
                           <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
                             {reservation.time.slice(0, 5)}
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="px-4 py-3 align-top">
+                          <div className="text-sm font-medium text-foreground">
+                            {format(new Date(reservation.created_at), 'dd/MM/yyyy')}
+                          </div>
+                          <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+                            {format(new Date(reservation.created_at), 'HH:mm')}
                           </div>
                         </TableCell>
 
