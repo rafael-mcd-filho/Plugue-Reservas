@@ -1041,7 +1041,7 @@ export default function ReservationModal({
                       <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
                         disabled={isFull}
                         className={cn(
-                          'relative h-16 rounded-md border px-2 py-2 text-sm transition-[border-color,background-color,color] duration-150',
+                          'relative h-14 rounded-md border px-2 py-1.5 text-sm transition-[border-color,background-color,color] duration-150',
                           isFull && 'opacity-40 cursor-not-allowed bg-muted',
                           selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
                           status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
@@ -1049,7 +1049,7 @@ export default function ReservationModal({
                         <span className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap leading-none">
                           <Clock className="h-3.5 w-3.5" />{time}
                         </span>
-                        <span className="pointer-events-none absolute inset-x-1 bottom-1.5 flex min-h-4 items-center justify-center">
+                        <span className="pointer-events-none absolute inset-x-1 bottom-1 flex min-h-4 items-center justify-center">
                           {slotBadge}
                         </span>
                       </button>

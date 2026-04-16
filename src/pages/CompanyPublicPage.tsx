@@ -599,10 +599,10 @@ export default function CompanyPublicPage() {
     const seoTitle = `Reservar mesa no ${company.name} | ${DEFAULT_SYSTEM_NAME}`;
     const seoDescription = truncateSeoText(
       descriptionText
-        ? `Reserve sua mesa no ${company.name}. ${descriptionText}`
+        ? descriptionText
         : `Página de reserva do ${company.name}${company.address ? ` em ${company.address}` : ''}. Consulte horários, localização e faça sua reserva online.`,
     );
-    const seoImage = customPublicPageEnabled ? toAbsoluteUrl(company.logo_url) : null;
+    const seoImage = toAbsoluteUrl(company.logo_url);
     const sameAs = [instagramUrl, googleMapsSearchUrl].filter(Boolean) as string[];
     const openingHoursSpecification = openingHours
       .map((hour) => {
@@ -640,6 +640,7 @@ export default function CompanyPublicPage() {
       upsertMeta('name', 'twitter:image', seoImage);
       upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
       upsertPublicCompanyIcon('icon', seoImage);
+      upsertPublicCompanyIcon('alternate icon', seoImage);
       upsertPublicCompanyIcon('apple-touch-icon', seoImage);
     } else {
       removeMeta('property', 'og:image');
