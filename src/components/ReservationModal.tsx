@@ -1094,7 +1094,7 @@ export default function ReservationModal({
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
             <p className="text-sm text-muted-foreground text-center">
-              {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime} · Mesa {availableTables.find(t => t.id === selectedTableId)?.number} · {selectedPartySize} pessoas
+              {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime} · {selectedPartySize} pessoas
             </p>
 
             <p className="text-xs text-muted-foreground">* Campos obrigatórios</p>
