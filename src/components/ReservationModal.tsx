@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
 import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
+import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
@@ -258,7 +259,7 @@ export default function ReservationModal({
         .from('blocked_dates' as any)
         .select('date, all_day, start_time, end_time')
         .eq('company_id', companyId)
-        .gte('date', new Date().toISOString().split('T')[0]);
+        .gte('date', format(new Date(), 'yyyy-MM-dd'));
       if (error) throw error;
       return data as any[];
     },
@@ -286,8 +287,18 @@ export default function ReservationModal({
 
   const timeSlots = useMemo(() => {
     if (!selectedDayHours || selectedDayHours.closed) return [];
-    return generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
-  }, [selectedDayHours, reservationDuration]);
+    const slots = generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
+    return filterPastTimeSlotsForDate(slots, selectedDate);
+  }, [selectedDate, selectedDayHours, reservationDuration]);
+
+  useEffect(() => {
+    if (!selectedTime || timeSlots.includes(selectedTime)) return;
+
+    setSelectedTime('');
+    setSelectedTableId('');
+    setSelectedTableMapId('');
+    setAvailableTables([]);
+  }, [selectedTime, timeSlots]);
 
   const resolveActiveTableMap = useCallback((date: Date, time: string) => {
     const [hours, minutes] = time.split(':').map(Number);
