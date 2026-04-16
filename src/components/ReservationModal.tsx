@@ -824,7 +824,7 @@ export default function ReservationModal({
 
   const getSlotSignalLabel = (slot: SlotAvailability | undefined) => {
     if (!slot || slot.available <= 0) return null;
-    if (slot.available <= 2) return 'Disponibilidade limitada';
+    if (slot.available <= 2) return 'Limitado';
     if (slot.occupied > 0) return 'Alta procura';
     return null;
   };
@@ -1033,34 +1033,42 @@ export default function ReservationModal({
                     const avail = slotAvailability[time];
                     const isFull = status === 'full';
                     const signalLabel = getSlotSignalLabel(avail);
-                    return (
-                      <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
-                        disabled={isFull}
-                        className={cn(
-                          'flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
-                          isFull && 'opacity-40 cursor-not-allowed bg-muted',
-                          selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
-                          status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
-                        )}>
-                        <span className="flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5" />{time}
+                    const slotBadge = isFull
+                      ? (
+                        <span className="text-[10px] font-medium text-destructive">
+                          Lotado
                         </span>
-                        {avail && isFull && (
+                      )
+                      : signalLabel
+                        ? (
                           <span className={cn(
-                            'text-[10px] font-medium',
-                            'text-destructive'
-                          )}>
-                            Lotado
-                          </span>
-                        )}
-                        {signalLabel && (
-                          <span className={cn(
-                            'rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none',
+                            'max-w-full truncate rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none',
                             status === 'low' ? 'bg-amber-100 text-amber-800' : 'bg-primary/10 text-primary',
                           )}>
                             {signalLabel}
                           </span>
-                        )}
+                        )
+                        : (
+                          <span aria-hidden="true" className="invisible text-[10px] font-medium">
+                            Status
+                          </span>
+                        );
+
+                    return (
+                      <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
+                        disabled={isFull}
+                        className={cn(
+                          'flex h-[72px] flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-sm transition-[border-color,background-color,color] duration-150',
+                          isFull && 'opacity-40 cursor-not-allowed bg-muted',
+                          selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
+                          status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
+                        )}>
+                        <span className="flex items-center gap-1.5 leading-none">
+                          <Clock className="h-3.5 w-3.5" />{time}
+                        </span>
+                        <span className="flex h-4 w-full items-center justify-center">
+                          {slotBadge}
+                        </span>
                       </button>
                     );
                   })}
