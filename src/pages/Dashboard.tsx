@@ -14,7 +14,7 @@ import {
 import { ptBR } from 'date-fns/locale';
 import {
   BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, Legend, PieChart, Pie, Cell,
+  ResponsiveContainer, Legend,
 } from 'recharts';
 import {
   CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle,
@@ -129,8 +129,6 @@ function getDashboardPeriodRange(period: string, customRange?: DateRange) {
   }
 }
 
-const PIE_COLORS = [CHART_COLORS.success, CHART_COLORS.primary, CHART_COLORS.destructive, CHART_COLORS.muted];
-
 function VariationBadge({
   current,
   previous,
@@ -201,20 +199,6 @@ function SectionTitle({
   );
 }
 
-// Custom label renderer for the donut chart - renders inside the slices
-const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
-  if (percent < 0.05) return null; // Don't render labels for very small slices
-  const RADIAN = Math.PI / 180;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  return (
-    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600}>
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-};
-
 export default function Dashboard() {
   const companyContext = useMaybeCompanySlug();
   const isCompanyContext = !!companyContext;
@@ -250,6 +234,7 @@ export default function Dashboard() {
   const {
     dailyStats,
     createdReservationDailyStats,
+    reservationGuestDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
     waitlistDailyStats,
@@ -329,13 +314,6 @@ export default function Dashboard() {
   const prevAvgPerDayRaw = dailyStats.length > 0 ? prevTotals.reservations / dailyStats.length : 0;
   const avgPerDay = Math.round(avgPerDayRaw);
   const prevAvgPerDay = Math.round(prevAvgPerDayRaw);
-
-  const scheduledStatusPieData = [
-    { name: 'Check-ins de agendadas', value: totals.scheduledCompleted },
-    { name: 'Confirmadas', value: totals.confirmed },
-    { name: 'Cancelamentos', value: totals.cancellations },
-    { name: 'No-shows', value: totals.noShows },
-  ].filter((entry) => entry.value > 0);
 
   const mainStats = [
     { label: 'Total Reservas', tooltip: 'Número de reservas marcadas para acontecer no período selecionado.', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
@@ -517,7 +495,7 @@ export default function Dashboard() {
             <div className="lg:col-span-2 h-72 animate-pulse rounded-md border border-border bg-muted" />
             <div className="h-72 animate-pulse rounded-md border border-border bg-muted" />
           </div>
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          <div className="grid gap-6 [&>*]:min-w-0">
             <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
             <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
           </div>
@@ -677,7 +655,7 @@ export default function Dashboard() {
               <CardTitle className="text-base">
                 <SectionTitle
                   title="Fila de Espera por Dia"
-                  tooltip="Mostra, por dia, quantas pessoas entraram na fila, quantas foram atendidas e quantas saíram sem sentar."
+                  tooltip="Mostra, por dia, quantas pessoas entraram na fila, quantas foram atendidas, quantas saíram sem sentar e o tempo médio de espera."
                 />
               </CardTitle>
               <CardDescription>
@@ -690,13 +668,27 @@ export default function Dashboard() {
                   <ComposedChart data={waitlistDailyStats}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                     <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                    <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                    <YAxis
+                      yAxisId="wait"
+                      orientation="right"
+                      tick={{ fontSize: 12 }}
+                      stroke="hsl(202, 89%, 48%)"
+                      tickFormatter={(value: number) => `${value}m`}
+                    />
                     <RechartsTooltip
                       contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                      formatter={(value: number, name: string) => [`${value} cliente${value === 1 ? '' : 's'}`, name]}
+                      formatter={(value: number, name: string) => {
+                        if (name === 'Tempo médio de espera') {
+                          return [`${value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} min`, name];
+                        }
+
+                        return [`${value} cliente${value === 1 ? '' : 's'}`, name];
+                      }}
                     />
                     <Legend />
                     <Line
+                      yAxisId="count"
                       type="monotone"
                       dataKey="entries"
                       name="Entradas na fila"
@@ -706,6 +698,7 @@ export default function Dashboard() {
                       activeDot={{ r: 5 }}
                     />
                     <Line
+                      yAxisId="count"
                       type="monotone"
                       dataKey="seated"
                       name="Sentados"
@@ -715,6 +708,7 @@ export default function Dashboard() {
                       activeDot={{ r: 5 }}
                     />
                     <Line
+                      yAxisId="count"
                       type="monotone"
                       dataKey="dropped"
                       name="Desistências"
@@ -723,7 +717,55 @@ export default function Dashboard() {
                       dot={{ r: 3 }}
                       activeDot={{ r: 5 }}
                     />
+                    <Line
+                      yAxisId="wait"
+                      type="monotone"
+                      dataKey="avgWaitMin"
+                      name="Tempo médio de espera"
+                      stroke="hsl(202, 89%, 48%)"
+                      strokeWidth={2.5}
+                      strokeDasharray="6 4"
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                      connectNulls={false}
+                    />
                   </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border border-border shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                <SectionTitle
+                  title="Total de Pessoas por Dia"
+                  tooltip="Mostra a soma de pessoas por data da reserva, usando o tamanho de cada agendamento no dia marcado."
+                />
+              </CardTitle>
+              <CardDescription>
+                Cada barra considera a data do agendamento, não a data de criação da reserva.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={reservationGuestDailyStats}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                    <RechartsTooltip
+                      contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
+                      formatter={(value: number, name: string) => [`${value} pessoa${value === 1 ? '' : 's'}`, name]}
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="totalGuests"
+                      name="Total de pessoas"
+                      fill="hsl(202, 89%, 48%)"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
@@ -869,7 +911,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            {advancedReportsEnabled && (
+            {false && advancedReportsEnabled && (
               <Card className="min-w-0 border border-border shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">
@@ -916,6 +958,7 @@ export default function Dashboard() {
             <>
           {/* Charts Row 2 */}
           <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            {false && (
             <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
@@ -942,6 +985,7 @@ export default function Dashboard() {
                 </div>
               </CardContent>
             </Card>
+            )}
 
             <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">

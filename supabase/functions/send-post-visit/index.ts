@@ -7,6 +7,7 @@ import {
   sendWhatsAppText,
   serializeWhatsAppFailure,
 } from "../_shared/whatsapp.ts";
+import { formatDateKeyInTimeZone, getZonedParts } from "../_shared/timezone.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -57,42 +58,34 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
+    const zonedNow = getZonedParts(now);
+    const localHour = Number(zonedNow.hour);
 
-    // Find successful visits roughly 12h after check-in.
-    // Keep legacy support for old reservations that still used status = 'completed'.
-    const h12ago = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
-    const h12_30ago = new Date(now.getTime() - (12 * 60 + 30) * 60 * 1000).toISOString();
+    if (localHour !== 8) {
+      console.log(`Post-visit: skipping outside 08:00 local window (${zonedNow.hour}:${zonedNow.minute}:${zonedNow.second})`);
+      return new Response(JSON.stringify({ sent: 0, skipped: true, reason: 'outside_post_visit_window' }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
-    console.log(`Post-visit: checking successful reservations between ${h12_30ago} and ${h12ago}`);
+    const yesterdayStr = formatDateKeyInTimeZone(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
-    const [{ data: checkedInReservations }, { data: completedReservations }] = await Promise.all([
-      supabaseAdmin
-        .from('reservations')
-        .select('*')
-        .eq('status', 'checked_in')
-        .gte('checked_in_at', h12_30ago)
-        .lte('checked_in_at', h12ago),
-      supabaseAdmin
-        .from('reservations')
-        .select('*')
-        .eq('status', 'completed')
-        .gte('updated_at', h12_30ago)
-        .lte('updated_at', h12ago),
-    ]);
+    console.log(`Post-visit: checking successful reservations from ${yesterdayStr} for next-day 08:00 delivery`);
 
-    const reservations = [
-      ...(checkedInReservations || []),
-      ...(completedReservations || []),
-    ];
+    const { data: reservations } = await supabaseAdmin
+      .from('reservations')
+      .select('*')
+      .eq('date', yesterdayStr)
+      .in('status', ['checked_in', 'completed']);
 
     if (!reservations || reservations.length === 0) {
-      console.log('No successful reservations in 12h window');
+      console.log('No successful reservations from yesterday for post-visit');
       return new Response(JSON.stringify({ sent: 0 }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    console.log(`Found ${reservations.length} successful reservations ~12h ago`);
+    console.log(`Found ${reservations.length} successful reservations from yesterday`);
 
     const companyIds = [...new Set(reservations.map((r: any) => r.company_id))];
 

@@ -54,7 +54,7 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
   {
     type: 'post_visit',
     label: 'Mensagem Pós-Visita',
-    description: 'Enviada automaticamente depois do check-in concluído',
+    description: 'Enviada automaticamente às 08:00 do dia seguinte para reservas com check-in concluído',
     icon: Star,
     defaultTemplate: 'Olá, {nome}! ✨ Obrigado pela visita. Esperamos que você tenha aproveitado a experiência. Volte sempre! 💛',
     variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],

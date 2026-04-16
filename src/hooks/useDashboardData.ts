@@ -47,6 +47,12 @@ export interface CreatedReservationDailyStat {
   waitlistCreatedReservations: number;
 }
 
+export interface ReservationGuestDailyStat {
+  date: string;
+  label: string;
+  totalGuests: number;
+}
+
 export interface ReservationLeadTrendPoint {
   date: string;
   label: string;
@@ -61,6 +67,7 @@ export interface WaitlistDailyStat {
   entries: number;
   seated: number;
   dropped: number;
+  avgWaitMin: number | null;
 }
 
 export interface HeatmapCellBreakdown {
@@ -374,6 +381,8 @@ export function useDashboardData(
     const entriesByDate: Record<string, number> = {};
     const seatedByDate: Record<string, number> = {};
     const droppedByDate: Record<string, number> = {};
+    const totalWaitMsByDate: Record<string, number> = {};
+    const seatedWithWaitByDate: Record<string, number> = {};
 
     for (const entry of rawWaitlist) {
       const dateKey = format(new Date(entry.created_at), 'yyyy-MM-dd');
@@ -384,6 +393,9 @@ export function useDashboardData(
       if (!entry.seated_at) continue;
       const dateKey = format(new Date(entry.seated_at), 'yyyy-MM-dd');
       seatedByDate[dateKey] = (seatedByDate[dateKey] || 0) + 1;
+      totalWaitMsByDate[dateKey] = (totalWaitMsByDate[dateKey] || 0)
+        + Math.max(new Date(entry.seated_at).getTime() - new Date(entry.created_at).getTime(), 0);
+      seatedWithWaitByDate[dateKey] = (seatedWithWaitByDate[dateKey] || 0) + 1;
     }
 
     for (const entry of rawWaitlistDropped) {
@@ -401,6 +413,9 @@ export function useDashboardData(
         entries: entriesByDate[dateStr] || 0,
         seated: seatedByDate[dateStr] || 0,
         dropped: droppedByDate[dateStr] || 0,
+        avgWaitMin: seatedWithWaitByDate[dateStr]
+          ? Number((totalWaitMsByDate[dateStr] / seatedWithWaitByDate[dateStr] / 60000).toFixed(1))
+          : null,
       };
     });
   }, [endDate, rawWaitlist, rawWaitlistDropped, rawWaitlistSeated, startDate]);
@@ -477,6 +492,24 @@ export function useDashboardData(
       };
     });
   }, [createdReservations, startDate, endDate]);
+
+  const reservationGuestDailyStats = useMemo(() => {
+    const days = eachDayOfInterval({ start: startDate, end: endDate });
+    const guestsByDate: Record<string, number> = {};
+
+    for (const reservation of rawReservations) {
+      guestsByDate[reservation.date] = (guestsByDate[reservation.date] || 0) + (reservation.party_size || 1);
+    }
+
+    return days.map((day): ReservationGuestDailyStat => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      return {
+        date: dateStr,
+        label: format(day, 'dd/MM', { locale: ptBR }),
+        totalGuests: guestsByDate[dateStr] || 0,
+      };
+    });
+  }, [endDate, rawReservations, startDate]);
 
   const reservationLeadTrend = useMemo(() => {
     const days = eachDayOfInterval({ start: startDate, end: endDate });
@@ -564,6 +597,7 @@ export function useDashboardData(
   return {
     dailyStats,
     createdReservationDailyStats,
+    reservationGuestDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
     waitlistDailyStats,
