@@ -65,7 +65,7 @@ export default function LiveFunnelPanel({
           </span>
         </CardTitle>
         <CardDescription className="text-xs">
-          {totalActive} sess\u00F5es com atividade nos \u00FAltimos {windowMinutes} minutos
+          {`${totalActive} sess\u00F5es com atividade nos \u00FAltimos ${windowMinutes} minutos`}
         </CardDescription>
       </CardHeader>
       <CardContent className="min-w-0 pt-1">
