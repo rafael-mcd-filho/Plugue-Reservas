@@ -22,11 +22,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
+import { cn } from '@/lib/utils';
 
 interface TrackingSettingsForm {
   pixel_id: string;
@@ -115,6 +125,9 @@ interface MetaAttemptRow {
 type ClearEventDataScope = 'meta_queue' | 'event_log';
 
 const EVENT_LOG_LIMIT = 100;
+const EVENT_LOG_PAGE_SIZE = 10;
+const META_QUEUE_PAGE_SIZE = 8;
+const META_ATTEMPTS_PAGE_SIZE = 10;
 const EVENT_TYPE_FILTER_ALL = 'all';
 
 function createDefaultSettings(): TrackingSettingsForm {
@@ -171,6 +184,33 @@ function formatEventOptionLabel(eventName: string) {
   return display === eventName ? eventName : `${eventName} - ${display}`;
 }
 
+function getVisiblePages(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, 'ellipsis', totalPages] as const;
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [1, 'ellipsis', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages] as const;
+  }
+
+  return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages] as const;
+}
+
+function getPaginationSummary(totalItems: number, currentPage: number, pageSize: number, label: string) {
+  if (totalItems === 0) {
+    return `Exibindo 0 de 0 ${label}`;
+  }
+
+  const start = (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, totalItems);
+
+  return `Exibindo ${start}-${end} de ${totalItems} ${label}`;
+}
+
 function formatMetaMapping(eventName: string) {
   if (eventName === 'page_view') return 'PageView';
   if (eventName === 'time_select') return 'InitiateCheckout';
@@ -218,6 +258,9 @@ export default function CompanyEvents() {
   const [eventTypeFilter, setEventTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
   const [eventStartDate, setEventStartDate] = useState('');
   const [eventEndDate, setEventEndDate] = useState('');
+  const [eventLogPage, setEventLogPage] = useState(1);
+  const [metaQueuePage, setMetaQueuePage] = useState(1);
+  const [metaAttemptsPage, setMetaAttemptsPage] = useState(1);
 
   const since = useMemo(() => subDays(new Date(), 7).toISOString(), []);
   const hasInvalidEventDateRange = !!eventStartDate && !!eventEndDate && eventStartDate > eventEndDate;
@@ -556,6 +599,65 @@ export default function CompanyEvents() {
       ? 'Nenhum evento encontrado para os filtros informados.'
       : 'Nenhum evento registrado ainda.';
   const hasAnyEventLogEntries = eventLog.length > 0 || eventTypeOptions.length > 0;
+  const eventLogTotalPages = Math.max(1, Math.ceil(eventLog.length / EVENT_LOG_PAGE_SIZE));
+  const metaQueueTotalPages = Math.max(1, Math.ceil(metaQueue.length / META_QUEUE_PAGE_SIZE));
+  const metaAttemptsTotalPages = Math.max(1, Math.ceil(metaAttempts.length / META_ATTEMPTS_PAGE_SIZE));
+
+  const paginatedEventLog = useMemo(() => {
+    const startIndex = (eventLogPage - 1) * EVENT_LOG_PAGE_SIZE;
+    return eventLog.slice(startIndex, startIndex + EVENT_LOG_PAGE_SIZE);
+  }, [eventLog, eventLogPage]);
+
+  const paginatedMetaQueue = useMemo(() => {
+    const startIndex = (metaQueuePage - 1) * META_QUEUE_PAGE_SIZE;
+    return metaQueue.slice(startIndex, startIndex + META_QUEUE_PAGE_SIZE);
+  }, [metaQueue, metaQueuePage]);
+
+  const paginatedMetaAttempts = useMemo(() => {
+    const startIndex = (metaAttemptsPage - 1) * META_ATTEMPTS_PAGE_SIZE;
+    return metaAttempts.slice(startIndex, startIndex + META_ATTEMPTS_PAGE_SIZE);
+  }, [metaAttempts, metaAttemptsPage]);
+
+  const eventLogPageSummary = useMemo(
+    () => getPaginationSummary(eventLog.length, eventLogPage, EVENT_LOG_PAGE_SIZE, 'eventos'),
+    [eventLog.length, eventLogPage],
+  );
+
+  const metaQueuePageSummary = useMemo(
+    () => getPaginationSummary(metaQueue.length, metaQueuePage, META_QUEUE_PAGE_SIZE, 'itens da fila'),
+    [metaQueue.length, metaQueuePage],
+  );
+
+  const metaAttemptsPageSummary = useMemo(
+    () => getPaginationSummary(metaAttempts.length, metaAttemptsPage, META_ATTEMPTS_PAGE_SIZE, 'tentativas'),
+    [metaAttempts.length, metaAttemptsPage],
+  );
+
+  const eventLogVisiblePages = useMemo(() => getVisiblePages(eventLogPage, eventLogTotalPages), [eventLogPage, eventLogTotalPages]);
+  const metaQueueVisiblePages = useMemo(() => getVisiblePages(metaQueuePage, metaQueueTotalPages), [metaQueuePage, metaQueueTotalPages]);
+  const metaAttemptsVisiblePages = useMemo(() => getVisiblePages(metaAttemptsPage, metaAttemptsTotalPages), [metaAttemptsPage, metaAttemptsTotalPages]);
+
+  useEffect(() => {
+    setEventLogPage(1);
+  }, [eventTypeFilter, eventStartDate, eventEndDate]);
+
+  useEffect(() => {
+    if (eventLogPage > eventLogTotalPages) {
+      setEventLogPage(eventLogTotalPages);
+    }
+  }, [eventLogPage, eventLogTotalPages]);
+
+  useEffect(() => {
+    if (metaQueuePage > metaQueueTotalPages) {
+      setMetaQueuePage(metaQueueTotalPages);
+    }
+  }, [metaQueuePage, metaQueueTotalPages]);
+
+  useEffect(() => {
+    if (metaAttemptsPage > metaAttemptsTotalPages) {
+      setMetaAttemptsPage(metaAttemptsTotalPages);
+    }
+  }, [metaAttemptsPage, metaAttemptsTotalPages]);
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
@@ -906,7 +1008,7 @@ export default function CompanyEvents() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    eventLog.map((event) => (
+                    paginatedEventLog.map((event) => (
                       <TableRow
                         key={event.id}
                         role="button"
@@ -944,6 +1046,65 @@ export default function CompanyEvents() {
                   )}
                 </TableBody>
               </Table>
+
+              {eventLog.length > 0 && (
+                <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs text-muted-foreground">
+                    {eventLogPageSummary} · Pagina {eventLogPage} de {eventLogTotalPages}
+                  </div>
+
+                  {eventLogTotalPages > 1 && (
+                    <Pagination className="justify-start sm:justify-end">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              if (eventLogPage > 1) {
+                                setEventLogPage(eventLogPage - 1);
+                              }
+                            }}
+                            className={cn(eventLogPage === 1 && 'pointer-events-none opacity-50')}
+                          />
+                        </PaginationItem>
+
+                        {eventLogVisiblePages.map((page, index) => (
+                          <PaginationItem key={`event-log-${page}-${index}`}>
+                            {page === 'ellipsis' ? (
+                              <PaginationEllipsis />
+                            ) : (
+                              <PaginationLink
+                                href="#"
+                                isActive={page === eventLogPage}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  setEventLogPage(page);
+                                }}
+                              >
+                                {page}
+                              </PaginationLink>
+                            )}
+                          </PaginationItem>
+                        ))}
+
+                        <PaginationItem>
+                          <PaginationNext
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              if (eventLogPage < eventLogTotalPages) {
+                                setEventLogPage(eventLogPage + 1);
+                              }
+                            }}
+                            className={cn(eventLogPage === eventLogTotalPages && 'pointer-events-none opacity-50')}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -987,7 +1148,7 @@ export default function CompanyEvents() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    metaQueue.map((item) => (
+                    paginatedMetaQueue.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell>
                           <div className="space-y-1">
@@ -1024,6 +1185,65 @@ export default function CompanyEvents() {
                   )}
                 </TableBody>
               </Table>
+
+              {metaQueue.length > 0 && (
+                <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs text-muted-foreground">
+                    {metaQueuePageSummary} · Pagina {metaQueuePage} de {metaQueueTotalPages}
+                  </div>
+
+                  {metaQueueTotalPages > 1 && (
+                    <Pagination className="justify-start sm:justify-end">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              if (metaQueuePage > 1) {
+                                setMetaQueuePage(metaQueuePage - 1);
+                              }
+                            }}
+                            className={cn(metaQueuePage === 1 && 'pointer-events-none opacity-50')}
+                          />
+                        </PaginationItem>
+
+                        {metaQueueVisiblePages.map((page, index) => (
+                          <PaginationItem key={`meta-queue-${page}-${index}`}>
+                            {page === 'ellipsis' ? (
+                              <PaginationEllipsis />
+                            ) : (
+                              <PaginationLink
+                                href="#"
+                                isActive={page === metaQueuePage}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  setMetaQueuePage(page);
+                                }}
+                              >
+                                {page}
+                              </PaginationLink>
+                            )}
+                          </PaginationItem>
+                        ))}
+
+                        <PaginationItem>
+                          <PaginationNext
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              if (metaQueuePage < metaQueueTotalPages) {
+                                setMetaQueuePage(metaQueuePage + 1);
+                              }
+                            }}
+                            className={cn(metaQueuePage === metaQueueTotalPages && 'pointer-events-none opacity-50')}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1057,7 +1277,7 @@ export default function CompanyEvents() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  metaAttempts.map((attempt) => (
+                  paginatedMetaAttempts.map((attempt) => (
                     <TableRow key={attempt.id}>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {formatDateTime(attempt.created_at)}
@@ -1102,6 +1322,65 @@ export default function CompanyEvents() {
                 )}
               </TableBody>
             </Table>
+
+            {metaAttempts.length > 0 && (
+              <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {metaAttemptsPageSummary} · Pagina {metaAttemptsPage} de {metaAttemptsTotalPages}
+                </div>
+
+                {metaAttemptsTotalPages > 1 && (
+                  <Pagination className="justify-start sm:justify-end">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            if (metaAttemptsPage > 1) {
+                              setMetaAttemptsPage(metaAttemptsPage - 1);
+                            }
+                          }}
+                          className={cn(metaAttemptsPage === 1 && 'pointer-events-none opacity-50')}
+                        />
+                      </PaginationItem>
+
+                      {metaAttemptsVisiblePages.map((page, index) => (
+                        <PaginationItem key={`meta-attempts-${page}-${index}`}>
+                          {page === 'ellipsis' ? (
+                            <PaginationEllipsis />
+                          ) : (
+                            <PaginationLink
+                              href="#"
+                              isActive={page === metaAttemptsPage}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                setMetaAttemptsPage(page);
+                              }}
+                            >
+                              {page}
+                            </PaginationLink>
+                          )}
+                        </PaginationItem>
+                      ))}
+
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            if (metaAttemptsPage < metaAttemptsTotalPages) {
+                              setMetaAttemptsPage(metaAttemptsPage + 1);
+                            }
+                          }}
+                          className={cn(metaAttemptsPage === metaAttemptsTotalPages && 'pointer-events-none opacity-50')}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
