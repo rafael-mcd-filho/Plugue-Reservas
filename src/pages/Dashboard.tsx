@@ -911,82 +911,6 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            {false && advancedReportsEnabled && (
-              <Card className="min-w-0 border border-border shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">
-                    <SectionTitle
-                      title="Distribuição das agendadas"
-                      tooltip="Mostra como as reservas agendadas do período se dividem entre os principais status."
-                    />
-                  </CardTitle>
-                  <CardDescription>Status das reservas agendadas</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[300px] flex items-center justify-center">
-                    {scheduledStatusPieData.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Sem dados no período</p>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={scheduledStatusPieData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={100}
-                            paddingAngle={3}
-                            dataKey="value"
-                            label={renderCustomLabel}
-                            labelLine={false}
-                          >
-                            {scheduledStatusPieData.map((_, i) => (
-                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <RechartsTooltip />
-                          <Legend />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-          {advancedReportsEnabled ? (
-            <>
-          {/* Charts Row 2 */}
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            {false && (
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Confirmadas vs Check-ins das agendadas"
-                    tooltip="Compara o que foi agendado com o que realmente aconteceu nas reservas agendadas."
-                  />
-                </CardTitle>
-                <CardDescription>Comparativo diário apenas das reservas agendadas</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[260px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
-                      <Legend />
-                      <Bar dataKey="confirmed" name="Confirmadas" fill="hsl(28, 85%, 55%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="scheduledCompleted" name="Check-ins de agendadas" fill="hsl(28, 90%, 27%)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-            )}
-
             <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
@@ -1014,7 +938,8 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
-
+          {advancedReportsEnabled ? (
+            <>
           {/* Heatmap + Funnel */}
           <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <ReservationHeatmap {...heatmapData} />
