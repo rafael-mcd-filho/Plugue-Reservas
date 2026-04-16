@@ -790,7 +790,6 @@ export default function ReservationModal({
   const selectedSlotHasDemand = !!selectedSlotAvailability
     && selectedSlotAvailability.occupied > 0
     && selectedSlotAvailability.available > 0;
-  const hasCriticalUrgency = urgencySlots.some((slot) => slot.available <= 2);
   const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
   const isLargeParty = isLargePartyReservation(selectedPartySize);
   const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp);
@@ -999,7 +998,7 @@ export default function ReservationModal({
                       <div>
                         <p className="text-sm font-semibold">
                           {urgencySlots.length > 0
-                            ? hasCriticalUrgency ? 'Horários quase esgotando' : 'Horários com maior procura'
+                            ? 'Alta demanda para esta data'
                             : 'Os horários podem esgotar rápido'}
                         </p>
                         <p className={cn(
@@ -1007,21 +1006,10 @@ export default function ReservationModal({
                           urgencySlots.length > 0 ? 'text-amber-800' : 'text-muted-foreground',
                         )}>
                           {urgencySlots.length > 0
-                            ? hasCriticalUrgency
-                              ? 'Alguns horários estão com disponibilidade mais limitada para o tamanho do seu grupo.'
-                              : 'Já existem reservas nesses horários. Se um deles encaixa para você, vale garantir agora.'
+                            ? 'Outros clientes estão reservando ao mesmo tempo. Confirme agora para garantir sua mesa.'
                             : 'Escolha uma opção para garantir sua mesa. A disponibilidade muda conforme novas reservas entram.'}
                         </p>
                       </div>
-                      {urgencySlots.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {urgencySlots.map((slot) => (
-                            <span key={slot.time} className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm">
-                              {slot.time}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
