@@ -359,25 +359,82 @@ function removeCanonical() {
 function upsertPublicCompanyIcon(rel: string, href: string, type?: string) {
   if (typeof document === 'undefined') return;
 
-  let element = document.head.querySelector<HTMLLinkElement>(`link[data-public-company-icon="${rel}"]`);
+  let element = document.head.querySelector<HTMLLinkElement>(`link[data-public-company-icon="${rel}"]`)
+    ?? document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
   if (!element) {
     element = document.createElement('link');
     element.rel = rel;
-    element.setAttribute('data-public-company-icon', rel);
     document.head.appendChild(element);
   }
 
+  if (!element.hasAttribute('data-public-company-icon-original-href') && element.hasAttribute('href')) {
+    element.setAttribute('data-public-company-icon-original-href', element.getAttribute('href') || '');
+  }
+
+  if (!element.hasAttribute('data-public-company-icon-original-type') && element.hasAttribute('type')) {
+    element.setAttribute('data-public-company-icon-original-type', element.getAttribute('type') || '');
+  }
+
+  if (!element.hasAttribute('data-public-company-icon-original-sizes') && element.hasAttribute('sizes')) {
+    element.setAttribute('data-public-company-icon-original-sizes', element.getAttribute('sizes') || '');
+  }
+
+  if (!element.hasAttribute('data-public-company-icon-generated')) {
+    element.setAttribute('data-public-company-icon-generated', element.hasAttribute('href') ? 'false' : 'true');
+  }
+
+  element.setAttribute('data-public-company-icon', rel);
+  element.rel = rel;
   element.href = href;
   if (type) {
     element.type = type;
   } else {
     element.removeAttribute('type');
   }
+
+  if (rel === 'alternate icon') {
+    element.setAttribute('sizes', 'any');
+  }
 }
 
 function removePublicCompanyIcons() {
   if (typeof document === 'undefined') return;
-  document.head.querySelectorAll<HTMLLinkElement>('link[data-public-company-icon]').forEach((element) => element.remove());
+  document.head.querySelectorAll<HTMLLinkElement>('link[data-public-company-icon]').forEach((element) => {
+    const wasGenerated = element.getAttribute('data-public-company-icon-generated') === 'true';
+
+    if (wasGenerated) {
+      element.remove();
+      return;
+    }
+
+    const originalHref = element.getAttribute('data-public-company-icon-original-href');
+    const originalType = element.getAttribute('data-public-company-icon-original-type');
+    const originalSizes = element.getAttribute('data-public-company-icon-original-sizes');
+
+    if (originalHref) {
+      element.href = originalHref;
+    } else {
+      element.removeAttribute('href');
+    }
+
+    if (originalType) {
+      element.type = originalType;
+    } else {
+      element.removeAttribute('type');
+    }
+
+    if (originalSizes) {
+      element.setAttribute('sizes', originalSizes);
+    } else {
+      element.removeAttribute('sizes');
+    }
+
+    element.removeAttribute('data-public-company-icon');
+    element.removeAttribute('data-public-company-icon-original-href');
+    element.removeAttribute('data-public-company-icon-original-type');
+    element.removeAttribute('data-public-company-icon-original-sizes');
+    element.removeAttribute('data-public-company-icon-generated');
+  });
 }
 
 function upsertJsonLd(data: Record<string, unknown>) {
@@ -641,6 +698,7 @@ export default function CompanyPublicPage() {
       upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
       upsertPublicCompanyIcon('icon', seoImage);
       upsertPublicCompanyIcon('alternate icon', seoImage);
+      upsertPublicCompanyIcon('shortcut icon', seoImage);
       upsertPublicCompanyIcon('apple-touch-icon', seoImage);
     } else {
       removeMeta('property', 'og:image');
