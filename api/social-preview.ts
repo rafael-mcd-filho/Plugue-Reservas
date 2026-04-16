@@ -16,12 +16,13 @@ interface PublicCompanyPreview {
   description: string | null;
   logo_url: string | null;
   address: string | null;
-  custom_public_page_enabled: boolean | null;
 }
 
 const DEFAULT_SYSTEM_NAME = 'Plugue Reservas';
 const DEFAULT_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const DEFAULT_SUPABASE_URL = 'https://hdpxqqiudiotanrybvcf.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhkcHhxcWl1ZGlvdGFucnlidmNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwNjk0OTksImV4cCI6MjA4ODY0NTQ5OX0.OeJWsYMXQSMqNz05eqfgceMj3iQNX0pQH-4gxKOaNhY';
 
 function getHeader(headers: PreviewRequest['headers'], key: string) {
   const value = headers[key] ?? headers[key.toLowerCase()];
@@ -85,16 +86,17 @@ function toAbsoluteUrl(url: string | null | undefined, origin: string) {
 }
 
 async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL
+    ?? process.env.SUPABASE_URL
+    ?? DEFAULT_SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY
     ?? process.env.VITE_SUPABASE_ANON_KEY
-    ?? process.env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) return null;
+    ?? process.env.SUPABASE_ANON_KEY
+    ?? DEFAULT_SUPABASE_PUBLISHABLE_KEY;
 
   const url = new URL('/rest/v1/companies_public', supabaseUrl);
   url.searchParams.set('slug', `eq.${slug}`);
-  url.searchParams.set('select', 'name,description,logo_url,address,custom_public_page_enabled');
+  url.searchParams.set('select', 'name,description,logo_url,address');
   url.searchParams.set('limit', '1');
 
   const response = await fetch(url, {
@@ -145,6 +147,7 @@ function renderPreviewHtml({
     <meta name="twitter:image" content="${safeImageUrl}" />
     <meta name="twitter:image:alt" content="${safeTitle}" />
     <link rel="icon" href="${safeImageUrl}" />
+    <link rel="shortcut icon" href="${safeImageUrl}" />
     <link rel="apple-touch-icon" href="${safeImageUrl}" />` : ''}
     <meta name="twitter:card" content="${safeImageUrl ? 'summary_large_image' : 'summary'}" />
     <meta name="twitter:title" content="${safeTitle}" />
@@ -160,9 +163,9 @@ function renderPreviewHtml({
 export default async function handler(request: PreviewRequest, response: PreviewResponse) {
   const origin = getOrigin(request);
   const slug = getSlug(request);
-  const canonicalUrl = `${origin}/${slug ?? ''}`;
+  const canonicalUrl = slug ? `${origin}/${slug}` : origin;
   const company = slug ? await fetchCompany(slug) : null;
-  const companyLogo = company?.custom_public_page_enabled === false ? null : toAbsoluteUrl(company?.logo_url, origin);
+  const companyLogo = toAbsoluteUrl(company?.logo_url, origin);
   const companyDescription = richTextToPlainText(company?.description);
   const title = company
     ? `Reservar mesa no ${company.name} | ${DEFAULT_SYSTEM_NAME}`
@@ -170,7 +173,7 @@ export default async function handler(request: PreviewRequest, response: Preview
   const description = company
     ? truncateSeoText(
         companyDescription
-          ? `Reserve sua mesa no ${company.name}. ${companyDescription}`
+          ? companyDescription
           : `Página de reserva do ${company.name}${company.address ? ` em ${company.address}` : ''}. Consulte horários, localização e faça sua reserva online.`,
       )
     : DEFAULT_DESCRIPTION;
