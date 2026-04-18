@@ -787,9 +787,6 @@ export default function ReservationModal({
   const selectedSlotIsLow = !!selectedSlotAvailability
     && selectedSlotAvailability.available > 0
     && selectedSlotAvailability.available <= 2;
-  const selectedSlotHasDemand = !!selectedSlotAvailability
-    && selectedSlotAvailability.occupied > 0
-    && selectedSlotAvailability.available > 0;
   const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
   const isLargeParty = isLargePartyReservation(selectedPartySize);
   const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp);
@@ -1014,7 +1011,7 @@ export default function ReservationModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2">
                   {timeSlots.map(time => {
                     const status = getSlotStatus(time);
                     const avail = slotAvailability[time];
@@ -1041,15 +1038,15 @@ export default function ReservationModal({
                       <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
                         disabled={isFull}
                         className={cn(
-                          'relative h-14 rounded-md border px-2 py-1.5 text-sm transition-[border-color,background-color,color] duration-150',
+                          'flex h-[3.15rem] flex-col items-center justify-center gap-0.5 rounded-md border px-2 py-1 text-[13px] transition-[border-color,background-color,color] duration-150 sm:h-[3.35rem] sm:text-sm',
                           isFull && 'opacity-40 cursor-not-allowed bg-muted',
                           selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
                           status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
                         )}>
-                        <span className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 whitespace-nowrap leading-none">
+                        <span className="flex items-center gap-1 whitespace-nowrap leading-none">
                           <Clock className="h-3.5 w-3.5" />{time}
                         </span>
-                        <span className="pointer-events-none absolute inset-x-1 bottom-1 flex min-h-4 items-center justify-center">
+                        <span className="pointer-events-none flex min-h-3 items-center justify-center">
                           {slotBadge}
                         </span>
                       </button>
@@ -1059,11 +1056,9 @@ export default function ReservationModal({
               </>
             )}
 
-            {(selectedSlotIsLow || selectedSlotHasDemand) && (
+            {selectedSlotIsLow && (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900">
-                {selectedSlotIsLow
-                  ? 'Esse horário está com disponibilidade limitada. Continue para garantir a reserva.'
-                  : 'Esse horário já recebeu reservas. Continue para garantir sua mesa enquanto ainda há disponibilidade.'}
+                Esse horário está com disponibilidade limitada. Continue para garantir a reserva.
               </p>
             )}
 
