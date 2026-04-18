@@ -1038,16 +1038,16 @@ export default function ReservationModal({
                       <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
                         disabled={isFull}
                         className={cn(
-                          'relative flex h-11 items-center justify-center rounded-md border px-2 py-1 text-[13px] transition-[border-color,background-color,color] duration-150 sm:h-12 sm:text-sm',
+                          'relative h-10 rounded-md border px-2 py-0.5 text-xs transition-[border-color,background-color,color] duration-150 sm:h-11 sm:text-[13px]',
                           isFull && 'opacity-40 cursor-not-allowed bg-muted',
                           selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
                           status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
                         )}>
-                        <span className="flex items-center gap-1 whitespace-nowrap leading-none">
+                        <span className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap leading-none">
                           <Clock className="h-3.5 w-3.5" />{time}
                         </span>
                         {slotBadge && (
-                          <span className="pointer-events-none absolute inset-x-1 bottom-0.5 flex items-center justify-center">
+                          <span className="pointer-events-none absolute inset-x-1 bottom-px flex items-center justify-center">
                             {slotBadge}
                           </span>
                         )}
