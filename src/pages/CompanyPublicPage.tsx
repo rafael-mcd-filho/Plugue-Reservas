@@ -916,7 +916,7 @@ export default function CompanyPublicPage() {
 
             <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
               <Button
-                className="group w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
+                className="group animate-attention-pulse w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
                 size="lg"
                 onMouseEnter={() => void loadReservationModal()}
                 onFocus={() => void loadReservationModal()}

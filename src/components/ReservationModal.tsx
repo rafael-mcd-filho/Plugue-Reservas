@@ -1273,7 +1273,7 @@ export default function ReservationModal({
             </p>
 
             <div className="sticky bottom-0 -mx-5 bg-card/95 px-5 pb-1 pt-3 shadow-[0_-12px_24px_rgba(255,255,255,0.92)] backdrop-blur">
-              <Button ref={confirmButtonRef} type="submit" className="w-full text-base rounded-md shadow-sm" disabled={submitting}>
+              <Button ref={confirmButtonRef} type="submit" className="animate-attention-pulse w-full rounded-md text-base shadow-sm disabled:animate-none" disabled={submitting}>
                 {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Confirmar Reserva
               </Button>

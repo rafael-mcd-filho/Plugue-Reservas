@@ -172,9 +172,29 @@
   .animate-fade-in  { animation: fadeIn  0.25s ease-out both; }
   .animate-slide-up { animation: slideUp 0.3s  ease-out both; }
   .animate-scale-in { animation: scaleIn 0.2s  ease-out both; }
+  .animate-attention-pulse {
+    animation: attentionPulse 2.8s ease-in-out infinite;
+    will-change: transform, box-shadow;
+  }
 }
 
 /* ─── Keyframes ───────────────────────────────────────────────────────────── */
 @keyframes fadeIn  { from { opacity: 0; }                          to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+@keyframes attentionPulse {
+  0%, 72%, 100% {
+    transform: scale(1);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+
+  24% {
+    transform: scale(1.018);
+    box-shadow: 0 10px 26px rgba(217, 119, 6, 0.22);
+  }
+
+  40% {
+    transform: scale(1.01);
+    box-shadow: 0 6px 18px rgba(217, 119, 6, 0.14);
+  }
+}
