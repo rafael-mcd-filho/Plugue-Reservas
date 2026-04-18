@@ -531,6 +531,10 @@ export default function CompanyPublicPage() {
   const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
   const publicStickyReserveButtonEnabled = (company as any)?.show_public_sticky_reserve_button ?? true;
   const publicReservationExitPromptEnabled = (company as any)?.show_public_reservation_exit_prompt ?? false;
+  const publicReservationExitPromptPrimaryText = (company as any)?.public_reservation_exit_prompt_primary_text ?? null;
+  const publicReservationExitPromptPrimaryTextSize = (company as any)?.public_reservation_exit_prompt_primary_text_size ?? null;
+  const publicReservationExitPromptSecondaryText = (company as any)?.public_reservation_exit_prompt_secondary_text ?? null;
+  const publicReservationExitPromptSecondaryTextSize = (company as any)?.public_reservation_exit_prompt_secondary_text_size ?? null;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
@@ -1086,6 +1090,10 @@ export default function CompanyPublicPage() {
             getTrackingSnapshot={getTrackingSnapshot}
             clearTrackingJourney={clearJourney}
             exitRecoveryEnabled={publicReservationExitPromptEnabled}
+            exitRecoveryPrimaryText={publicReservationExitPromptPrimaryText}
+            exitRecoveryPrimaryTextSize={publicReservationExitPromptPrimaryTextSize}
+            exitRecoverySecondaryText={publicReservationExitPromptSecondaryText}
+            exitRecoverySecondaryTextSize={publicReservationExitPromptSecondaryTextSize}
           />
         </Suspense>
       )}

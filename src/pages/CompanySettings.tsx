@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -38,6 +38,19 @@ import type { Company } from '@/hooks/useCompanies';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { getGoogleMapsEmbedUrl, normalizeGoogleMapsEmbedInput } from '@/lib/maps';
+import {
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+  PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS,
+  PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER,
+  getPublicReservationExitPromptTextClassName,
+  getPublicReservationExitPromptTextValue,
+  normalizePublicReservationExitPromptTextSize,
+  renderPublicReservationExitPromptText,
+  type PublicReservationExitPromptMarkupTag,
+} from '@/lib/publicReservationExitPrompt';
 import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
@@ -86,10 +99,10 @@ const DEFAULT_PAYMENTS: Record<string, boolean> = {
 
 const SETTINGS_TABS = ['info', 'location', 'hours', 'payments', 'public-page'] as const;
 const SETTINGS_TAB_ITEMS = [
-  { value: 'hours', label: 'Horários', icon: Clock },
-  { value: 'payments', label: 'Pagamentos', icon: CreditCard },
   { value: 'info', label: 'Informações', icon: Info },
   { value: 'location', label: 'Localização', icon: MapPin },
+  { value: 'hours', label: 'Horários', icon: Clock },
+  { value: 'payments', label: 'Pagamentos', icon: CreditCard },
   { value: 'public-page', label: 'Página Pública', icon: Megaphone },
 ] as const;
 const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
@@ -100,7 +113,8 @@ const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 
@@ -122,6 +136,10 @@ function isMissingCompanySettingsColumnError(error: unknown, columnName: string)
 
   return (code === '42703' || message.toLowerCase().includes('does not exist'))
     && message.includes(columnName);
+}
+
+function isMissingAnyCompanySettingsColumnError(error: unknown, columnNames: string[]) {
+  return columnNames.some((columnName) => isMissingCompanySettingsColumnError(error, columnName));
 }
 
 function slugify(text: string) {
@@ -155,47 +173,49 @@ export default function CompanySettings() {
   const { data: company, isLoading, error: companyError } = useQuery({
     queryKey: ['company-settings', companyId],
     queryFn: async () => {
-      const primaryResult = await supabase
-        .from('companies' as any)
-        .select(COMPANY_SETTINGS_SELECT)
-        .eq('id', companyId)
-        .maybeSingle();
+      const selectAttempts = [
+        {
+          select: COMPANY_SETTINGS_SELECT,
+          missingColumns: [
+            'public_reservation_exit_prompt_primary_text',
+            'public_reservation_exit_prompt_primary_text_size',
+            'public_reservation_exit_prompt_secondary_text',
+            'public_reservation_exit_prompt_secondary_text_size',
+          ],
+        },
+        {
+          select: COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT,
+          missingColumns: ['show_public_reservation_exit_prompt'],
+        },
+        {
+          select: COMPANY_SETTINGS_SELECT_WITH_STICKY,
+          missingColumns: ['show_public_sticky_reserve_button'],
+        },
+        {
+          select: COMPANY_SETTINGS_SELECT_LEGACY,
+          missingColumns: [],
+        },
+      ] as const;
 
-      if (primaryResult.error && isMissingCompanySettingsColumnError(primaryResult.error, 'show_public_reservation_exit_prompt')) {
-        const fallbackResult = await supabase
+      for (const attempt of selectAttempts) {
+        const result = await supabase
           .from('companies' as any)
-          .select(COMPANY_SETTINGS_SELECT_WITH_STICKY)
+          .select(attempt.select)
           .eq('id', companyId)
           .maybeSingle();
 
-        if (fallbackResult.error && isMissingCompanySettingsColumnError(fallbackResult.error, 'show_public_sticky_reserve_button')) {
-          const legacyResult = await supabase
-            .from('companies' as any)
-            .select(COMPANY_SETTINGS_SELECT_LEGACY)
-            .eq('id', companyId)
-            .maybeSingle();
-
-          if (legacyResult.error) throw legacyResult.error;
-          return legacyResult.data as Company | null;
+        if (!result.error) {
+          return result.data as Company | null;
         }
 
-        if (fallbackResult.error) throw fallbackResult.error;
-        return fallbackResult.data as Company | null;
+        if (attempt.missingColumns.length > 0 && isMissingAnyCompanySettingsColumnError(result.error, attempt.missingColumns)) {
+          continue;
+        }
+
+        throw result.error;
       }
 
-      if (primaryResult.error && isMissingCompanySettingsColumnError(primaryResult.error, 'show_public_sticky_reserve_button')) {
-        const legacyResult = await supabase
-          .from('companies' as any)
-          .select(COMPANY_SETTINGS_SELECT_LEGACY)
-          .eq('id', companyId)
-          .maybeSingle();
-
-        if (legacyResult.error) throw legacyResult.error;
-        return legacyResult.data as Company | null;
-      }
-
-      if (primaryResult.error) throw primaryResult.error;
-      return primaryResult.data as Company | null;
+      return null;
     },
     enabled: !!companyId,
     retry: false,
@@ -229,6 +249,10 @@ export default function CompanySettings() {
   const [showPublicWhatsappButton, setShowPublicWhatsappButton] = useState('show');
   const [showPublicStickyReserveButton, setShowPublicStickyReserveButton] = useState(true);
   const [showPublicReservationExitPrompt, setShowPublicReservationExitPrompt] = useState(false);
+  const [publicReservationExitPromptPrimaryText, setPublicReservationExitPromptPrimaryText] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT);
+  const [publicReservationExitPromptPrimaryTextSize, setPublicReservationExitPromptPrimaryTextSize] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE);
+  const [publicReservationExitPromptSecondaryText, setPublicReservationExitPromptSecondaryText] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT);
+  const [publicReservationExitPromptSecondaryTextSize, setPublicReservationExitPromptSecondaryTextSize] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE);
   const [publicWaitlistEnabled, setPublicWaitlistEnabled] = useState(false);
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
@@ -240,6 +264,8 @@ export default function CompanySettings() {
   const [noticeActiveUntil, setNoticeActiveUntil] = useState('');
   const [uploadingNoticeImage, setUploadingNoticeImage] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const publicReservationExitPromptPrimaryTextRef = useRef<HTMLTextAreaElement | null>(null);
+  const publicReservationExitPromptSecondaryTextRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setInitialized(false);
@@ -259,6 +285,22 @@ export default function CompanySettings() {
     setShowPublicWhatsappButton((company.show_public_whatsapp_button ?? true) ? 'show' : 'hide');
     setShowPublicStickyReserveButton((company as any).show_public_sticky_reserve_button ?? true);
     setShowPublicReservationExitPrompt((company as any).show_public_reservation_exit_prompt ?? false);
+    setPublicReservationExitPromptPrimaryText(getPublicReservationExitPromptTextValue(
+      (company as any).public_reservation_exit_prompt_primary_text,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+    ));
+    setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(
+      (company as any).public_reservation_exit_prompt_primary_text_size,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+    ));
+    setPublicReservationExitPromptSecondaryText(getPublicReservationExitPromptTextValue(
+      (company as any).public_reservation_exit_prompt_secondary_text,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+    ));
+    setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(
+      (company as any).public_reservation_exit_prompt_secondary_text_size,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+    ));
     setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
     setGoogleMapsUrl(company.google_maps_url || '');
     setReservationDuration((company as any).reservation_duration ?? 30);
@@ -315,6 +357,8 @@ export default function CompanySettings() {
       const trimmedNoticeText = noticeText.trim();
       const hasNoticeContent = !!trimmedNoticeText || !!noticeImageUrl;
       const noticeActiveUntilIso = fromDateTimeLocalValue(noticeActiveUntil);
+      const normalizedReservationExitPromptPrimaryText = publicReservationExitPromptPrimaryText.replace(/\r\n/g, '\n');
+      const normalizedReservationExitPromptSecondaryText = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
 
       if (!publicCustomizationLocked && noticeActive) {
         if (!hasNoticeContent) {
@@ -349,42 +393,69 @@ export default function CompanySettings() {
         updated_at: new Date().toISOString(),
       } as any;
 
-      let { data: updatedCompany, error } = await supabase
-        .from('companies' as any)
-        .update({
-          ...baseCompanyUpdate,
-          show_public_sticky_reserve_button: showPublicStickyReserveButton,
-          show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
-        } as any)
-        .eq('id', companyId)
-        .select('id')
-        .maybeSingle();
-
-      if (error && isMissingCompanySettingsColumnError(error, 'show_public_reservation_exit_prompt')) {
-        const fallbackResult = await supabase
-          .from('companies' as any)
-          .update({
+      const updateAttempts = [
+        {
+          payload: {
             ...baseCompanyUpdate,
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
-          } as any)
-          .eq('id', companyId)
-          .select('id')
-          .maybeSingle();
+            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
+            public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
+            public_reservation_exit_prompt_primary_text_size: publicReservationExitPromptPrimaryTextSize,
+            public_reservation_exit_prompt_secondary_text: normalizedReservationExitPromptSecondaryText,
+            public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
+          } as any,
+          missingColumns: [
+            'public_reservation_exit_prompt_primary_text',
+            'public_reservation_exit_prompt_primary_text_size',
+            'public_reservation_exit_prompt_secondary_text',
+            'public_reservation_exit_prompt_secondary_text_size',
+          ],
+        },
+        {
+          payload: {
+            ...baseCompanyUpdate,
+            show_public_sticky_reserve_button: showPublicStickyReserveButton,
+            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
+          } as any,
+          missingColumns: ['show_public_reservation_exit_prompt'],
+        },
+        {
+          payload: {
+            ...baseCompanyUpdate,
+            show_public_sticky_reserve_button: showPublicStickyReserveButton,
+          } as any,
+          missingColumns: ['show_public_sticky_reserve_button'],
+        },
+        {
+          payload: baseCompanyUpdate,
+          missingColumns: [],
+        },
+      ] as const;
 
-        updatedCompany = fallbackResult.data;
-        error = fallbackResult.error;
-      }
+      let updatedCompany: { id: string } | null = null;
+      let error: unknown = null;
 
-      if (error && isMissingCompanySettingsColumnError(error, 'show_public_sticky_reserve_button')) {
-        const fallbackResult = await supabase
+      for (const attempt of updateAttempts) {
+        const result = await supabase
           .from('companies' as any)
-          .update(baseCompanyUpdate)
+          .update(attempt.payload)
           .eq('id', companyId)
           .select('id')
           .maybeSingle();
 
-        updatedCompany = fallbackResult.data;
-        error = fallbackResult.error;
+        if (!result.error) {
+          updatedCompany = result.data;
+          error = null;
+          break;
+        }
+
+        error = result.error;
+
+        if (attempt.missingColumns.length > 0 && isMissingAnyCompanySettingsColumnError(result.error, attempt.missingColumns)) {
+          continue;
+        }
+
+        throw result.error;
       }
 
       if (error) throw error;
@@ -451,6 +522,102 @@ export default function CompanySettings() {
     } catch {
       toast.error('Não foi possível copiar o link.');
     }
+  };
+
+  const previewCompanyName = companyName || 'sua empresa';
+  const previewReservationExitPromptPrimaryText = useMemo(
+    () => getPublicReservationExitPromptTextValue(
+      publicReservationExitPromptPrimaryText,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+    ),
+    [publicReservationExitPromptPrimaryText],
+  );
+  const previewReservationExitPromptSecondaryText = useMemo(
+    () => getPublicReservationExitPromptTextValue(
+      publicReservationExitPromptSecondaryText,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+    ),
+    [publicReservationExitPromptSecondaryText],
+  );
+  const previewReservationExitPromptPrimaryTextSize = useMemo(
+    () => normalizePublicReservationExitPromptTextSize(
+      publicReservationExitPromptPrimaryTextSize,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+    ),
+    [publicReservationExitPromptPrimaryTextSize],
+  );
+  const previewReservationExitPromptSecondaryTextSize = useMemo(
+    () => normalizePublicReservationExitPromptTextSize(
+      publicReservationExitPromptSecondaryTextSize,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+    ),
+    [publicReservationExitPromptSecondaryTextSize],
+  );
+
+  const wrapPublicReservationExitPromptSelection = (
+    field: 'primary' | 'secondary',
+    tag: PublicReservationExitPromptMarkupTag,
+  ) => {
+    const textarea = field === 'primary'
+      ? publicReservationExitPromptPrimaryTextRef.current
+      : publicReservationExitPromptSecondaryTextRef.current;
+    const value = field === 'primary'
+      ? publicReservationExitPromptPrimaryText
+      : publicReservationExitPromptSecondaryText;
+    const setValue = field === 'primary'
+      ? setPublicReservationExitPromptPrimaryText
+      : setPublicReservationExitPromptSecondaryText;
+    const openTag = `{${tag}}`;
+    const closeTag = `{/${tag}}`;
+
+    if (!textarea) {
+      setValue((current) => `${current}${openTag}texto${closeTag}`);
+      return;
+    }
+
+    const selectionStart = textarea.selectionStart ?? value.length;
+    const selectionEnd = textarea.selectionEnd ?? value.length;
+    const selectedText = value.slice(selectionStart, selectionEnd);
+    const wrappedText = selectedText || 'texto';
+    const nextValue = `${value.slice(0, selectionStart)}${openTag}${wrappedText}${closeTag}${value.slice(selectionEnd)}`;
+
+    setValue(nextValue);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const innerStart = selectionStart + openTag.length;
+      const innerEnd = innerStart + wrappedText.length;
+      textarea.setSelectionRange(innerStart, innerEnd);
+    });
+  };
+
+  const insertPublicReservationExitPromptToken = (field: 'primary' | 'secondary', token: '{empresa}') => {
+    const textarea = field === 'primary'
+      ? publicReservationExitPromptPrimaryTextRef.current
+      : publicReservationExitPromptSecondaryTextRef.current;
+    const value = field === 'primary'
+      ? publicReservationExitPromptPrimaryText
+      : publicReservationExitPromptSecondaryText;
+    const setValue = field === 'primary'
+      ? setPublicReservationExitPromptPrimaryText
+      : setPublicReservationExitPromptSecondaryText;
+
+    if (!textarea) {
+      setValue((current) => `${current}${token}`);
+      return;
+    }
+
+    const selectionStart = textarea.selectionStart ?? value.length;
+    const selectionEnd = textarea.selectionEnd ?? value.length;
+    const nextValue = `${value.slice(0, selectionStart)}${token}${value.slice(selectionEnd)}`;
+
+    setValue(nextValue);
+
+    requestAnimationFrame(() => {
+      const cursor = selectionStart + token.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
   };
 
   const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1257,6 +1424,203 @@ export default function CompanySettings() {
                     Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
                   </p>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <Info className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Texto do modal de recuperação</CardTitle>
+                  <CardDescription>
+                    Personalize os dois blocos de texto do modal que aparece ao tentar sair da reserva depois de escolher data e horário.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Label htmlFor="public-reservation-exit-primary-text" className="text-base font-semibold">
+                        Texto de apoio
+                      </Label>
+                      <Select
+                        value={publicReservationExitPromptPrimaryTextSize}
+                        onValueChange={(value) => setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
+                      >
+                        <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de apoio">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                        onClick={() => insertPublicReservationExitPromptToken('primary', '{empresa}')}
+                      >
+                        Empresa
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'b')}
+                      >
+                        B
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'u')}
+                      >
+                        U
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'bu')}
+                      >
+                        B+U
+                      </Button>
+                    </div>
+
+                    <Textarea
+                      id="public-reservation-exit-primary-text"
+                      ref={publicReservationExitPromptPrimaryTextRef}
+                      value={publicReservationExitPromptPrimaryText}
+                      onChange={(event) => setPublicReservationExitPromptPrimaryText(event.target.value)}
+                      rows={4}
+                      className={settingsTextAreaClassName}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Label htmlFor="public-reservation-exit-secondary-text" className="text-base font-semibold">
+                        Texto de fechamento
+                      </Label>
+                      <Select
+                        value={publicReservationExitPromptSecondaryTextSize}
+                        onValueChange={(value) => setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(value, DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE))}
+                      >
+                        <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de fechamento">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                        onClick={() => insertPublicReservationExitPromptToken('secondary', '{empresa}')}
+                      >
+                        Empresa
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'b')}
+                      >
+                        B
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'u')}
+                      >
+                        U
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'bu')}
+                      >
+                        B+U
+                      </Button>
+                    </div>
+
+                    <Textarea
+                      id="public-reservation-exit-secondary-text"
+                      ref={publicReservationExitPromptSecondaryTextRef}
+                      value={publicReservationExitPromptSecondaryText}
+                      onChange={(event) => setPublicReservationExitPromptSecondaryText(event.target.value)}
+                      rows={3}
+                      className={settingsTextAreaClassName}
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 px-4 py-3">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.55rem] border border-primary/25 bg-[linear-gradient(180deg,#fffdfa_0%,#fff8f0_100%)] p-4 shadow-[0_18px_36px_rgba(86,52,20,0.08)]">
+                  <div className="space-y-5 rounded-[1.2rem] border border-primary/18 bg-white/92 px-5 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                    <div className="space-y-4">
+                      <h3 className="font-serif text-[clamp(1.22rem,4vw,1.72rem)] font-semibold leading-[1.02] tracking-[-0.03em] text-foreground">
+                        <span className="block whitespace-nowrap">Tem certeza que quer</span>
+                        <span className="mt-1 block text-primary">parar por aqui?</span>
+                      </h3>
+
+                      <div className="space-y-3">
+                        {previewReservationExitPromptPrimaryText.trim() && (
+                          <p className={getPublicReservationExitPromptTextClassName('primary', previewReservationExitPromptPrimaryTextSize)}>
+                            {renderPublicReservationExitPromptText(previewReservationExitPromptPrimaryText, previewCompanyName, 'foreground')}
+                          </p>
+                        )}
+
+                        {previewReservationExitPromptSecondaryText.trim() && (
+                          <p className={getPublicReservationExitPromptTextClassName('secondary', previewReservationExitPromptSecondaryTextSize)}>
+                            {renderPublicReservationExitPromptText(previewReservationExitPromptSecondaryText, previewCompanyName)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <div className="flex h-[3.15rem] items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-primary-foreground shadow-[0_16px_28px_rgba(201,129,58,0.22)]">
+                        Quero garantir minha vaga
+                      </div>
+                      <p className="text-sm font-medium text-foreground/60 underline decoration-foreground/35 underline-offset-4">
+                        Sair mesmo assim
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-dashed border-primary/18 bg-primary/5 px-3 py-2">
+                      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary/80">
+                        Prévia
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

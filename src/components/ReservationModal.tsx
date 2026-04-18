@@ -15,6 +15,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
+import {
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+  DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+  getPublicReservationExitPromptTextClassName,
+  getPublicReservationExitPromptTextValue,
+  normalizePublicReservationExitPromptTextSize,
+  renderPublicReservationExitPromptText,
+} from '@/lib/publicReservationExitPrompt';
 import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
 import {
@@ -48,6 +58,10 @@ interface ReservationModalProps {
   getTrackingSnapshot?: () => Promise<TrackingSnapshot>;
   clearTrackingJourney?: () => void;
   exitRecoveryEnabled?: boolean;
+  exitRecoveryPrimaryText?: string | null;
+  exitRecoveryPrimaryTextSize?: string | null;
+  exitRecoverySecondaryText?: string | null;
+  exitRecoverySecondaryTextSize?: string | null;
 }
 
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
@@ -161,6 +175,10 @@ export default function ReservationModal({
   getTrackingSnapshot,
   clearTrackingJourney,
   exitRecoveryEnabled = false,
+  exitRecoveryPrimaryText,
+  exitRecoveryPrimaryTextSize,
+  exitRecoverySecondaryText,
+  exitRecoverySecondaryTextSize,
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
@@ -187,6 +205,24 @@ export default function ReservationModal({
   const lastPrefillLookupRef = useRef('');
   const whatsappDigits = normalizePhone(form.whatsapp);
   const customerFoundForCurrentPhone = !!prefilledPhoneDigits && prefilledPhoneDigits === whatsappDigits;
+  const resolvedExitRecoveryPrimaryText = getPublicReservationExitPromptTextValue(
+    exitRecoveryPrimaryText,
+    DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+  );
+  const resolvedExitRecoveryPrimaryTextSize = normalizePublicReservationExitPromptTextSize(
+    exitRecoveryPrimaryTextSize,
+    DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+  );
+  const resolvedExitRecoverySecondaryText = getPublicReservationExitPromptTextValue(
+    exitRecoverySecondaryText,
+    DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+  );
+  const resolvedExitRecoverySecondaryTextSize = normalizePublicReservationExitPromptTextSize(
+    exitRecoverySecondaryTextSize,
+    DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+  );
+  const hasExitRecoveryPrimaryText = resolvedExitRecoveryPrimaryText.trim().length > 0;
+  const hasExitRecoverySecondaryText = resolvedExitRecoverySecondaryText.trim().length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -893,12 +929,18 @@ export default function ReservationModal({
                   <span className="block whitespace-nowrap">Tem certeza que quer</span>
                   <span className="mt-1 block text-primary">parar por aqui?</span>
                 </h2>
-                <p className="mx-auto max-w-[27rem] text-[0.97rem] leading-7 text-muted-foreground sm:text-[1.01rem]">
-                  A experiência de ir ao {companyName} é <span className="font-semibold text-foreground">extraordinária.</span>
-                  <span className="mt-4 block font-serif text-[1.32rem] italic leading-[1.4] text-primary sm:text-[1.55rem]">
-                    Todo mundo que foi ficou <span className="font-semibold underline decoration-primary/35 underline-offset-[0.18em]">maravilhado.</span>
-                  </span>
-                </p>
+                <div className="mx-auto max-w-[27rem] space-y-4">
+                  {hasExitRecoveryPrimaryText && (
+                    <p className={getPublicReservationExitPromptTextClassName('primary', resolvedExitRecoveryPrimaryTextSize)}>
+                      {renderPublicReservationExitPromptText(resolvedExitRecoveryPrimaryText, companyName, 'foreground')}
+                    </p>
+                  )}
+                  {hasExitRecoverySecondaryText && (
+                    <p className={getPublicReservationExitPromptTextClassName('secondary', resolvedExitRecoverySecondaryTextSize)}>
+                      {renderPublicReservationExitPromptText(resolvedExitRecoverySecondaryText, companyName)}
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="w-full space-y-2.5">
@@ -913,7 +955,7 @@ export default function ReservationModal({
                 <Button
                   type="button"
                   variant="ghost"
-                  className="w-full text-sm font-medium text-foreground/60 transition-colors duration-150 hover:bg-transparent hover:text-foreground"
+                  className="w-full text-sm font-medium text-foreground/60 underline decoration-foreground/35 underline-offset-4 transition-colors duration-150 hover:bg-transparent hover:text-foreground hover:decoration-foreground"
                   onClick={closeImmediately}
                 >
                   Sair mesmo assim

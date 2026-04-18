@@ -23,6 +23,10 @@ export interface Company {
   show_public_whatsapp_button?: boolean | null;
   show_public_sticky_reserve_button?: boolean | null;
   show_public_reservation_exit_prompt?: boolean | null;
+  public_reservation_exit_prompt_primary_text?: string | null;
+  public_reservation_exit_prompt_primary_text_size?: string | null;
+  public_reservation_exit_prompt_secondary_text?: string | null;
+  public_reservation_exit_prompt_secondary_text_size?: string | null;
   public_waitlist_enabled?: boolean | null;
   google_maps_url: string | null;
   description: string | null;
