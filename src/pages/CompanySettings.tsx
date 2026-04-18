@@ -1273,22 +1273,25 @@ export default function CompanySettings() {
         </TabsContent>
 
         <TabsContent value="public-page" className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card className={settingsCardClassName}>
-              <CardHeader className="space-y-0 pb-2">
-                <div className="flex items-start gap-3">
-                  <div className={settingsBadgeClassName}>
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg">Duração de cada reserva</CardTitle>
-                    <CardDescription>Intervalo entre os horários disponíveis.</CardDescription>
-                  </div>
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <Clock className="h-5 w-5" />
                 </div>
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Duração</Label>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">1. ⚙️ Configuração da operação</CardTitle>
+                  <CardDescription>Base do sistema que define a duração dos horários e o limite de pessoas por faixa.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="space-y-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
+                  <div className="space-y-1">
+                    <Label className="text-base font-semibold text-foreground">Duração de cada reserva</Label>
+                    <p className="text-sm text-muted-foreground">Intervalo entre os horários disponíveis no fluxo público.</p>
+                  </div>
                   <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
                     <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
                       <SelectValue />
@@ -1303,24 +1306,12 @@ export default function CompanySettings() {
                     </SelectContent>
                   </Select>
                 </div>
-              </CardContent>
-            </Card>
 
-            <Card className={settingsCardClassName}>
-              <CardHeader className="space-y-0 pb-2">
-                <div className="flex items-start gap-3">
-                  <div className={settingsBadgeClassName}>
-                    <Users className="h-5 w-5" />
-                  </div>
+                <div className="space-y-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
                   <div className="space-y-1">
-                    <CardTitle className="text-lg">Capacidade máxima / horário</CardTitle>
-                    <CardDescription>Total de pessoas por horário. 0 = sem limite.</CardDescription>
+                    <Label htmlFor="company-settings-max-guests" className="text-base font-semibold text-foreground">Capacidade máxima / horário</Label>
+                    <p className="text-sm text-muted-foreground">Total de pessoas por horário. Use 0 para trabalhar sem limite.</p>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="company-settings-max-guests" className="text-sm text-muted-foreground">Pessoas</Label>
                   <Input
                     id="company-settings-max-guests"
                     name="max_guests_per_slot"
@@ -1332,19 +1323,19 @@ export default function CompanySettings() {
                     placeholder="0"
                   />
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
                 <div className={settingsBadgeClassName}>
-                  <Megaphone className="h-5 w-5" />
+                  <MessageCircle className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Botões e acessos</CardTitle>
-                  <CardDescription>Controle os elementos de ação e os fluxos públicos da unidade.</CardDescription>
+                  <CardTitle className="text-lg">2. 🔘 Ações e acessos do usuário</CardTitle>
+                  <CardDescription>Controles dos botões públicos e do acesso direto à fila de espera.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -1374,21 +1365,6 @@ export default function CompanySettings() {
                   checked={showPublicStickyReserveButton}
                   onCheckedChange={setShowPublicStickyReserveButton}
                   aria-label="Ativar botão sticky reservar agora"
-                />
-              </div>
-
-              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-1">
-                  <Label className="text-base font-semibold">Confirmação ao sair da reserva</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Se a pessoa já tiver escolhido data e horário, mostramos uma tela de recuperação antes de fechar o modal.
-                  </p>
-                  <p className="text-xs text-muted-foreground">Não aparece se a pessoa ainda não tiver selecionado o horário.</p>
-                </div>
-                <Switch
-                  checked={showPublicReservationExitPrompt}
-                  onCheckedChange={setShowPublicReservationExitPrompt}
-                  aria-label="Ativar confirmação ao sair do modal de reserva"
                 />
               </div>
 
@@ -1435,189 +1411,211 @@ export default function CompanySettings() {
                   <Info className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Texto do modal de recuperação</CardTitle>
-                  <CardDescription>
-                    Personalize os dois blocos de texto do modal que aparece ao tentar sair da reserva depois de escolher data e horário.
-                  </CardDescription>
+                  <CardTitle className="text-lg">3. 🧭 Proteções de fluxo</CardTitle>
+                  <CardDescription>Recupera a pessoa antes de fechar a reserva quando ela já escolheu data e horário.</CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="pt-2">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <Label htmlFor="public-reservation-exit-primary-text" className="text-base font-semibold">
-                        Texto de apoio
-                      </Label>
-                      <Select
-                        value={publicReservationExitPromptPrimaryTextSize}
-                        onValueChange={(value) => setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
-                      >
-                        <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de apoio">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+            <CardContent className="space-y-4 pt-2">
+              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Ativar recuperação ao sair</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Se a pessoa já tiver escolhido data e horário, mostramos uma tela de recuperação antes de fechar o modal.
+                  </p>
+                  <p className="text-xs text-muted-foreground">Não aparece se a pessoa ainda não tiver selecionado o horário.</p>
+                </div>
+                <Switch
+                  checked={showPublicReservationExitPrompt}
+                  onCheckedChange={setShowPublicReservationExitPrompt}
+                  aria-label="Ativar confirmação ao sair do modal de reserva"
+                />
+              </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                        onClick={() => insertPublicReservationExitPromptToken('primary', '{empresa}')}
-                      >
-                        Empresa
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'b')}
-                      >
-                        B
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'u')}
-                      >
-                        U
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                        onClick={() => wrapPublicReservationExitPromptSelection('primary', 'bu')}
-                      >
-                        B+U
-                      </Button>
-                    </div>
-
-                    <Textarea
-                      id="public-reservation-exit-primary-text"
-                      ref={publicReservationExitPromptPrimaryTextRef}
-                      value={publicReservationExitPromptPrimaryText}
-                      onChange={(event) => setPublicReservationExitPromptPrimaryText(event.target.value)}
-                      rows={4}
-                      className={settingsTextAreaClassName}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <Label htmlFor="public-reservation-exit-secondary-text" className="text-base font-semibold">
-                        Texto de fechamento
-                      </Label>
-                      <Select
-                        value={publicReservationExitPromptSecondaryTextSize}
-                        onValueChange={(value) => setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(value, DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE))}
-                      >
-                        <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de fechamento">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                        onClick={() => insertPublicReservationExitPromptToken('secondary', '{empresa}')}
-                      >
-                        Empresa
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'b')}
-                      >
-                        B
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'u')}
-                      >
-                        U
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                        onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'bu')}
-                      >
-                        B+U
-                      </Button>
-                    </div>
-
-                    <Textarea
-                      id="public-reservation-exit-secondary-text"
-                      ref={publicReservationExitPromptSecondaryTextRef}
-                      value={publicReservationExitPromptSecondaryText}
-                      onChange={(event) => setPublicReservationExitPromptSecondaryText(event.target.value)}
-                      rows={3}
-                      className={settingsTextAreaClassName}
-                    />
-                  </div>
-
-                  <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 px-4 py-3">
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER}
-                    </p>
-                  </div>
+              <div className="space-y-5 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[linear-gradient(180deg,rgba(252,248,243,0.9)_0%,rgba(255,255,255,0.96)_100%)] p-4">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Modal de recuperação</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Edite os textos do modal e confira a prévia visual antes de salvar.
+                  </p>
                 </div>
 
-                <div className="rounded-[1.55rem] border border-primary/25 bg-[linear-gradient(180deg,#fffdfa_0%,#fff8f0_100%)] p-4 shadow-[0_18px_36px_rgba(86,52,20,0.08)]">
-                  <div className="space-y-5 rounded-[1.2rem] border border-primary/18 bg-white/92 px-5 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-                    <div className="space-y-4">
-                      <h3 className="font-serif text-[clamp(1.22rem,4vw,1.72rem)] font-semibold leading-[1.02] tracking-[-0.03em] text-foreground">
-                        <span className="block whitespace-nowrap">Tem certeza que quer</span>
-                        <span className="mt-1 block text-primary">parar por aqui?</span>
-                      </h3>
-
-                      <div className="space-y-3">
-                        {previewReservationExitPromptPrimaryText.trim() && (
-                          <p className={getPublicReservationExitPromptTextClassName('primary', previewReservationExitPromptPrimaryTextSize)}>
-                            {renderPublicReservationExitPromptText(previewReservationExitPromptPrimaryText, previewCompanyName, 'foreground')}
-                          </p>
-                        )}
-
-                        {previewReservationExitPromptSecondaryText.trim() && (
-                          <p className={getPublicReservationExitPromptTextClassName('secondary', previewReservationExitPromptSecondaryTextSize)}>
-                            {renderPublicReservationExitPromptText(previewReservationExitPromptSecondaryText, previewCompanyName)}
-                          </p>
-                        )}
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
+                  <div className="space-y-5">
+                    <div className="space-y-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <Label htmlFor="public-reservation-exit-primary-text" className="text-base font-semibold">
+                          Texto de apoio
+                        </Label>
+                        <Select
+                          value={publicReservationExitPromptPrimaryTextSize}
+                          onValueChange={(value) => setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
+                        >
+                          <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de apoio">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                          onClick={() => insertPublicReservationExitPromptToken('primary', '{empresa}')}
+                        >
+                          Empresa
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'b')}
+                        >
+                          B
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'u')}
+                        >
+                          U
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'bu')}
+                        >
+                          B+U
+                        </Button>
+                      </div>
+
+                      <Textarea
+                        id="public-reservation-exit-primary-text"
+                        ref={publicReservationExitPromptPrimaryTextRef}
+                        value={publicReservationExitPromptPrimaryText}
+                        onChange={(event) => setPublicReservationExitPromptPrimaryText(event.target.value)}
+                        rows={4}
+                        className={settingsTextAreaClassName}
+                      />
                     </div>
 
-                    <div className="space-y-2.5">
-                      <div className="flex h-[3.15rem] items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-primary-foreground shadow-[0_16px_28px_rgba(201,129,58,0.22)]">
-                        Quero garantir minha vaga
+                    <div className="space-y-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <Label htmlFor="public-reservation-exit-secondary-text" className="text-base font-semibold">
+                          Texto de fechamento
+                        </Label>
+                        <Select
+                          value={publicReservationExitPromptSecondaryTextSize}
+                          onValueChange={(value) => setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(value, DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE))}
+                        >
+                          <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de fechamento">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                      <p className="text-sm font-medium text-foreground/60 underline decoration-foreground/35 underline-offset-4">
-                        Sair mesmo assim
-                      </p>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                          onClick={() => insertPublicReservationExitPromptToken('secondary', '{empresa}')}
+                        >
+                          Empresa
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
+                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'b')}
+                        >
+                          B
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'u')}
+                        >
+                          U
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
+                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'bu')}
+                        >
+                          B+U
+                        </Button>
+                      </div>
+
+                      <Textarea
+                        id="public-reservation-exit-secondary-text"
+                        ref={publicReservationExitPromptSecondaryTextRef}
+                        value={publicReservationExitPromptSecondaryText}
+                        onChange={(event) => setPublicReservationExitPromptSecondaryText(event.target.value)}
+                        rows={3}
+                        className={settingsTextAreaClassName}
+                      />
                     </div>
 
-                    <div className="rounded-xl border border-dashed border-primary/18 bg-primary/5 px-3 py-2">
-                      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary/80">
-                        Prévia
+                    <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 px-4 py-3">
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER}
                       </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[1.55rem] border border-primary/25 bg-[linear-gradient(180deg,#fffdfa_0%,#fff8f0_100%)] p-4 shadow-[0_18px_36px_rgba(86,52,20,0.08)]">
+                    <div className="space-y-5 rounded-[1.2rem] border border-primary/18 bg-white/92 px-5 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                      <div className="space-y-4">
+                        <h3 className="font-serif text-[clamp(1.22rem,4vw,1.72rem)] font-semibold leading-[1.02] tracking-[-0.03em] text-foreground">
+                          <span className="block whitespace-nowrap">Tem certeza que quer</span>
+                          <span className="mt-1 block text-primary">parar por aqui?</span>
+                        </h3>
+
+                        <div className="space-y-3">
+                          {previewReservationExitPromptPrimaryText.trim() && (
+                            <p className={getPublicReservationExitPromptTextClassName('primary', previewReservationExitPromptPrimaryTextSize)}>
+                              {renderPublicReservationExitPromptText(previewReservationExitPromptPrimaryText, previewCompanyName, 'foreground')}
+                            </p>
+                          )}
+
+                          {previewReservationExitPromptSecondaryText.trim() && (
+                            <p className={getPublicReservationExitPromptTextClassName('secondary', previewReservationExitPromptSecondaryTextSize)}>
+                              {renderPublicReservationExitPromptText(previewReservationExitPromptSecondaryText, previewCompanyName)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <div className="flex h-[3.15rem] items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-primary-foreground shadow-[0_16px_28px_rgba(201,129,58,0.22)]">
+                          Quero garantir minha vaga
+                        </div>
+                        <p className="text-sm font-medium text-foreground/60 underline decoration-foreground/35 underline-offset-4">
+                          Sair mesmo assim
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border border-dashed border-primary/18 bg-primary/5 px-3 py-2">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary/80">
+                          Prévia
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1632,8 +1630,8 @@ export default function CompanySettings() {
                   <Megaphone className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-lg">Aviso na página pública</CardTitle>
-                  <CardDescription>Exibe um modal temporário para visitantes enquanto o aviso estiver ativo.</CardDescription>
+                  <CardTitle className="text-lg">4. 📢 Comunicação ativa</CardTitle>
+                  <CardDescription>Aviso temporário exibido como modal para visitantes enquanto estiver ativo.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -1643,7 +1641,7 @@ export default function CompanySettings() {
                   <div>
                     <Label className="flex items-center gap-1.5 text-base font-semibold">
                       <Megaphone className="h-4 w-4 text-primary" />
-                      Aviso ativo
+                      Aviso na página pública
                     </Label>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Apenas um aviso fica disponível por empresa e ele some automaticamente ao expirar.
@@ -1660,9 +1658,9 @@ export default function CompanySettings() {
                   </div>
                 </div>
 
-                <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_16rem]">
                   <div className="space-y-2">
-                    <Label htmlFor="company-settings-notice-text">Texto do aviso</Label>
+                    <Label htmlFor="company-settings-notice-text">Texto</Label>
                     <Textarea
                       id="company-settings-notice-text"
                       value={noticeText}
@@ -1678,7 +1676,7 @@ export default function CompanySettings() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="company-settings-notice-active-until">Ativo até</Label>
+                    <Label htmlFor="company-settings-notice-active-until">Data de expiração</Label>
                     <Input
                       id="company-settings-notice-active-until"
                       type="datetime-local"
@@ -1695,7 +1693,7 @@ export default function CompanySettings() {
                 </div>
 
                 <div className="space-y-3">
-                  <Label>Imagem do aviso</Label>
+                  <Label>Imagem</Label>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative">
                       <input
