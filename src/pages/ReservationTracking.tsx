@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Loader2, MapPin, XCircle } from 'lucide-react';
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
+import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { isValidCompanySlug } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
@@ -190,6 +191,11 @@ export default function ReservationTracking() {
   });
 
   const isLoading = companyLoading || entryLoading;
+
+  useEffect(() => {
+    syncPublicCompanyIcons(company?.logo_url);
+    return () => removePublicCompanyIcons();
+  }, [company?.logo_url]);
 
   if (isLoading) {
     return (

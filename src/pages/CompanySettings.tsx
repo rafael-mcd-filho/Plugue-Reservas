@@ -12,7 +12,6 @@ import {
   Loader2,
   MessageCircle,
   Phone,
-  CalendarOff,
   Trash2,
   Upload,
   Megaphone,
@@ -41,7 +40,7 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { getGoogleMapsEmbedUrl, normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
-import { formatBrazilPhone, getPhoneValidationMessage } from '@/lib/validation';
+import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 
 interface OpeningHour {
   day: string;
@@ -85,13 +84,13 @@ const DEFAULT_PAYMENTS: Record<string, boolean> = {
   vale_refeicao: false,
 };
 
-const SETTINGS_TABS = ['hours', 'payments', 'info', 'location', 'blocked'] as const;
+const SETTINGS_TABS = ['info', 'location', 'hours', 'payments', 'public-page'] as const;
 const SETTINGS_TAB_ITEMS = [
   { value: 'hours', label: 'Horários', icon: Clock },
   { value: 'payments', label: 'Pagamentos', icon: CreditCard },
   { value: 'info', label: 'Informações', icon: Info },
   { value: 'location', label: 'Localização', icon: MapPin },
-  { value: 'blocked', label: 'Bloqueios', icon: CalendarOff },
+  { value: 'public-page', label: 'Página Pública', icon: Megaphone },
 ] as const;
 const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
 const settingsFieldClassName = 'h-10 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
@@ -101,11 +100,28 @@ const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 function isSettingsTab(value: string | null): value is SettingsTab {
   return value !== null && SETTINGS_TABS.includes(value as SettingsTab);
+}
+
+function normalizeSettingsTab(value: string | null): SettingsTab | null {
+  if (isSettingsTab(value)) return value;
+  if (value === 'blocked') return 'hours';
+  return null;
+}
+
+function isMissingCompanySettingsColumnError(error: unknown, columnName: string) {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+  const message = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message ?? '') : '';
+
+  return (code === '42703' || message.toLowerCase().includes('does not exist'))
+    && message.includes(columnName);
 }
 
 function slugify(text: string) {
@@ -136,19 +152,53 @@ export default function CompanySettings() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { data: company, isLoading } = useQuery({
+  const { data: company, isLoading, error: companyError } = useQuery({
     queryKey: ['company-settings', companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const primaryResult = await supabase
         .from('companies' as any)
-        .select('description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot')
+        .select(COMPANY_SETTINGS_SELECT)
         .eq('id', companyId)
         .maybeSingle();
 
-      if (error) throw error;
-      return data as Company | null;
+      if (primaryResult.error && isMissingCompanySettingsColumnError(primaryResult.error, 'show_public_reservation_exit_prompt')) {
+        const fallbackResult = await supabase
+          .from('companies' as any)
+          .select(COMPANY_SETTINGS_SELECT_WITH_STICKY)
+          .eq('id', companyId)
+          .maybeSingle();
+
+        if (fallbackResult.error && isMissingCompanySettingsColumnError(fallbackResult.error, 'show_public_sticky_reserve_button')) {
+          const legacyResult = await supabase
+            .from('companies' as any)
+            .select(COMPANY_SETTINGS_SELECT_LEGACY)
+            .eq('id', companyId)
+            .maybeSingle();
+
+          if (legacyResult.error) throw legacyResult.error;
+          return legacyResult.data as Company | null;
+        }
+
+        if (fallbackResult.error) throw fallbackResult.error;
+        return fallbackResult.data as Company | null;
+      }
+
+      if (primaryResult.error && isMissingCompanySettingsColumnError(primaryResult.error, 'show_public_sticky_reserve_button')) {
+        const legacyResult = await supabase
+          .from('companies' as any)
+          .select(COMPANY_SETTINGS_SELECT_LEGACY)
+          .eq('id', companyId)
+          .maybeSingle();
+
+        if (legacyResult.error) throw legacyResult.error;
+        return legacyResult.data as Company | null;
+      }
+
+      if (primaryResult.error) throw primaryResult.error;
+      return primaryResult.data as Company | null;
     },
     enabled: !!companyId,
+    retry: false,
   });
 
   const { data: featureFlags } = useCompanyFeatureFlags(companyId);
@@ -177,6 +227,8 @@ export default function CompanySettings() {
   const [instagram, setInstagram] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [showPublicWhatsappButton, setShowPublicWhatsappButton] = useState('show');
+  const [showPublicStickyReserveButton, setShowPublicStickyReserveButton] = useState(true);
+  const [showPublicReservationExitPrompt, setShowPublicReservationExitPrompt] = useState(false);
   const [publicWaitlistEnabled, setPublicWaitlistEnabled] = useState(false);
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
@@ -202,9 +254,11 @@ export default function CompanySettings() {
     setLogoUrl(company.logo_url || '');
     setAddress(company.address || '');
     setPhone(formatBrazilPhone(company.phone));
-    setInstagram(company.instagram || '');
+    setInstagram(normalizeInstagramHandle(company.instagram));
     setWhatsapp(formatBrazilPhone(company.whatsapp));
     setShowPublicWhatsappButton((company.show_public_whatsapp_button ?? true) ? 'show' : 'hide');
+    setShowPublicStickyReserveButton((company as any).show_public_sticky_reserve_button ?? true);
+    setShowPublicReservationExitPrompt((company as any).show_public_reservation_exit_prompt ?? false);
     setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
     setGoogleMapsUrl(company.google_maps_url || '');
     setReservationDuration((company as any).reservation_duration ?? 30);
@@ -276,29 +330,62 @@ export default function CompanySettings() {
         }
       }
 
-      const { data: updatedCompany, error } = await supabase
+      const baseCompanyUpdate = {
+        opening_hours: hours,
+        payment_methods: payments,
+        description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
+        logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
+        address,
+        phone: formatBrazilPhone(phone),
+        instagram: normalizeInstagramHandle(instagram) || null,
+        whatsapp: publicCustomizationLocked ? (company.whatsapp || '') : formatBrazilPhone(whatsapp),
+        show_public_whatsapp_button: publicCustomizationLocked
+          ? (company.show_public_whatsapp_button ?? true)
+          : showPublicWhatsappButton === 'show',
+        public_waitlist_enabled: publicWaitlistEnabled,
+        google_maps_url: normalizedMapsEmbedUrl || null,
+        reservation_duration: reservationDuration,
+        max_guests_per_slot: maxGuestsPerSlot,
+        updated_at: new Date().toISOString(),
+      } as any;
+
+      let { data: updatedCompany, error } = await supabase
         .from('companies' as any)
         .update({
-          opening_hours: hours,
-          payment_methods: payments,
-          description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
-          logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
-          address,
-          phone: formatBrazilPhone(phone),
-          instagram,
-          whatsapp: publicCustomizationLocked ? (company.whatsapp || '') : formatBrazilPhone(whatsapp),
-          show_public_whatsapp_button: publicCustomizationLocked
-            ? (company.show_public_whatsapp_button ?? true)
-            : showPublicWhatsappButton === 'show',
-          public_waitlist_enabled: publicWaitlistEnabled,
-          google_maps_url: normalizedMapsEmbedUrl || null,
-          reservation_duration: reservationDuration,
-          max_guests_per_slot: maxGuestsPerSlot,
-          updated_at: new Date().toISOString(),
+          ...baseCompanyUpdate,
+          show_public_sticky_reserve_button: showPublicStickyReserveButton,
+          show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
         } as any)
         .eq('id', companyId)
         .select('id')
         .maybeSingle();
+
+      if (error && isMissingCompanySettingsColumnError(error, 'show_public_reservation_exit_prompt')) {
+        const fallbackResult = await supabase
+          .from('companies' as any)
+          .update({
+            ...baseCompanyUpdate,
+            show_public_sticky_reserve_button: showPublicStickyReserveButton,
+          } as any)
+          .eq('id', companyId)
+          .select('id')
+          .maybeSingle();
+
+        updatedCompany = fallbackResult.data;
+        error = fallbackResult.error;
+      }
+
+      if (error && isMissingCompanySettingsColumnError(error, 'show_public_sticky_reserve_button')) {
+        const fallbackResult = await supabase
+          .from('companies' as any)
+          .update(baseCompanyUpdate)
+          .eq('id', companyId)
+          .select('id')
+          .maybeSingle();
+
+        updatedCompany = fallbackResult.data;
+        error = fallbackResult.error;
+      }
 
       if (error) throw error;
       if (!updatedCompany) throw new Error('Sem permissão para salvar as configurações desta unidade.');
@@ -339,9 +426,7 @@ export default function CompanySettings() {
   const publicWaitlistUrl = typeof window === 'undefined'
     ? `/${slug}/fila`
     : `${window.location.origin}/${slug}/fila`;
-  const activeTab: SettingsTab = isSettingsTab(searchParams.get('tab'))
-    ? searchParams.get('tab')!
-    : 'hours';
+  const activeTab: SettingsTab = normalizeSettingsTab(searchParams.get('tab')) ?? 'info';
 
   const handleTabChange = (value: string) => {
     if (!isSettingsTab(value)) return;
@@ -349,7 +434,7 @@ export default function CompanySettings() {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
 
-      if (value === 'hours') {
+      if (value === 'info') {
         next.delete('tab');
       } else {
         next.set('tab', value);
@@ -475,6 +560,19 @@ export default function CompanySettings() {
     );
   }
 
+  if (companyError) {
+    return (
+      <Card className="rounded-xl border-destructive/30">
+        <CardHeader>
+          <CardTitle>Erro ao carregar configurações</CardTitle>
+          <CardDescription>
+            {companyError instanceof Error ? companyError.message : 'Não foi possível carregar os dados desta unidade.'}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -506,7 +604,9 @@ export default function CompanySettings() {
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <div className="overflow-x-auto pb-1">
           <TabsList className="h-auto w-max min-w-full justify-start rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-1 md:min-w-0">
-            {SETTINGS_TAB_ITEMS.map((tab) => {
+            {SETTINGS_TABS.map((tabValue) => {
+              const tab = SETTINGS_TAB_ITEMS.find((item) => item.value === tabValue);
+              if (!tab) return null;
               const Icon = tab.icon;
 
               return (
@@ -575,7 +675,10 @@ export default function CompanySettings() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <BlockedDatesTab companyId={companyId} />
+
+          {false && (
+            <div className="grid gap-4 xl:grid-cols-2">
             <Card className={settingsCardClassName}>
               <CardHeader className="space-y-0 pb-2">
                 <div className="flex items-start gap-3">
@@ -636,7 +739,8 @@ export default function CompanySettings() {
                 </div>
               </CardContent>
             </Card>
-          </div>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="payments">
@@ -696,7 +800,7 @@ export default function CompanySettings() {
                 </div>
                 <div className="space-y-1">
                   <CardTitle className="text-lg">Informações da empresa</CardTitle>
-                  <CardDescription>Dados exibidos na página pública e no link oculto da fila.</CardDescription>
+                  <CardDescription>Cadastro, identidade visual e canais da empresa.</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -794,11 +898,13 @@ export default function CompanySettings() {
                     name="instagram"
                     value={instagram}
                     onChange={(event) => setInstagram(event.target.value)}
-                    placeholder="@restaurante"
+                    onBlur={() => setInstagram((current) => normalizeInstagramHandle(current))}
+                    placeholder="becomagicojoaopessoa"
                     className={settingsFieldClassName}
                     autoComplete="off"
                     spellCheck={false}
                   />
+                  <p className="text-xs text-muted-foreground">Informe só o usuário. O link do Instagram é montado automaticamente.</p>
                 </div>
 
                 <div className={settingsFieldGroupClassName}>
@@ -820,173 +926,463 @@ export default function CompanySettings() {
                   )}
                 </div>
 
-                <div className={settingsFieldGroupClassName}>
-                  <Label className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> Botão do WhatsApp</Label>
-                  <Select value={showPublicWhatsappButton} onValueChange={setShowPublicWhatsappButton} disabled={publicCustomizationLocked}>
-                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar exibição do botão de WhatsApp">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="show">Mostrar botão</SelectItem>
-                      <SelectItem value="hide">Ocultar botão</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
-                  )}
-                  {!publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">Controla se o botão aparece na página pública.</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
-                <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <Label className="flex items-center gap-1.5 text-base font-semibold">
-                        <Users className="h-4 w-4" />
-                        Entrada pública na fila de espera
-                      </Label>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Este link não aparece na página pública. Só entra quem receber a URL direta.
-                      </p>
-                    </div>
-                    <Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />
-                  </div>
-
-                  <div className="flex flex-col gap-3 md:flex-row">
-                    <Input value={publicWaitlistUrl} readOnly className={cn('font-mono text-sm', settingsFieldClassName)} />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 shrink-0 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-4"
-                      onClick={copyPublicWaitlistUrl}
-                    >
-                      <Copy className="h-4 w-4" />
-                      Copiar
-                    </Button>
-                  </div>
-
-                  {!publicWaitlistEnabled && (
-                    <p className="text-xs text-muted-foreground">
-                      Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
-                <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <Label className="flex items-center gap-1.5 text-base font-semibold">
-                        <Megaphone className="h-4 w-4 text-primary" />
-                        Aviso na página pública
-                      </Label>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Abre um modal central para visitantes enquanto estiver ativo. Apenas um aviso fica disponível por empresa.
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
-                      <span className="text-sm font-medium text-muted-foreground">Ativar agora</span>
-                      <Switch
-                        checked={noticeActive}
-                        onCheckedChange={setNoticeActive}
-                        disabled={publicCustomizationLocked}
-                        aria-label="Ativar aviso público"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
-                    <div className="space-y-2">
-                      <Label htmlFor="company-settings-notice-text">Texto do aviso</Label>
-                      <Textarea
-                        id="company-settings-notice-text"
-                        value={noticeText}
-                        onChange={(event) => setNoticeText(event.target.value)}
-                        placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
-                        rows={5}
-                        disabled={publicCustomizationLocked}
-                        className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        O aviso pode ter apenas texto, apenas imagem, ou os dois.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="company-settings-notice-active-until">Ativo até</Label>
-                      <Input
-                        id="company-settings-notice-active-until"
-                        type="datetime-local"
-                        value={noticeActiveUntil}
-                        onChange={(event) => setNoticeActiveUntil(event.target.value)}
-                        disabled={publicCustomizationLocked}
-                        min={toDateTimeLocalValue(new Date().toISOString())}
-                        className={settingsFieldClassName}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Depois desse horário o modal para de aparecer automaticamente.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <Label>Imagem do aviso</Label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="relative">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleNoticeImageUpload}
-                          disabled={publicCustomizationLocked || uploadingNoticeImage}
-                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={publicCustomizationLocked || uploadingNoticeImage}
-                          className="pointer-events-none gap-2 bg-white"
-                        >
-                          {uploadingNoticeImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                          {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
-                        </Button>
-                      </div>
-
-                      {noticeImageUrl && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          disabled={publicCustomizationLocked || uploadingNoticeImage}
-                          onClick={() => setNoticeImageUrl('')}
-                          className="gap-2 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Remover
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
-                      {noticeImageUrl ? (
-                        <img
-                          src={noticeImageUrl}
-                          alt="Prévia do aviso público"
-                          className="max-h-48 w-full rounded-lg object-contain"
-                        />
-                      ) : (
-                        <p className="text-center text-xs text-muted-foreground">Nenhuma imagem enviada para o aviso.</p>
-                      )}
-                    </div>
-
+                {false && (
+                  <div className={settingsFieldGroupClassName}>
+                    <Label className={settingsLabelClassName}><MessageCircle className="h-4 w-4" /> Botão do WhatsApp</Label>
+                    <Select value={showPublicWhatsappButton} onValueChange={setShowPublicWhatsappButton} disabled={publicCustomizationLocked}>
+                      <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar exibição do botão de WhatsApp">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="show">Mostrar botão</SelectItem>
+                        <SelectItem value="hide">Ocultar botão</SelectItem>
+                      </SelectContent>
+                    </Select>
                     {publicCustomizationLocked && (
+                      <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
+                    )}
+                    {!publicCustomizationLocked && (
+                      <p className="text-xs text-muted-foreground">Controla se o botão aparece na página pública.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {false && (
+                <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
+                  <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <Label className="flex items-center gap-1.5 text-base font-semibold">
+                          <Users className="h-4 w-4" />
+                          Entrada pública na fila de espera
+                        </Label>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Este link não aparece na página pública. Só entra quem receber a URL direta.
+                        </p>
+                      </div>
+                      <Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />
+                    </div>
+
+                    <div className="flex flex-col gap-3 md:flex-row">
+                      <Input value={publicWaitlistUrl} readOnly className={cn('font-mono text-sm', settingsFieldClassName)} />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-4"
+                        onClick={copyPublicWaitlistUrl}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copiar
+                      </Button>
+                    </div>
+
+                    {!publicWaitlistEnabled && (
                       <p className="text-xs text-muted-foreground">
-                        Avisos da página pública ficam bloqueados quando a página pública customizada está desativada.
+                        Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
                       </p>
                     )}
                   </div>
+                </div>
+              )}
+
+              {false && (
+                <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
+                  <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <Label className="flex items-center gap-1.5 text-base font-semibold">
+                          <Megaphone className="h-4 w-4 text-primary" />
+                          Aviso na página pública
+                        </Label>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Abre um modal central para visitantes enquanto estiver ativo. Apenas um aviso fica disponível por empresa.
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
+                        <span className="text-sm font-medium text-muted-foreground">Ativar agora</span>
+                        <Switch
+                          checked={noticeActive}
+                          onCheckedChange={setNoticeActive}
+                          disabled={publicCustomizationLocked}
+                          aria-label="Ativar aviso público"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+                      <div className="space-y-2">
+                        <Label htmlFor="company-settings-notice-text">Texto do aviso</Label>
+                        <Textarea
+                          id="company-settings-notice-text"
+                          value={noticeText}
+                          onChange={(event) => setNoticeText(event.target.value)}
+                          placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
+                          rows={5}
+                          disabled={publicCustomizationLocked}
+                          className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          O aviso pode ter apenas texto, apenas imagem, ou os dois.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="company-settings-notice-active-until">Ativo até</Label>
+                        <Input
+                          id="company-settings-notice-active-until"
+                          type="datetime-local"
+                          value={noticeActiveUntil}
+                          onChange={(event) => setNoticeActiveUntil(event.target.value)}
+                          disabled={publicCustomizationLocked}
+                          min={toDateTimeLocalValue(new Date().toISOString())}
+                          className={settingsFieldClassName}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Depois desse horário o modal para de aparecer automaticamente.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <Label>Imagem do aviso</Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleNoticeImageUpload}
+                            disabled={publicCustomizationLocked || uploadingNoticeImage}
+                            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={publicCustomizationLocked || uploadingNoticeImage}
+                            className="pointer-events-none gap-2 bg-white"
+                          >
+                            {uploadingNoticeImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                            {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
+                          </Button>
+                        </div>
+
+                        {noticeImageUrl && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={publicCustomizationLocked || uploadingNoticeImage}
+                            onClick={() => setNoticeImageUrl('')}
+                            className="gap-2 text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Remover
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
+                        {noticeImageUrl ? (
+                          <img
+                            src={noticeImageUrl}
+                            alt="Prévia do aviso público"
+                            className="max-h-48 w-full rounded-lg object-contain"
+                          />
+                        ) : (
+                          <p className="text-center text-xs text-muted-foreground">Nenhuma imagem enviada para o aviso.</p>
+                        )}
+                      </div>
+
+                      {publicCustomizationLocked && (
+                        <p className="text-xs text-muted-foreground">
+                          Avisos da página pública ficam bloqueados quando a página pública customizada está desativada.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="public-page" className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className={settingsCardClassName}>
+              <CardHeader className="space-y-0 pb-2">
+                <div className="flex items-start gap-3">
+                  <div className={settingsBadgeClassName}>
+                    <Clock className="h-5 w-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg">Duração de cada reserva</CardTitle>
+                    <CardDescription>Intervalo entre os horários disponíveis.</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Duração</Label>
+                  <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
+                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15 min</SelectItem>
+                      <SelectItem value="30">30 min</SelectItem>
+                      <SelectItem value="45">45 min</SelectItem>
+                      <SelectItem value="60">1 hora</SelectItem>
+                      <SelectItem value="90">1h30</SelectItem>
+                      <SelectItem value="120">2 horas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className={settingsCardClassName}>
+              <CardHeader className="space-y-0 pb-2">
+                <div className="flex items-start gap-3">
+                  <div className={settingsBadgeClassName}>
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg">Capacidade máxima / horário</CardTitle>
+                    <CardDescription>Total de pessoas por horário. 0 = sem limite.</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="company-settings-max-guests" className="text-sm text-muted-foreground">Pessoas</Label>
+                  <Input
+                    id="company-settings-max-guests"
+                    name="max_guests_per_slot"
+                    type="number"
+                    min={0}
+                    value={maxGuestsPerSlot}
+                    onChange={(event) => setMaxGuestsPerSlot(Number(event.target.value))}
+                    className={settingsFieldClassName}
+                    placeholder="0"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <Megaphone className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Botões e acessos</CardTitle>
+                  <CardDescription>Controle os elementos de ação e os fluxos públicos da unidade.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Botão do WhatsApp</Label>
+                  <p className="text-sm text-muted-foreground">Controla se o botão aparece na página pública.</p>
+                  {publicCustomizationLocked && (
+                    <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
+                  )}
+                </div>
+                <Switch
+                  checked={showPublicWhatsappButton === 'show'}
+                  onCheckedChange={(checked) => setShowPublicWhatsappButton(checked ? 'show' : 'hide')}
+                  disabled={publicCustomizationLocked}
+                  aria-label="Ativar botão do WhatsApp na página pública"
+                />
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Botão sticky "Reservar agora"</Label>
+                  <p className="text-sm text-muted-foreground">Aparece fixo no rodapé da versão mobile da página pública.</p>
+                </div>
+                <Switch
+                  checked={showPublicStickyReserveButton}
+                  onCheckedChange={setShowPublicStickyReserveButton}
+                  aria-label="Ativar botão sticky reservar agora"
+                />
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Confirmação ao sair da reserva</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Se a pessoa já tiver escolhido data e horário, mostramos uma tela de recuperação antes de fechar o modal.
+                  </p>
+                  <p className="text-xs text-muted-foreground">Não aparece se a pessoa ainda não tiver selecionado o horário.</p>
+                </div>
+                <Switch
+                  checked={showPublicReservationExitPrompt}
+                  onCheckedChange={setShowPublicReservationExitPrompt}
+                  aria-label="Ativar confirmação ao sair do modal de reserva"
+                />
+              </div>
+
+              <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <Label className="flex items-center gap-1.5 text-base font-semibold">
+                      <Users className="h-4 w-4" />
+                      Entrada pública na fila de espera
+                    </Label>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Este link não aparece na página pública. Só entra quem receber a URL direta.
+                    </p>
+                  </div>
+                  <Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />
+                </div>
+
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <Input value={publicWaitlistUrl} readOnly className={cn('font-mono text-sm', settingsFieldClassName)} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 shrink-0 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-4"
+                    onClick={copyPublicWaitlistUrl}
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copiar
+                  </Button>
+                </div>
+
+                {!publicWaitlistEnabled && (
+                  <p className="text-xs text-muted-foreground">
+                    Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <Megaphone className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Aviso na página pública</CardTitle>
+                  <CardDescription>Exibe um modal temporário para visitantes enquanto o aviso estiver ativo.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <Label className="flex items-center gap-1.5 text-base font-semibold">
+                      <Megaphone className="h-4 w-4 text-primary" />
+                      Aviso ativo
+                    </Label>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Apenas um aviso fica disponível por empresa e ele some automaticamente ao expirar.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
+                    <span className="text-sm font-medium text-muted-foreground">Ativar agora</span>
+                    <Switch
+                      checked={noticeActive}
+                      onCheckedChange={setNoticeActive}
+                      disabled={publicCustomizationLocked}
+                      aria-label="Ativar aviso público"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+                  <div className="space-y-2">
+                    <Label htmlFor="company-settings-notice-text">Texto do aviso</Label>
+                    <Textarea
+                      id="company-settings-notice-text"
+                      value={noticeText}
+                      onChange={(event) => setNoticeText(event.target.value)}
+                      placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
+                      rows={5}
+                      disabled={publicCustomizationLocked}
+                      className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      O aviso pode ter apenas texto, apenas imagem, ou os dois.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-settings-notice-active-until">Ativo até</Label>
+                    <Input
+                      id="company-settings-notice-active-until"
+                      type="datetime-local"
+                      value={noticeActiveUntil}
+                      onChange={(event) => setNoticeActiveUntil(event.target.value)}
+                      disabled={publicCustomizationLocked}
+                      min={toDateTimeLocalValue(new Date().toISOString())}
+                      className={settingsFieldClassName}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Depois desse horário o modal para de aparecer automaticamente.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label>Imagem do aviso</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleNoticeImageUpload}
+                        disabled={publicCustomizationLocked || uploadingNoticeImage}
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={publicCustomizationLocked || uploadingNoticeImage}
+                        className="pointer-events-none gap-2 bg-white"
+                      >
+                        {uploadingNoticeImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                        {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
+                      </Button>
+                    </div>
+
+                    {noticeImageUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={publicCustomizationLocked || uploadingNoticeImage}
+                        onClick={() => setNoticeImageUrl('')}
+                        className="gap-2 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Remover
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
+                    {noticeImageUrl ? (
+                      <img
+                        src={noticeImageUrl}
+                        alt="Prévia do aviso público"
+                        className="max-h-48 w-full rounded-lg object-contain"
+                      />
+                    ) : (
+                      <p className="text-center text-xs text-muted-foreground">Nenhuma imagem enviada para o aviso.</p>
+                    )}
+                  </div>
+
+                  {publicCustomizationLocked && (
+                    <p className="text-xs text-muted-foreground">
+                      Avisos da página pública ficam bloqueados quando a página pública customizada está desativada.
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -1069,9 +1465,6 @@ export default function CompanySettings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="blocked">
-          <BlockedDatesTab companyId={companyId} />
-        </TabsContent>
       </Tabs>
     </div>
   );

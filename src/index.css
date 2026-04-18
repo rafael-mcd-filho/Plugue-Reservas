@@ -176,6 +176,10 @@
     animation: attentionPulse 2.8s ease-in-out infinite;
     will-change: transform, box-shadow;
   }
+  .animate-attention-pulse-fast {
+    animation: attentionPulse 1.9s ease-in-out infinite;
+    will-change: transform, box-shadow;
+  }
 }
 
 /* ─── Keyframes ───────────────────────────────────────────────────────────── */

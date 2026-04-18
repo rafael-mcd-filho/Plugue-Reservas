@@ -21,6 +21,8 @@ export interface Company {
   instagram: string | null;
   whatsapp: string | null;
   show_public_whatsapp_button?: boolean | null;
+  show_public_sticky_reserve_button?: boolean | null;
+  show_public_reservation_exit_prompt?: boolean | null;
   public_waitlist_enabled?: boolean | null;
   google_maps_url: string | null;
   description: string | null;

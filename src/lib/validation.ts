@@ -7,6 +7,7 @@ export const PASSWORD_POLICY_REJECTED_TEXT = 'A senha foi rejeitada pela politic
 export const COMPANY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const BRAZIL_WHATSAPP_PATTERN = /^(55)?[1-9][0-9](?:9?[0-9]{8})$/;
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INSTAGRAM_HANDLE_RESERVED_SEGMENTS = new Set(['p', 'reel', 'reels', 'stories', 'explore']);
 
 export function isValidCompanySlug(value: string | null | undefined) {
   return COMPANY_SLUG_PATTERN.test((value || '').trim());
@@ -73,6 +74,51 @@ export function toBrazilWhatsAppNumber(value: string | null | undefined) {
 
 export function normalizeEmail(value: string | null | undefined) {
   return (value || '').trim().toLowerCase();
+}
+
+export function normalizeInstagramHandle(value: string | null | undefined) {
+  let normalized = (value || '').trim();
+  if (!normalized) return '';
+
+  if (normalized.includes('instagram.com')) {
+    const candidateUrl = /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized.replace(/^\/+/, '')}`;
+
+    try {
+      const pathnameSegments = new URL(candidateUrl).pathname
+        .split('/')
+        .filter(Boolean);
+      const firstSegment = pathnameSegments[0] || '';
+
+      if (INSTAGRAM_HANDLE_RESERVED_SEGMENTS.has(firstSegment.toLowerCase())) {
+        return '';
+      }
+
+      normalized = firstSegment;
+    } catch {
+      normalized = normalized
+        .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+        .replace(/^(www\.)?instagram\.com\//i, '');
+    }
+  }
+
+  normalized = normalized
+    .replace(/^@+/, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/[^a-zA-Z0-9._]/g, '')
+    .slice(0, 30)
+    .toLowerCase();
+
+  return normalized;
+}
+
+export function buildInstagramProfileUrl(value: string | null | undefined) {
+  const handle = normalizeInstagramHandle(value);
+  return handle ? `https://www.instagram.com/${handle}/` : null;
+}
+
+export function formatInstagramHandleLabel(value: string | null | undefined) {
+  const handle = normalizeInstagramHandle(value);
+  return handle ? `@${handle}` : null;
 }
 
 export function isValidEmail(value: string | null | undefined) {

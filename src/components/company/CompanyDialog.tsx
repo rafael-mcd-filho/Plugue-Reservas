@@ -43,6 +43,7 @@ import { normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { toast } from 'sonner';
 import {
+  normalizeInstagramHandle,
   formatBrazilPhone,
   formatCnpj,
   getCnpjValidationMessage,
@@ -196,7 +197,7 @@ function buildFormFromCompany(company: Company): CompanyInsert {
     responsible_name: company.responsible_name || '',
     responsible_email: company.responsible_email || '',
     responsible_phone: formatBrazilPhone(company.responsible_phone),
-    instagram: company.instagram || '',
+    instagram: normalizeInstagramHandle(company.instagram),
     whatsapp: formatBrazilPhone(company.whatsapp),
     google_maps_url: company.google_maps_url || '',
     description: company.description || '',
@@ -436,6 +437,7 @@ export default function CompanyDialog({
       email: normalizeEmail(form.email),
       responsible_email: normalizeEmail(form.responsible_email),
       responsible_phone: formatBrazilPhone(form.responsible_phone),
+      instagram: normalizeInstagramHandle(form.instagram) || null,
       logo_url: publicCustomizationLocked ? (company?.logo_url || '') : (form.logo_url || ''),
       description: publicCustomizationLocked ? (company?.description || '') : toSafeRichTextHtml(form.description || ''),
       whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : formatBrazilPhone(form.whatsapp),
@@ -666,7 +668,12 @@ export default function CompanyDialog({
                         </div>
                         <div>
                           <Label>Instagram</Label>
-                          <Input value={form.instagram || ''} onChange={(event) => setForm((current) => ({ ...current, instagram: event.target.value }))} placeholder="@restaurante" />
+                          <Input
+                            value={form.instagram || ''}
+                            onChange={(event) => setForm((current) => ({ ...current, instagram: event.target.value }))}
+                            onBlur={() => setForm((current) => ({ ...current, instagram: normalizeInstagramHandle(current.instagram) }))}
+                            placeholder="becomagicojoaopessoa"
+                          />
                         </div>
                         <div>
                           <Label>WhatsApp</Label>

@@ -25,12 +25,15 @@ import type { Company } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
 import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import {
+  buildInstagramProfileUrl,
+  formatInstagramHandleLabel,
   formatBrazilPhone,
   isValidCompanySlug,
   normalizeBrazilPhoneDigits,
   toBrazilWhatsAppNumber,
 } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
+import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 
@@ -356,87 +359,6 @@ function removeCanonical() {
   document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.remove();
 }
 
-function upsertPublicCompanyIcon(rel: string, href: string, type?: string) {
-  if (typeof document === 'undefined') return;
-
-  let element = document.head.querySelector<HTMLLinkElement>(`link[data-public-company-icon="${rel}"]`)
-    ?? document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
-  if (!element) {
-    element = document.createElement('link');
-    element.rel = rel;
-    document.head.appendChild(element);
-  }
-
-  if (!element.hasAttribute('data-public-company-icon-original-href') && element.hasAttribute('href')) {
-    element.setAttribute('data-public-company-icon-original-href', element.getAttribute('href') || '');
-  }
-
-  if (!element.hasAttribute('data-public-company-icon-original-type') && element.hasAttribute('type')) {
-    element.setAttribute('data-public-company-icon-original-type', element.getAttribute('type') || '');
-  }
-
-  if (!element.hasAttribute('data-public-company-icon-original-sizes') && element.hasAttribute('sizes')) {
-    element.setAttribute('data-public-company-icon-original-sizes', element.getAttribute('sizes') || '');
-  }
-
-  if (!element.hasAttribute('data-public-company-icon-generated')) {
-    element.setAttribute('data-public-company-icon-generated', element.hasAttribute('href') ? 'false' : 'true');
-  }
-
-  element.setAttribute('data-public-company-icon', rel);
-  element.rel = rel;
-  element.href = href;
-  if (type) {
-    element.type = type;
-  } else {
-    element.removeAttribute('type');
-  }
-
-  if (rel === 'alternate icon') {
-    element.setAttribute('sizes', 'any');
-  }
-}
-
-function removePublicCompanyIcons() {
-  if (typeof document === 'undefined') return;
-  document.head.querySelectorAll<HTMLLinkElement>('link[data-public-company-icon]').forEach((element) => {
-    const wasGenerated = element.getAttribute('data-public-company-icon-generated') === 'true';
-
-    if (wasGenerated) {
-      element.remove();
-      return;
-    }
-
-    const originalHref = element.getAttribute('data-public-company-icon-original-href');
-    const originalType = element.getAttribute('data-public-company-icon-original-type');
-    const originalSizes = element.getAttribute('data-public-company-icon-original-sizes');
-
-    if (originalHref) {
-      element.href = originalHref;
-    } else {
-      element.removeAttribute('href');
-    }
-
-    if (originalType) {
-      element.type = originalType;
-    } else {
-      element.removeAttribute('type');
-    }
-
-    if (originalSizes) {
-      element.setAttribute('sizes', originalSizes);
-    } else {
-      element.removeAttribute('sizes');
-    }
-
-    element.removeAttribute('data-public-company-icon');
-    element.removeAttribute('data-public-company-icon-original-href');
-    element.removeAttribute('data-public-company-icon-original-type');
-    element.removeAttribute('data-public-company-icon-original-sizes');
-    element.removeAttribute('data-public-company-icon-generated');
-  });
-}
-
 function upsertJsonLd(data: Record<string, unknown>) {
   if (typeof document === 'undefined') return;
 
@@ -595,26 +517,8 @@ export default function CompanyPublicPage() {
   }, [company?.id, publicNotice?.id]);
 
   const whatsappUrl = buildPublicWhatsappUrl(company?.whatsapp);
-  const instagramUrl = company?.instagram
-    ? (company.instagram.startsWith('http') ? company.instagram : `https://instagram.com/${company.instagram.replace('@', '')}`)
-    : null;
-  const instagramLabel = useMemo(() => {
-    if (!company?.instagram) return null;
-
-    const rawValue = company.instagram.trim();
-    if (!rawValue) return null;
-
-    if (rawValue.startsWith('http')) {
-      try {
-        const pathname = new URL(rawValue).pathname.replace(/^\/+|\/+$/g, '');
-        return pathname ? `@${pathname.split('/')[0]}` : '@instagram';
-      } catch {
-        return '@instagram';
-      }
-    }
-
-    return rawValue.startsWith('@') ? rawValue : `@${rawValue}`;
-  }, [company?.instagram]);
+  const instagramUrl = buildInstagramProfileUrl(company?.instagram);
+  const instagramLabel = useMemo(() => formatInstagramHandleLabel(company?.instagram), [company?.instagram]);
   const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
   const mapsEmbedUrl = getGoogleMapsEmbedUrl(company?.google_maps_url, company?.address || company?.name || null);
   const openingHours = useMemo(
@@ -625,6 +529,8 @@ export default function CompanyPublicPage() {
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
   const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
   const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
+  const publicStickyReserveButtonEnabled = (company as any)?.show_public_sticky_reserve_button ?? true;
+  const publicReservationExitPromptEnabled = (company as any)?.show_public_reservation_exit_prompt ?? false;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
@@ -696,10 +602,7 @@ export default function CompanyPublicPage() {
       upsertMeta('property', 'og:image:alt', `Logo do ${company.name}`);
       upsertMeta('name', 'twitter:image', seoImage);
       upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
-      upsertPublicCompanyIcon('icon', seoImage);
-      upsertPublicCompanyIcon('alternate icon', seoImage);
-      upsertPublicCompanyIcon('shortcut icon', seoImage);
-      upsertPublicCompanyIcon('apple-touch-icon', seoImage);
+      syncPublicCompanyIcons(seoImage);
     } else {
       removeMeta('property', 'og:image');
       removeMeta('property', 'og:image:secure_url');
@@ -916,13 +819,13 @@ export default function CompanyPublicPage() {
 
             <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
               <Button
-                className="group animate-attention-pulse w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-primary/90"
+                className="group animate-attention-pulse-fast w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
                 size="lg"
                 onMouseEnter={() => void loadReservationModal()}
                 onFocus={() => void loadReservationModal()}
                 onClick={handleOpenReservation}
               >
-                <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
+                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
                 Reservar agora
               </Button>
 
@@ -930,7 +833,7 @@ export default function CompanyPublicPage() {
                 <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
                   <Button
                     variant="secondary"
-                    className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-background/90"
+                    className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-background/90"
                     size="lg"
                   >
                     <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
@@ -1138,23 +1041,25 @@ export default function CompanyPublicPage() {
         </DialogContent>
       </Dialog>
 
-      <div
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 px-4 pt-3 shadow-[0_-12px_32px_rgba(0,0,0,0.14)] backdrop-blur-xl md:hidden"
-        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-      >
-        <div className="mx-auto max-w-lg">
-          <Button
-            className="group w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-200"
-            size="lg"
-            onClick={handleOpenReservation}
-            onMouseEnter={() => void loadReservationModal()}
-            onFocus={() => void loadReservationModal()}
-          >
-            <CalendarCheck className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" />
-            Reservar agora
-          </Button>
+      {publicStickyReserveButtonEnabled && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 px-4 pt-3 shadow-[0_-12px_32px_rgba(0,0,0,0.14)] backdrop-blur-xl md:hidden"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        >
+          <div className="mx-auto max-w-lg">
+            <Button
+              className="group animate-attention-pulse-fast w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-150"
+              size="lg"
+              onClick={handleOpenReservation}
+              onMouseEnter={() => void loadReservationModal()}
+              onFocus={() => void loadReservationModal()}
+            >
+              <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+              Reservar agora
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {showReservation && (
         <Suspense fallback={
@@ -1180,6 +1085,7 @@ export default function CompanyPublicPage() {
             onStepChange={(step) => trackStep(step)}
             getTrackingSnapshot={getTrackingSnapshot}
             clearTrackingJourney={clearJourney}
+            exitRecoveryEnabled={publicReservationExitPromptEnabled}
           />
         </Suspense>
       )}

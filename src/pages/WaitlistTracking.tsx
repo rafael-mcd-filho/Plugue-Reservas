@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
+import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import {
   formatWaitlistCountdown,
   getWaitlistCallRemainingMs,
@@ -127,6 +128,11 @@ export default function WaitlistTracking() {
     },
     enabled: slugIsValid,
   });
+
+  useEffect(() => {
+    syncPublicCompanyIcons(company?.logo_url);
+    return () => removePublicCompanyIcons();
+  }, [company?.logo_url]);
 
   const leaveWaitlist = useMutation({
     mutationFn: async () => {

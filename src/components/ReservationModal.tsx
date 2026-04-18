@@ -47,6 +47,7 @@ interface ReservationModalProps {
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
   getTrackingSnapshot?: () => Promise<TrackingSnapshot>;
   clearTrackingJourney?: () => void;
+  exitRecoveryEnabled?: boolean;
 }
 
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
@@ -159,6 +160,7 @@ export default function ReservationModal({
   onStepChange,
   getTrackingSnapshot,
   clearTrackingJourney,
+  exitRecoveryEnabled = false,
 }: ReservationModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
@@ -179,6 +181,7 @@ export default function ReservationModal({
   const [prefilledPhoneDigits, setPrefilledPhoneDigits] = useState('');
   const [prefillStatus, setPrefillStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
   const [identityFieldsCollapsed, setIdentityFieldsCollapsed] = useState(false);
+  const [showExitRecoveryPrompt, setShowExitRecoveryPrompt] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const prefillRequestIdRef = useRef(0);
   const lastPrefillLookupRef = useRef('');
@@ -202,6 +205,7 @@ export default function ReservationModal({
     setPrefilledPhoneDigits('');
     setPrefillStatus('idle');
     setIdentityFieldsCollapsed(false);
+    setShowExitRecoveryPrompt(false);
     prefillRequestIdRef.current = 0;
     lastPrefillLookupRef.current = '';
   }, [initialDate, initialPartySize, open]);
@@ -467,16 +471,38 @@ export default function ReservationModal({
     setPrefilledPhoneDigits('');
     setPrefillStatus('idle');
     setIdentityFieldsCollapsed(false);
+    setShowExitRecoveryPrompt(false);
     prefillRequestIdRef.current = 0;
     lastPrefillLookupRef.current = '';
   };
 
-  const handleClose = (v: boolean) => {
-    if (!v) {
-      handleReset();
-      clearTrackingJourney?.();
+  const closeImmediately = () => {
+    handleReset();
+    clearTrackingJourney?.();
+    onOpenChange(false);
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      onOpenChange(true);
+      return;
     }
-    onOpenChange(v);
+
+    if (showExitRecoveryPrompt) {
+      return;
+    }
+
+    const shouldShowExitRecovery = exitRecoveryEnabled
+      && !confirmedReservation
+      && !!selectedDate
+      && !!selectedTime;
+
+    if (shouldShowExitRecovery) {
+      setShowExitRecoveryPrompt(true);
+      return;
+    }
+
+    closeImmediately();
   };
 
   const lookupCustomerPrefill = useCallback(async (normalizedPhone: string, requestId: number) => {
@@ -825,13 +851,26 @@ export default function ReservationModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]">
-        <DialogHeader className="px-12">
-          <DialogTitle className="mx-auto max-w-full text-center text-lg font-bold leading-snug text-foreground">
-            {step === 4 ? 'Reserva Confirmada!' : `Reservar Mesa — ${companyName}`}
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        hideCloseButton={showExitRecoveryPrompt}
+        onEscapeKeyDown={(event) => {
+          if (showExitRecoveryPrompt) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (showExitRecoveryPrompt) event.preventDefault();
+        }}
+        className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]"
+      >
+        <DialogHeader className={showExitRecoveryPrompt ? 'sr-only' : 'px-12'}>
+          <DialogTitle className={cn('mx-auto max-w-full text-center text-lg font-bold leading-snug', showExitRecoveryPrompt ? 'text-white' : 'text-foreground')}>
+            {showExitRecoveryPrompt
+              ? 'Tem certeza que quer parar por aqui?'
+              : step === 4
+                ? 'Reserva Confirmada!'
+                : `Reservar Mesa — ${companyName}`}
           </DialogTitle>
-          {step !== 4 && (
+          {!showExitRecoveryPrompt && step !== 4 && (
             <div className="flex items-center justify-center gap-2 pt-2" role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={3} aria-label={`Passo ${step} de 3`}>
               {[1, 2, 3].map(s => (
                 <div
@@ -846,8 +885,43 @@ export default function ReservationModal({
           )}
         </DialogHeader>
 
-        {/* Step 1: Date + Party Size */}
-        {step === 1 && (
+        {showExitRecoveryPrompt ? (
+          <div className="animate-fade-in px-2 pb-1 pt-3">
+            <div className="mx-auto flex max-w-md flex-col items-center gap-7 text-center">
+              <div className="space-y-6">
+                <h2 className="mx-auto flex max-w-full flex-col items-center font-serif text-[clamp(1.28rem,4.6vw,1.82rem)] font-semibold leading-[0.98] tracking-[-0.03em] text-foreground">
+                  <span className="block whitespace-nowrap">Tem certeza que quer</span>
+                  <span className="mt-1 block text-primary">parar por aqui?</span>
+                </h2>
+                <p className="mx-auto max-w-[27rem] text-[0.97rem] leading-7 text-muted-foreground sm:text-[1.01rem]">
+                  A experiência de ir ao {companyName} é <span className="font-semibold text-foreground">extraordinária.</span>
+                  <span className="mt-4 block font-serif text-[1.32rem] italic leading-[1.4] text-primary sm:text-[1.55rem]">
+                    Todo mundo que foi ficou <span className="font-semibold underline decoration-primary/35 underline-offset-[0.18em]">maravilhado.</span>
+                  </span>
+                </p>
+              </div>
+
+              <div className="w-full space-y-2.5">
+                <Button
+                  type="button"
+                  className="animate-attention-pulse-fast h-[3.35rem] w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground shadow-[0_18px_34px_rgba(201,129,58,0.28)] ring-1 ring-primary/20 transition-[transform,box-shadow,background-color] duration-150 hover:bg-primary/95 hover:shadow-[0_20px_40px_rgba(201,129,58,0.34)]"
+                  onClick={() => setShowExitRecoveryPrompt(false)}
+                >
+                  Quero garantir minha vaga
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full text-sm font-medium text-foreground/60 transition-colors duration-150 hover:bg-transparent hover:text-foreground"
+                  onClick={closeImmediately}
+                >
+                  Sair mesmo assim
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : step === 1 && (
           <div className="animate-fade-in space-y-4 pt-2">
             <p className="text-sm text-muted-foreground text-center">Escolha a data e número de pessoas</p>
 
@@ -956,7 +1030,7 @@ export default function ReservationModal({
         )}
 
         {/* Step 2: Time + Table */}
-        {step === 2 && (
+        {!showExitRecoveryPrompt && step === 2 && (
           <div className="animate-fade-in space-y-4 pt-2">
             <Button variant="ghost" size="sm" onClick={() => { setStep(1); setSelectedTime(''); setSelectedTableId(''); }}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
@@ -1085,7 +1159,7 @@ export default function ReservationModal({
         )}
 
         {/* Step 3: Personal Info */}
-        {step === 3 && (
+        {!showExitRecoveryPrompt && step === 3 && (
           <form onSubmit={handleSubmit} className="animate-fade-in space-y-4 pt-2">
             <Button variant="ghost" size="sm" type="button" onClick={() => setStep(2)}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
@@ -1282,7 +1356,7 @@ export default function ReservationModal({
         )}
 
         {/* Step 4: Success */}
-        {step === 4 && confirmedReservation && (
+        {!showExitRecoveryPrompt && step === 4 && confirmedReservation && (
           <div className="animate-fade-in space-y-6 pt-4 text-center">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-100 shadow-[0_18px_40px_rgba(16,185,129,0.18)]">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-[0_10px_24px_rgba(5,150,105,0.35)]">
@@ -1349,7 +1423,7 @@ export default function ReservationModal({
                   Adicionar ao Google Calendar
                 </Button>
               </a>
-              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => handleClose(false)}>
+              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={closeImmediately}>
                 Fechar
               </Button>
             </div>
