@@ -142,7 +142,6 @@ interface ImportedLeadRecord {
 }
 
 type LeadSource = LeadVisitSource | 'mixed' | 'imported';
-type LeadSourceFilter = 'all' | 'holder' | 'companion';
 type LeadImportMode = 'fill_missing' | 'overwrite';
 
 interface Lead {
@@ -173,7 +172,6 @@ const LEAD_EXPORT_STATUS_OPTIONS = [
   { value: 'checked_in', label: 'Check-in realizado' },
   { value: 'cancelled', label: 'Cancelada' },
   { value: 'no-show', label: 'No Show' },
-  { value: 'seated', label: 'Sentado' },
 ] as const;
 
 const DDD_TO_STATE: Record<string, { code: string; name: string }> = {
@@ -509,15 +507,10 @@ function consolidateImportPreviewRows(rows: ParsedLeadImportRow[]) {
 
 function shouldIncludeImportedLeadInExport(
   lead: Lead,
-  exportSourceFilter: LeadSourceFilter,
   exportVisitRange: DateRange | undefined,
   exportStatuses: string[],
 ) {
   if (!lead.importedLeadId || lead.total_reservations > 0) {
-    return false;
-  }
-
-  if (exportSourceFilter !== 'all') {
     return false;
   }
 
@@ -551,10 +544,10 @@ export default function Leads() {
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
   const [createdRange, setCreatedRange] = useState<DateRange | undefined>();
+  const [createdRangeOpen, setCreatedRangeOpen] = useState(false);
   const [createdFrom, setCreatedFrom] = useState<Date | undefined>();
   const [createdTo, setCreatedTo] = useState<Date | undefined>();
   const [stateFilter, setStateFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState<LeadSourceFilter>('all');
   const [minReservations, setMinReservations] = useState('');
   const [maxReservations, setMaxReservations] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -570,9 +563,10 @@ export default function Leads() {
   const [importReading, setImportReading] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
+  const [exportLeadCreatedRangeOpen, setExportLeadCreatedRangeOpen] = useState(false);
   const [exportVisitRange, setExportVisitRange] = useState<DateRange | undefined>();
+  const [exportVisitRangeOpen, setExportVisitRangeOpen] = useState(false);
   const [exportStateFilter, setExportStateFilter] = useState('all');
-  const [exportSourceFilter, setExportSourceFilter] = useState<LeadSourceFilter>('all');
   const [exportStatuses, setExportStatuses] = useState<string[]>([]);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
 
@@ -1214,20 +1208,6 @@ export default function Leads() {
         return false;
       }
 
-      if (
-        sourceFilter === 'holder' &&
-        !lead.reservations.some((reservation) => isHolderVisitSource(reservation.lead_source))
-      ) {
-        return false;
-      }
-
-      if (
-        sourceFilter === 'companion' &&
-        !lead.reservations.some((reservation) => isCompanionVisitSource(reservation.lead_source))
-      ) {
-        return false;
-      }
-
       if (parsedMinReservations !== null && !Number.isNaN(parsedMinReservations) && lead.total_reservations < parsedMinReservations) {
         return false;
       }
@@ -1238,7 +1218,7 @@ export default function Leads() {
 
       return true;
     });
-  }, [createdFrom, createdTo, leads, maxReservations, minReservations, search, sourceFilter, stateFilter]);
+  }, [createdFrom, createdTo, leads, maxReservations, minReservations, search, stateFilter]);
 
   const filteredLeadRecordsCount = useMemo(
     () =>
@@ -1282,13 +1262,12 @@ export default function Leads() {
     !!createdFrom ||
     !!createdTo ||
     stateFilter !== 'all' ||
-    sourceFilter !== 'all' ||
     minReservations.trim().length > 0 ||
     maxReservations.trim().length > 0;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, createdFrom, createdTo, stateFilter, sourceFilter, minReservations, maxReservations, pageSize]);
+  }, [search, createdFrom, createdTo, stateFilter, minReservations, maxReservations, pageSize]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -1311,7 +1290,7 @@ export default function Leads() {
           return null;
         }
 
-        if (shouldIncludeImportedLeadInExport(lead, exportSourceFilter, exportVisitRange, exportStatuses)) {
+        if (shouldIncludeImportedLeadInExport(lead, exportVisitRange, exportStatuses)) {
           return {
             lead,
             matchedVisits: [] as LeadVisitRecord[],
@@ -1320,14 +1299,6 @@ export default function Leads() {
         }
 
         const matchedVisits = lead.reservations.filter((visit) => {
-          if (exportSourceFilter === 'holder' && !isHolderVisitSource(visit.lead_source)) {
-            return false;
-          }
-
-          if (exportSourceFilter === 'companion' && !isCompanionVisitSource(visit.lead_source)) {
-            return false;
-          }
-
           if (!matchesLocalDateRange(visit.date, exportVisitRange)) {
             return false;
           }
@@ -1350,22 +1321,11 @@ export default function Leads() {
         };
       })
       .filter((item): item is { lead: Lead; matchedVisits: LeadVisitRecord[]; matchedSource: LeadSource } => item !== null);
-  }, [exportLeadCreatedRange, exportSourceFilter, exportStateFilter, exportStatuses, exportVisitRange, leads]);
+  }, [exportLeadCreatedRange, exportStateFilter, exportStatuses, exportVisitRange, leads]);
 
   const exportedLeadsSummary = useMemo(() => {
-    const totalVisits = exportedLeads.reduce((sum, item) => sum + item.matchedVisits.length, 0);
-
     return {
       totalLeads: exportedLeads.length,
-      totalVisits,
-      byStatus: LEAD_EXPORT_STATUS_OPTIONS.map((status) => ({
-        ...status,
-        count: exportedLeads.reduce(
-          (sum, item) =>
-            sum + item.matchedVisits.filter((visit) => normalizeVisitStatus(visit.status) === status.value).length,
-          0,
-        ),
-      })),
     };
   }, [exportedLeads]);
 
@@ -1375,7 +1335,6 @@ export default function Leads() {
     setCreatedFrom(undefined);
     setCreatedTo(undefined);
     setStateFilter('all');
-    setSourceFilter('all');
     setMinReservations('');
     setMaxReservations('');
     setCurrentPage(1);
@@ -1385,7 +1344,6 @@ export default function Leads() {
     setExportLeadCreatedRange(undefined);
     setExportVisitRange(undefined);
     setExportStateFilter('all');
-    setExportSourceFilter('all');
     setExportStatuses([]);
     setExportSearchTriggered(false);
   };
@@ -1472,7 +1430,7 @@ export default function Leads() {
         </div>
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:justify-end">
           <Select value={pageSize} onValueChange={(value) => setPageSize(value as (typeof LEADS_PAGE_SIZE_OPTIONS)[number])}>
-            <SelectTrigger className="w-full sm:w-[130px]">
+            <SelectTrigger className="w-full sm:w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1520,18 +1478,15 @@ export default function Leads() {
           </SelectContent>
         </Select>
 
-        <Select value={sourceFilter} onValueChange={(value) => setSourceFilter(value as LeadSourceFilter)}>
-          <SelectTrigger>
-            <SelectValue placeholder="Papel" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os papeis</SelectItem>
-            <SelectItem value="holder">Titular</SelectItem>
-            <SelectItem value="companion">Acompanhante</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Popover>
+        <Popover
+          open={createdRangeOpen}
+          onOpenChange={(open) => {
+            if (open && createdRange?.from && createdRange?.to) {
+              setCreatedRange(undefined);
+            }
+            setCreatedRangeOpen(open);
+          }}
+        >
           <PopoverTrigger asChild>
             <Button
               variant="outline"
@@ -1545,7 +1500,12 @@ export default function Leads() {
             <Calendar
               mode="range"
               selected={createdRange}
-              onSelect={setCreatedRange}
+              onSelect={(range) => {
+                setCreatedRange(range);
+                if (range?.from && range?.to) {
+                  setCreatedRangeOpen(false);
+                }
+              }}
               numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
               initialFocus
               className="pointer-events-auto p-3"
@@ -1885,7 +1845,15 @@ export default function Leads() {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
                 <Label>Criação do lead</Label>
-                <Popover>
+                <Popover
+                  open={exportLeadCreatedRangeOpen}
+                  onOpenChange={(open) => {
+                    if (open && exportLeadCreatedRange?.from && exportLeadCreatedRange?.to) {
+                      setExportLeadCreatedRange(undefined);
+                    }
+                    setExportLeadCreatedRangeOpen(open);
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
@@ -1902,7 +1870,12 @@ export default function Leads() {
                     <Calendar
                       mode="range"
                       selected={exportLeadCreatedRange}
-                      onSelect={setExportLeadCreatedRange}
+                      onSelect={(range) => {
+                        setExportLeadCreatedRange(range);
+                        if (range?.from && range?.to) {
+                          setExportLeadCreatedRangeOpen(false);
+                        }
+                      }}
                       numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
@@ -1913,7 +1886,15 @@ export default function Leads() {
 
               <div className="space-y-2">
                 <Label>Período das visitas</Label>
-                <Popover>
+                <Popover
+                  open={exportVisitRangeOpen}
+                  onOpenChange={(open) => {
+                    if (open && exportVisitRange?.from && exportVisitRange?.to) {
+                      setExportVisitRange(undefined);
+                    }
+                    setExportVisitRangeOpen(open);
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
@@ -1930,7 +1911,12 @@ export default function Leads() {
                     <Calendar
                       mode="range"
                       selected={exportVisitRange}
-                      onSelect={setExportVisitRange}
+                      onSelect={(range) => {
+                        setExportVisitRange(range);
+                        if (range?.from && range?.to) {
+                          setExportVisitRangeOpen(false);
+                        }
+                      }}
                       numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                       initialFocus
                       className="pointer-events-auto p-3"
@@ -1957,19 +1943,6 @@ export default function Leads() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Papel</Label>
-                <Select value={exportSourceFilter} onValueChange={(value) => setExportSourceFilter(value as LeadSourceFilter)}>
-                  <SelectTrigger className="h-11 rounded-xl bg-card">
-                    <SelectValue placeholder="Todos os papeis" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os papeis</SelectItem>
-                    <SelectItem value="holder">Titular</SelectItem>
-                    <SelectItem value="companion">Acompanhante</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             <div className="space-y-3">
@@ -2006,38 +1979,9 @@ export default function Leads() {
 
             {exportSearchTriggered && (
               <div className="space-y-4 rounded-3xl border border-border bg-muted/20 p-5">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Leads encontrados</p>
-                    <p className="mt-2 text-2xl font-semibold text-foreground">{exportedLeadsSummary.totalLeads}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Visitas filtradas</p>
-                    <p className="mt-2 text-2xl font-semibold text-foreground">{exportedLeadsSummary.totalVisits}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Papel filtrado</p>
-                    <p className="mt-2 text-sm font-medium text-foreground">
-                      {exportSourceFilter === 'all'
-                        ? 'Todos'
-                        : exportSourceFilter === 'holder'
-                          ? 'Titular'
-                          : 'Acompanhante'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  {LEAD_EXPORT_STATUS_OPTIONS.map((status) => {
-                    const summaryItem = exportedLeadsSummary.byStatus.find((item) => item.value === status.value);
-
-                    return (
-                      <div key={status.value} className="rounded-2xl border border-border bg-card p-4">
-                        <p className="text-xs text-muted-foreground">{status.label}</p>
-                        <p className="mt-1 text-lg font-semibold text-foreground">{summaryItem?.count ?? 0}</p>
-                      </div>
-                    );
-                  })}
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Leads encontrados</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{exportedLeadsSummary.totalLeads}</p>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

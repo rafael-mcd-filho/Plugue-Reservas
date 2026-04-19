@@ -258,7 +258,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
   };
 
   const renderLogTable = (items: MessageRecord[], showResend = false) => (
-    <div className="max-h-[500px] overflow-auto">
+    <div className="h-[800px] overflow-auto">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -322,7 +322,7 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
   );
 
   const renderQueueTable = (items: MessageRecord[]) => (
-    <div className="max-h-[500px] overflow-auto">
+    <div className="h-[800px] overflow-auto">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">

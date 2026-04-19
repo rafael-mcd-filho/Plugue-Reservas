@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Bot, Save } from 'lucide-react';
+import { Bot, History, Save, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import WhatsAppConnection from './WhatsAppConnection';
 import WhatsAppMessageHistory from './WhatsAppMessageHistory';
@@ -88,10 +89,24 @@ export default function AutomationsTab({ companyId }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <WhatsAppConnection companyId={companyId} />
+    <Tabs defaultValue="connection" className="space-y-6">
+      <TabsList>
+        <TabsTrigger value="connection" className="gap-2">
+          <Smartphone className="h-4 w-4" /> Conexão
+        </TabsTrigger>
+        <TabsTrigger value="messages" className="gap-2">
+          <Bot className="h-4 w-4" /> Mensagens
+        </TabsTrigger>
+        <TabsTrigger value="history" className="gap-2">
+          <History className="h-4 w-4" /> Histórico
+        </TabsTrigger>
+      </TabsList>
 
-      <div className="space-y-4">
+      <TabsContent value="connection">
+        <WhatsAppConnection companyId={companyId} />
+      </TabsContent>
+
+      <TabsContent value="messages" className="space-y-4">
         <div>
           <h3 className="flex items-center gap-2 text-lg font-semibold">
             <Bot className="h-5 w-5 text-primary" /> Mensagens automáticas
@@ -166,9 +181,11 @@ export default function AutomationsTab({ companyId }: Props) {
             </Card>
           );
         })}
-      </div>
+      </TabsContent>
 
-      <WhatsAppMessageHistory companyId={companyId} />
-    </div>
+      <TabsContent value="history">
+        <WhatsAppMessageHistory companyId={companyId} />
+      </TabsContent>
+    </Tabs>
   );
 }

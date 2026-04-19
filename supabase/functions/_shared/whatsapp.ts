@@ -85,6 +85,38 @@ export function formatPhoneForWhatsApp(phone: string): string {
   return digits;
 }
 
+export function randomIntInRange(min: number, max: number): number {
+  const low = Math.ceil(Math.min(min, max));
+  const high = Math.floor(Math.max(min, max));
+  return Math.floor(Math.random() * (high - low + 1)) + low;
+}
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+export async function sendWhatsAppPresence(
+  evolutionUrl: string,
+  evolutionToken: string,
+  instanceName: string,
+  phone: string,
+  presence: "composing" | "recording" | "paused" = "composing",
+  delayMs = 2000,
+): Promise<void> {
+  try {
+    await fetch(`${evolutionUrl}/chat/sendPresence/${instanceName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: evolutionToken,
+      },
+      body: JSON.stringify({ number: phone, presence, delay: delayMs }),
+    });
+  } catch {
+    // Best-effort: falhas de presenca nao devem bloquear o envio real.
+  }
+}
+
 export function serializeWhatsAppFailure(error: WhatsAppFailureDetails): string {
   return JSON.stringify({
     code: error.code,
@@ -132,12 +164,19 @@ export function getWhatsAppAcceptedLogStatus(
   return "pending";
 }
 
+export interface SendWhatsAppTextOptions {
+  typing?: boolean;
+  typingMinMs?: number;
+  typingMaxMs?: number;
+}
+
 export async function sendWhatsAppText(
   evolutionUrl: string,
   evolutionToken: string,
   instanceName: string,
   phone: string,
   message: string,
+  options: SendWhatsAppTextOptions = {},
 ): Promise<WhatsAppSendResult> {
   if (!phone || !message) {
     return buildFailure(
@@ -145,6 +184,13 @@ export async function sendWhatsAppText(
       "Dados invalidos para envio",
       "Telefone e mensagem sao obrigatorios para enviar pelo WhatsApp.",
     );
+  }
+
+  const shouldType = options.typing !== false;
+  if (shouldType) {
+    const typingMs = randomIntInRange(options.typingMinMs ?? 2000, options.typingMaxMs ?? 4000);
+    await sendWhatsAppPresence(evolutionUrl, evolutionToken, instanceName, phone, "composing", typingMs);
+    await sleep(typingMs);
   }
 
   let response: Response;

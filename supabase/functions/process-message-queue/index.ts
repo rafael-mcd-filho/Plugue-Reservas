@@ -6,9 +6,20 @@ import {
 import {
   formatPhoneForWhatsApp,
   getWhatsAppAcceptedLogStatus,
+  randomIntInRange,
   sendWhatsAppText,
   serializeWhatsAppFailure,
+  sleep,
 } from "../_shared/whatsapp.ts";
+import {
+  checkWhatsAppCircuit,
+  recordWhatsAppFailure,
+  recordWhatsAppSuccess,
+} from "../_shared/whatsapp-circuit.ts";
+
+const MESSAGE_JITTER_MIN_MS = 15_000;
+const MESSAGE_JITTER_MAX_MS = 30_000;
+const BATCH_SIZE = 3;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -104,19 +115,41 @@ Deno.serve(async (req) => {
       .lt("expires_at", new Date().toISOString())
       .in("company_id", connectedCompanyIds);
 
+    const pausedCompanyIds: string[] = [];
+    const eligibleCompanyIds: string[] = [];
+
+    for (const companyId of connectedCompanyIds) {
+      const circuit = await checkWhatsAppCircuit(supabaseAdmin, companyId);
+      if (circuit.open) {
+        pausedCompanyIds.push(companyId);
+      } else {
+        eligibleCompanyIds.push(companyId);
+      }
+    }
+
+    if (eligibleCompanyIds.length === 0) {
+      return new Response(
+        JSON.stringify({ processed: 0, reason: "circuit_breaker_open", paused_company_ids: pausedCompanyIds }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     const queueQuery = supabaseAdmin
       .from("whatsapp_message_queue")
       .select("*")
-      .in("company_id", connectedCompanyIds)
+      .in("company_id", eligibleCompanyIds)
       .eq("status", "pending")
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: true })
-      .limit(10);
+      .limit(BATCH_SIZE);
 
     const { data: pendingMessages } = await queueQuery;
 
     if (!pendingMessages || pendingMessages.length === 0) {
-      return new Response(JSON.stringify({ processed: 0 }), {
+      return new Response(JSON.stringify({ processed: 0, paused_company_ids: pausedCompanyIds }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -124,10 +157,22 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     let failed = 0;
+    let circuitTripped = false;
 
-    for (const message of pendingMessages) {
+    for (let index = 0; index < pendingMessages.length; index++) {
+      const message = pendingMessages[index];
       const instanceName = instanceMap.get(message.company_id);
       if (!instanceName) continue;
+
+      if (index > 0) {
+        await sleep(randomIntInRange(MESSAGE_JITTER_MIN_MS, MESSAGE_JITTER_MAX_MS));
+      }
+
+      const runtimeCircuit = await checkWhatsAppCircuit(supabaseAdmin, message.company_id);
+      if (runtimeCircuit.open) {
+        circuitTripped = true;
+        continue;
+      }
 
       await supabaseAdmin
         .from("whatsapp_message_queue")
@@ -191,6 +236,7 @@ Deno.serve(async (req) => {
             status: logStatus,
           });
 
+          await recordWhatsAppSuccess(supabaseAdmin, message.company_id);
           sent++;
         } else {
           const nextAttempts = message.attempts + 1;
@@ -204,31 +250,56 @@ Deno.serve(async (req) => {
               status: nextAttempts >= message.max_attempts ? "failed" : "pending",
             })
             .eq("id", message.id);
+          const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, message.company_id, responseData.error);
+          if (nextCircuit.open) {
+            circuitTripped = true;
+          }
           failed++;
         }
       } catch (error) {
         const nextAttempts = message.attempts + 1;
+        const failureDetails = {
+          code: "unknown_error" as const,
+          title: "Falha ao processar a fila",
+          message: error instanceof Error ? error.message : "Erro desconhecido ao processar a fila.",
+          provider_status: null,
+          provider_message: null,
+          raw: null,
+        };
         await supabaseAdmin
           .from("whatsapp_message_queue")
           .update({
             attempts: nextAttempts,
             last_attempt_at: new Date().toISOString(),
-            error_details: serializeWhatsAppFailure({
-              code: "unknown_error",
-              title: "Falha ao processar a fila",
-              message: error instanceof Error ? error.message : "Erro desconhecido ao processar a fila.",
-            }),
+            error_details: serializeWhatsAppFailure(failureDetails),
             status: nextAttempts >= message.max_attempts ? "failed" : "pending",
           })
           .eq("id", message.id);
+        const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, message.company_id, failureDetails);
+        if (nextCircuit.open) {
+          circuitTripped = true;
+        }
         failed++;
+      }
+
+      if (circuitTripped) {
+        break;
       }
     }
 
-    return new Response(JSON.stringify({ processed: pendingMessages.length, sent, failed }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        processed: pendingMessages.length,
+        sent,
+        failed,
+        circuit_tripped: circuitTripped,
+        paused_company_ids: pausedCompanyIds,
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message || "Erro interno" }), {
       status: error.message === "Nao autorizado"
