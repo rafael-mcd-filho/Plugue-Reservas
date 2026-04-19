@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { endOfDay, format, parseISO, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -7,14 +7,18 @@ import {
   CalendarIcon,
   Download,
   Eye,
+  Loader2,
   Mail,
   MapPin,
   Phone,
   Search,
+  Upload,
   X,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { useAuth } from '@/contexts/AuthContext';
+import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -35,9 +39,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone } from '@/lib/validation';
+import { formatBrazilPhone, normalizeEmail } from '@/lib/validation';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
@@ -119,8 +124,26 @@ interface WaitlistCompanionRecord {
   } | null;
 }
 
-type LeadSource = LeadVisitSource | 'mixed';
+interface ImportedLeadRecord {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  phone_normalized: string | null;
+  email: string | null;
+  email_normalized: string | null;
+  birthdate: string | null;
+  notes: string | null;
+  source: string | null;
+  import_filename: string | null;
+  imported_at: string;
+  imported_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type LeadSource = LeadVisitSource | 'mixed' | 'imported';
 type LeadSourceFilter = 'all' | 'holder' | 'companion';
+type LeadImportMode = 'fill_missing' | 'overwrite';
 
 interface Lead {
   key: string;
@@ -137,6 +160,11 @@ interface Lead {
   stateName: string | null;
   source: LeadSource;
   reservations: LeadVisitRecord[];
+  importedLeadId: string | null;
+  importedNotes: string | null;
+  importedAt: string | null;
+  importedByUserId: string | null;
+  importFilename: string | null;
 }
 
 const LEADS_PAGE_SIZE_OPTIONS = ['25', '50', '100'] as const;
@@ -222,6 +250,18 @@ function normalizePhone(phone: string | null | undefined) {
   return (phone ?? '').replace(/\D/g, '');
 }
 
+function getLeadLookupKey(values: {
+  phone?: string | null;
+  phoneDigits?: string | null;
+  email?: string | null;
+  fallback: string;
+}) {
+  const normalizedPhone = values.phoneDigits || normalizePhone(values.phone);
+  const normalizedEmail = normalizeEmail(values.email);
+
+  return normalizedPhone || normalizedEmail || values.fallback;
+}
+
 function getDddFromPhone(phone: string | null | undefined) {
   const digits = normalizePhone(phone);
 
@@ -264,7 +304,11 @@ function normalizeVisitStatus(status: string) {
   return normalizeReservationStatus(status);
 }
 
-function formatLeadState(lead: Pick<Lead, 'stateCode' | 'stateName'>) {
+function formatLeadState(lead: Pick<Lead, 'guest_phone' | 'stateCode' | 'stateName'>) {
+  if (!lead.guest_phone) {
+    return 'Sem telefone informado';
+  }
+
   return lead.stateCode && lead.stateName ? `${lead.stateName} (${lead.stateCode})` : 'DDD não identificado';
 }
 
@@ -277,6 +321,10 @@ function isHolderVisitSource(source: LeadVisitSource) {
 }
 
 function formatLeadSource(source: LeadSource) {
+  if (source === 'imported') {
+    return 'Importado';
+  }
+
   if (source === 'mixed') {
     return 'Multiplos papeis';
   }
@@ -344,6 +392,142 @@ function formatLeadDateRangeLabel(range: DateRange | undefined) {
   return formatDateRangeLabel(range, 'Criado em');
 }
 
+function formatLeadPhoneText(phone: string | null | undefined) {
+  return formatBrazilPhone(phone) || 'Não informado';
+}
+
+function mergeImportedNotes(currentNotes: string | null, nextNotes: string | null) {
+  if (!currentNotes) return nextNotes;
+  if (!nextNotes || nextNotes === currentNotes) return currentNotes;
+  return `${currentNotes}\n${nextNotes}`;
+}
+
+function mergeImportedTextField(
+  currentValue: string | null | undefined,
+  nextValue: string | null | undefined,
+  mode: LeadImportMode,
+) {
+  const current = currentValue?.trim() || '';
+  const next = nextValue?.trim() || '';
+
+  if (mode === 'overwrite') {
+    return next || current || null;
+  }
+
+  return current || next || null;
+}
+
+function mergeImportedNameField(
+  currentValue: string | null | undefined,
+  nextValue: string | null | undefined,
+  mode: LeadImportMode,
+) {
+  const current = currentValue?.trim() || '';
+  const next = nextValue?.trim() || '';
+
+  if (mode === 'overwrite') {
+    return next || current || 'Lead sem nome';
+  }
+
+  if (!current || current === 'Lead sem nome') {
+    return next || current || 'Lead sem nome';
+  }
+
+  return current;
+}
+
+function mergeImportedNotesField(
+  currentValue: string | null | undefined,
+  nextValue: string | null | undefined,
+  mode: LeadImportMode,
+) {
+  const current = currentValue?.trim() || null;
+  const next = nextValue?.trim() || null;
+
+  if (mode === 'overwrite') {
+    return next || current;
+  }
+
+  return mergeImportedNotes(current, next);
+}
+
+function mergePreviewRows(current: ParsedLeadImportRow, next: ParsedLeadImportRow): ParsedLeadImportRow {
+  return {
+    ...current,
+    name: current.name !== 'Lead sem nome' ? current.name : next.name,
+    phone: current.phone || next.phone,
+    phoneNormalized: current.phoneNormalized || next.phoneNormalized,
+    email: current.email || next.email,
+    emailNormalized: current.emailNormalized || next.emailNormalized,
+    birthdate: current.birthdate || next.birthdate,
+    notes: mergeImportedNotes(current.notes, next.notes),
+  };
+}
+
+function consolidateImportPreviewRows(rows: ParsedLeadImportRow[]) {
+  const mergedRows: ParsedLeadImportRow[] = [];
+  const byPhone = new Map<string, ParsedLeadImportRow>();
+  const byEmail = new Map<string, ParsedLeadImportRow>();
+  let duplicateCount = 0;
+
+  for (const row of rows) {
+    const current =
+      (row.phoneNormalized ? byPhone.get(row.phoneNormalized) : undefined)
+      || (row.emailNormalized ? byEmail.get(row.emailNormalized) : undefined);
+
+    if (current) {
+      duplicateCount += 1;
+      const merged = mergePreviewRows(current, row);
+
+      Object.assign(current, merged);
+
+      if (current.phoneNormalized) {
+        byPhone.set(current.phoneNormalized, current);
+      }
+
+      if (current.emailNormalized) {
+        byEmail.set(current.emailNormalized, current);
+      }
+
+      continue;
+    }
+
+    const nextRow = { ...row };
+    mergedRows.push(nextRow);
+
+    if (nextRow.phoneNormalized) {
+      byPhone.set(nextRow.phoneNormalized, nextRow);
+    }
+
+    if (nextRow.emailNormalized) {
+      byEmail.set(nextRow.emailNormalized, nextRow);
+    }
+  }
+
+  return { rows: mergedRows, duplicateCount };
+}
+
+function shouldIncludeImportedLeadInExport(
+  lead: Lead,
+  exportSourceFilter: LeadSourceFilter,
+  exportVisitRange: DateRange | undefined,
+  exportStatuses: string[],
+) {
+  if (!lead.importedLeadId || lead.total_reservations > 0) {
+    return false;
+  }
+
+  if (exportSourceFilter !== 'all') {
+    return false;
+  }
+
+  if (exportVisitRange?.from) {
+    return false;
+  }
+
+  return exportStatuses.length === 0;
+}
+
 function getVisiblePages(currentPage: number, totalPages: number) {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
@@ -361,7 +545,10 @@ function getVisiblePages(currentPage: number, totalPages: number) {
 }
 
 export default function Leads() {
-  const { companyId } = useCompanySlug();
+  const { companyId, slug } = useCompanySlug();
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
   const [createdRange, setCreatedRange] = useState<DateRange | undefined>();
   const [createdFrom, setCreatedFrom] = useState<Date | undefined>();
@@ -373,6 +560,14 @@ export default function Leads() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof LEADS_PAGE_SIZE_OPTIONS)[number]>('25');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState('');
+  const [importRows, setImportRows] = useState<ParsedLeadImportRow[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importDuplicateCount, setImportDuplicateCount] = useState(0);
+  const [importMode, setImportMode] = useState<LeadImportMode>('fill_missing');
+  const [importReading, setImportReading] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
   const [exportVisitRange, setExportVisitRange] = useState<DateRange | undefined>();
@@ -385,6 +580,70 @@ export default function Leads() {
     setCreatedFrom(createdRange?.from);
     setCreatedTo(createdRange?.to);
   }, [createdRange]);
+
+  useEffect(() => {
+    if (!selectedLead) {
+      setSelectedReservationId(null);
+    }
+  }, [selectedLead]);
+
+  const {
+    data: selectedReservation,
+    isLoading: selectedReservationLoading,
+    error: selectedReservationError,
+  } = useQuery({
+    queryKey: ['lead-reservation-details', companyId, selectedReservationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservations' as never)
+        .select(
+          'id, guest_name, guest_phone, guest_email, source, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at',
+        )
+        .eq('company_id', companyId!)
+        .eq('id', selectedReservationId!)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error('Reservation not found');
+      }
+
+      return data as ReservationDetails;
+    },
+    enabled: !!companyId && !!selectedReservationId,
+  });
+
+  useEffect(() => {
+    if (!selectedReservationId || !selectedReservationError) {
+      return;
+    }
+
+    toast.error('Não foi possível carregar os detalhes da reserva.');
+    setSelectedReservationId(null);
+  }, [selectedReservationError, selectedReservationId]);
+
+  const { data: importedLeads = [], isLoading: importedLeadsLoading } = useQuery({
+    queryKey: ['leads-imported', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('crm_leads' as never)
+        .select(
+          'id, full_name, phone, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at',
+        )
+        .eq('company_id', companyId!)
+        .order('imported_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      return ((data ?? []) as any[]) as ImportedLeadRecord[];
+    },
+    enabled: !!companyId,
+  });
 
   const { data: reservations = [], isLoading: reservationsLoading } = useQuery({
     queryKey: ['leads-reservations', companyId],
@@ -552,7 +811,186 @@ export default function Leads() {
     enabled: !!companyId,
   });
 
-  const isLoading = reservationsLoading || companionsLoading || waitlistLoading || waitlistCompanionsLoading;
+  const resetImportState = () => {
+    setImportFileName('');
+    setImportRows([]);
+    setImportErrors([]);
+    setImportDuplicateCount(0);
+    setImportMode('fill_missing');
+    setImportReading(false);
+
+    if (importFileInputRef.current) {
+      importFileInputRef.current.value = '';
+    }
+  };
+
+  const importMutation = useMutation({
+    mutationFn: async () => {
+      if (!companyId || !user) {
+        throw new Error('Sessão expirada. Entre novamente para importar leads.');
+      }
+
+      if (importRows.length === 0) {
+        throw new Error('Carregue um CSV com pelo menos um lead válido antes de importar.');
+      }
+
+      const existingByPhone = new Map<string, ImportedLeadRecord>();
+      const existingByEmail = new Map<string, ImportedLeadRecord>();
+
+      for (const lead of importedLeads) {
+        if (lead.phone_normalized && !existingByPhone.has(lead.phone_normalized)) {
+          existingByPhone.set(lead.phone_normalized, lead);
+        }
+
+        if (lead.email_normalized && !existingByEmail.has(lead.email_normalized)) {
+          existingByEmail.set(lead.email_normalized, lead);
+        }
+      }
+
+      const importedAt = new Date().toISOString();
+      const payloads: Array<Record<string, unknown>> = [];
+      let inserted = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      for (const row of importRows) {
+        const matchedByPhone = row.phoneNormalized ? existingByPhone.get(row.phoneNormalized) : undefined;
+        const matchedByEmail = row.emailNormalized ? existingByEmail.get(row.emailNormalized) : undefined;
+
+        if (matchedByPhone && matchedByEmail && matchedByPhone.id !== matchedByEmail.id) {
+          skipped += 1;
+          continue;
+        }
+
+        const current = matchedByPhone ?? matchedByEmail ?? null;
+
+        const payload: Record<string, unknown> = {
+          company_id: companyId,
+          full_name: mergeImportedNameField(current?.full_name, row.name, importMode),
+          phone: mergeImportedTextField(current?.phone, row.phone || null, importMode),
+          phone_normalized: mergeImportedTextField(current?.phone_normalized, row.phoneNormalized || null, importMode),
+          email: mergeImportedTextField(current?.email, row.email || null, importMode),
+          email_normalized: mergeImportedTextField(current?.email_normalized, row.emailNormalized || null, importMode),
+          birthdate: mergeImportedTextField(current?.birthdate, row.birthdate, importMode),
+          notes: mergeImportedNotesField(current?.notes, row.notes, importMode),
+          source: 'import_csv',
+          import_filename: importFileName || null,
+          imported_at: importedAt,
+          imported_by_user_id: user.id,
+        };
+
+        if (current?.id) {
+          payload.id = current.id;
+          updated += 1;
+        } else {
+          inserted += 1;
+        }
+
+        payloads.push(payload);
+      }
+
+      if (payloads.length === 0) {
+        return { inserted, updated, skipped };
+      }
+
+      const chunkSize = 200;
+
+      for (let index = 0; index < payloads.length; index += chunkSize) {
+        const chunk = payloads.slice(index, index + chunkSize);
+        const { error } = await supabase
+          .from('crm_leads' as never)
+          .upsert(chunk as never[]);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      return { inserted, updated, skipped };
+    },
+    onSuccess: async ({ inserted, updated, skipped }) => {
+      await qc.invalidateQueries({ queryKey: ['leads-imported', companyId] });
+
+      const pieces = [
+        inserted > 0 ? `${inserted} novos` : null,
+        updated > 0 ? `${updated} atualizados` : null,
+        skipped > 0 ? `${skipped} ignorados por conflito` : null,
+      ].filter(Boolean);
+
+      toast.success(
+        pieces.length > 0
+          ? `Importação concluída: ${pieces.join(' • ')}.`
+          : 'Nenhum lead precisou ser importado.',
+      );
+
+      setImportDialogOpen(false);
+      resetImportState();
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Não foi possível importar os leads.';
+      toast.error(message);
+    },
+  });
+
+  const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setImportReading(true);
+
+    try {
+      const text = await file.text();
+      const result = parseLeadImportCsv(text);
+      const consolidated = consolidateImportPreviewRows(result.rows);
+
+      setImportFileName(file.name);
+      setImportRows(consolidated.rows);
+      setImportErrors(result.errors);
+      setImportDuplicateCount(result.duplicateCount + consolidated.duplicateCount);
+
+      if (consolidated.rows.length === 0) {
+        toast.error('Nenhum lead válido foi encontrado no arquivo.');
+      } else if (result.errors.length > 0) {
+        toast.success(`Arquivo carregado com ${consolidated.rows.length} leads válidos e ${result.errors.length} linhas ignoradas.`);
+      } else {
+        toast.success(`${consolidated.rows.length} leads prontos para importar.`);
+      }
+    } catch {
+      toast.error('Não foi possível ler o arquivo CSV.');
+    } finally {
+      setImportReading(false);
+      event.target.value = '';
+    }
+  };
+
+  const downloadImportTemplate = () => {
+    downloadCsv(
+      'modelo-importacao-leads.csv',
+      ['nome', 'telefone', 'email', 'nascimento', 'observações'],
+      [
+        ['Maria Eduarda Nunes', '83981297758', 'maria@example.com', '1994-05-18', 'Veio de uma base antiga'],
+        ['Joao Pedro', '85999887766', '', '', 'Interessado em jantar romantico'],
+      ],
+    );
+  };
+
+  const isLoading =
+    reservationsLoading ||
+    companionsLoading ||
+    waitlistLoading ||
+    waitlistCompanionsLoading ||
+    importedLeadsLoading;
+
+  const openReservationDetails = (visit: LeadVisitRecord) => {
+    if (visit.visit_origin !== 'reservation') {
+      return;
+    }
+
+    setSelectedReservationId(visit.visit_id);
+  };
 
   const leads = useMemo(() => {
     const map = new Map<string, Lead>();
@@ -560,7 +998,12 @@ export default function Leads() {
 
     for (const visit of allVisits) {
       const phoneDigits = normalizePhone(visit.guest_phone);
-      const key = phoneDigits || visit.guest_phone || visit.id;
+      const key = getLeadLookupKey({
+        phone: visit.guest_phone,
+        phoneDigits,
+        email: visit.guest_email,
+        fallback: visit.id,
+      });
 
       if (!map.has(key)) {
         const state = getStateFromPhone(visit.guest_phone);
@@ -580,6 +1023,11 @@ export default function Leads() {
           stateName: state?.name ?? null,
           source: visit.lead_source,
           reservations: [],
+          importedLeadId: null,
+          importedNotes: null,
+          importedAt: null,
+          importedByUserId: null,
+          importFilename: null,
         });
       }
 
@@ -629,6 +1077,73 @@ export default function Leads() {
       }
     }
 
+    for (const importedLead of importedLeads) {
+      const phoneDigits = normalizePhone(importedLead.phone ?? importedLead.phone_normalized);
+      const key = getLeadLookupKey({
+        phone: importedLead.phone,
+        phoneDigits,
+        email: importedLead.email ?? importedLead.email_normalized,
+        fallback: `crm-${importedLead.id}`,
+      });
+
+      const state = getStateFromPhone(importedLead.phone ?? importedLead.phone_normalized);
+      const current = map.get(key);
+
+      if (!current) {
+        map.set(key, {
+          key,
+          guest_phone: importedLead.phone ?? importedLead.phone_normalized ?? '',
+          phone_digits: phoneDigits,
+          guest_name: importedLead.full_name,
+          guest_email: importedLead.email ?? null,
+          guest_birthdate: importedLead.birthdate ?? null,
+          total_reservations: 0,
+          lead_created_at: importedLead.imported_at ?? importedLead.created_at,
+          last_reservation_date: '',
+          last_reservation_time: '',
+          stateCode: state?.code ?? null,
+          stateName: state?.name ?? null,
+          source: 'imported',
+          reservations: [],
+          importedLeadId: importedLead.id,
+          importedNotes: importedLead.notes ?? null,
+          importedAt: importedLead.imported_at ?? null,
+          importedByUserId: importedLead.imported_by_user_id ?? null,
+          importFilename: importedLead.import_filename ?? null,
+        });
+        continue;
+      }
+
+      if (!current.guest_email && importedLead.email) {
+        current.guest_email = importedLead.email;
+      }
+
+      if (!current.guest_birthdate && importedLead.birthdate) {
+        current.guest_birthdate = importedLead.birthdate;
+      }
+
+      if (!current.guest_phone && (importedLead.phone || importedLead.phone_normalized)) {
+        current.guest_phone = importedLead.phone ?? importedLead.phone_normalized ?? '';
+        current.phone_digits = phoneDigits;
+        current.stateCode = state?.code ?? null;
+        current.stateName = state?.name ?? null;
+      }
+
+      if (current.guest_name === 'Lead sem nome' && importedLead.full_name) {
+        current.guest_name = importedLead.full_name;
+      }
+
+      if ((importedLead.imported_at ?? importedLead.created_at).localeCompare(current.lead_created_at) < 0) {
+        current.lead_created_at = importedLead.imported_at ?? importedLead.created_at;
+      }
+
+      current.importedLeadId = importedLead.id;
+      current.importedNotes = mergeImportedNotes(current.importedNotes, importedLead.notes ?? null);
+      current.importedAt = importedLead.imported_at ?? current.importedAt;
+      current.importedByUserId = importedLead.imported_by_user_id ?? current.importedByUserId;
+      current.importFilename = importedLead.import_filename ?? current.importFilename;
+    }
+
     return Array.from(map.values())
       .map((lead) => ({
         ...lead,
@@ -645,7 +1160,7 @@ export default function Leads() {
 
         return b.lead_created_at.localeCompare(a.lead_created_at);
       });
-  }, [companionVisits, reservations, waitlistCompanionVisits, waitlistVisits]);
+  }, [companionVisits, importedLeads, reservations, waitlistCompanionVisits, waitlistVisits]);
 
   const stateOptions = useMemo(() => {
     const uniqueStates = new Map<string, string>();
@@ -725,15 +1240,20 @@ export default function Leads() {
     });
   }, [createdFrom, createdTo, leads, maxReservations, minReservations, search, sourceFilter, stateFilter]);
 
-  const filteredReservationsCount = useMemo(
-    () => filteredLeads.reduce((total, lead) => total + lead.total_reservations, 0),
+  const filteredLeadRecordsCount = useMemo(
+    () =>
+      filteredLeads.reduce(
+        (total, lead) => total + (lead.total_reservations > 0 ? lead.total_reservations : lead.importedLeadId ? 1 : 0),
+        0,
+      ),
     [filteredLeads],
   );
   const totalLeadRecords =
     reservations.length +
     companionVisits.length +
     waitlistVisits.length +
-    waitlistCompanionVisits.length;
+    waitlistCompanionVisits.length +
+    importedLeads.length;
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / Number(pageSize)));
 
@@ -789,6 +1309,14 @@ export default function Leads() {
 
         if (exportStateFilter !== 'all' && exportStateFilter !== 'unknown' && lead.stateCode !== exportStateFilter) {
           return null;
+        }
+
+        if (shouldIncludeImportedLeadInExport(lead, exportSourceFilter, exportVisitRange, exportStatuses)) {
+          return {
+            lead,
+            matchedVisits: [] as LeadVisitRecord[],
+            matchedSource: 'imported' as const,
+          };
         }
 
         const matchedVisits = lead.reservations.filter((visit) => {
@@ -871,7 +1399,7 @@ export default function Leads() {
   const exportLeadsCsv = () => {
     const rows = exportedLeads.map(({ lead, matchedVisits, matchedSource }) => [
       lead.guest_name,
-      formatBrazilPhone(lead.guest_phone),
+      formatLeadPhoneText(lead.guest_phone),
       lead.guest_email || '',
       lead.stateCode ? `${lead.stateName} (${lead.stateCode})` : '',
       lead.guest_birthdate || '',
@@ -882,13 +1410,15 @@ export default function Leads() {
       matchedVisits[0]
         ? `${format(new Date(`${matchedVisits[0].date}T12:00:00`), 'dd/MM/yyyy')} ${matchedVisits[0].time.slice(0, 5)}`
         : '',
-      matchedVisits
-        .map((visit) => {
-          const visitStatus = formatReservationStatus(visit.status);
-          const visitMoment = `${format(new Date(`${visit.date}T12:00:00`), 'dd/MM/yyyy')} ${visit.time.slice(0, 5)}`;
-          return `${visitMoment} - ${visitStatus}${formatLeadVisitContext(visit)}${visit.occasion ? ` - ${visit.occasion}` : ''}`;
-        })
-        .join(' | '),
+      matchedVisits.length > 0
+        ? matchedVisits
+          .map((visit) => {
+            const visitStatus = formatReservationStatus(visit.status);
+            const visitMoment = `${format(new Date(`${visit.date}T12:00:00`), 'dd/MM/yyyy')} ${visit.time.slice(0, 5)}`;
+            return `${visitMoment} - ${visitStatus}${formatLeadVisitContext(visit)}${visit.occasion ? ` - ${visit.occasion}` : ''}`;
+          })
+          .join(' | ')
+        : 'Lead importado sem reservas',
     ]);
 
     downloadCsv(
@@ -903,7 +1433,7 @@ export default function Leads() {
         'Papel filtrado',
         'Visitas filtradas',
         'Visitas totais',
-        'Ultima visita filtrada',
+        'Última visita filtrada',
         'Histórico filtrado',
       ],
       rows,
@@ -930,7 +1460,7 @@ export default function Leads() {
   };
 
   const summaryText = hasActiveFilters
-    ? `${filteredLeads.length} de ${leads.length} clientes · ${filteredReservationsCount} de ${totalLeadRecords} registros`
+    ? `${filteredLeads.length} de ${leads.length} clientes · ${filteredLeadRecordsCount} de ${totalLeadRecords} registros`
     : `${leads.length} clientes · ${totalLeadRecords} registros`;
 
   return (
@@ -953,6 +1483,10 @@ export default function Leads() {
               ))}
             </SelectContent>
           </Select>
+          <Button onClick={() => setImportDialogOpen(true)} variant="outline" className="w-full gap-2 sm:w-auto">
+            <Upload className="h-4 w-4" />
+            Importar CSV
+          </Button>
           <Button onClick={() => setExportDialogOpen(true)} variant="outline" className="w-full gap-2 sm:w-auto" disabled={leads.length === 0}>
             <Download className="h-4 w-4" />
             Exportar leads
@@ -1069,11 +1603,18 @@ export default function Leads() {
                       {(lead.guest_name.charAt(0) || '?').toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-foreground">{lead.guest_name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-semibold text-foreground">{lead.guest_name}</p>
+                        {lead.importedLeadId && (
+                          <Badge variant="outline" className="rounded-full">
+                            Importado
+                          </Badge>
+                        )}
+                      </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Phone className="h-3 w-3" />
-                          {formatBrazilPhone(lead.guest_phone)}
+                          {formatLeadPhoneText(lead.guest_phone)}
                         </span>
                         {lead.guest_email && (
                           <span className="flex items-center gap-1">
@@ -1158,6 +1699,173 @@ export default function Leads() {
           )}
         </div>
       )}
+
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          setImportDialogOpen(open);
+          if (!open && !importMutation.isPending) {
+            resetImportState();
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Importar leads</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6 pt-2">
+            <div className="rounded-3xl border border-border bg-muted/20 p-5">
+              <p className="text-sm text-muted-foreground">
+                Importe leads sem criar reservas. O arquivo pode ter as colunas
+                <span className="font-medium text-foreground"> nome</span>,
+                <span className="font-medium text-foreground"> telefone</span>,
+                <span className="font-medium text-foreground"> email</span>,
+                <span className="font-medium text-foreground"> nascimento</span> e
+                <span className="font-medium text-foreground"> observações</span>.
+              </p>
+
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleImportFileChange}
+              />
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => importFileInputRef.current?.click()}
+                  disabled={importReading || importMutation.isPending}
+                >
+                  {importReading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {importReading ? 'Lendo arquivo...' : 'Selecionar CSV'}
+                </Button>
+                <Button type="button" variant="ghost" onClick={downloadImportTemplate} disabled={importMutation.isPending}>
+                  Baixar modelo
+                </Button>
+                {importRows.length > 0 && (
+                  <Button type="button" variant="ghost" onClick={resetImportState} disabled={importMutation.isPending}>
+                    Limpar arquivo
+                  </Button>
+                )}
+              </div>
+
+              {importFileName && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Arquivo atual: <span className="font-medium text-foreground">{importFileName}</span>
+                </p>
+              )}
+            </div>
+
+            {(importRows.length > 0 || importErrors.length > 0) ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Prontos</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">{importRows.length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Ignorados</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">{importErrors.length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Duplicados</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">{importDuplicateCount}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Modo</p>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {importMode === 'fill_missing' ? 'Preencher vazios' : 'Sobrescrever com CSV'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    <Label>Como atualizar leads já importados</Label>
+                    <Select value={importMode} onValueChange={(value) => setImportMode(value as LeadImportMode)}>
+                      <SelectTrigger className="h-11 rounded-xl bg-card">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fill_missing">Preencher apenas campos vazios</SelectItem>
+                        <SelectItem value="overwrite">Sobrescrever com valores do CSV</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      O sistema usa telefone e email normalizados para tentar localizar leads já importados.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-sm font-medium text-foreground">Preview</p>
+                    <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                      {importRows.slice(0, 8).map((row) => (
+                        <div key={row.key} className="rounded-xl border border-border bg-muted/10 p-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-medium text-foreground">{row.name}</p>
+                            <p className="text-xs text-muted-foreground">Linha {row.rowNumber}</p>
+                          </div>
+                          <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+                            <p>Telefone: {formatLeadPhoneText(row.phone)}</p>
+                            <p>Email: {row.email || 'Não informado'}</p>
+                            {row.birthdate && <p>Nascimento: {row.birthdate}</p>}
+                            {row.notes && <p className="whitespace-pre-wrap">Observacoes: {row.notes}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {importRows.length > 8 && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Mostrando 8 de {importRows.length} leads prontos para importar.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {importErrors.length > 0 && (
+                  <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+                    <p className="text-sm font-medium text-foreground">Linhas ignoradas</p>
+                    <div className="mt-3 max-h-40 space-y-2 overflow-y-auto text-xs text-muted-foreground">
+                      {importErrors.slice(0, 12).map((errorMessage) => (
+                        <p key={errorMessage}>{errorMessage}</p>
+                      ))}
+                    </div>
+                    {importErrors.length > 12 && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Mostrando 12 de {importErrors.length} erros encontrados.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Leads importados aparecem na tela mesmo sem reservas e passam a se juntar ao histórico quando o mesmo telefone ou email voltar a reservar.
+                  </p>
+                  <Button
+                    type="button"
+                    className="gap-2"
+                    onClick={() => importMutation.mutate()}
+                    disabled={importRows.length === 0 || importReading || importMutation.isPending}
+                  >
+                    {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {importMutation.isPending ? 'Importando...' : `Importar ${importRows.length} leads`}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-3xl border border-dashed border-border bg-muted/10 p-6 text-sm text-muted-foreground">
+                Carregue um arquivo CSV para validar os contatos antes de importar.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={exportDialogOpen}
@@ -1349,7 +2057,15 @@ export default function Leads() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
+      <Dialog
+        open={!!selectedLead}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedLead(null);
+            setSelectedReservationId(null);
+          }
+        }}
+      >
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
           {selectedLead && (
             <>
@@ -1360,7 +2076,7 @@ export default function Leads() {
                   </div>
                   <div>
                     <p>{selectedLead.guest_name}</p>
-                    <p className="text-sm font-normal text-muted-foreground">{formatBrazilPhone(selectedLead.guest_phone)}</p>
+                    <p className="text-sm font-normal text-muted-foreground">{formatLeadPhoneText(selectedLead.guest_phone)}</p>
                   </div>
                 </DialogTitle>
               </DialogHeader>
@@ -1399,19 +2115,40 @@ export default function Leads() {
                   <span className="text-foreground">{formatLeadState(selectedLead)}</span>
                 </div>
 
+                {selectedLead.importedLeadId && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem do lead</p>
+                    <p className="mt-1 font-medium text-foreground">
+                      Importado via CSV{selectedLead.importFilename ? ` · ${selectedLead.importFilename}` : ''}
+                    </p>
+                    {selectedLead.importedAt && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Última importação em {format(parseISO(selectedLead.importedAt), 'dd/MM/yyyy HH:mm')}
+                      </p>
+                    )}
+                    {selectedLead.importedNotes && (
+                      <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{selectedLead.importedNotes}</p>
+                    )}
+                  </div>
+                )}
+
               </div>
 
               <div className="pt-4">
                 <h4 className="mb-3 text-sm font-semibold text-foreground">
                   Histórico de Presenças ({selectedLead.total_reservations})
                 </h4>
+                {selectedLead.reservations.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                    Este lead ainda não possui reservas ou entradas na fila de espera.
+                  </div>
+                ) : (
                 <div className="max-h-60 space-y-2 overflow-y-auto">
-                  {selectedLead.reservations.map((reservation) => (
-                    <div
-                      key={reservation.id}
-                      className="flex items-center justify-between rounded-md border border-border p-3 text-sm"
-                    >
-                      <div>
+                  {selectedLead.reservations.map((reservation) => {
+                    const canOpenReservation = reservation.visit_origin === 'reservation';
+                    const content = (
+                      <>
+                        <div>
                         <p className="font-medium text-foreground">
                           {format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })} às{' '}
                           {reservation.time?.substring(0, 5)}
@@ -1422,17 +2159,58 @@ export default function Leads() {
                           {reservation.occasion ? ` · ${reservation.occasion}` : ''}
                         </p>
                       </div>
-                      <Badge className={getStatusColor(reservation.status)}>
-                        {formatReservationStatus(reservation.status)}
-                      </Badge>
-                    </div>
-                  ))}
+                      <div className="flex items-center gap-2">
+                        <Badge className={getStatusColor(reservation.status)}>
+                          {formatReservationStatus(reservation.status)}
+                        </Badge>
+                        {canOpenReservation && <Eye className="h-4 w-4 text-muted-foreground" />}
+                      </div>
+                      </>
+                    );
+
+                    if (!canOpenReservation) {
+                      return (
+                        <div
+                          key={reservation.id}
+                          className="flex items-center justify-between rounded-md border border-border p-3 text-sm"
+                        >
+                          {content}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        key={reservation.id}
+                        className="flex w-full items-center justify-between rounded-md border border-border p-3 text-left text-sm transition hover:border-primary/40 hover:bg-muted/30"
+                        onClick={() => openReservationDetails(reservation)}
+                      >
+                        {content}
+                      </button>
+                    );
+                  })}
                 </div>
+                )}
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+
+      <ReservationDetailsDialog
+        open={!!selectedReservationId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedReservationId(null);
+          }
+        }}
+        reservation={selectedReservation ?? null}
+        slug={slug}
+        loading={selectedReservationLoading}
+        onBackToList={() => setSelectedReservationId(null)}
+        backLabel="Voltar para o lead"
+      />
     </div>
   );
 }

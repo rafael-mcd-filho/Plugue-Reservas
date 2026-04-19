@@ -92,6 +92,7 @@ export default function OperatorTodayReservations() {
     qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['reservation-companions'] });
+    qc.invalidateQueries({ queryKey: ['reservation-event-history'] });
   };
 
   const syncReservationInDialogs = (updated: Reservation) => {

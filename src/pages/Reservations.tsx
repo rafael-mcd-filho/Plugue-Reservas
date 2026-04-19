@@ -204,6 +204,14 @@ export default function Reservations() {
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
 
+  const invalidateReservationQueries = () => {
+    qc.invalidateQueries({ queryKey: ['reservations', companyId] });
+    qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
+    qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
+    qc.invalidateQueries({ queryKey: ['reservation-companions'] });
+    qc.invalidateQueries({ queryKey: ['reservation-event-history'] });
+  };
+
   const { data: reservations = [], isLoading } = useQuery({
     queryKey: ['reservations', companyId],
     queryFn: async () => {
@@ -401,10 +409,7 @@ export default function Reservations() {
       return (Array.isArray(data) ? data[0] : data) as Reservation;
     },
     onSuccess: (updated) => {
-      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['reservation-companions'] });
+      invalidateReservationQueries();
       toast.success(updated.status === 'checked_in' ? 'Check-in registrado.' : 'Status atualizado.');
       setEditDialog(false);
       setEditingReservation(null);
@@ -448,9 +453,7 @@ export default function Reservations() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
+      invalidateReservationQueries();
       toast.success('Reserva atualizada.');
       setDataEditDialog(false);
       setDataEditReservation(null);
@@ -468,9 +471,7 @@ export default function Reservations() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
+      invalidateReservationQueries();
       toast.success('Reserva removida.');
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),

@@ -106,6 +106,7 @@ export default function CalendarView() {
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['reservation-companions'] });
+    qc.invalidateQueries({ queryKey: ['reservation-event-history'] });
   };
 
   const syncReservationInDialogs = (updated: Reservation) => {

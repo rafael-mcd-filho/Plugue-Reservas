@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
+import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { formatBrazilPhone } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
 
@@ -21,7 +22,7 @@ interface ReservationCompanion {
   position: number;
 }
 
-interface ReservationDetails {
+export interface ReservationDetails {
   id: string;
   guest_name: string;
   guest_phone: string;
@@ -50,6 +51,9 @@ interface ReservationTimelineItem {
   description: string | null;
   status: string | null;
   payload: Record<string, unknown> | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  actor_source: string | null;
 }
 
 interface ReservationDetailsDialogProps {
@@ -57,6 +61,7 @@ interface ReservationDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   reservation: ReservationDetails | null;
   slug: string;
+  loading?: boolean;
   onBackToList?: () => void;
   backLabel?: string;
   /** @deprecated Use onEdit/onCheckIn/onStatusChange/onCancel instead */
@@ -70,6 +75,7 @@ interface ReservationDetailsDialogProps {
 
 function formatTimelineSource(source: string) {
   if (source === 'meta') return 'Meta CAPI';
+  if (source === 'audit') return 'Auditoria';
   return 'Tracking';
 }
 
@@ -89,11 +95,116 @@ function formatTimelineTitle(item: ReservationTimelineItem) {
   return item.title;
 }
 
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  guest_name: 'Nome',
+  guest_phone: 'WhatsApp',
+  guest_email: 'E-mail',
+  guest_birthdate: 'Nascimento',
+  date: 'Data',
+  time: 'Horário',
+  party_size: 'Pessoas reservadas',
+  occasion: 'Ocasião',
+  notes: 'Observações',
+  status: 'Status',
+  checked_in_at: 'Check-in',
+  checked_in_party_size: 'Pessoas presentes',
+};
+
+function formatAuditRole(role: string | null) {
+  if (role === 'superadmin') return 'Superadmin';
+  if (role === 'admin') return 'Admin';
+  if (role === 'operator') return 'Operador';
+  if (role === 'user') return 'Usuário';
+  if (role === 'system') return 'Sistema';
+  return role;
+}
+
+function formatAuditValue(field: string, value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return 'vazio';
+  }
+
+  if (field === 'status' && typeof value === 'string') {
+    return getReservationStatusLabel(value);
+  }
+
+  if (field === 'date' && typeof value === 'string') {
+    const dateValue = new Date(`${value}T12:00:00`);
+    if (!Number.isNaN(dateValue.getTime())) {
+      return format(dateValue, 'dd/MM/yyyy', { locale: ptBR });
+    }
+    return value;
+  }
+
+  if (field === 'time' && typeof value === 'string') {
+    return value.slice(0, 5);
+  }
+
+  if ((field === 'checked_in_at' || field === 'guest_birthdate') && typeof value === 'string') {
+    const dateValue = field === 'guest_birthdate' ? new Date(`${value}T12:00:00`) : new Date(value);
+    const pattern = field === 'guest_birthdate' ? 'dd/MM/yyyy' : "dd/MM/yyyy 'às' HH:mm";
+    if (!Number.isNaN(dateValue.getTime())) {
+      return format(dateValue, pattern, { locale: ptBR });
+    }
+    return value;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'sim' : 'nao';
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function getAuditChangeEntries(item: ReservationTimelineItem) {
+  if (item.source !== 'audit' || !item.payload || typeof item.payload !== 'object') {
+    return [];
+  }
+
+  const changes = item.payload.changes;
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    return [];
+  }
+
+  return Object.entries(changes)
+    .filter(([, change]) => change && typeof change === 'object' && !Array.isArray(change))
+    .map(([field, change]) => {
+      const typedChange = change as { old?: unknown; new?: unknown };
+
+      return {
+        field,
+        label: AUDIT_FIELD_LABELS[field] ?? field,
+        oldValue: formatAuditValue(field, typedChange.old),
+        newValue: formatAuditValue(field, typedChange.new),
+      };
+    });
+}
+
+function getAuditActorLabel(item: ReservationTimelineItem) {
+  if (item.source !== 'audit') return null;
+  if (item.actor_source === 'system') return 'Sistema automático';
+  if (item.actor_source === 'public') return item.actor_name ? `${item.actor_name} (Público)` : 'Público';
+
+  const roleLabel = formatAuditRole(item.actor_role);
+  if (item.actor_name && roleLabel) return `${item.actor_name} (${roleLabel})`;
+  if (item.actor_name) return item.actor_name;
+  return roleLabel ?? 'Usuário';
+}
+
 export default function ReservationDetailsDialog({
   open,
   onOpenChange,
   reservation,
   slug,
+  loading = false,
   onBackToList,
   backLabel,
   actions,
@@ -104,6 +215,7 @@ export default function ReservationDetailsDialog({
 }: ReservationDetailsDialogProps) {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
+  const [auditHistoryOpen, setAuditHistoryOpen] = useState(false);
   const trackingUrl = reservation
     ? `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`
     : '';
@@ -112,6 +224,7 @@ export default function ReservationDetailsDialog({
     if (!open) {
       setSelectedPayload(null);
       setEventHistoryOpen(false);
+      setAuditHistoryOpen(false);
     }
   }, [open]);
 
@@ -155,6 +268,16 @@ export default function ReservationDetailsDialog({
     [timeline],
   );
 
+  const auditTimeline = useMemo(
+    () => sortedTimeline.filter((item) => item.source === 'audit'),
+    [sortedTimeline],
+  );
+
+  const eventTimeline = useMemo(
+    () => sortedTimeline.filter((item) => item.source !== 'audit'),
+    [sortedTimeline],
+  );
+
   const copyTrackingLink = async () => {
     if (!trackingUrl) return;
     await navigator.clipboard.writeText(trackingUrl);
@@ -164,6 +287,107 @@ export default function ReservationDetailsDialog({
   const openTrackingLink = () => {
     if (!trackingUrl) return;
     window.open(trackingUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const renderTimelineItems = (items: ReservationTimelineItem[], emptyMessage: string) => {
+    if (timelineLoading) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Carregando histÃ³rico...
+        </div>
+      );
+    }
+
+    if (timelineError) {
+      return <p className="text-sm text-destructive">NÃ£o foi possÃ­vel carregar o histÃ³rico desta reserva.</p>;
+    }
+
+    if (items.length === 0) {
+      return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {items.map((item) => {
+          const timelineTitle = formatTimelineTitle(item);
+          const auditChanges = getAuditChangeEntries(item);
+          const auditActorLabel = getAuditActorLabel(item);
+
+          return (
+            <div key={`${item.source}-${item.id}`} className="overflow-hidden rounded-lg border border-border bg-background/80 p-3 text-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium text-foreground">{timelineTitle}</p>
+                    <Badge variant={item.source === 'meta' ? 'outline' : 'secondary'}>
+                      {formatTimelineSource(item.source)}
+                    </Badge>
+                    {item.source === 'audit' && item.actor_role && (
+                      <Badge variant={item.actor_source === 'system' ? 'secondary' : 'outline'}>
+                        {formatAuditRole(item.actor_role)}
+                      </Badge>
+                    )}
+                    {item.source === 'audit' && item.actor_source === 'system' && (
+                      <Badge variant="secondary">Automático</Badge>
+                    )}
+                    {item.status && (
+                      <Badge variant={item.status === 'sent' ? 'secondary' : item.status === 'failed' ? 'destructive' : 'outline'}>
+                        {formatAttemptStatus(item.status)}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {format(new Date(item.occurred_at), "dd/MM/yyyy 'Ã s' HH:mm:ss", { locale: ptBR })}
+                  </p>
+                  {auditActorLabel && (
+                    <p className="text-xs text-muted-foreground">Por {auditActorLabel}</p>
+                  )}
+                </div>
+
+                {item.payload && Object.keys(item.payload).length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() =>
+                      setSelectedPayload({
+                        title: `${timelineTitle} (${formatTimelineSource(item.source)})`,
+                        content: JSON.stringify(item.payload, null, 2),
+                      })
+                    }
+                  >
+                    Ver payload
+                  </Button>
+                )}
+              </div>
+
+              {item.description && (
+                <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                  {item.description}
+                </p>
+              )}
+
+              {auditChanges.length > 0 && (
+                <div className="mt-3 grid gap-2">
+                  {auditChanges.map((change) => (
+                    <div
+                      key={`${item.id}-${change.field}`}
+                      className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs"
+                    >
+                      <p className="font-medium text-foreground">{change.label}</p>
+                      <p className="mt-1 text-muted-foreground">De: {change.oldValue}</p>
+                      <p className="text-muted-foreground">Para: {change.newValue}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -211,7 +435,12 @@ export default function ReservationDetailsDialog({
             ) : null}
           </DialogHeader>
 
-          {reservation ? (
+          {loading ? (
+            <div className="flex min-h-[240px] items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Carregando detalhes da reserva...
+            </div>
+          ) : reservation ? (
             <div className="space-y-5 pt-2">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
@@ -281,6 +510,32 @@ export default function ReservationDetailsDialog({
               )}
 
               {showEventHistory && (
+                <div className="space-y-3">
+                <div className="rounded-lg border border-border bg-muted/20">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-muted/30"
+                  onClick={() => setAuditHistoryOpen((v) => !v)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Pencil className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium text-foreground">Histórico de alterações</p>
+                    {!timelineLoading && (
+                      <span className="text-xs text-muted-foreground">({auditTimeline.length})</span>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${auditHistoryOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {auditHistoryOpen && (
+                  <div className="border-t border-border px-4 pb-4 pt-3">
+                    {renderTimelineItems(
+                      auditTimeline,
+                      'Nenhuma alteração registrada para esta reserva ainda.',
+                    )}
+                  </div>
+                )}
+                </div>
                 <div className="rounded-lg border border-border bg-muted/20">
                 <button
                   type="button"
@@ -291,7 +546,7 @@ export default function ReservationDetailsDialog({
                     <Activity className="h-4 w-4 text-primary" />
                     <p className="text-sm font-medium text-foreground">Histórico de eventos</p>
                     {!timelineLoading && (
-                      <span className="text-xs text-muted-foreground">({sortedTimeline.length})</span>
+                      <span className="text-xs text-muted-foreground">({eventTimeline.length})</span>
                     )}
                   </div>
                   <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${eventHistoryOpen ? 'rotate-180' : ''}`} />
@@ -306,12 +561,14 @@ export default function ReservationDetailsDialog({
                   </div>
                 ) : timelineError ? (
                   <p className="text-sm text-destructive">Não foi possível carregar o histórico desta reserva.</p>
-                ) : sortedTimeline.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhum evento registrado para esta reserva ainda.</p>
+                ) : eventTimeline.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhum evento da jornada foi registrado para esta reserva ainda.</p>
                 ) : (
                   <div className="space-y-3">
-                    {sortedTimeline.map((item) => {
+                    {eventTimeline.map((item) => {
                       const timelineTitle = formatTimelineTitle(item);
+                      const auditChanges = getAuditChangeEntries(item);
+                      const auditActorLabel = getAuditActorLabel(item);
 
                       return (
                       <div key={`${item.source}-${item.id}`} className="overflow-hidden rounded-lg border border-border bg-background/80 p-3 text-sm">
@@ -322,6 +579,14 @@ export default function ReservationDetailsDialog({
                               <Badge variant={item.source === 'meta' ? 'outline' : 'secondary'}>
                                 {formatTimelineSource(item.source)}
                               </Badge>
+                              {item.source === 'audit' && item.actor_role && (
+                                <Badge variant={item.actor_source === 'system' ? 'secondary' : 'outline'}>
+                                  {formatAuditRole(item.actor_role)}
+                                </Badge>
+                              )}
+                              {item.source === 'audit' && item.actor_source === 'system' && (
+                                <Badge variant="secondary">Automático</Badge>
+                              )}
                               {item.status && (
                                 <Badge variant={item.status === 'sent' ? 'secondary' : item.status === 'failed' ? 'destructive' : 'outline'}>
                                   {formatAttemptStatus(item.status)}
@@ -331,6 +596,9 @@ export default function ReservationDetailsDialog({
                             <p className="text-xs text-muted-foreground">
                               {format(new Date(item.occurred_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
                             </p>
+                            {auditActorLabel && (
+                              <p className="text-xs text-muted-foreground">Por {auditActorLabel}</p>
+                            )}
                           </div>
 
                           {item.payload && Object.keys(item.payload).length > 0 && (
@@ -356,12 +624,27 @@ export default function ReservationDetailsDialog({
                             {item.description}
                           </p>
                         )}
+                        {auditChanges.length > 0 && (
+                          <div className="mt-3 grid gap-2">
+                            {auditChanges.map((change) => (
+                              <div
+                                key={`${item.id}-${change.field}`}
+                                className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs"
+                              >
+                                <p className="font-medium text-foreground">{change.label}</p>
+                                <p className="mt-1 text-muted-foreground">De: {change.oldValue}</p>
+                                <p className="text-muted-foreground">Para: {change.newValue}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )})}
                   </div>
                 )}
                   </div>
                 )}
+                </div>
                 </div>
               )}
 
@@ -424,7 +707,11 @@ export default function ReservationDetailsDialog({
                 </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
+              Nenhuma reserva selecionada.
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
