@@ -897,7 +897,7 @@ export default function CompanyEvents() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <MousePointerClick className="h-4 w-4" />
@@ -909,7 +909,7 @@ export default function CompanyEvents() {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="gap-2"
+                className="w-full gap-2 sm:w-auto"
                 onClick={() => handleClearEventData('event_log')}
                 disabled={clearEventDataMutation.isPending || !hasAnyEventLogEntries}
               >
@@ -919,8 +919,8 @@ export default function CompanyEvents() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_180px_180px_160px]">
-                  <div className="space-y-2">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="event-type-filter">Tipo de evento</Label>
                     <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
                       <SelectTrigger id="event-type-filter" className="h-9">
@@ -961,91 +961,93 @@ export default function CompanyEvents() {
                     />
                   </div>
 
-                  <div className="flex items-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-full"
-                      onClick={handleResetEventFilters}
-                      disabled={!hasEventLogFiltersActive}
-                    >
+                  <div className="flex items-end sm:col-span-2 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-full sm:w-auto"
+                        onClick={handleResetEventFilters}
+                        disabled={!hasEventLogFiltersActive}
+                      >
                       Limpar filtros
                     </Button>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className={`text-xs ${hasInvalidEventDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {hasInvalidEventDateRange
                       ? 'Data inicial não pode ser maior que a data final.'
                       : `Exibindo até ${EVENT_LOG_LIMIT} eventos mais recentes para o recorte atual.`}
                   </p>
-                  <Badge variant="outline">{eventLogCountLabel}</Badge>
+                  <Badge variant="outline" className="self-start sm:self-auto">{eventLogCountLabel}</Badge>
                 </div>
               </div>
 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Quando</TableHead>
-                    <TableHead>Evento</TableHead>
-                    <TableHead>Reserva</TableHead>
-                    <TableHead>Detalhe</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {eventLogLoading && eventLog.length === 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        Carregando eventos...
-                      </TableCell>
+                      <TableHead>Quando</TableHead>
+                      <TableHead>Evento</TableHead>
+                      <TableHead>Reserva</TableHead>
+                      <TableHead>Detalhe</TableHead>
                     </TableRow>
-                  ) : eventLog.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        {eventLogEmptyMessage}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    paginatedEventLog.map((event) => (
-                      <TableRow
-                        key={event.id}
-                        role="button"
-                        tabIndex={0}
-                        className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        title="Ver detalhes do evento"
-                        onClick={() => setSelectedEvent(event)}
-                        onKeyDown={(keyboardEvent) => {
-                          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                            keyboardEvent.preventDefault();
-                            setSelectedEvent(event);
-                          }
-                        }}
-                      >
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                          {formatDateTime(event.occurred_at)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary">{event.event_name}</Badge>
-                              <Badge variant="outline">{event.tracking_source}</Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground">{formatEventDisplay(event.event_name)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {event.reservation_id ? event.reservation_id.slice(0, 8) : '-'}
-                        </TableCell>
-                        <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">
-                          {event.path ?? event.page_url ?? '-'}
+                  </TableHeader>
+                  <TableBody>
+                    {eventLogLoading && eventLog.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                          Carregando eventos...
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : eventLog.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                          {eventLogEmptyMessage}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedEventLog.map((event) => (
+                        <TableRow
+                          key={event.id}
+                          role="button"
+                          tabIndex={0}
+                          className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          title="Ver detalhes do evento"
+                          onClick={() => setSelectedEvent(event)}
+                          onKeyDown={(keyboardEvent) => {
+                            if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                              keyboardEvent.preventDefault();
+                              setSelectedEvent(event);
+                            }
+                          }}
+                        >
+                          <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                            {formatDateTime(event.occurred_at)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary">{event.event_name}</Badge>
+                                <Badge variant="outline">{event.tracking_source}</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{formatEventDisplay(event.event_name)}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {event.reservation_id ? event.reservation_id.slice(0, 8) : '-'}
+                          </TableCell>
+                          <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">
+                            {event.path ?? event.page_url ?? '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
               {eventLog.length > 0 && (
                 <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">

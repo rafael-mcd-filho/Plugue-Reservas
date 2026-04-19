@@ -44,6 +44,33 @@ export type CompanyInsert = Omit<Company, 'id' | 'created_at' | 'updated_at' | '
   plan_tier?: CompanyPlanTier;
 };
 
+function getCompanyMutationErrorMessage(err: any, fallbackPrefix: string) {
+  const message = String(err?.message || '');
+  const details = String(err?.details || '');
+  const code = String(err?.code || '');
+  const combined = `${message} ${details}`.toLowerCase();
+
+  if (
+    combined.includes('companies_cnpj_key') ||
+    (code === '23505' && combined.includes('(cnpj)'))
+  ) {
+    return 'Ja existe uma empresa com este CNPJ';
+  }
+
+  if (
+    combined.includes('companies_slug_key') ||
+    (code === '23505' && combined.includes('(slug)'))
+  ) {
+    return 'Ja existe uma empresa com este slug';
+  }
+
+  if (combined.includes('already been registered')) {
+    return 'Este email ja esta cadastrado no sistema';
+  }
+
+  return message ? `${fallbackPrefix}: ${message}` : fallbackPrefix;
+}
+
 export function useCompanies() {
   return useQuery({
     queryKey: ['companies'],
@@ -62,7 +89,9 @@ export function useCreateCompany() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (company: CompanyInsert) => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) throw new Error('Não autenticado');
 
       const response = await supabase.functions.invoke('create-company', {
@@ -94,16 +123,7 @@ export function useCreateCompany() {
       toast.success('Empresa criada com sucesso!');
     },
     onError: (err: any) => {
-      const msg = err.message || '';
-      if (msg.includes('companies_cnpj_key')) {
-        toast.error('Já existe uma empresa com este CNPJ');
-      } else if (msg.includes('companies_slug_key')) {
-        toast.error('Já existe uma empresa com este slug');
-      } else if (msg.includes('already been registered')) {
-        toast.error('Este email já está cadastrado no sistema');
-      } else {
-        toast.error(`Erro ao criar empresa: ${msg}`);
-      }
+      toast.error(getCompanyMutationErrorMessage(err, 'Erro ao criar empresa'));
     },
   });
 }
@@ -126,7 +146,7 @@ export function useUpdateCompany() {
       toast.success('Empresa atualizada!');
     },
     onError: (err: any) => {
-      toast.error(`Erro ao atualizar: ${err.message}`);
+      toast.error(getCompanyMutationErrorMessage(err, 'Erro ao atualizar'));
     },
   });
 }

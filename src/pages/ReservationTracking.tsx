@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Loader2, MapPin, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, MapPin, XCircle } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -313,6 +313,21 @@ export default function ReservationTracking() {
                   >
                     {cancelReservation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Cancelar reserva
+                  </Button>
+                </div>
+              )}
+              {normalizedStatus === 'cancelled' && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  {false && (
+                    <p className="text-sm text-muted-foreground">
+                    Se quiser voltar, vocÃª pode fazer uma nova reserva na pÃ¡gina pÃºblica da unidade.
+                    </p>
+                  )}
+                  <Button asChild className="h-11 w-full rounded-lg shadow-sm">
+                    <Link to={`/${slug}`}>
+                      Fazer nova reserva
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
                   </Button>
                 </div>
               )}

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CheckCircle2, Pencil } from 'lucide-react';
+import { CheckCircle2, Clock3, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -223,6 +223,13 @@ export default function CalendarView() {
       .sort((left, right) => left.time.localeCompare(right.time)),
     [reservations, selectedDateStr],
   );
+  const daySummary = useMemo(
+    () => ({
+      reservations: dayReservations.length,
+      guests: dayReservations.reduce((sum, reservation) => sum + reservation.party_size, 0),
+    }),
+    [dayReservations],
+  );
 
   const openDetails = (reservation: Reservation) => {
     setDetailsReservation(reservation);
@@ -375,12 +382,27 @@ export default function CalendarView() {
           </Card>
 
           <Card className="border-none shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">
+            <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle className="text-lg leading-none">
                 {selectedDate
                   ? `Reservas em ${format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}`
                   : 'Selecione uma data'}
               </CardTitle>
+              {selectedDate && (
+                <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm sm:self-center">
+                  <div className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <Clock3 className="h-3.5 w-3.5 text-amber-500" />
+                    <span className="font-medium text-foreground">{daySummary.reservations}</span>
+                    <span>{daySummary.reservations === 1 ? 'reserva' : 'reservas'}</span>
+                  </div>
+                  <div className="h-4 w-px bg-border/80" />
+                  <div className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <Users className="h-3.5 w-3.5 text-sky-500" />
+                    <span className="font-medium text-foreground">{daySummary.guests}</span>
+                    <span>{daySummary.guests === 1 ? 'pessoa' : 'pessoas'}</span>
+                  </div>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {dayReservations.length === 0 ? (

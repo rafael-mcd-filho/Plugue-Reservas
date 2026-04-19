@@ -2,7 +2,7 @@ import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInMinutes, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CheckCircle2, Clock3, Loader2, Search, Users } from 'lucide-react';
+import { Ban, CheckCircle2, Clock3, Loader2, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -118,12 +118,30 @@ export default function OperatorTodayReservations() {
     refetchInterval: 30000,
   });
 
-  const checkInMutation = useMutation({
-    mutationFn: async ({ reservationId, totalPresent }: { reservationId: string; totalPresent: number }) => {
-      const { data, error } = await (supabase as any).rpc('check_in_reservation', {
+  const statusMutation = useMutation({
+    mutationFn: async ({
+      reservationId,
+      status,
+      totalPresent,
+    }: {
+      reservationId: string;
+      status: ReservationStatus;
+      totalPresent?: number;
+    }) => {
+      if (status === 'checked_in') {
+        const { data, error } = await (supabase as any).rpc('check_in_reservation', {
+          _reservation_id: reservationId,
+          _checked_in_party_size: totalPresent,
+          _companions: [],
+        });
+
+        if (error) throw error;
+        return normalizeReservationRecord((Array.isArray(data) ? data[0] : data) as Reservation);
+      }
+
+      const { data, error } = await (supabase as any).rpc('update_reservation_status', {
         _reservation_id: reservationId,
-        _checked_in_party_size: totalPresent,
-        _companions: [],
+        _status: status,
       });
 
       if (error) throw error;
@@ -132,10 +150,13 @@ export default function OperatorTodayReservations() {
     onSuccess: (updated) => {
       invalidateReservationQueries();
       syncReservationInDialogs(updated);
-      toast.success('Check-in registrado.');
-      setCheckInReservation(null);
+      toast.success(updated.status === 'checked_in' ? 'Check-in registrado.' : 'Reserva marcada como No-Show.');
+      if (updated.status === 'checked_in') {
+        setCheckInReservation(null);
+        setCheckedInPartySize('1');
+      }
       supabase.functions.invoke('reservation-events', {
-        body: { event: 'status_changed', reservation: { id: updated.id } },
+        body: { event: updated.status === 'cancelled' ? 'reservation_cancelled' : 'status_changed', reservation: { id: updated.id } },
       }).catch((error) => console.warn('Reservation events error:', error));
     },
     onError: () => {
@@ -240,9 +261,17 @@ export default function OperatorTodayReservations() {
       return;
     }
 
-    checkInMutation.mutate({
+    statusMutation.mutate({
       reservationId: checkInReservation.id,
+      status: 'checked_in',
       totalPresent: parsedCheckedInCount,
+    });
+  };
+
+  const handleMarkNoShow = (reservation: Reservation) => {
+    statusMutation.mutate({
+      reservationId: reservation.id,
+      status: 'no-show',
     });
   };
 
@@ -336,6 +365,9 @@ export default function OperatorTodayReservations() {
               ) : (
                 filteredPendingReservations.map((reservation) => {
                   const lateMinutes = getLateMinutes(reservation, now);
+                  const reservationActionPending = statusMutation.isPending
+                    && statusMutation.variables?.reservationId === reservation.id;
+                  const pendingStatus = reservationActionPending ? statusMutation.variables?.status : null;
 
                   return (
                     <div
@@ -380,15 +412,38 @@ export default function OperatorTodayReservations() {
                           </div>
                         </div>
 
-                      <div className="flex w-full items-center sm:w-auto sm:justify-end" onClick={(event) => event.stopPropagation()}>
+                        <div
+                          className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[148px]"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <Button
                             type="button"
                             size="sm"
-                            className="w-full gap-2 sm:min-w-28 sm:w-auto"
+                            className="w-full gap-2"
                             onClick={() => openCheckIn(reservation)}
+                            disabled={reservationActionPending}
                           >
-                            <CheckCircle2 className="h-4 w-4" />
-                            Check-in
+                            {pendingStatus === 'checked_in' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-4 w-4" />
+                            )}
+                            {pendingStatus === 'checked_in' ? 'Registrando...' : 'Check-in'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="w-full gap-2 border-destructive/25 text-destructive hover:border-destructive/35 hover:bg-destructive/5 hover:text-destructive"
+                            onClick={() => handleMarkNoShow(reservation)}
+                            disabled={reservationActionPending}
+                          >
+                            {pendingStatus === 'no-show' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Ban className="h-4 w-4" />
+                            )}
+                            {pendingStatus === 'no-show' ? 'Marcando...' : 'No-Show'}
                           </Button>
                         </div>
                       </div>
@@ -513,8 +568,8 @@ export default function OperatorTodayReservations() {
                 <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => handleCheckInDialogChange(false)}>
                   Cancelar
                 </Button>
-                <Button className="w-full sm:w-auto" onClick={handleConfirmCheckIn} disabled={checkInMutation.isPending}>
-                  {checkInMutation.isPending ? (
+                <Button className="w-full sm:w-auto" onClick={handleConfirmCheckIn} disabled={statusMutation.isPending}>
+                  {statusMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Registrando...

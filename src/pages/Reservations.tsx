@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, eachDayOfInterval, format, isToday, parseISO, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
+  Ban,
   CalendarIcon,
   CheckCircle2,
   ChevronLeft,
@@ -11,7 +12,6 @@ import {
   Download,
   Eye,
   Loader2,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -59,6 +59,7 @@ import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
 
 type CalendarRangeMode = 'future' | 'past';
+type ReservationRemovalAction = 'cancel' | 'delete';
 
 interface Reservation {
   id: string;
@@ -80,6 +81,13 @@ interface Reservation {
   checked_in_party_size: number | null;
   created_at: string;
   updated_at: string;
+}
+
+interface ReservationRemovalFlow {
+  reservationId: string;
+  step: 'choose' | 'confirm';
+  action: ReservationRemovalAction | null;
+  allowCancelOption: boolean;
 }
 
 interface ReservationCompanionForm {
@@ -159,8 +167,8 @@ export default function Reservations() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [dateFrom, setDateFrom] = useState<Date | undefined>();
-  const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
+  const [reservationListRangeOpen, setReservationListRangeOpen] = useState(false);
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
@@ -186,7 +194,7 @@ export default function Reservations() {
   const [createDialog, setCreateDialog] = useState(false);
   const [manualReservationForm, setManualReservationForm] = useState<ManualReservationForm>(createManualReservationForm);
   const [dayModal, setDayModal] = useState<string | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [reservationRemovalFlow, setReservationRemovalFlow] = useState<ReservationRemovalFlow | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportCreatedRange, setExportCreatedRange] = useState<DateRange | undefined>();
   const [exportReservationRange, setExportReservationRange] = useState<DateRange | undefined>();
@@ -544,20 +552,7 @@ export default function Reservations() {
   });
 
   const sortedReservations = useMemo(() => {
-    const todayString = format(new Date(), 'yyyy-MM-dd');
-
     return [...reservations].sort((left, right) => {
-      const leftFuture = left.date >= todayString;
-      const rightFuture = right.date >= todayString;
-
-      if (leftFuture && !rightFuture) return -1;
-      if (!leftFuture && rightFuture) return 1;
-
-      if (leftFuture) {
-        const dateCompare = left.date.localeCompare(right.date);
-        return dateCompare !== 0 ? dateCompare : left.time.localeCompare(right.time);
-      }
-
       const dateCompare = right.date.localeCompare(left.date);
       return dateCompare !== 0 ? dateCompare : right.time.localeCompare(left.time);
     });
@@ -566,11 +561,7 @@ export default function Reservations() {
   const filteredReservations = useMemo(() => {
     const result = sortedReservations
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
-      .filter((reservation) => {
-        if (dateFrom && reservation.date < format(dateFrom, 'yyyy-MM-dd')) return false;
-        if (dateTo && reservation.date > format(dateTo, 'yyyy-MM-dd')) return false;
-        return true;
-      })
+      .filter((reservation) => matchesLocalDateRange(reservation.date, reservationListRange))
       .filter((reservation) => {
         const query = search.toLowerCase();
         const queryDigits = normalizePhone(search);
@@ -581,7 +572,7 @@ export default function Reservations() {
         );
       });
     return result;
-  }, [dateFrom, dateTo, search, sortedReservations, statusFilter]);
+  }, [reservationListRange, search, sortedReservations, statusFilter]);
 
   const listTotalPages = Math.max(1, Math.ceil(filteredReservations.length / LIST_PAGE_SIZE));
   const paginatedReservations = useMemo(
@@ -591,7 +582,7 @@ export default function Reservations() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, statusFilter, dateFrom, dateTo]);
+  }, [search, statusFilter, reservationListRange]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -660,6 +651,11 @@ export default function Reservations() {
     if (!dayModal) return [];
     return (reservationsByDate.get(dayModal) ?? []).sort((left, right) => left.time.localeCompare(right.time));
   }, [dayModal, reservationsByDate]);
+  const reservationPendingRemoval = useMemo(
+    () => reservations.find((reservation) => reservation.id === reservationRemovalFlow?.reservationId) ?? null,
+    [reservationRemovalFlow?.reservationId, reservations],
+  );
+  const reservationRemovalBusy = saveStatusMutation.isPending || deleteMutation.isPending;
 
   const openEdit = (reservation: Reservation) => {
     setEditingReservation(reservation);
@@ -698,6 +694,62 @@ export default function Reservations() {
     setDetailsDialog(true);
   };
 
+  const openReservationRemovalFlow = (reservationId: string) => {
+    const reservation = reservations.find((item) => item.id === reservationId);
+    const allowCancelOption = reservation?.status !== 'cancelled' && reservation?.status !== 'checked_in';
+
+    setReservationRemovalFlow({
+      reservationId,
+      step: allowCancelOption ? 'choose' : 'confirm',
+      action: allowCancelOption ? null : 'delete',
+      allowCancelOption,
+    });
+  };
+
+  const closeReservationRemovalFlow = () => {
+    if (reservationRemovalBusy) return;
+    setReservationRemovalFlow(null);
+  };
+
+  const selectReservationRemovalAction = (action: ReservationRemovalAction) => {
+    setReservationRemovalFlow((current) => (
+      current
+        ? {
+            ...current,
+            action,
+            step: 'confirm',
+          }
+        : current
+    ));
+  };
+
+  const backToReservationRemovalChoice = () => {
+    if (reservationRemovalBusy) return;
+    setReservationRemovalFlow((current) => (
+      current?.allowCancelOption
+        ? {
+            ...current,
+            step: 'choose',
+            action: null,
+          }
+        : current
+    ));
+  };
+
+  const confirmReservationRemoval = () => {
+    if (!reservationRemovalFlow?.reservationId || !reservationRemovalFlow.action) return;
+
+    const { reservationId, action } = reservationRemovalFlow;
+    setReservationRemovalFlow(null);
+
+    if (action === 'cancel') {
+      saveStatusMutation.mutate({ id: reservationId, status: 'cancelled' });
+      return;
+    }
+
+    deleteMutation.mutate(reservationId);
+  };
+
   const closeDetails = (options?: { returnToDay?: boolean }) => {
     const returnDay = options?.returnToDay ? detailsReturnDay : null;
     setDetailsDialog(false);
@@ -710,8 +762,16 @@ export default function Reservations() {
   };
 
   const clearDateFilters = () => {
-    setDateFrom(undefined);
-    setDateTo(undefined);
+    setReservationListRange(undefined);
+    setReservationListRangeOpen(false);
+  };
+
+  const handleReservationListRangeSelect = (range: DateRange | undefined) => {
+    setReservationListRange(range);
+
+    if (range?.from && range?.to) {
+      setReservationListRangeOpen(false);
+    }
   };
 
   const clearExportFilters = () => {
@@ -1010,55 +1070,32 @@ export default function Reservations() {
                 </SelectContent>
               </Select>
 
-              <Popover>
+              <Popover open={reservationListRangeOpen} onOpenChange={setReservationListRangeOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     className={cn(
-                      'h-10 w-full justify-between rounded-lg bg-card px-4 text-left font-normal sm:w-[150px]',
-                      !dateFrom && 'text-muted-foreground',
+                      'h-10 w-full justify-between gap-3 rounded-lg bg-card px-4 text-left font-normal sm:w-fit sm:min-w-0',
+                      !reservationListRange?.from && 'text-muted-foreground',
                     )}
                   >
-                    {dateFrom ? format(dateFrom, 'dd/MM/yyyy') : 'dd/mm/aaaa'}
+                    {formatDateRangeLabel(reservationListRange, 'Selecionar período')}
                     <CalendarIcon className="h-4 w-4" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
                   <Calendar
-                    mode="single"
-                    selected={dateFrom}
-                    onSelect={setDateFrom}
+                    mode="range"
+                    selected={reservationListRange}
+                    onSelect={handleReservationListRangeSelect}
+                    numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
                     initialFocus
-                    className="p-3 pointer-events-auto"
+                    className="pointer-events-auto p-3"
                   />
                 </PopoverContent>
               </Popover>
 
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      'h-10 w-full justify-between rounded-lg bg-card px-4 text-left font-normal sm:w-[150px]',
-                      !dateTo && 'text-muted-foreground',
-                    )}
-                  >
-                    {dateTo ? format(dateTo, 'dd/MM/yyyy') : 'dd/mm/aaaa'}
-                    <CalendarIcon className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={dateTo}
-                    onSelect={setDateTo}
-                    initialFocus
-                    className="p-3 pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-
-              {(dateFrom || dateTo) && (
+              {reservationListRange?.from && (
                 <Button
                   variant="outline"
                   size="icon"
@@ -1077,25 +1114,25 @@ export default function Reservations() {
             <Table>
               <TableHeader className="bg-muted/55">
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Reserva
                   </TableHead>
-                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Criada em
                   </TableHead>
-                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Cliente
                   </TableHead>
-                  <TableHead className="hidden h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:table-cell">
+                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:table-cell">
                     Pessoas
                   </TableHead>
-                  <TableHead className="hidden h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:table-cell">
+                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:table-cell">
                     Ocasião
                   </TableHead>
-                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Status
                   </TableHead>
-                  <TableHead className="h-12 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                     Ações
                   </TableHead>
                 </TableRow>
@@ -1144,7 +1181,7 @@ export default function Reservations() {
                           <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
                         </TableCell>
 
-                        <TableCell className="hidden px-4 py-3 text-sm font-medium text-foreground sm:table-cell">
+                        <TableCell className="hidden px-4 py-3 text-center text-sm font-medium text-foreground sm:table-cell">
                           {reservation.party_size}
                         </TableCell>
 
@@ -1153,20 +1190,13 @@ export default function Reservations() {
                         </TableCell>
 
                         <TableCell className="px-4 py-3">
-                          <ReservationStatusBadge status={reservation.status} />
+                          <div className="flex justify-center">
+                            <ReservationStatusBadge status={reservation.status} />
+                          </div>
                         </TableCell>
 
                         <TableCell className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8 rounded-lg"
-                              aria-label="Ver detalhes"
-                              onClick={() => openDetails(reservation)}
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </Button>
+                          <div className="flex items-center justify-center gap-1.5">
                             {reservation.status === 'confirmed' && (
                               <Button
                                 variant="outline"
@@ -1182,17 +1212,17 @@ export default function Reservations() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8 rounded-lg"
-                              aria-label="Editar reserva"
-                              onClick={() => openDataEdit(reservation)}
+                              aria-label="Ver detalhes"
+                              onClick={() => openDetails(reservation)}
                             >
-                              <Pencil className="h-3.5 w-3.5" />
+                              <Eye className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               variant="outline"
                               size="icon"
                               className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
                               aria-label="Excluir reserva"
-                              onClick={() => setDeleteConfirmId(reservation.id)}
+                              onClick={() => openReservationRemovalFlow(reservation.id)}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1924,31 +1954,131 @@ export default function Reservations() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+      <Dialog
+        open={reservationRemovalFlow?.step === 'choose'}
+        onOpenChange={(open) => {
+          if (!open) closeReservationRemovalFlow();
+        }}
+      >
+        <DialogContent className="sm:max-w-[31rem]">
+          <DialogHeader>
+            <DialogTitle className="text-left">O que deseja fazer com esta reserva?</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {reservationPendingRemoval && (
+              <div className="rounded-xl border border-border/70 bg-muted/25 px-3.5 py-2.5 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{reservationPendingRemoval.guest_name}</span>
+                {` • ${format(new Date(`${reservationPendingRemoval.date}T12:00:00`), 'dd/MM/yyyy')} às ${reservationPendingRemoval.time.slice(0, 5)}`}
+              </div>
+            )}
+
+            <div className="grid gap-2.5">
+              <button
+                type="button"
+                className="group rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left transition hover:border-primary/25 hover:bg-muted/15"
+                onClick={() => selectReservationRemovalAction('cancel')}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Manter histórico
+                    </p>
+                    <p className="text-[15px] font-semibold text-foreground">Cancelar reserva</p>
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Mantém o registro salvo no sistema e apenas altera o status para cancelada.
+                    </p>
+                  </div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background text-muted-foreground shadow-sm transition group-hover:border-primary/20">
+                    <Ban className="h-4 w-4" />
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="group rounded-xl border border-destructive/45 bg-gradient-to-br from-destructive/[0.12] via-background to-destructive/[0.04] px-3.5 py-3 text-left shadow-[0_18px_36px_-34px_hsl(var(--destructive)/0.95)] transition hover:border-destructive/75 hover:from-destructive/[0.18] hover:to-destructive/[0.08]"
+                onClick={() => selectReservationRemovalAction('delete')}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-destructive/80">
+                        Ação irreversível
+                      </p>
+                      <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+                    </div>
+                    <p className="text-[15px] font-semibold text-destructive">Excluir reserva</p>
+                    <p className="text-sm leading-relaxed text-foreground/80">
+                      Remove permanentemente o registro da reserva. Depois disso, ele não poderá ser recuperado.
+                    </p>
+                  </div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-destructive/25 bg-destructive/15 text-destructive shadow-[inset_0_1px_0_hsl(var(--destructive)/0.15)] transition group-hover:bg-destructive/20">
+                    <Trash2 className="h-4 w-4" />
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={reservationRemovalFlow?.step === 'confirm'}
+        onOpenChange={(open) => {
+          if (!open) closeReservationRemovalFlow();
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir reserva?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {reservationRemovalFlow?.action === 'cancel' ? 'Confirmar cancelamento?' : 'Confirmar exclusão?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. A reserva será removida permanentemente.
+              {reservationRemovalFlow?.action === 'cancel'
+                ? 'A reserva continuará no histórico, mas ficará marcada como cancelada e não permanecerá ativa.'
+                : 'Esta ação exclui permanentemente o registro da reserva. Depois de confirmar, não será possível recuperar esse dado.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId);
-                setDeleteConfirmId(null);
+            <AlertDialogCancel
+              disabled={reservationRemovalBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                if (reservationRemovalFlow?.allowCancelOption) {
+                  backToReservationRemovalChoice();
+                  return;
+                }
+
+                closeReservationRemovalFlow();
               }}
             >
-              Excluir
+              {reservationRemovalFlow?.allowCancelOption ? 'Voltar' : 'Fechar'}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(
+                reservationRemovalFlow?.action === 'delete'
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90',
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                confirmReservationRemoval();
+              }}
+              disabled={reservationRemovalBusy}
+            >
+              {reservationRemovalBusy
+                ? 'Processando...'
+                : reservationRemovalFlow?.action === 'cancel'
+                  ? 'Cancelar reserva'
+                  : 'Excluir reserva'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <Dialog open={!!dayModal} onOpenChange={(open) => !open && setDayModal(null)}>
-        <DialogContent className="max-h-[80vh] w-[calc(100vw-2rem)] max-w-3xl overflow-x-hidden overflow-y-auto">
+        <DialogContent className="left-2 right-2 max-h-[82vh] overflow-x-hidden overflow-y-auto sm:w-fit sm:min-w-[44rem] sm:max-w-[min(94vw,72rem)] lg:max-w-[min(92vw,76rem)]">
           <DialogHeader>
             <DialogTitle className="pr-10 text-left leading-tight">
               Reservas - {dayModal && format(new Date(`${dayModal}T12:00:00`), "EEEE, dd 'de' MMMM", { locale: ptBR })}
@@ -1970,14 +2100,94 @@ export default function Reservations() {
                       index !== dayModalReservations.length - 1 && 'border-b border-border/60',
                     )}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="sm:hidden">
+                      <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3">
+                        <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
+                          {reservation.time.slice(0, 5)}
+                        </div>
+
+                        <div className="min-w-0">
+                          <span
+                            className="block text-sm font-semibold leading-snug text-foreground"
+                            style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                            title={reservation.guest_name}
+                          >
+                            {reservation.guest_name}
+                          </span>
+
+                          <div className="mt-1">
+                            <ReservationStatusBadge status={reservation.status} />
+                          </div>
+
+                          <div className="mt-2 flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                                <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                                <span className="inline-flex items-center gap-1">
+                                  <Users className="h-3 w-3" />
+                                  {reservation.party_size}
+                                </span>
+                                {reservation.occasion && <span>{reservation.occasion}</span>}
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {reservation.status === 'confirmed' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                                  onClick={() => openCheckIn(reservation)}
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  Check-in
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 rounded-lg"
+                                aria-label="Ver reserva"
+                                onClick={() => {
+                                  setDayModal(null);
+                                  openDetails(reservation, { returnDay: dayModal });
+                                }}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                                aria-label="Excluir reserva"
+                                onClick={() => openReservationRemovalFlow(reservation.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="hidden items-center gap-3 sm:flex">
                       <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
                         {reservation.time.slice(0, 5)}
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span
+                            className="truncate text-sm font-semibold text-foreground"
+                            title={reservation.guest_name}
+                          >
+                            {reservation.guest_name}
+                          </span>
                           <ReservationStatusBadge status={reservation.status} />
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
@@ -2004,8 +2214,8 @@ export default function Reservations() {
                         )}
                         <Button
                           variant="outline"
-                          size="sm"
-                          className="h-8 gap-1.5 rounded-lg px-3 text-xs"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg"
                           aria-label="Ver reserva"
                           onClick={() => {
                             setDayModal(null);
@@ -2013,7 +2223,15 @@ export default function Reservations() {
                           }}
                         >
                           <Eye className="h-3.5 w-3.5" />
-                          Ver reserva
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                          aria-label="Excluir reserva"
+                          onClick={() => openReservationRemovalFlow(reservation.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </div>

@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Ban, CheckCircle2, ChevronDown, ChevronLeft, Copy, ExternalLink, Loader2, Pencil, Send, Users } from 'lucide-react';
+import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Loader2, Pencil, Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
@@ -98,7 +98,6 @@ export default function ReservationDetailsDialog({
   backLabel,
   actions,
   onEdit,
-  onCheckIn,
   onStatusChange,
   onCancel,
   showEventHistory = true,
@@ -189,18 +188,12 @@ export default function ReservationDetailsDialog({
             <DialogTitle className="text-left">Detalhes da reserva</DialogTitle>
             {actions ? (
               <div className="flex flex-wrap gap-2 pt-1">{actions}</div>
-            ) : reservation && (onEdit || onCheckIn || onStatusChange || onCancel) ? (
+            ) : reservation && (onEdit || onStatusChange || onCancel) ? (
               <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap">
                 {onEdit && (
                   <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onEdit(reservation)}>
                     <Pencil className="h-3.5 w-3.5" />
                     Editar reserva
-                  </Button>
-                )}
-                {onCheckIn && reservation.status === 'confirmed' && (
-                  <Button type="button" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onCheckIn(reservation)}>
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Realizar check-in
                   </Button>
                 )}
                 {onStatusChange && (
@@ -321,9 +314,9 @@ export default function ReservationDetailsDialog({
                       const timelineTitle = formatTimelineTitle(item);
 
                       return (
-                      <div key={`${item.source}-${item.id}`} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
+                      <div key={`${item.source}-${item.id}`} className="overflow-hidden rounded-lg border border-border bg-background/80 p-3 text-sm">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="space-y-1">
+                          <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium text-foreground">{timelineTitle}</p>
                               <Badge variant={item.source === 'meta' ? 'outline' : 'secondary'}>
@@ -359,7 +352,9 @@ export default function ReservationDetailsDialog({
                         </div>
 
                         {item.description && (
-                          <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+                          <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                            {item.description}
+                          </p>
                         )}
                       </div>
                     )})}
