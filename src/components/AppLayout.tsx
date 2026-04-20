@@ -618,7 +618,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           activeRoles.includes('admin') || activeRoles.includes('operator')
         ) && <NotificationBanner companyId={companyContext.companyId} />}
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 py-4 lg:px-5 lg:py-4 animate-fade-in">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:px-5 lg:py-4 animate-fade-in">
           {children}
         </main>
       </div>

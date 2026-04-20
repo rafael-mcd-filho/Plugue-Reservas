@@ -71,8 +71,8 @@ export default function ReservationFunnelChart({
           {headerActions}
         </div>
       </CardHeader>
-      <CardContent className="min-w-0">
-        <div className="h-[300px]">
+      <CardContent className="min-w-0 pb-5 sm:pb-4">
+        <div className="h-[280px] sm:h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(30, 15%, 88%)" horizontal={false} />
@@ -110,7 +110,7 @@ export default function ReservationFunnelChart({
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <p className="mt-2 text-center text-sm text-muted-foreground">
+        <p className="mt-3 pb-1 text-center text-sm text-muted-foreground">
           Taxa de conversão geral: <span className="font-semibold text-foreground">{overallConversion}%</span>
         </p>
       </CardContent>
