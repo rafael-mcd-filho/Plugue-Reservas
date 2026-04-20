@@ -436,9 +436,9 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI — linha 1: equação de atendimentos + pessoas */}
-          <div className="flex flex-wrap items-stretch gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-stretch sm:gap-2">
             {/* Reservas agendadas */}
-            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
               <CardContent className="flex items-center gap-3 py-4">
                 <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
                   <CalendarCheck className="h-5 w-5" />
@@ -456,10 +456,10 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <div className="flex items-center px-1 text-lg font-semibold text-muted-foreground">+</div>
+            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">+</div>
 
             {/* Fila convertida */}
-            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
               <CardContent className="flex items-center gap-3 py-4">
                 <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
                   <ClipboardList className="h-5 w-5" />
@@ -477,10 +477,10 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <div className="flex items-center px-1 text-lg font-semibold text-muted-foreground">=</div>
+            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">=</div>
 
             {/* Atendimentos totais */}
-            <Card className="min-w-0 flex-1 border-2 border-primary/30 shadow-sm">
+            <Card className="min-w-0 sm:flex-1 border-2 border-primary/30 shadow-sm">
               <CardContent className="flex items-center gap-3 py-4">
                 <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
                   <CalendarIcon className="h-5 w-5" />
@@ -501,7 +501,7 @@ export default function Dashboard() {
             <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">·</div>
 
             {/* Total pessoas */}
-            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
               <CardContent className="flex items-center gap-3 py-4">
                 <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
                   <Users className="h-5 w-5" />
@@ -594,28 +594,28 @@ export default function Dashboard() {
                     return (
                       <div>
                         <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Reservas</p>
-                        <div className="flex items-center gap-2">
-                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2">
+                        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                          <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
                             <span className="text-lg font-bold leading-none text-foreground">{total.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Agendamentos</span>
                           </div>
-                          <div className="flex flex-1 items-center gap-1">
-                            <div className="h-0.5 flex-1 bg-border" />
+                          <div className="flex items-center justify-center gap-1 sm:flex-1">
+                            <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctCheckIn}%</span>
-                            <div className="h-0.5 flex-1 bg-border" />
+                            <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                           </div>
-                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2">
+                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[110px]">
                             <span className="text-lg font-bold leading-none text-success">{checkIns.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Check-ins</span>
                           </div>
                           {total > checkIns && (
                             <>
-                              <div className="flex flex-1 items-center gap-1">
-                                <div className="h-0.5 flex-1 bg-border" />
+                              <div className="flex items-center justify-center gap-1 sm:flex-1">
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                                 <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctCheckIn}%</span>
-                                <div className="h-0.5 flex-1 bg-border" />
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
                                 <span className="text-lg font-bold leading-none text-destructive">{(total - checkIns).toLocaleString('pt-BR')}</span>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
                               </div>
@@ -633,28 +633,28 @@ export default function Dashboard() {
                     return (
                       <div>
                         <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Pessoas</p>
-                        <div className="flex items-center gap-2">
-                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2">
+                        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                          <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
                             <span className="text-lg font-bold leading-none text-foreground">{totalGuests.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Programadas</span>
                           </div>
-                          <div className="flex flex-1 items-center gap-1">
-                            <div className="h-0.5 flex-1 bg-border" />
+                          <div className="flex items-center justify-center gap-1 sm:flex-1">
+                            <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctGuests}%</span>
-                            <div className="h-0.5 flex-1 bg-border" />
+                            <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                           </div>
-                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2">
+                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[110px]">
                             <span className="text-lg font-bold leading-none text-success">{checkedInGuests.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Compareceram</span>
                           </div>
                           {totalGuests > checkedInGuests && (
                             <>
-                              <div className="flex flex-1 items-center gap-1">
-                                <div className="h-0.5 flex-1 bg-border" />
+                              <div className="flex items-center justify-center gap-1 sm:flex-1">
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                                 <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctGuests}%</span>
-                                <div className="h-0.5 flex-1 bg-border" />
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
                                 <span className="text-lg font-bold leading-none text-destructive">{(totalGuests - checkedInGuests).toLocaleString('pt-BR')}</span>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
                               </div>

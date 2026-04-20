@@ -29,6 +29,7 @@ export interface Notification {
   company_id: string | null;
   title: string;
   message: string;
+  image_url: string | null;
   type: string;
   is_read: boolean;
   read_at: string | null;
@@ -159,7 +160,7 @@ export function useNotifications() {
 export function useCreateNotification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (notification: { company_ids: string[]; title: string; message: string; type: string }) => {
+    mutationFn: async (notification: { company_ids: string[]; title: string; message: string; image_url?: string | null; type: string }) => {
       const { data: { session } } = await supabase.auth.getSession();
       const { company_ids, ...rest } = notification;
 

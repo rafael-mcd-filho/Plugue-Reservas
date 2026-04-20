@@ -74,8 +74,10 @@ const OperatorTodayReservations = lazyWithRouteReload(() => import("@/pages/Oper
 const PublicWaitlistPage = lazyWithRouteReload(() => import("@/pages/PublicWaitlistPage"));
 const WaitlistTracking = lazyWithRouteReload(() => import("@/pages/WaitlistTracking"));
 const ReservationTracking = lazyWithRouteReload(() => import("@/pages/ReservationTracking"));
+const AffiliateCompanyPublicPage = lazyWithRouteReload(() => import("@/pages/AffiliateCompanyPublicPage"));
 const Profile = lazyWithRouteReload(() => import("@/pages/Profile"));
 const Leads = lazyWithRouteReload(() => import("@/pages/Leads"));
+const Affiliates = lazyWithRouteReload(() => import("@/pages/Affiliates"));
 const Users = lazyWithRouteReload(() => import("@/pages/Users"));
 const Login = lazyWithRouteReload(() => import("@/pages/Login"));
 const ResetPassword = lazyWithRouteReload(() => import("@/pages/ResetPassword"));
@@ -364,6 +366,14 @@ const App = () => (
               />
 
               <Route
+                path="/:slug/f/:code"
+                element={
+                  <SuspenseRoute fallback={<PublicPageSkeleton />}>
+                    <AffiliateCompanyPublicPage />
+                  </SuspenseRoute>
+                }
+              />
+              <Route
                 path="/:slug"
                 element={
                   <SuspenseRoute fallback={<PublicPageSkeleton />}>
@@ -481,6 +491,14 @@ const App = () => (
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
                     <Leads />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/filiados"
+                element={
+                  <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
+                    <Affiliates />
                   </CompanyAdminRoute>
                 }
               />

@@ -18,8 +18,8 @@ export default function CompanyNotificationsPopover() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="icon" className="relative" aria-label="Notificações da empresa">
-          <Bell className="h-4 w-4" />
+        <Button variant="outline" size="sm" className="relative px-2.5" aria-label="Notificações da empresa">
+          <Bell className="h-3.5 w-3.5" />
           {unreadCount > 0 && (
             <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
               {unreadCount > 9 ? '9+' : unreadCount}
@@ -75,9 +75,10 @@ export default function CompanyNotificationsPopover() {
                           </Badge>
                         )}
                       </div>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                        {notification.message}
-                      </p>
+                      <div
+                        className="prose prose-sm mt-1 max-w-none text-muted-foreground [&_*]:text-muted-foreground [&_a]:text-primary [&_img]:hidden"
+                        dangerouslySetInnerHTML={{ __html: notification.message }}
+                      />
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">

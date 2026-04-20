@@ -167,6 +167,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (_event === 'TOKEN_REFRESHED') {
+          if (!newSession) {
+            // Refresh token expired or was revoked — force logout
+            loadUserData(null);
+          } else {
+            loadUserData(newSession, { background: true });
+          }
+          return;
+        }
+
+        if (_event === 'USER_UPDATED') {
           loadUserData(newSession, { background: true });
         }
       }

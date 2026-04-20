@@ -42,12 +42,12 @@ export default function WhatsAppStatusAlert() {
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2 text-sm">
+    <div className="flex min-w-0 shrink items-center gap-1.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-1.5 text-sm">
       <WifiOff className="h-4 w-4 shrink-0 text-destructive" />
-      <span className="font-medium text-destructive">WhatsApp desconectado</span>
+      <span className="shrink-0 font-medium text-destructive">WhatsApp desconectado</span>
       {queueCount > 0 && (
-        <span className="text-destructive/70">
-          {' - '} {queueCount} {queueCount === 1 ? 'mensagem' : 'mensagens'} na fila
+        <span className="hidden truncate text-destructive/70 sm:inline">
+          {'· '}{queueCount} {queueCount === 1 ? 'mensagem' : 'mensagens'} na fila
         </span>
       )}
     </div>

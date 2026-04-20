@@ -85,7 +85,7 @@ export default function Companies() {
   const resolveFeatures = (company: Company) =>
     featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier));
 
-  const { data: impersonationCandidates = [], isLoading: impersonationCandidatesLoading } = useQuery({
+  const { data: impersonationCandidates = [], isLoading: impersonationCandidatesLoading, isError: impersonationCandidatesError, error: impersonationCandidatesErrorObj } = useQuery({
     queryKey: ['impersonation-candidates', companyToImpersonate?.id],
     queryFn: async () => {
       const companyId = companyToImpersonate?.id;
@@ -434,6 +434,11 @@ export default function Companies() {
             <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Carregando usuários da empresa...
+            </div>
+          ) : impersonationCandidatesError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive space-y-1">
+              <p className="font-medium">Erro ao carregar usuários:</p>
+              <p className="font-mono text-xs break-all">{(impersonationCandidatesErrorObj as any)?.message || 'Erro desconhecido'}</p>
             </div>
           ) : !companyToImpersonate ? null : impersonationCandidates.length === 0 ? (
             <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">

@@ -4,6 +4,7 @@ import { differenceInMinutes, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Ban, CheckCircle2, Clock3, Loader2, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
@@ -75,6 +76,11 @@ function formatLateLabel(minutes: number) {
   }
 
   return `Atrasada ha ${hours}h${String(remainingMinutes).padStart(2, '0')}`;
+}
+
+function getPresentGuestCount(reservation: Reservation) {
+  if (reservation.status !== 'checked_in') return 0;
+  return reservation.checked_in_party_size ?? reservation.party_size;
 }
 
 export default function OperatorTodayReservations() {
@@ -176,11 +182,14 @@ export default function OperatorTodayReservations() {
   const summary = useMemo(
     () => ({
       total: reservations.length,
+      guests: reservations.reduce((totalGuests, reservation) => totalGuests + reservation.party_size, 0),
       pending: pendingReservations.length,
+      pendingGuests: pendingReservations.reduce((totalGuests, reservation) => totalGuests + reservation.party_size, 0),
       checkedIn: reservations.filter((reservation) => reservation.status === 'checked_in').length,
+      checkedInGuests: reservations.reduce((totalGuests, reservation) => totalGuests + getPresentGuestCount(reservation), 0),
       issues: reservations.filter((reservation) => reservation.status === 'cancelled' || reservation.status === 'no-show').length,
     }),
-    [pendingReservations.length, reservations],
+    [pendingReservations, reservations],
   );
   const normalizedSearch = search.trim().toLowerCase();
   const normalizedSearchDigits = normalizePhoneDigits(search);
@@ -212,13 +221,19 @@ export default function OperatorTodayReservations() {
     {
       label: 'Pendentes',
       value: summary.pending,
-      hint: 'aguardando chegada',
+      hint: 'grupos que faltam chegar',
       className: 'bg-primary-soft text-primary',
+    },
+    {
+      label: 'Pessoas previstas',
+      value: summary.guests,
+      hint: 'reservadas para hoje',
+      className: 'bg-emerald-50 text-emerald-700',
     },
     {
       label: 'Check-ins',
       value: summary.checkedIn,
-      hint: 'ja registrados',
+      hint: 'grupos que ja chegaram',
       className: 'bg-info-soft text-info',
     },
     {
@@ -303,7 +318,7 @@ export default function OperatorTodayReservations() {
         </div>
 
         <div className="rounded-2xl bg-card/95 p-3 shadow-sm">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {summaryItems.map((item) => (
               <div key={item.label} className="rounded-xl border border-border/35 bg-background/75 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
                 <div className="flex items-start justify-between gap-3">
@@ -395,7 +410,11 @@ export default function OperatorTodayReservations() {
                               </span>
                             )}
                           </div>
-                          <p className="mt-0.5 text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</p>
+                          <PhoneWhatsAppLink
+                            phone={reservation.guest_phone}
+                            className="mt-0.5"
+                            phoneClassName="text-sm text-muted-foreground"
+                          />
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                             <span className="rounded-full bg-muted px-2.5 py-1 font-medium text-muted-foreground">
                               {reservation.party_size} pessoas
@@ -501,7 +520,10 @@ export default function OperatorTodayReservations() {
                             <ReservationStatusBadge status={reservation.status} />
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                            <span>{formatBrazilPhone(reservation.guest_phone)}</span>
+                            <PhoneWhatsAppLink
+                              phone={reservation.guest_phone}
+                              phoneClassName="text-xs text-muted-foreground"
+                            />
                             <span>{reservation.party_size} pessoas</span>
                             {reservation.status === 'checked_in' && reservation.checked_in_party_size && (
                               <span>{reservation.checked_in_party_size} presentes</span>

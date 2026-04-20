@@ -40,6 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
@@ -1150,7 +1151,11 @@ export default function Reservations() {
 
                         <TableCell className="px-4 py-3">
                           <div className="text-sm font-medium text-foreground">{reservation.guest_name}</div>
-                          <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</div>
+                          <PhoneWhatsAppLink
+                            phone={reservation.guest_phone}
+                            className="mt-0.5"
+                            phoneClassName="text-xs text-muted-foreground"
+                          />
                         </TableCell>
 
                         <TableCell className="hidden px-4 py-3 text-center text-sm font-medium text-foreground sm:table-cell">
@@ -2042,7 +2047,10 @@ export default function Reservations() {
                           <div className="mt-2 flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                                <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                                <PhoneWhatsAppLink
+                                  phone={reservation.guest_phone}
+                                  phoneClassName="text-xs text-muted-foreground"
+                                />
                                 <span className="inline-flex items-center gap-1">
                                   <Users className="h-3 w-3" />
                                   {reservation.party_size}
@@ -2106,7 +2114,10 @@ export default function Reservations() {
                           <ReservationStatusBadge status={reservation.status} />
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                          <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                          <PhoneWhatsAppLink
+                            phone={reservation.guest_phone}
+                            phoneClassName="text-xs text-muted-foreground"
+                          />
                           <span className="inline-flex items-center gap-1">
                             <Users className="h-3 w-3" />
                             {reservation.party_size}

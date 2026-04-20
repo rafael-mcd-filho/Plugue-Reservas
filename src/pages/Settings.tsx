@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload, ChevronRight } from 'lucide-react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload, ChevronRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +22,7 @@ import {
   useNotifications, useCreateNotification, useDeleteNotification,
 } from '@/hooks/useSettings';
 import { useCompanies } from '@/hooks/useCompanies';
+import RichTextEditor from '@/components/RichTextEditor';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -225,8 +226,30 @@ function NotificationsTab() {
   const deleteNotification = useDeleteNotification();
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ company_ids: [] as string[], title: '', message: '', type: 'info' });
+  const [form, setForm] = useState({ company_ids: [] as string[], title: '', message: '', image_url: '', type: 'info' });
   const [sendToAll, setSendToAll] = useState(true);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) { toast.error('Imagem deve ter no máximo 3MB'); return; }
+    setUploadingImage(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `notification-images/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('system-assets').upload(path, file, { upsert: false });
+      if (error) throw error;
+      const { data } = supabase.storage.from('system-assets').getPublicUrl(path);
+      setForm((f) => ({ ...f, image_url: data.publicUrl }));
+      toast.success('Imagem enviada!');
+    } catch (err: any) {
+      toast.error(`Erro: ${err.message}`);
+    } finally {
+      setUploadingImage(false);
+      e.target.value = '';
+    }
+  };
 
   const toggleCompany = (id: string) => {
     setForm(prev => ({
@@ -245,9 +268,10 @@ function NotificationsTab() {
       company_ids: targetCompanyIds,
       title: form.title,
       message: form.message,
+      image_url: form.image_url.trim() || null,
       type: form.type,
     });
-    setForm({ company_ids: [], title: '', message: '', type: 'info' });
+    setForm({ company_ids: [], title: '', message: '', image_url: '', type: 'info' });
     setSendToAll(true);
     setDialogOpen(false);
   };
@@ -263,11 +287,12 @@ function NotificationsTab() {
           <DialogTrigger asChild>
             <Button className="gap-2"><Send className="h-4 w-4" /> Nova Notificação</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
+          <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 max-w-2xl">
+            <DialogHeader className="border-b border-border px-6 py-4">
               <DialogTitle>Enviar Notificação</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleSend} className="space-y-4 mt-4">
+            <form onSubmit={handleSend} className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 mt-0">
               <div className="space-y-3">
                 <Label>Destinatários</Label>
                 <div className="flex items-center gap-2">
@@ -316,9 +341,51 @@ function NotificationsTab() {
               </div>
               <div>
                 <Label>Mensagem *</Label>
-                <Textarea value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Mensagem..." rows={3} />
+                <RichTextEditor
+                  content={form.message}
+                  onChange={(html) => setForm((f) => ({ ...f, message: html }))}
+                  placeholder="Escreva a mensagem da notificação..."
+                />
               </div>
-              <div className="flex justify-end gap-3">
+              <div>
+                <Label>Imagem <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                <div className="mt-1.5 flex gap-2">
+                  <Input
+                    value={form.image_url}
+                    onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
+                    placeholder="Cole uma URL ou faça upload..."
+                    className="min-w-0 flex-1"
+                  />
+                  <label className="relative cursor-pointer">
+                    <Button type="button" variant="outline" size="sm" className="gap-1.5 pointer-events-none h-10 px-3" disabled={uploadingImage}>
+                      {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      {uploadingImage ? 'Enviando...' : 'Upload'}
+                    </Button>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={handleImageUpload}
+                      disabled={uploadingImage}
+                    />
+                  </label>
+                  {form.image_url.trim() && (
+                    <Button type="button" variant="ghost" size="sm" className="h-10 px-2 text-muted-foreground" onClick={() => setForm((f) => ({ ...f, image_url: '' }))}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+                {form.image_url.trim() && (
+                  <img
+                    src={form.image_url}
+                    alt="Preview"
+                    className="mt-2 max-h-40 w-full rounded-lg border border-border object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+              </div>
+              </div>
+              <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
                 <Button
                   type="submit"

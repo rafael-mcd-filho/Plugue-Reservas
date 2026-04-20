@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, type TrackingSnapshot, type TrackingUserData } from '@/hooks/useFunnelTracking';
+import { getAffiliateAttribution } from '@/lib/affiliateLinks';
 import {
   DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
   DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
@@ -690,6 +691,10 @@ export default function ReservationModal({
         country: null,
         external_id: trackingSnapshot.anonymous_id,
       };
+      const affiliateAttribution = getAffiliateAttribution({
+        companyId,
+        companySlug: slug,
+      });
 
       const attributionSnapshot = {
         ...trackingSnapshot.attribution_snapshot,
@@ -710,6 +715,10 @@ export default function ReservationModal({
         utm_content: trackingSnapshot.utm_content,
         utm_term: trackingSnapshot.utm_term,
         user_data: reservationUserData,
+        affiliate_link_id: affiliateAttribution?.affiliateLinkId ?? null,
+        affiliate_code: affiliateAttribution?.code ?? null,
+        affiliate_name: affiliateAttribution?.referenceName ?? null,
+        affiliate_captured_at: affiliateAttribution?.capturedAt ?? null,
       };
       const reservationData = {
         id: reservationId,
@@ -731,6 +740,9 @@ export default function ReservationModal({
         origin_tracking_session_id: trackingSnapshot.session_id,
         origin_tracking_journey_id: trackingSnapshot.journey_id,
         origin_anonymous_id: trackingSnapshot.anonymous_id,
+        origin_affiliate_link_id: affiliateAttribution?.affiliateLinkId ?? null,
+        origin_affiliate_code: affiliateAttribution?.code ?? null,
+        origin_affiliate_name: affiliateAttribution?.referenceName ?? null,
         origin_fbp: trackingSnapshot.fbp,
         origin_fbc: trackingSnapshot.fbc,
         attribution_snapshot: attributionSnapshot,

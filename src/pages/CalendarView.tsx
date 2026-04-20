@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CheckCircle2, Clock3, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import {
@@ -414,10 +415,17 @@ export default function CalendarView() {
                     const detail = reservation.occasion || reservation.notes;
 
                     return (
-                      <button
+                      <div
                         key={reservation.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => openDetails(reservation)}
+                        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            openDetails(reservation);
+                          }
+                        }}
                         className={cn(
                           'group w-full bg-card px-4 py-3 text-left transition hover:bg-accent/20',
                           index !== dayReservations.length - 1 && 'border-b border-border/60',
@@ -434,13 +442,17 @@ export default function CalendarView() {
                               <ReservationStatusBadge status={reservation.status} />
                             </div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                              <span className="tabular-nums">{formatBrazilPhone(reservation.guest_phone)}</span>
+                              <PhoneWhatsAppLink
+                                phone={reservation.guest_phone}
+                                phoneClassName="text-xs text-muted-foreground"
+                                linkMode="button"
+                              />
                               <span>{reservation.party_size} pessoas</span>
                               {detail && <span>{detail}</span>}
                             </div>
                           </div>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

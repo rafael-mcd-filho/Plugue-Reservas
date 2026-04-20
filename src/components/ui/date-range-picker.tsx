@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { format } from 'date-fns';
+import { format, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarIcon } from 'lucide-react';
-import type { DateRange } from 'react-day-picker';
+import type { DateRange, DayClickEventHandler } from 'react-day-picker';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -32,22 +32,34 @@ export function DateRangePicker({
   numberOfMonths,
 }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
+  const [draftRange, setDraftRange] = useState<DateRange | undefined>();
 
   const resolvedMonths = numberOfMonths ?? (typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2);
+  const displayedRange = draftRange ?? value;
 
   function handleOpenChange(next: boolean) {
-    if (next && value?.from && value?.to) {
-      onChange(undefined);
+    if (!next) {
+      setDraftRange(undefined);
     }
     setOpen(next);
   }
 
-  function handleSelect(range: DateRange | undefined) {
-    onChange(range);
-    if (range?.from && range?.to) {
-      setOpen(false);
+  const handleDayClick: DayClickEventHandler = (day, modifiers) => {
+    if (modifiers.disabled) return;
+
+    if (!draftRange?.from || draftRange.to) {
+      setDraftRange({ from: day, to: undefined });
+      return;
     }
-  }
+
+    const nextRange = isBefore(day, draftRange.from)
+      ? { from: day, to: draftRange.from }
+      : { from: draftRange.from, to: day };
+
+    setDraftRange(nextRange);
+    onChange(nextRange);
+    setOpen(false);
+  };
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -56,19 +68,20 @@ export function DateRangePicker({
           variant="outline"
           className={cn(
             'h-9 justify-between gap-2 text-left font-normal',
-            !value?.from && 'text-muted-foreground',
+            !displayedRange?.from && 'text-muted-foreground',
             className,
           )}
         >
-          <span className="truncate">{formatRangeLabel(value, placeholder)}</span>
+          <span className="truncate">{formatRangeLabel(displayedRange, placeholder)}</span>
           <CalendarIcon className="h-4 w-4 shrink-0" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
         <Calendar
           mode="range"
-          selected={value}
-          onSelect={handleSelect}
+          selected={displayedRange}
+          onDayClick={handleDayClick}
+          defaultMonth={displayedRange?.from ?? value?.from}
           numberOfMonths={resolvedMonths}
           initialFocus
           locale={ptBR}

@@ -13,8 +13,11 @@ import {
   ExternalLink,
   Grid3X3,
   LayoutDashboard,
+  Link2,
   LogOut,
   Menu,
+  Pin,
+  PinOff,
   type LucideIcon,
   Settings,
   ShieldAlert,
@@ -29,6 +32,7 @@ import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import { useSystemBranding } from '@/hooks/useSettings';
 import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
+import NotificationBanner from '@/components/NotificationBanner';
 import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
@@ -51,6 +55,8 @@ const ROLE_LABELS: Record<AppRole, string> = {
   operator: 'Operador',
 };
 
+const DESKTOP_SIDEBAR_PINNED_STORAGE_KEY = 'app-layout:desktop-sidebar-pinned';
+
 function formatRoleLabel(role: AppRole) {
   return ROLE_LABELS[role] ?? role;
 }
@@ -61,6 +67,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const companyContext = useMaybeCompanySlug();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY) === 'true';
+  });
   const [companyMenuOpen, setCompanyMenuOpen] = useState(true);
   const { user, profile, roles, loading, signOut } = useAuth();
   const { data: systemBranding } = useSystemBranding();
@@ -153,6 +163,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           description: 'Clientes e hist\u00F3rico',
           icon: Contact,
           path: `/${slug}/admin/leads`,
+          showFor: ['admin', 'superadmin'],
+        },
+        {
+          label: 'Filiados',
+          description: 'Links de indica\u00E7\u00E3o e origem',
+          icon: Link2,
+          path: `/${slug}/admin/filiados`,
           showFor: ['admin', 'superadmin'],
         },
         {
@@ -253,7 +270,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (item.matchPrefix) {
       return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
     }
-
     return location.pathname === item.path;
   };
 
@@ -264,6 +280,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const isProfileRoute = location.pathname === profilePath;
   const hasCompanySettingsNav = !!visibleCompanySettingsNavItem;
   const isCompanySettingsRouteActive = visibleCompanySettingsNavItem ? isNavItemActive(visibleCompanySettingsNavItem) : false;
+  const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
+  const showHeaderContextBadges = !isOperatorPanel;
+  const showHeaderMeta = showHeaderContextBadges || isImpersonatingCompany;
+  const canViewCompanyHeaderSignals = activeRoles.includes('admin') || activeRoles.includes('superadmin');
 
   const headerTitle = isProfileRoute
     ? 'Meu Perfil'
@@ -282,6 +302,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY, String(desktopSidebarPinned));
+  }, [desktopSidebarPinned]);
 
   useEffect(() => {
     if (isCompanySettingsRouteActive) {
@@ -359,15 +384,19 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background">
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          className={cn(
+            'fixed inset-0 z-40 bg-black/60 backdrop-blur-sm',
+            desktopSidebarPinned && 'lg:hidden',
+          )}
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-300 lg:relative lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-2xl transition-transform duration-300',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
+          desktopSidebarPinned && 'lg:relative lg:translate-x-0 lg:shadow-none',
         )}
       >
         <div className="px-4 pb-3 pt-4">
@@ -476,7 +505,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   <p className="truncate text-sm font-semibold text-sidebar-foreground">
                     {profile.full_name || profile.email}
                   </p>
-                  <p className="truncate text-xs text-sidebar-foreground/50">{profile.email}</p>
                 </div>
               </div>
 
@@ -520,35 +548,46 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="border-b border-border bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex flex-col gap-2 lg:min-h-[44px] lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-h-[44px] flex-row items-center justify-between gap-2">
             <div className="flex min-w-0 items-start gap-3 lg:items-center">
               <button
-                onClick={() => setMobileOpen(true)}
+                onClick={() => setMobileOpen((current) => !current)}
                 aria-label="Abrir menu de navegação"
-                className="mt-0.5 rounded-md border border-border bg-card p-2 text-foreground transition-colors hover:bg-muted lg:hidden"
+                className="mt-0.5 rounded-md border border-border bg-card p-2 text-foreground transition-colors hover:bg-muted"
               >
                 <Menu className="h-4 w-4" />
               </button>
 
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  {sidebarContextLabel}
-                </span>
-                {slug && (
-                  <span className="truncate rounded-md border border-primary/20 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary">
-                    {companyName}
-                  </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDesktopSidebarPinned((current) => !current);
+                  setMobileOpen(false);
+                }}
+                aria-label={desktopSidebarPinned ? 'Desafixar menu lateral' : 'Fixar menu lateral'}
+                title={desktopSidebarPinned ? 'Desafixar menu lateral' : 'Fixar menu lateral'}
+                className="mt-0.5 hidden rounded-md border border-border bg-card p-2 text-foreground transition-colors hover:bg-muted lg:inline-flex"
+              >
+                {desktopSidebarPinned ? (
+                  <PinOff className="h-4 w-4" />
+                ) : (
+                  <Pin className="h-4 w-4" />
                 )}
-                {isImpersonatingCompany && (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary">
-                    <ShieldAlert className="h-3.5 w-3.5" />
-                    {`Impersonando ${formatRoleLabel(effectiveRole)}`}
-                  </span>
-                )}
-              </div>
+              </button>
+
+              {showHeaderMeta && (
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {isImpersonatingCompany && (
+                    <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary">
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      {`Impersonando ${formatRoleLabel(effectiveRole)}`}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <div className="flex min-w-0 items-center gap-2 lg:justify-end">
               {slug && (
                 <a
                   href={`/${slug}`}
@@ -562,8 +601,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   </Button>
                 </a>
               )}
-              {slug && <CompanyNotificationsPopover />}
-              {slug && <WhatsAppStatusAlert />}
+              {slug && canViewCompanyHeaderSignals && <CompanyNotificationsPopover />}
+              {slug && canViewCompanyHeaderSignals && <WhatsAppStatusAlert />}
               {isImpersonatingCompany && (
                 <Button variant="outline" size="sm" onClick={handleExitImpersonation}>
                   {'Sair da impersona\u00E7\u00E3o'}
@@ -572,6 +611,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+
+
+        {/* Notificações do superadmin — só para admin/operator com empresa ativa */}
+        {companyContext?.companyId && !activeRoles.includes('superadmin') && (
+          activeRoles.includes('admin') || activeRoles.includes('operator')
+        ) && <NotificationBanner companyId={companyContext.companyId} />}
 
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 py-4 lg:px-5 lg:py-4 animate-fade-in">
           {children}

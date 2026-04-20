@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, MapPin, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Loader2, MapPin, XCircle } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -259,6 +259,22 @@ export default function ReservationTracking() {
                 <h2 className={`text-lg font-bold ${status.color}`}>{status.title}</h2>
                 <p className="mt-1 text-muted-foreground">{status.description}</p>
               </div>
+
+              {normalizedStatus === 'confirmed' && (
+                <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 text-left">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-primary/10 p-2 text-primary">
+                      <Clock3 className="h-4 w-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-foreground">Tolerância de atraso</p>
+                      <p className="text-sm leading-6 text-muted-foreground">
+                        Existe tolerância de até 10 minutos de atraso no horário da sua reserva.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2 border-t border-border pt-4 text-left text-sm">
                 <div className="flex justify-between gap-4">

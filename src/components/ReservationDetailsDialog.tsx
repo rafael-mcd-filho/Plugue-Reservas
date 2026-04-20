@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Loader2, Pencil, Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,8 @@ export interface ReservationDetails {
   guest_phone: string;
   guest_email: string | null;
   source: string | null;
+  origin_affiliate_code?: string | null;
+  origin_affiliate_name?: string | null;
   date: string;
   time: string;
   party_size: number;
@@ -449,7 +452,7 @@ export default function ReservationDetailsDialog({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
-                  <p className="text-sm text-muted-foreground">{formatBrazilPhone(reservation.guest_phone)}</p>
+                  <PhoneWhatsAppLink phone={reservation.guest_phone} phoneClassName="text-sm text-muted-foreground" />
                   {reservation.guest_email && (
                     <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
                   )}
@@ -697,6 +700,15 @@ export default function ReservationDetailsDialog({
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground">Link de acompanhamento</p>
                     <p className="break-all text-xs text-muted-foreground">{trackingUrl}</p>
+                    {reservation.origin_affiliate_name && (
+                      <div className="pt-2">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem afiliada</p>
+                        <p className="mt-1 text-sm text-foreground">
+                          {reservation.origin_affiliate_name}
+                          {reservation.origin_affiliate_code ? ` · ${reservation.origin_affiliate_code}` : ''}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">

@@ -109,19 +109,19 @@ function isStrongPassword(value: string) {
 
 async function verifyCaller(req: Request): Promise<CallerContext> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) throw new Error("Nao autorizado");
+  if (!authHeader) throw new Error("Nao autorizado: sem header de autenticacao");
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-  const supabaseUser = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-
-  const { data: { user: caller } } = await supabaseUser.auth.getUser();
-  if (!caller) throw new Error("Nao autorizado");
-
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data: { user: caller }, error: callerError } = await supabaseAdmin.auth.getUser(token);
+  if (callerError || !caller) {
+    console.error("verifyCaller getUser failed:", callerError?.message ?? "no user returned");
+    throw new Error(`Nao autorizado: token invalido (${callerError?.message ?? "usuario nulo"})`);
+  }
   const { data: callerRoles, error: callerRolesError } = await supabaseAdmin
     .from("user_roles")
     .select("role, company_id")
