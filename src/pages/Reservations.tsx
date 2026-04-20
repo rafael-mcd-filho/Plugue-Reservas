@@ -4,6 +4,7 @@ import { addDays, eachDayOfInterval, format, isToday, parseISO, startOfDay, subD
 import { ptBR } from 'date-fns/locale';
 import {
   Ban,
+  CalendarCheck,
   CalendarIcon,
   CheckCircle2,
   ChevronLeft,
@@ -168,6 +169,7 @@ export default function Reservations() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
+  const [dateFilterMode, setDateFilterMode] = useState<'reservation' | 'created'>('reservation');
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
@@ -561,7 +563,11 @@ export default function Reservations() {
   const filteredReservations = useMemo(() => {
     const result = sortedReservations
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
-      .filter((reservation) => matchesLocalDateRange(reservation.date, reservationListRange))
+      .filter((reservation) =>
+        dateFilterMode === 'reservation'
+          ? matchesLocalDateRange(reservation.date, reservationListRange)
+          : matchesTimestampRange(reservation.created_at, reservationListRange),
+      )
       .filter((reservation) => {
         const query = search.toLowerCase();
         const queryDigits = normalizePhone(search);
@@ -572,7 +578,17 @@ export default function Reservations() {
         );
       });
     return result;
-  }, [reservationListRange, search, sortedReservations, statusFilter]);
+  }, [dateFilterMode, reservationListRange, search, sortedReservations, statusFilter]);
+
+  const listSummary = useMemo(() => {
+    const STATUS_ORDER = ['confirmed', 'checked_in', 'cancelled', 'no-show'] as const;
+    const byStatus = STATUS_ORDER.map((status) => {
+      const rows = filteredReservations.filter((r) => r.status === status);
+      return { status, count: rows.length, people: rows.reduce((s, r) => s + r.party_size, 0) };
+    }).filter((s) => s.count > 0);
+    const total = { count: filteredReservations.length, people: filteredReservations.reduce((s, r) => s + r.party_size, 0) };
+    return { byStatus, total };
+  }, [filteredReservations]);
 
   const listTotalPages = Math.max(1, Math.ceil(filteredReservations.length / LIST_PAGE_SIZE));
   const paginatedReservations = useMemo(
@@ -582,7 +598,7 @@ export default function Reservations() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, statusFilter, reservationListRange]);
+  }, [search, statusFilter, reservationListRange, dateFilterMode]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -1062,6 +1078,16 @@ export default function Reservations() {
                 </SelectContent>
               </Select>
 
+              <Select value={dateFilterMode} onValueChange={(v) => setDateFilterMode(v as 'reservation' | 'created')}>
+                <SelectTrigger className="h-10 w-full rounded-lg bg-card sm:w-fit sm:min-w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reservation">Data da reserva</SelectItem>
+                  <SelectItem value="created">Data de criação</SelectItem>
+                </SelectContent>
+              </Select>
+
               <DateRangePicker
                 value={reservationListRange}
                 onChange={setReservationListRange}
@@ -1081,6 +1107,35 @@ export default function Reservations() {
               )}
             </div>
           </div>
+
+          {filteredReservations.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
+              <span className="flex items-center gap-1.5 font-semibold text-foreground">
+                <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                {listSummary.total.count} {listSummary.total.count === 1 ? 'reserva' : 'reservas'}
+              </span>
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Users className="h-3.5 w-3.5 text-info" />
+                {listSummary.total.people} {listSummary.total.people === 1 ? 'pessoa' : 'pessoas'}
+              </span>
+              {listSummary.byStatus.length > 1 && (
+                <>
+                  <span className="h-4 w-px bg-border" />
+                  {listSummary.byStatus.map(({ status, count, people }) => (
+                    <span key={status} className="flex items-center gap-1.5">
+                      <ReservationStatusBadge status={status as ReservationStatus} />
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        <CalendarCheck className="h-3 w-3" />
+                        {count}
+                        <Users className="ml-1 h-3 w-3" />
+                        {people}
+                      </span>
+                    </span>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
 
           <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
             <div className="overflow-x-auto">

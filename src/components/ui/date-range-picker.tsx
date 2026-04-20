@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarIcon } from 'lucide-react';
@@ -33,6 +33,10 @@ export function DateRangePicker({
 }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const [draftRange, setDraftRange] = useState<DateRange | undefined>();
+
+  useEffect(() => {
+    if (!value) setDraftRange(undefined);
+  }, [value]);
 
   const resolvedMonths = numberOfMonths ?? (typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2);
   const displayedRange = draftRange ?? value;

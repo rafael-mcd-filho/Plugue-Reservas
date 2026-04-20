@@ -13,7 +13,7 @@ import {
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  BarChart, Bar, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
 import {
@@ -36,7 +36,6 @@ import { useLiveFunnelPresence } from '@/hooks/useLiveFunnelPresence';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
-import ReservationHeatmap from '@/components/ReservationHeatmap';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
@@ -237,11 +236,11 @@ export default function Dashboard() {
     createdReservationDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
+    reservationOriginBreakdown,
     waitlistDailyStats,
     totals,
     prevTotals,
     waitlistTotals,
-    heatmapData,
     isLoading: dashLoading,
     isFetching: dashFetching,
     lastUpdatedAt: dashboardUpdatedAt,
@@ -323,6 +322,10 @@ export default function Dashboard() {
     { label: 'Média/Dia', tooltip: 'Média de reservas por dia no período selecionado.', value: avgPerDay, prev: prevAvgPerDay, compareCurrent: avgPerDayRaw, comparePrevious: prevAvgPerDayRaw, icon: TrendingUp, color: 'text-primary' },
   ];
   const advancedReportsEnabled = !isCompanyContext || !!featureFlags?.features.advanced_reports;
+  const visibleReservationOriginItems = useMemo(
+    () => reservationOriginBreakdown.items.filter((item) => item.value > 0),
+    [reservationOriginBreakdown.items],
+  );
   const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0, liveFunnelUpdatedAt || 0);
   const hasFreshnessData = lastDataSyncAt > 0;
   const dataLagMs = hasFreshnessData ? Date.now() - lastDataSyncAt : 0;
@@ -449,7 +452,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.scheduledReservations} previous={prevTotals.scheduledReservations} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Reservas agendadas" tooltip="Reservas marcadas previamente para o período. Não inclui quem entrou pela fila." />
+                    <MetricLabel label="Reservas agendadas" tooltip="Reservas marcadas previamente para o período. Não inclui quem entrou pela fila. Filtrado pela data da reserva — ou seja, quando o cliente está programado para visitar." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -470,7 +473,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.waitlistReservations} previous={prevTotals.waitlistReservations} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Fila convertida" tooltip="Pessoas ou grupos que entraram na fila e depois viraram registro em reservas." />
+                    <MetricLabel label="Fila convertida" tooltip="Pessoas ou grupos que entraram na fila e depois viraram registro em reservas. Filtrado pela data da reserva — quando o atendimento aconteceu, não quando entraram na fila." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -491,7 +494,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.reservations} previous={prevTotals.reservations} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Atendimentos totais" tooltip="Total registrado em reservas no período: agendadas mais o que veio da fila." />
+                    <MetricLabel label="Atendimentos totais" tooltip="Total registrado em reservas no período: agendadas mais o que veio da fila. Filtrado pela data da reserva — quando o cliente visitou ou estava programado para visitar." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -512,7 +515,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.totalGuests} previous={prevTotals.totalGuests} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Total pessoas" tooltip="Soma das pessoas em todos os atendimentos registrados no período." />
+                    <MetricLabel label="Total pessoas" tooltip="Soma das pessoas em todos os atendimentos registrados no período. Filtrado pela data da reserva — quando o cliente visitou ou estava programado para visitar." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -533,7 +536,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.completed} previous={prevTotals.completed} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Check-ins totais" tooltip="Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida." />
+                    <MetricLabel label="Check-ins totais" tooltip="Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida. Filtrado pela data da reserva — quando o check-in aconteceu." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -551,7 +554,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.cancellations} previous={prevTotals.cancellations} goodWhenDecreases />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Cancelamentos" tooltip="Reservas agendadas que foram canceladas no período. A fila não entra aqui." />
+                    <MetricLabel label="Cancelamentos" tooltip="Reservas agendadas que foram canceladas no período. A fila não entra aqui. Filtrado pela data da reserva — quando o cliente estava programado para visitar, não quando cancelou." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -569,7 +572,7 @@ export default function Dashboard() {
                     <VariationBadge current={totals.noShows} previous={prevTotals.noShows} goodWhenDecreases />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="No-shows" tooltip="Reservas agendadas em que o cliente não compareceu e não cancelou." />
+                    <MetricLabel label="No-shows" tooltip="Reservas agendadas em que o cliente não compareceu e não cancelou. Filtrado pela data da reserva — quando o cliente estava programado para visitar." />
                   </p>
                   <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
@@ -669,6 +672,105 @@ export default function Dashboard() {
             </Card>
           )}
 
+          <Card className="hidden border border-border shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                <SectionTitle
+                  title="Origem das Reservas"
+                  tooltip="Classifica todas as reservas do período em uma única origem: Direta/Orgânica, Ads, Filiado, Manual ou Waitlist."
+                />
+              </CardTitle>
+              <CardDescription>
+                A soma das categorias fecha exatamente em {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas no período selecionado.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {reservationOriginBreakdown.total > 0 ? (
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-center">
+                  <div className="relative h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={visibleReservationOriginItems}
+                          dataKey="value"
+                          nameKey="label"
+                          innerRadius={72}
+                          outerRadius={104}
+                          paddingAngle={2}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                        >
+                          {visibleReservationOriginItems.map((item) => (
+                            <Cell key={item.key} fill={item.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(0, 0%, 100%)',
+                            border: '1px solid hsl(0, 0%, 88%)',
+                            borderRadius: '0.5rem',
+                            fontSize: '0.875rem',
+                          }}
+                          formatter={(value, name, context) => [
+                            `${Number(value).toLocaleString('pt-BR')} reserva${Number(value) === 1 ? '' : 's'} (${Number(context?.payload?.percentage ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`,
+                            name,
+                          ]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Total</span>
+                      <span className="text-3xl font-semibold text-foreground">
+                        {reservationOriginBreakdown.total.toLocaleString('pt-BR')}
+                      </span>
+                      <span className="text-xs text-muted-foreground">reservas</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {reservationOriginBreakdown.items.map((item) => (
+                        <div
+                          key={item.key}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 p-3"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full"
+                              style={{ backgroundColor: item.color }}
+                              aria-hidden="true"
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {item.percentage.toLocaleString('pt-BR', {
+                                  minimumFractionDigits: 1,
+                                  maximumFractionDigits: 1,
+                                })}
+                                %
+                              </p>
+                            </div>
+                          </div>
+                          <p className="shrink-0 text-lg font-semibold text-foreground">
+                            {item.value.toLocaleString('pt-BR')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Ads só entra quando existe marcador pago explícito no tracking, como utm_medium=paid, paid_social, cpc ou equivalente.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
+                  Sem reservas no período para classificar por origem.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Waitlist KPIs */}
           {(
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
@@ -682,7 +784,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
                         label="Fila — Total"
-                        tooltip="Número de pessoas ou grupos que entraram na fila no período."
+                        tooltip="Número de pessoas ou grupos que entraram na fila no período. Filtrado pela data de entrada na fila, não pela data da reserva."
                       />
                     </p>
                   </div>
@@ -698,7 +800,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
                         label="Fila — Sentados"
-                        tooltip="Número de pessoas ou grupos da fila que foram atendidos e sentados no período."
+                        tooltip="Número de pessoas ou grupos da fila que foram atendidos e sentados no período. Filtrado pela data de entrada na fila."
                       />
                     </p>
                   </div>
@@ -714,7 +816,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
                         label="Fila — Desistências"
-                        tooltip="Número de pessoas ou grupos da fila que saíram sem sentar, por desistência ou por tempo esgotado."
+                        tooltip="Número de pessoas ou grupos da fila que saíram sem sentar, por desistência ou por tempo esgotado. Filtrado pela data de entrada na fila."
                       />
                     </p>
                   </div>
@@ -730,7 +832,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       <MetricLabel
                         label="Fila — Espera Média"
-                        tooltip="Tempo médio entre entrar na fila e ser atendido."
+                        tooltip="Tempo médio entre entrar na fila e ser atendido. Considera apenas quem entrou na fila no período selecionado."
                       />
                     </p>
                   </div>
@@ -744,7 +846,7 @@ export default function Dashboard() {
               <CardTitle className="text-base">
                 <SectionTitle
                   title="Fila de Espera por Dia"
-                  tooltip="Mostra, por dia, quantas pessoas entraram na fila, quantas foram atendidas, quantas saíram sem sentar e o tempo médio de espera."
+                  tooltip="Mostra, por dia, quantas pessoas entraram na fila, quantas foram atendidas, quantas saíram sem sentar e o tempo médio de espera. Agrupado pela data de entrada na fila."
                 />
               </CardTitle>
               <CardDescription>
@@ -830,7 +932,7 @@ export default function Dashboard() {
                 <CardTitle className="text-base">
                   <SectionTitle
                     title="Atendimentos por Dia"
-                    tooltip="Mostra por dia o que foi agendado, o que veio da fila, o total de reservas e o total de pessoas."
+                    tooltip="Mostra por dia o que foi agendado, o que veio da fila, o total de reservas e o total de pessoas. Agrupado pela data da reserva — quando o cliente visitou ou estava programado para visitar."
                   />
                 </CardTitle>
                 <CardDescription>Separação diária entre agendadas, fila convertida, total e total de pessoas</CardDescription>
@@ -898,7 +1000,7 @@ export default function Dashboard() {
               <CardTitle className="text-base">
                 <SectionTitle
                   title="Registros em reservas por data de criação"
-                  tooltip="Mostra quantos registros entraram em reservas por dia, separando o que foi agendado do que veio da fila."
+                  tooltip="Mostra quantos registros foram criados em reservas por dia, separando agendadas da fila. Agrupado pela data de criação da reserva — quando o cliente fez o agendamento, não quando vai visitar."
                 />
               </CardTitle>
               <CardDescription>
@@ -952,7 +1054,7 @@ export default function Dashboard() {
                 <CardTitle className="text-base">
                   <SectionTitle
                     title="Antecedência das reservas agendadas"
-                    tooltip="Mostra com quantos dias de antecedência as reservas agendadas costumam ser feitas. A fila não entra aqui."
+                    tooltip="Mostra com quantos dias de antecedência as reservas agendadas costumam ser feitas. A fila não entra aqui. Agrupado pela data de criação da reserva — o período selecionado filtra quando o agendamento foi feito."
                   />
                 </CardTitle>
                 <CardDescription>
@@ -985,7 +1087,7 @@ export default function Dashboard() {
                     <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
                       <MetricLabel
                         label="Agendadas criadas"
-                        tooltip="Total de reservas agendadas registradas no sistema no período."
+                        tooltip="Total de reservas agendadas criadas no sistema no período selecionado. Conta pela data de criação da reserva."
                       />
                     </p>
                     <p className="mt-1 text-lg font-semibold text-foreground">{createdReservationTotals.scheduledCreated}</p>
@@ -1038,7 +1140,7 @@ export default function Dashboard() {
                 <CardTitle className="text-base">
                   <SectionTitle
                     title="Cancelamentos e No Show das agendadas"
-                    tooltip="Mostra as perdas do período por cancelamento e por reservas que viraram No Show."
+                    tooltip="Mostra as perdas do período por cancelamento e por reservas que viraram No Show. Agrupado pela data da reserva — quando o cliente estava programado para visitar."
                   />
                 </CardTitle>
                 <CardDescription>Acompanhamento diário das perdas nas reservas agendadas</CardDescription>
@@ -1060,11 +1162,112 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+          <Card className="border border-amber-200 bg-amber-50/40 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/20">
+            <CardHeader className="pb-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <CardTitle className="text-base">
+                  <SectionTitle
+                    title="Origem das Reservas"
+                    tooltip="Mostra de onde vieram as reservas criadas no período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data de criação da reserva — quando o agendamento foi feito."
+                  />
+                </CardTitle>
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                  Em desenvolvimento
+                </span>
+              </div>
+              <CardDescription>
+                Considera a data de criação da reserva. Cada reserva entra em uma única categoria — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {reservationOriginBreakdown.total > 0 ? (
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-center">
+                  <div className="relative h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={visibleReservationOriginItems}
+                          dataKey="value"
+                          nameKey="label"
+                          innerRadius={72}
+                          outerRadius={104}
+                          paddingAngle={2}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                        >
+                          {visibleReservationOriginItems.map((item) => (
+                            <Cell key={item.key} fill={item.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(0, 0%, 100%)',
+                            border: '1px solid hsl(0, 0%, 88%)',
+                            borderRadius: '0.5rem',
+                            fontSize: '0.875rem',
+                          }}
+                          formatter={(value, name, context) => [
+                            `${Number(value).toLocaleString('pt-BR')} reserva${Number(value) === 1 ? '' : 's'} · ${Number(context?.payload?.people ?? 0).toLocaleString('pt-BR')} pessoas (${Number(context?.payload?.percentage ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`,
+                            name,
+                          ]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Total</span>
+                      <span className="text-3xl font-semibold text-foreground">
+                        {reservationOriginBreakdown.total.toLocaleString('pt-BR')}
+                      </span>
+                      <span className="text-xs text-muted-foreground">reservas</span>
+                      <span className="mt-0.5 text-xs text-muted-foreground">
+                        {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {reservationOriginBreakdown.items.map((item) => (
+                      <div
+                        key={item.key}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 p-3"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full"
+                            style={{ backgroundColor: item.color }}
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.percentage.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                            </p>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="flex items-center justify-end gap-1 text-lg font-semibold text-foreground leading-tight">
+                            <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                            {item.value.toLocaleString('pt-BR')}
+                          </p>
+                          <p className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                            <Users className="h-3 w-3 text-info" />
+                            {item.people.toLocaleString('pt-BR')} {item.people === 1 ? 'pessoa' : 'pessoas'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
+                  Sem reservas criadas no período para classificar por origem.
+                </div>
+              )}
+            </CardContent>
+          </Card>
           {advancedReportsEnabled ? (
             <>
-          {/* Heatmap + Funnel */}
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            <ReservationHeatmap {...heatmapData} />
+          <div className="[&>*]:min-w-0">
             <ReservationFunnelChart
               data={funnelData}
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}

@@ -140,7 +140,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Meu Perfil</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -156,7 +156,7 @@ export default function Profile() {
               Dados da conta
             </CardTitle>
             <CardDescription>
-              Se voce alterar o e-mail de login, a sessao atual sera encerrada para voce entrar novamente.
+              Se você alterar o e-mail de login, a sessão atual será encerrada para você entrar novamente.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -214,7 +214,7 @@ export default function Profile() {
               Senha
             </CardTitle>
             <CardDescription>
-              Ao alterar sua senha, a sessao atual sera encerrada para novo login.
+              Ao alterar sua senha, a sessão atual será encerrada para novo login.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -268,16 +268,28 @@ export default function Profile() {
 
       <Card className="border-none shadow-sm">
         <CardHeader>
-          <CardTitle className="text-base">Sessao atual</CardTitle>
+          <CardTitle className="text-base">Sessão atual</CardTitle>
           <CardDescription>
             {slug
-              ? 'Voce esta acessando o perfil dentro do painel da unidade.'
-              : 'Voce esta acessando o perfil no painel global.'}
+              ? 'Você está acessando o perfil dentro do painel da unidade.'
+              : 'Você está acessando o perfil no painel global.'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
-          <p><span className="font-medium text-foreground">Nome:</span> {profile?.full_name || '-'}</p>
-          <p className="break-all"><span className="font-medium text-foreground">E-mail:</span> {profile?.email || '-'}</p>
+        <CardContent className="flex flex-col gap-3 text-sm sm:flex-row sm:flex-wrap">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Nome</p>
+            <p className="font-medium text-foreground">{profile?.full_name || '-'}</p>
+          </div>
+          <div className="hidden sm:block sm:h-auto sm:w-px sm:bg-border" />
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">E-mail</p>
+            <p className="break-all font-medium text-foreground">{profile?.email || '-'}</p>
+          </div>
+          <div className="hidden sm:block sm:h-auto sm:w-px sm:bg-border" />
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Acesso</p>
+            <p className="font-medium text-foreground capitalize">{profile?.role || '-'}</p>
+          </div>
         </CardContent>
       </Card>
     </div>

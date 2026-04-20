@@ -28,6 +28,10 @@ interface RawReservation {
   checked_in_party_size: number | null;
   created_at: string;
   source: string | null;
+  origin_tracking_session_id?: string | null;
+  origin_anonymous_id?: string | null;
+  origin_affiliate_link_id?: string | null;
+  attribution_snapshot?: Record<string, unknown> | null;
 }
 
 interface RawWaitlistEntry {
@@ -78,8 +82,104 @@ export interface HeatmapCellBreakdown {
   waitlist: number;
 }
 
+export type ReservationOriginKey =
+  | 'direct_organic'
+  | 'ads'
+  | 'affiliate'
+  | 'manual'
+  | 'waitlist';
+
+export interface ReservationOriginBreakdownItem {
+  key: ReservationOriginKey;
+  label: string;
+  value: number;
+  percentage: number;
+  color: string;
+}
+
+const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; color: string }> = {
+  direct_organic: {
+    label: 'Direta/Orgânica',
+    color: 'hsl(202, 89%, 48%)',
+  },
+  ads: {
+    label: 'Ads',
+    color: 'hsl(28, 85%, 55%)',
+  },
+  affiliate: {
+    label: 'Filiado',
+    color: 'hsl(145, 63%, 42%)',
+  },
+  manual: {
+    label: 'Manual',
+    color: 'hsl(0, 0%, 35%)',
+  },
+  waitlist: {
+    label: 'Fila de Espera',
+    color: 'hsl(338, 78%, 55%)',
+  },
+};
+
+const PAID_UTM_MEDIUM_VALUES = new Set([
+  'ads',
+  'cpc',
+  'cpm',
+  'cpv',
+  'paid',
+  'paid-social',
+  'paid_social',
+  'ppc',
+  'social_paid',
+]);
+
 function normalizeReservationSource(source: string | null | undefined) {
   return source === 'waitlist' ? 'waitlist' : 'reservation';
+}
+
+function normalizeTextValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() || null : null;
+}
+
+function getAttributionString(
+  snapshot: Record<string, unknown> | null | undefined,
+  key: string,
+) {
+  return normalizeTextValue(snapshot?.[key]);
+}
+
+function isPublicReservation(reservation: RawReservation) {
+  if (normalizeTextValue(reservation.origin_tracking_session_id)) return true;
+  if (normalizeTextValue(reservation.origin_anonymous_id)) return true;
+  return getAttributionString(reservation.attribution_snapshot, 'tracking_source') === 'public_web';
+}
+
+function isPaidTrafficMarker(utmMedium: string | null | undefined) {
+  if (!utmMedium) return false;
+
+  const normalizedMedium = utmMedium.trim().toLowerCase();
+  if (PAID_UTM_MEDIUM_VALUES.has(normalizedMedium)) return true;
+  return normalizedMedium.startsWith('paid');
+}
+
+function classifyReservationOrigin(reservation: RawReservation): ReservationOriginKey {
+  if (normalizeReservationSource(reservation.source) === 'waitlist') {
+    return 'waitlist';
+  }
+
+  if (!isPublicReservation(reservation)) {
+    return 'manual';
+  }
+
+  if (normalizeTextValue(reservation.origin_affiliate_link_id)) {
+    return 'affiliate';
+  }
+
+  const utmMedium = getAttributionString(reservation.attribution_snapshot, 'utm_medium');
+  if (isPaidTrafficMarker(utmMedium)) {
+    return 'ads';
+  }
+
+  return 'direct_organic';
 }
 
 export function useDashboardData(
@@ -103,7 +203,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
         .gte('date', startStr)
         .lte('date', endStr);
 
@@ -180,7 +280,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, created_at, source')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
         .gte('date', prevStartStr)
         .lte('date', prevEndStr);
 
@@ -199,7 +299,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, created_at, source')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
         .gte('created_at', rangeStartIso)
         .lte('created_at', rangeEndIso);
 
@@ -321,6 +421,37 @@ export function useDashboardData(
     }, 0);
     return { ...base, totalGuests, checkedInGuests };
   }, [dailyStats, rawReservations]);
+
+  const reservationOriginBreakdown = useMemo(() => {
+    const counts: Record<ReservationOriginKey, number> = {
+      direct_organic: 0, ads: 0, affiliate: 0, manual: 0, waitlist: 0,
+    };
+    const people: Record<ReservationOriginKey, number> = {
+      direct_organic: 0, ads: 0, affiliate: 0, manual: 0, waitlist: 0,
+    };
+
+    for (const reservation of createdReservations) {
+      const key = classifyReservationOrigin(reservation);
+      counts[key] += 1;
+      people[key] += reservation.party_size || 1;
+    }
+
+    const total = createdReservations.length;
+    const totalPeople = createdReservations.reduce((s, r) => s + (r.party_size || 1), 0);
+    const items = (Object.keys(RESERVATION_ORIGIN_CONFIG) as ReservationOriginKey[]).map((key) => {
+      const value = counts[key];
+      return {
+        key,
+        label: RESERVATION_ORIGIN_CONFIG[key].label,
+        color: RESERVATION_ORIGIN_CONFIG[key].color,
+        value,
+        people: people[key],
+        percentage: total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0,
+      };
+    });
+
+    return { total, totalPeople, items };
+  }, [createdReservations]);
 
   const prevTotals = useMemo(() => {
     const acc = {
@@ -609,6 +740,7 @@ export function useDashboardData(
     reservationGuestDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
+    reservationOriginBreakdown,
     waitlistDailyStats,
     totals,
     prevTotals,
