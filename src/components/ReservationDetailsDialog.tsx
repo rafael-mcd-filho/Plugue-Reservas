@@ -169,6 +169,10 @@ function getAuditChangeEntries(item: ReservationTimelineItem) {
     return [];
   }
 
+  if (item.event_name === 'created') {
+    return [];
+  }
+
   const changes = item.payload.changes;
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
     return [];

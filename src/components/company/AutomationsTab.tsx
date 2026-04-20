@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, History, Save, Smartphone } from 'lucide-react';
+import { Bot, History, Save, Send, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import BroadcastsTab from './BroadcastsTab';
 import WhatsAppConnection from './WhatsAppConnection';
 import WhatsAppMessageHistory from './WhatsAppMessageHistory';
 import { type AutomationSetting, useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
@@ -97,6 +98,9 @@ export default function AutomationsTab({ companyId }: Props) {
         <TabsTrigger value="messages" className="gap-2">
           <Bot className="h-4 w-4" /> Mensagens
         </TabsTrigger>
+        <TabsTrigger value="broadcast" className="gap-2">
+          <Send className="h-4 w-4" /> Disparo
+        </TabsTrigger>
         <TabsTrigger value="history" className="gap-2">
           <History className="h-4 w-4" /> Histórico
         </TabsTrigger>
@@ -181,6 +185,10 @@ export default function AutomationsTab({ companyId }: Props) {
             </Card>
           );
         })}
+      </TabsContent>
+
+      <TabsContent value="broadcast">
+        <BroadcastsTab companyId={companyId} />
       </TabsContent>
 
       <TabsContent value="history">

@@ -1404,7 +1404,7 @@ export default function CompanySettings() {
             </CardContent>
           </Card>
 
-          <Card className={settingsCardClassName}>
+          {featureFlags?.features.flow_protection !== false && <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
                 <div className={settingsBadgeClassName}>
@@ -1621,9 +1621,9 @@ export default function CompanySettings() {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </Card>}
 
-          <Card className={settingsCardClassName}>
+          {featureFlags?.features.active_communication !== false && <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
                 <div className={settingsBadgeClassName}>
@@ -1748,7 +1748,7 @@ export default function CompanySettings() {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </Card>}
         </TabsContent>
 
         <TabsContent value="location">

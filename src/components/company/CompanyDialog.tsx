@@ -211,8 +211,9 @@ function buildFormFromCompany(company: Company): CompanyInsert {
 }
 
 function getInitialFeatures(company: Company | null, initialFeatures?: CompanyFeatureState | null) {
-  if (initialFeatures) return initialFeatures;
-  return getPlanDefaultFeatures(normalizeCompanyPlanTier(company?.plan_tier));
+  const defaults = getPlanDefaultFeatures(normalizeCompanyPlanTier(company?.plan_tier));
+  if (initialFeatures) return { ...defaults, ...initialFeatures };
+  return defaults;
 }
 
 export default function CompanyDialog({
@@ -478,7 +479,7 @@ export default function CompanyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden sm:w-[calc(100vw-2rem)]">
+      <DialogContent className="flex h-[90vh] w-full flex-col overflow-hidden sm:max-w-[90vw] sm:w-[90vw]">
         <DialogHeader className="pr-8">
           <div className="flex items-center gap-3">
             <DialogTitle>{company ? company.name : 'Nova Empresa'}</DialogTitle>
@@ -498,9 +499,8 @@ export default function CompanyDialog({
 
         <form onSubmit={handleSubmit} className="mt-4 flex min-h-0 flex-1 flex-col">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-            <TabsList className={`grid w-full ${isEditing ? 'grid-cols-4' : 'grid-cols-3'}`}>
+            <TabsList className={`grid w-full ${isEditing ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="geral">Geral</TabsTrigger>
-              <TabsTrigger value="operacao">Operação</TabsTrigger>
               <TabsTrigger value="features">Features</TabsTrigger>
               {isEditing && <TabsTrigger value="historico">Histórico</TabsTrigger>}
             </TabsList>

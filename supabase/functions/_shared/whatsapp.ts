@@ -275,3 +275,127 @@ export async function sendWhatsAppText(
     },
   );
 }
+
+export interface SendWhatsAppMediaOptions extends SendWhatsAppTextOptions {
+  mediaType?: "image" | "video" | "document";
+  mimeType?: string;
+  fileName?: string;
+}
+
+export async function sendWhatsAppMedia(
+  evolutionUrl: string,
+  evolutionToken: string,
+  instanceName: string,
+  phone: string,
+  mediaUrl: string,
+  caption: string,
+  options: SendWhatsAppMediaOptions = {},
+): Promise<WhatsAppSendResult> {
+  if (!phone || !mediaUrl) {
+    return buildFailure(
+      "invalid_payload",
+      "Dados invalidos para envio",
+      "Telefone e imagem sao obrigatorios para enviar midia pelo WhatsApp.",
+    );
+  }
+
+  const shouldType = options.typing !== false;
+  if (shouldType) {
+    const typingMs = randomIntInRange(options.typingMinMs ?? 2000, options.typingMaxMs ?? 4000);
+    await sendWhatsAppPresence(evolutionUrl, evolutionToken, instanceName, phone, "composing", typingMs);
+    await sleep(typingMs);
+  }
+
+  const mediaType = options.mediaType ?? "image";
+  const mimeType = options.mimeType ?? "image/jpeg";
+  const fileName = options.fileName ?? `broadcast.${mimeType.includes("png") ? "png" : "jpg"}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${evolutionUrl}/message/sendMedia/${instanceName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: evolutionToken,
+      },
+      body: JSON.stringify({
+        number: phone,
+        mediatype: mediaType,
+        mimetype: mimeType,
+        caption: caption || "",
+        media: mediaUrl,
+        fileName,
+      }),
+    });
+  } catch (error) {
+    return buildFailure(
+      "unknown_error",
+      "Falha ao acessar a Evolution API",
+      error instanceof Error ? error.message : "Erro desconhecido ao enviar a midia.",
+    );
+  }
+
+  const raw = await response.text();
+  let parsed: unknown = null;
+
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (response.ok) {
+    const providerStatusText = typeof parsed === "object" && parsed && "status" in parsed
+      && typeof (parsed as Record<string, unknown>).status === "string"
+      ? ((parsed as Record<string, unknown>).status as string)
+      : null;
+
+    return {
+      ok: true,
+      data: parsed ?? raw,
+      raw: raw || null,
+      provider_status_text: providerStatusText,
+    };
+  }
+
+  const providerMessage = extractMessage(parsed) ?? extractMessage(raw);
+  const lowerText = `${providerMessage ?? ""} ${raw}`.toLowerCase();
+
+  if (lowerText.includes("not connected") || lowerText.includes("disconnected") || lowerText.includes("closed")) {
+    return buildFailure(
+      "instance_disconnected",
+      "Instancia desconectada",
+      "A Evolution API informou que a instancia esta desconectada.",
+      {
+        provider_status: response.status,
+        provider_message: providerMessage,
+        raw: raw || null,
+      },
+    );
+  }
+
+  if (!parsed && raw) {
+    return buildFailure(
+      "provider_invalid_response",
+      "Resposta invalida da Evolution API",
+      "A Evolution API retornou uma resposta que nao foi possivel interpretar.",
+      {
+        provider_status: response.status,
+        raw: raw || null,
+      },
+    );
+  }
+
+  return buildFailure(
+    "provider_request_failed",
+    "Falha ao enviar midia",
+    providerMessage ?? "A Evolution API rejeitou o envio da midia.",
+    {
+      provider_status: response.status,
+      provider_message: providerMessage,
+      raw: raw || null,
+    },
+  );
+}

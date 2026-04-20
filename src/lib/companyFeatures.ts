@@ -2,7 +2,9 @@ export type CompanyPlanTier = 'starter' | 'pro' | 'enterprise';
 export type CompanyFeatureKey =
   | 'whatsapp_integration'
   | 'custom_public_page'
-  | 'advanced_reports';
+  | 'advanced_reports'
+  | 'active_communication'
+  | 'flow_protection';
 
 export interface CompanyFeatureDefinition {
   key: CompanyFeatureKey;
@@ -36,6 +38,18 @@ export const COMPANY_FEATURE_DEFINITIONS: CompanyFeatureDefinition[] = [
     shortLabel: 'Relatórios',
     description: 'Libera gráficos, funil e análises detalhadas no dashboard.',
   },
+  {
+    key: 'active_communication',
+    label: 'Comunicação ativa',
+    shortLabel: 'Comunicação',
+    description: 'Habilita avisos e pop-ups na página pública de reservas.',
+  },
+  {
+    key: 'flow_protection',
+    label: 'Proteções de fluxo',
+    shortLabel: 'Proteções',
+    description: 'Habilita configurações de proteção do fluxo público de reservas.',
+  },
 ];
 
 const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>> = {
@@ -43,16 +57,22 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     whatsapp_integration: false,
     custom_public_page: false,
     advanced_reports: false,
+    active_communication: false,
+    flow_protection: false,
   },
   pro: {
     whatsapp_integration: true,
     custom_public_page: true,
     advanced_reports: false,
+    active_communication: true,
+    flow_protection: true,
   },
   enterprise: {
     whatsapp_integration: true,
     custom_public_page: true,
     advanced_reports: true,
+    active_communication: true,
+    flow_protection: true,
   },
 };
 

@@ -159,7 +159,7 @@ export function useSaveCompanyFeatures() {
       const rows = COMPANY_FEATURE_DEFINITIONS.map((definition) => ({
         company_id: payload.companyId,
         feature_key: definition.key,
-        enabled: payload.features[definition.key],
+        enabled: payload.features[definition.key] ?? false,
         updated_at: new Date().toISOString(),
       }));
 

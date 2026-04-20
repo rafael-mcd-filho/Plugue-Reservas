@@ -14,10 +14,22 @@ function useSystemHealth() {
     queryKey: ['system-health'],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke('system-health');
-      if (error) throw error;
+      if (error) {
+        let detail = '';
+        try {
+          const ctx = (error as any)?.context;
+          if (ctx instanceof Response) {
+            const body = await ctx.clone().json();
+            detail = JSON.stringify(body);
+          }
+        } catch { /* ignore */ }
+        throw new Error(detail || error.message);
+      }
+      if (data?.error) throw new Error(JSON.stringify(data));
       return data;
     },
-    refetchInterval: 30000, // auto-refresh every 30s
+    refetchInterval: 30000,
+    retry: 1,
   });
 }
 
@@ -44,7 +56,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function SystemHealth() {
-  const { data, isLoading, refetch, isFetching } = useSystemHealth();
+  const { data, isLoading, refetch, isFetching, error } = useSystemHealth();
 
   return (
     <div className="space-y-6">
@@ -74,7 +86,11 @@ export default function SystemHealth() {
         <Card className="border-none shadow-sm">
           <CardContent className="py-12 text-center text-muted-foreground">
             <AlertTriangle className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p>Não foi possível obter dados de saúde do sistema.</p>
+            <p className="font-medium">Não foi possível obter dados de saúde do sistema.</p>
+            {error && (
+              <p className="mt-2 text-xs text-destructive font-mono">{(error as Error).message}</p>
+            )}
+            <p className="mt-3 text-xs opacity-70">Verifique se a edge function <code>system-health</code> está deployada.</p>
           </CardContent>
         </Card>
       ) : (

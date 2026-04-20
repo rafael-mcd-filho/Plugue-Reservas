@@ -21,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -36,7 +36,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
 import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
@@ -544,7 +543,6 @@ export default function Leads() {
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
   const [createdRange, setCreatedRange] = useState<DateRange | undefined>();
-  const [createdRangeOpen, setCreatedRangeOpen] = useState(false);
   const [createdFrom, setCreatedFrom] = useState<Date | undefined>();
   const [createdTo, setCreatedTo] = useState<Date | undefined>();
   const [stateFilter, setStateFilter] = useState('all');
@@ -563,9 +561,7 @@ export default function Leads() {
   const [importReading, setImportReading] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
-  const [exportLeadCreatedRangeOpen, setExportLeadCreatedRangeOpen] = useState(false);
   const [exportVisitRange, setExportVisitRange] = useState<DateRange | undefined>();
-  const [exportVisitRangeOpen, setExportVisitRangeOpen] = useState(false);
   const [exportStateFilter, setExportStateFilter] = useState('all');
   const [exportStatuses, setExportStatuses] = useState<string[]>([]);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
@@ -1478,40 +1474,12 @@ export default function Leads() {
           </SelectContent>
         </Select>
 
-        <Popover
-          open={createdRangeOpen}
-          onOpenChange={(open) => {
-            if (open && createdRange?.from && createdRange?.to) {
-              setCreatedRange(undefined);
-            }
-            setCreatedRangeOpen(open);
-          }}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn('justify-start text-left text-sm', !createdRange?.from && 'text-muted-foreground')}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {formatLeadDateRangeLabel(createdRange)}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="range"
-              selected={createdRange}
-              onSelect={(range) => {
-                setCreatedRange(range);
-                if (range?.from && range?.to) {
-                  setCreatedRangeOpen(false);
-                }
-              }}
-              numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-              initialFocus
-              className="pointer-events-auto p-3"
-            />
-          </PopoverContent>
-        </Popover>
+        <DateRangePicker
+          value={createdRange}
+          onChange={setCreatedRange}
+          placeholder="Selecionar período"
+          className="w-full"
+        />
 
         <Input
           type="number"
@@ -1845,84 +1813,20 @@ export default function Leads() {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
                 <Label>Criação do lead</Label>
-                <Popover
-                  open={exportLeadCreatedRangeOpen}
-                  onOpenChange={(open) => {
-                    if (open && exportLeadCreatedRange?.from && exportLeadCreatedRange?.to) {
-                      setExportLeadCreatedRange(undefined);
-                    }
-                    setExportLeadCreatedRangeOpen(open);
-                  }}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'h-11 w-full justify-between rounded-xl bg-card px-4 text-left font-normal',
-                        !exportLeadCreatedRange?.from && 'text-muted-foreground',
-                      )}
-                    >
-                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar período')}
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="range"
-                      selected={exportLeadCreatedRange}
-                      onSelect={(range) => {
-                        setExportLeadCreatedRange(range);
-                        if (range?.from && range?.to) {
-                          setExportLeadCreatedRangeOpen(false);
-                        }
-                      }}
-                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                      initialFocus
-                      className="pointer-events-auto p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
+                <DateRangePicker
+                  value={exportLeadCreatedRange}
+                  onChange={setExportLeadCreatedRange}
+                  className="h-11 w-full rounded-xl bg-card"
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Período das visitas</Label>
-                <Popover
-                  open={exportVisitRangeOpen}
-                  onOpenChange={(open) => {
-                    if (open && exportVisitRange?.from && exportVisitRange?.to) {
-                      setExportVisitRange(undefined);
-                    }
-                    setExportVisitRangeOpen(open);
-                  }}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'h-11 w-full justify-between rounded-xl bg-card px-4 text-left font-normal',
-                        !exportVisitRange?.from && 'text-muted-foreground',
-                      )}
-                    >
-                      {formatDateRangeLabel(exportVisitRange, 'Selecionar período')}
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="range"
-                      selected={exportVisitRange}
-                      onSelect={(range) => {
-                        setExportVisitRange(range);
-                        if (range?.from && range?.to) {
-                          setExportVisitRangeOpen(false);
-                        }
-                      }}
-                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                      initialFocus
-                      className="pointer-events-auto p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
+                <DateRangePicker
+                  value={exportVisitRange}
+                  onChange={setExportVisitRange}
+                  className="h-11 w-full rounded-xl bg-card"
+                />
               </div>
 
               <div className="space-y-2">

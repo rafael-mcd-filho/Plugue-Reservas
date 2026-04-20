@@ -23,22 +23,29 @@ Deno.serve(async (req) => {
 
     const { data: { user }, error: authError } = await userClient.auth.getUser();
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      return new Response(JSON.stringify({ error: "Unauthorized", detail: authError?.message }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const adminClient = createClient(supabaseUrl, serviceKey);
-    const { data: roleData } = await adminClient
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "superadmin")
-      .maybeSingle();
 
-    if (!roleData) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
+    // Diagnóstico: busca roles diretamente
+    const { data: roleRows, error: roleQueryError } = await adminClient
+      .from("user_roles")
+      .select("role, company_id")
+      .eq("user_id", user.id);
+
+    const isSuperadmin = (roleRows || []).some((r: any) => r.role === "superadmin");
+
+    if (!isSuperadmin) {
+      return new Response(JSON.stringify({
+        error: "Forbidden",
+        user_id: user.id,
+        roles_found: roleRows,
+        roles_error: roleQueryError?.message,
+      }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

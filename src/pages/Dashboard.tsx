@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
@@ -234,7 +235,6 @@ export default function Dashboard() {
   const {
     dailyStats,
     createdReservationDailyStats,
-    reservationGuestDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
     waitlistDailyStats,
@@ -322,57 +322,6 @@ export default function Dashboard() {
     { label: 'Cancelamentos', tooltip: 'Reservas do período que foram canceladas.', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive', goodWhenDecreases: true },
     { label: 'Média/Dia', tooltip: 'Média de reservas por dia no período selecionado.', value: avgPerDay, prev: prevAvgPerDay, compareCurrent: avgPerDayRaw, comparePrevious: prevAvgPerDayRaw, icon: TrendingUp, color: 'text-primary' },
   ];
-  const dashboardStats = [
-    {
-      label: 'Reservas agendadas',
-      tooltip: 'Reservas marcadas previamente para o período. Não inclui quem entrou pela fila.',
-      value: totals.scheduledReservations,
-      prev: prevTotals.scheduledReservations,
-      icon: CalendarCheck,
-      color: 'text-primary',
-    },
-    {
-      label: 'Fila convertida',
-      tooltip: 'Pessoas ou grupos que entraram na fila e depois viraram registro em reservas.',
-      value: totals.waitlistReservations,
-      prev: prevTotals.waitlistReservations,
-      icon: ClipboardList,
-      color: 'text-success',
-    },
-    {
-      label: 'Atendimentos totais',
-      tooltip: 'Total registrado em reservas no período: agendadas mais o que veio da fila.',
-      value: totals.reservations,
-      prev: prevTotals.reservations,
-      icon: CalendarIcon,
-      color: 'text-info',
-    },
-    {
-      label: 'Total pessoas',
-      tooltip: 'Soma das pessoas em todos os atendimentos registrados no período.',
-      value: totals.totalGuests,
-      prev: prevTotals.totalGuests,
-      icon: Users,
-      color: 'text-info',
-    },
-    {
-      label: 'Check-ins totais',
-      tooltip: 'Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida.',
-      value: totals.completed,
-      prev: prevTotals.completed,
-      icon: CheckCircle,
-      color: 'text-success',
-    },
-    {
-      label: 'Cancelamentos agendados',
-      tooltip: 'Reservas agendadas que foram canceladas no período. A fila não entra aqui.',
-      value: totals.cancellations,
-      prev: prevTotals.cancellations,
-      icon: XCircle,
-      color: 'text-destructive',
-      goodWhenDecreases: true,
-    },
-  ];
   const advancedReportsEnabled = !isCompanyContext || !!featureFlags?.features.advanced_reports;
   const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0, liveFunnelUpdatedAt || 0);
   const hasFreshnessData = lastDataSyncAt > 0;
@@ -429,7 +378,7 @@ export default function Dashboard() {
           )}
 
           <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-full sm:w-[180px]">
+            <SelectTrigger className="w-full sm:w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -440,33 +389,17 @@ export default function Dashboard() {
           </Select>
 
           {period === 'custom' && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn("w-full justify-start text-left text-sm sm:w-[280px]", !customRange?.from && "text-muted-foreground")}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {formatDashboardDateRangeLabel(customRange)}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="range"
-                  selected={customRange}
-                  onSelect={setCustomRange}
-                  numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                  initialFocus
-                  className="p-3 pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
+            <DateRangePicker
+              value={customRange}
+              onChange={setCustomRange}
+              className="w-full sm:w-[280px]"
+            />
           )}
 
         </div>
       </div>
 
-      {isCompanyContext && liveFunnelPresence && (
+      {funnelCompanyId && liveFunnelPresence && (
         <LiveFunnelPanel
           data={liveFunnelPresence.stages}
           totalActive={liveFunnelPresence.totalActive}
@@ -502,35 +435,242 @@ export default function Dashboard() {
         </>
       ) : (
         <>
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 [&>*]:min-w-0">
-            {dashboardStats.map(stat => (
-              <Card key={stat.label} className="min-w-0 border border-border shadow-sm">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className={`p-2.5 rounded-md bg-muted ${stat.color}`}>
-                    <stat.icon className="h-5 w-5" />
+          {/* KPI — linha 1: equação de atendimentos + pessoas */}
+          <div className="flex flex-wrap items-stretch gap-2">
+            {/* Reservas agendadas */}
+            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
+                  <CalendarCheck className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.scheduledReservations} previous={prevTotals.scheduledReservations} />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-xl font-bold">{stat.value.toLocaleString('pt-BR')}</p>
-                      <VariationBadge
-                        current={stat.compareCurrent ?? stat.value}
-                        previous={stat.comparePrevious ?? stat.prev}
-                        goodWhenDecreases={stat.goodWhenDecreases}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      <MetricLabel label={stat.label} tooltip={stat.tooltip} />
-                    </p>
-                    <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Reservas agendadas" tooltip="Reservas marcadas previamente para o período. Não inclui quem entrou pela fila." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center px-1 text-lg font-semibold text-muted-foreground">+</div>
+
+            {/* Fila convertida */}
+            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
+                  <ClipboardList className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.waitlistReservations} previous={prevTotals.waitlistReservations} />
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Fila convertida" tooltip="Pessoas ou grupos que entraram na fila e depois viraram registro em reservas." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center px-1 text-lg font-semibold text-muted-foreground">=</div>
+
+            {/* Atendimentos totais */}
+            <Card className="min-w-0 flex-1 border-2 border-primary/30 shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
+                  <CalendarIcon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.reservations.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.reservations} previous={prevTotals.reservations} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Atendimentos totais" tooltip="Total registrado em reservas no período: agendadas mais o que veio da fila." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">·</div>
+
+            {/* Total pessoas */}
+            <Card className="min-w-0 flex-1 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.totalGuests.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.totalGuests} previous={prevTotals.totalGuests} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Total pessoas" tooltip="Soma das pessoas em todos os atendimentos registrados no período." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
+          {/* KPI — linha 2: check-ins, cancelamentos, no-show */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 [&>*]:min-w-0">
+            <Card className="min-w-0 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
+                  <CheckCircle className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.completed.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.completed} previous={prevTotals.completed} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Check-ins totais" tooltip="Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="min-w-0 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-destructive">
+                  <XCircle className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.cancellations.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.cancellations} previous={prevTotals.cancellations} goodWhenDecreases />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="Cancelamentos" tooltip="Reservas agendadas que foram canceladas no período. A fila não entra aqui." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="min-w-0 border border-border shadow-sm">
+              <CardContent className="flex items-center gap-3 py-4">
+                <div className="shrink-0 rounded-md bg-muted p-2.5 text-destructive">
+                  <UserX className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-bold">{totals.noShows.toLocaleString('pt-BR')}</p>
+                    <VariationBadge current={totals.noShows} previous={prevTotals.noShows} goodWhenDecreases />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <MetricLabel label="No-shows" tooltip="Reservas agendadas em que o cliente não compareceu e não cancelou." />
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Conversion Funnel */}
+          {(
+            <Card className="border border-border shadow-sm">
+              <CardContent className="py-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  <p className="text-sm font-medium text-foreground">Funil de Conversão</p>
+                </div>
+                <div className="space-y-3">
+                  {/* Linha 1: Reservas */}
+                  {(() => {
+                    const total = totals.reservations;
+                    const checkIns = totals.completed;
+                    const pctCheckIn = total > 0 ? Math.round((checkIns / total) * 100) : 0;
+                    return (
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Reservas</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2">
+                            <span className="text-lg font-bold leading-none text-foreground">{total.toLocaleString('pt-BR')}</span>
+                            <span className="mt-0.5 text-[11px] text-muted-foreground">Agendamentos</span>
+                          </div>
+                          <div className="flex flex-1 items-center gap-1">
+                            <div className="h-0.5 flex-1 bg-border" />
+                            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctCheckIn}%</span>
+                            <div className="h-0.5 flex-1 bg-border" />
+                          </div>
+                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2">
+                            <span className="text-lg font-bold leading-none text-success">{checkIns.toLocaleString('pt-BR')}</span>
+                            <span className="mt-0.5 text-[11px] text-muted-foreground">Check-ins</span>
+                          </div>
+                          {total > checkIns && (
+                            <>
+                              <div className="flex flex-1 items-center gap-1">
+                                <div className="h-0.5 flex-1 bg-border" />
+                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctCheckIn}%</span>
+                                <div className="h-0.5 flex-1 bg-border" />
+                              </div>
+                              <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                                <span className="text-lg font-bold leading-none text-destructive">{(total - checkIns).toLocaleString('pt-BR')}</span>
+                                <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* Linha 2: Pessoas */}
+                  {(() => {
+                    const totalGuests = totals.totalGuests;
+                    const checkedInGuests = totals.checkedInGuests;
+                    const pctGuests = totalGuests > 0 ? Math.round((checkedInGuests / totalGuests) * 100) : 0;
+                    return (
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Pessoas</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2">
+                            <span className="text-lg font-bold leading-none text-foreground">{totalGuests.toLocaleString('pt-BR')}</span>
+                            <span className="mt-0.5 text-[11px] text-muted-foreground">Programadas</span>
+                          </div>
+                          <div className="flex flex-1 items-center gap-1">
+                            <div className="h-0.5 flex-1 bg-border" />
+                            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctGuests}%</span>
+                            <div className="h-0.5 flex-1 bg-border" />
+                          </div>
+                          <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2">
+                            <span className="text-lg font-bold leading-none text-success">{checkedInGuests.toLocaleString('pt-BR')}</span>
+                            <span className="mt-0.5 text-[11px] text-muted-foreground">Compareceram</span>
+                          </div>
+                          {totalGuests > checkedInGuests && (
+                            <>
+                              <div className="flex flex-1 items-center gap-1">
+                                <div className="h-0.5 flex-1 bg-border" />
+                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctGuests}%</span>
+                                <div className="h-0.5 flex-1 bg-border" />
+                              </div>
+                              <div className="flex min-w-[110px] flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                                <span className="text-lg font-bold leading-none text-destructive">{(totalGuests - checkedInGuests).toLocaleString('pt-BR')}</span>
+                                <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Waitlist KPIs */}
-          {isCompanyContext && (
+          {(
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
               <Card className="min-w-0 border border-border shadow-sm">
                 <CardContent className="flex items-center gap-3 py-4">
@@ -597,57 +737,6 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             </div>
-          )}
-
-          {advancedReportsEnabled && (
-            <Card className="border border-border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Atendimentos por Dia"
-                    tooltip="Mostra por dia o que foi agendado, o que veio da fila e o total registrado em reservas."
-                  />
-                </CardTitle>
-                <CardDescription>Separação diária entre agendadas, fila convertida e total</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <RechartsTooltip
-                        contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                        formatter={(value: number, name: string) => [`${value} atendimento${value === 1 ? '' : 's'}`, name]}
-                      />
-                      <Legend />
-                      <Bar
-                        dataKey="scheduledReservations"
-                        name="Agendadas"
-                        fill="hsl(28, 85%, 55%)"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="waitlistReservations"
-                        name="Fila convertida"
-                        fill="hsl(145, 63%, 42%)"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="reservations"
-                        name="Total"
-                        stroke="hsl(202, 89%, 48%)"
-                        strokeWidth={2.5}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
           )}
 
           <Card className="border border-border shadow-sm">
@@ -735,41 +824,74 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                <SectionTitle
-                  title="Total de Pessoas por Dia"
-                  tooltip="Mostra a soma de pessoas por data da reserva, usando o tamanho de cada agendamento no dia marcado."
-                />
-              </CardTitle>
-              <CardDescription>
-                Cada barra considera a data do agendamento, não a data de criação da reserva.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={reservationGuestDailyStats}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                      formatter={(value: number, name: string) => [`${value} pessoa${value === 1 ? '' : 's'}`, name]}
-                    />
-                    <Legend />
-                    <Bar
-                      dataKey="totalGuests"
-                      name="Total de pessoas"
-                      fill="hsl(202, 89%, 48%)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
+          {advancedReportsEnabled && (
+            <Card className="border border-border shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  <SectionTitle
+                    title="Atendimentos por Dia"
+                    tooltip="Mostra por dia o que foi agendado, o que veio da fila, o total de reservas e o total de pessoas."
+                  />
+                </CardTitle>
+                <CardDescription>Separação diária entre agendadas, fila convertida, total e total de pessoas</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={dailyStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis yAxisId="reservations" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" allowDecimals={false} />
+                      <YAxis yAxisId="guests" orientation="right" tick={{ fontSize: 12 }} stroke="hsl(262, 60%, 55%)" allowDecimals={false} tickFormatter={(v: number) => `${v}p`} />
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
+                        formatter={(value: number, name: string) => {
+                          if (name === 'Pessoas') return [`${value} pessoa${value === 1 ? '' : 's'}`, name];
+                          return [`${value} atendimento${value === 1 ? '' : 's'}`, name];
+                        }}
+                      />
+                      <Legend />
+                      <Bar
+                        yAxisId="reservations"
+                        dataKey="scheduledReservations"
+                        name="Agendadas"
+                        fill="hsl(28, 85%, 55%)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Bar
+                        yAxisId="reservations"
+                        dataKey="waitlistReservations"
+                        name="Fila convertida"
+                        fill="hsl(145, 63%, 42%)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Line
+                        yAxisId="reservations"
+                        type="monotone"
+                        dataKey="reservations"
+                        name="Total"
+                        stroke="hsl(202, 89%, 48%)"
+                        strokeWidth={2.5}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                      />
+                      <Line
+                        yAxisId="guests"
+                        type="monotone"
+                        dataKey="totalGuests"
+                        name="Pessoas"
+                        stroke="hsl(262, 60%, 55%)"
+                        strokeWidth={2}
+                        strokeDasharray="5 3"
+                        dot={{ r: 2 }}
+                        activeDot={{ r: 4 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border border-border shadow-sm">
             <CardHeader className="pb-2">

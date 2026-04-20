@@ -4,7 +4,6 @@ const LEGACY_SYSTEM_NAMES = new Set([
   'ReservaFacil',
   'ReservaFácil',
   'PlugGuest',
-  'Plug Guest',
 ]);
 
 export function normalizeSystemName(value: string | null | undefined) {

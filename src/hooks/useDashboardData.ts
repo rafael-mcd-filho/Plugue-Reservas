@@ -17,6 +17,7 @@ export interface DailyStats {
   confirmed: number;
   cancellations: number;
   noShows: number;
+  totalGuests: number;
 }
 
 interface RawReservation {
@@ -24,6 +25,7 @@ interface RawReservation {
   time: string | null;
   status: string | null;
   party_size: number | null;
+  checked_in_party_size: number | null;
   created_at: string;
   source: string | null;
 }
@@ -101,7 +103,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, created_at, source')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source')
         .gte('date', startStr)
         .lte('date', endStr);
 
@@ -236,11 +238,13 @@ export function useDashboardData(
           confirmed: 0,
           cancellations: 0,
           noShows: 0,
+          totalGuests: 0,
         };
       }
 
       const dayStats = byDate[reservation.date];
       dayStats.reservations += 1;
+      dayStats.totalGuests += reservation.party_size || 1;
       if (normalizedSource === 'waitlist') {
         dayStats.waitlistReservations += 1;
       } else {
@@ -273,6 +277,7 @@ export function useDashboardData(
         confirmed: 0,
         cancellations: 0,
         noShows: 0,
+        totalGuests: 0,
       };
 
       return {
@@ -309,8 +314,12 @@ export function useDashboardData(
       },
     );
 
-    const totalGuests = rawReservations.reduce((sum, reservation) => sum + (reservation.party_size || 1), 0);
-    return { ...base, totalGuests };
+    const totalGuests = rawReservations.reduce((sum, r) => sum + (r.party_size || 1), 0);
+    const checkedInGuests = rawReservations.reduce((sum, r) => {
+      if (normalizeReservationStatus(r.status) !== 'checked_in') return sum;
+      return sum + (r.checked_in_party_size ?? r.party_size ?? 1);
+    }, 0);
+    return { ...base, totalGuests, checkedInGuests };
   }, [dailyStats, rawReservations]);
 
   const prevTotals = useMemo(() => {

@@ -37,8 +37,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -168,7 +167,6 @@ export default function Reservations() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
-  const [reservationListRangeOpen, setReservationListRangeOpen] = useState(false);
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
@@ -767,14 +765,6 @@ export default function Reservations() {
     setReservationListRangeOpen(false);
   };
 
-  const handleReservationListRangeSelect = (range: DateRange | undefined) => {
-    setReservationListRange(range);
-
-    if (range?.from && range?.to) {
-      setReservationListRangeOpen(false);
-    }
-  };
-
   const clearExportFilters = () => {
     setExportCreatedRange(undefined);
     setExportReservationRange(undefined);
@@ -1071,30 +1061,11 @@ export default function Reservations() {
                 </SelectContent>
               </Select>
 
-              <Popover open={reservationListRangeOpen} onOpenChange={setReservationListRangeOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      'h-10 w-full justify-between gap-3 rounded-lg bg-card px-4 text-left font-normal sm:w-fit sm:min-w-0',
-                      !reservationListRange?.from && 'text-muted-foreground',
-                    )}
-                  >
-                    {formatDateRangeLabel(reservationListRange, 'Selecionar período')}
-                    <CalendarIcon className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="range"
-                    selected={reservationListRange}
-                    onSelect={handleReservationListRangeSelect}
-                    numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                    initialFocus
-                    className="pointer-events-auto p-3"
-                  />
-                </PopoverContent>
-              </Popover>
+              <DateRangePicker
+                value={reservationListRange}
+                onChange={setReservationListRange}
+                className="h-10 w-full rounded-lg bg-card sm:w-fit sm:min-w-0"
+              />
 
               {reservationListRange?.from && (
                 <Button
@@ -1291,86 +1262,29 @@ export default function Reservations() {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
                 <Label>Período de criação da reserva</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'h-10 w-full justify-between rounded-lg bg-card px-4 text-left font-normal',
-                        !exportCreatedRange?.from && 'text-muted-foreground',
-                      )}
-                    >
-                      {formatDateRangeLabel(exportCreatedRange, 'Selecionar período')}
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="range"
-                      selected={exportCreatedRange}
-                      onSelect={setExportCreatedRange}
-                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                      initialFocus
-                      className="pointer-events-auto p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
+                <DateRangePicker
+                  value={exportCreatedRange}
+                  onChange={setExportCreatedRange}
+                  className="h-10 w-full rounded-lg bg-card"
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Período da reserva</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'h-10 w-full justify-between rounded-lg bg-card px-4 text-left font-normal',
-                        !exportReservationRange?.from && 'text-muted-foreground',
-                      )}
-                    >
-                      {formatDateRangeLabel(exportReservationRange, 'Selecionar período')}
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="range"
-                      selected={exportReservationRange}
-                      onSelect={setExportReservationRange}
-                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                      initialFocus
-                      className="pointer-events-auto p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
+                <DateRangePicker
+                  value={exportReservationRange}
+                  onChange={setExportReservationRange}
+                  className="h-10 w-full rounded-lg bg-card"
+                />
               </div>
 
               <div className="space-y-2 lg:col-span-2">
                 <Label>Período de criação do lead</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'h-10 w-full justify-between rounded-lg bg-card px-4 text-left font-normal',
-                        !exportLeadCreatedRange?.from && 'text-muted-foreground',
-                      )}
-                    >
-                      {formatDateRangeLabel(exportLeadCreatedRange, 'Selecionar período')}
-                      <CalendarIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="range"
-                      selected={exportLeadCreatedRange}
-                      onSelect={setExportLeadCreatedRange}
-                      numberOfMonths={typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2}
-                      initialFocus
-                      className="pointer-events-auto p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
+                <DateRangePicker
+                  value={exportLeadCreatedRange}
+                  onChange={setExportLeadCreatedRange}
+                  className="h-10 w-full rounded-lg bg-card"
+                />
                 <p className="text-xs text-muted-foreground">
                   Esse filtro usa a primeira vez em que o telefone apareceu como lead no sistema.
                 </p>
