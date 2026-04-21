@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Loader2, Pencil, Send, Users } from 'lucide-react';
+import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
-import { formatBrazilPhone } from '@/lib/validation';
+import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
 
 interface ReservationCompanion {
@@ -59,11 +59,16 @@ interface ReservationTimelineItem {
   actor_source: string | null;
 }
 
+interface ReservationLeadHistoryItem extends ReservationDetails {
+  guest_birthdate?: string | null;
+}
+
 interface ReservationDetailsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reservation: ReservationDetails | null;
   slug: string;
+  companyId?: string | null;
   loading?: boolean;
   onBackToList?: () => void;
   backLabel?: string;
@@ -74,6 +79,8 @@ interface ReservationDetailsDialogProps {
   onStatusChange?: (reservation: ReservationDetails) => void;
   onCancel?: (reservation: ReservationDetails) => void;
   showEventHistory?: boolean;
+  showLeadHistory?: boolean;
+  onReservationSelect?: (reservation: ReservationDetails) => void;
 }
 
 function formatTimelineSource(source: string) {
@@ -167,6 +174,12 @@ function formatAuditValue(field: string, value: unknown) {
   return JSON.stringify(value);
 }
 
+function getVisibleOccasionLabel(occasion: string | null | undefined) {
+  const normalizedOccasion = occasion?.trim();
+  if (!normalizedOccasion) return null;
+  return normalizedOccasion.toLowerCase() === 'outro' ? null : normalizedOccasion;
+}
+
 function getAuditChangeEntries(item: ReservationTimelineItem) {
   if (item.source !== 'audit' || !item.payload || typeof item.payload !== 'object') {
     return [];
@@ -206,11 +219,35 @@ function getAuditActorLabel(item: ReservationTimelineItem) {
   return roleLabel ?? 'Usuário';
 }
 
+function sortReservationHistory(
+  left: Pick<ReservationLeadHistoryItem, 'date' | 'time'>,
+  right: Pick<ReservationLeadHistoryItem, 'date' | 'time'>,
+) {
+  const dateDiff = right.date.localeCompare(left.date);
+  return dateDiff !== 0 ? dateDiff : right.time.localeCompare(left.time);
+}
+
+function getHistoryStatusBadgeClass(status: ReservationStatus) {
+  switch (status) {
+    case 'confirmed':
+      return 'border-primary/20 bg-primary text-primary-foreground';
+    case 'checked_in':
+      return 'border-info/20 bg-info text-info-foreground';
+    case 'cancelled':
+      return 'border-destructive/20 bg-destructive text-destructive-foreground';
+    case 'no-show':
+      return 'border-secondary/20 bg-secondary text-secondary-foreground';
+    default:
+      return 'border-secondary/20 bg-secondary text-secondary-foreground';
+  }
+}
+
 export default function ReservationDetailsDialog({
   open,
   onOpenChange,
   reservation,
   slug,
+  companyId,
   loading = false,
   onBackToList,
   backLabel,
@@ -219,13 +256,17 @@ export default function ReservationDetailsDialog({
   onStatusChange,
   onCancel,
   showEventHistory = true,
+  showLeadHistory = false,
+  onReservationSelect,
 }: ReservationDetailsDialogProps) {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
   const [auditHistoryOpen, setAuditHistoryOpen] = useState(false);
+  const normalizedPhone = normalizeBrazilPhoneDigits(reservation?.guest_phone);
   const trackingUrl = reservation
     ? `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`
     : '';
+  const visibleOccasion = getVisibleOccasionLabel(reservation?.occasion);
 
   useEffect(() => {
     if (!open) {
@@ -267,6 +308,28 @@ export default function ReservationDetailsDialog({
     enabled: showEventHistory && open && !!reservation?.id,
   });
 
+  const {
+    data: leadHistory = [],
+    isLoading: leadHistoryLoading,
+    error: leadHistoryError,
+  } = useQuery({
+    queryKey: ['reservation-lead-history', companyId, normalizedPhone],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservations' as never)
+        .select(
+          'id, guest_name, guest_phone, guest_email, source, date, time, party_size, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, public_tracking_code, origin_affiliate_code, origin_affiliate_name',
+        )
+        .eq('company_id', companyId!)
+        .eq('guest_phone', normalizedPhone);
+
+      if (error) throw error;
+
+      return (((data ?? []) as any[]) as ReservationLeadHistoryItem[]).sort(sortReservationHistory);
+    },
+    enabled: showLeadHistory && open && !!companyId && normalizedPhone.length > 0,
+  });
+
   const sortedTimeline = useMemo(
     () =>
       [...timeline].sort(
@@ -283,6 +346,11 @@ export default function ReservationDetailsDialog({
   const eventTimeline = useMemo(
     () => sortedTimeline.filter((item) => item.source !== 'audit'),
     [sortedTimeline],
+  );
+
+  const previousReservations = useMemo(
+    () => leadHistory.filter((item) => item.id !== reservation?.id),
+    [leadHistory, reservation?.id],
   );
 
   const copyTrackingLink = async () => {
@@ -499,12 +567,12 @@ export default function ReservationDetailsDialog({
                 )}
               </div>
 
-              {(reservation.occasion || reservation.notes) && (
+              {(visibleOccasion || reservation.notes) && (
                 <div className="space-y-3">
-                  {reservation.occasion && (
+                  {visibleOccasion && (
                     <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Ocasião</p>
-                      <p className="mt-1 font-medium text-foreground">{reservation.occasion}</p>
+                      <p className="mt-1 font-medium text-foreground">{visibleOccasion}</p>
                     </div>
                   )}
                   {reservation.notes && (
@@ -690,6 +758,84 @@ export default function ReservationDetailsDialog({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showLeadHistory && (
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium text-foreground">Histórico de presenças</p>
+                    </div>
+                    {!leadHistoryLoading && !leadHistoryError && (
+                      <p className="text-xs text-muted-foreground">{previousReservations.length} anteriores</p>
+                    )}
+                  </div>
+
+                  {leadHistoryLoading ? (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Carregando histórico do lead...
+                    </div>
+                  ) : leadHistoryError ? (
+                    <p className="mt-3 text-sm text-destructive">Não foi possível carregar o histórico deste lead.</p>
+                  ) : previousReservations.length === 0 ? (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Esta é a primeira presença registrada para este lead.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {previousReservations.map((item) => {
+                        const visibleHistoryOccasion = getVisibleOccasionLabel(item.occasion);
+                        const content = (
+                          <>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-foreground">
+                                {format(new Date(`${item.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })} às{' '}
+                                {item.time.slice(0, 5)}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {item.party_size} pessoas · Titular da reserva
+                                {visibleHistoryOccasion ? ` · ${visibleHistoryOccasion}` : ''}
+                              </p>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-2">
+                              <Badge
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold shadow-none ${getHistoryStatusBadgeClass(item.status)}`}
+                              >
+                                {getReservationStatusLabel(item.status)}
+                              </Badge>
+                              {onReservationSelect && <Eye className="h-4 w-4 text-muted-foreground" />}
+                            </div>
+                          </>
+                        );
+
+                        if (!onReservationSelect) {
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex items-center gap-4 rounded-lg border border-border bg-background/80 p-3 text-sm"
+                            >
+                              {content}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <button
+                            type="button"
+                            key={item.id}
+                            className="flex w-full items-center gap-4 rounded-lg border border-border bg-background/80 p-3 text-left text-sm transition hover:border-primary/35 hover:bg-background"
+                            onClick={() => onReservationSelect(item)}
+                          >
+                            {content}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
