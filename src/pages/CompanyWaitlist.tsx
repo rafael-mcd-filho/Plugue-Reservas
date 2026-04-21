@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Clock3,
   Copy,
+  Eye,
   Link2,
   Mail,
   PencilLine,
@@ -18,6 +19,8 @@ import {
 } from 'lucide-react';
 import { endOfDay, format, formatDistanceToNow, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
+import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +40,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 import {
   formatBrazilPhone,
@@ -90,6 +94,21 @@ interface WaitlistDetailsForm {
   guest_birthdate: string;
   party_size: string;
   notes: string;
+}
+
+function getReservationDateTime(reservation: Pick<ReservationDetails, 'date' | 'time'>) {
+  const dateTime = new Date(`${reservation.date}T${reservation.time}`);
+  if (!Number.isNaN(dateTime.getTime())) {
+    return dateTime;
+  }
+
+  return new Date(`${reservation.date}T12:00:00`);
+}
+
+function formatReservationSource(source: string | null) {
+  if (source === 'waitlist') return 'Fila de Espera';
+  if (source === 'reservation' || !source) return 'Agendada';
+  return source;
 }
 
 function validateWaitlistGuestInput(input: {
@@ -201,6 +220,8 @@ export default function CompanyWaitlist() {
     notes: '',
   });
   const [selectedEntry, setSelectedEntry] = useState<WaitlistEntry | null>(null);
+  const [contactHistoryEntry, setContactHistoryEntry] = useState<WaitlistEntry | null>(null);
+  const [historyReservationDetails, setHistoryReservationDetails] = useState<ReservationDetails | null>(null);
   const [detailsForm, setDetailsForm] = useState<WaitlistDetailsForm>(createWaitlistDetailsForm(null));
   const [seatEntry, setSeatEntry] = useState<WaitlistEntry | null>(null);
   const [showSeatedToday, setShowSeatedToday] = useState(false);
@@ -256,6 +277,15 @@ export default function CompanyWaitlist() {
     };
   }, [companyId, qc]);
 
+  const contactHistoryPhone = useMemo(
+    () => normalizeBrazilPhoneDigits(contactHistoryEntry?.guest_phone ?? ''),
+    [contactHistoryEntry?.guest_phone],
+  );
+  const contactHistoryEmail = useMemo(
+    () => normalizeEmail(contactHistoryEntry?.guest_email ?? ''),
+    [contactHistoryEntry?.guest_email],
+  );
+
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['waitlist', companyId],
     queryFn: async () => {
@@ -271,6 +301,65 @@ export default function CompanyWaitlist() {
     },
     enabled: !!companyId,
     refetchInterval: 10000,
+  });
+
+  const {
+    data: contactHistoryReservations = [],
+    isLoading: contactHistoryLoading,
+    error: contactHistoryError,
+  } = useQuery({
+    queryKey: ['waitlist-contact-history', companyId, contactHistoryPhone, contactHistoryEmail],
+    queryFn: async () => {
+      if (!companyId) {
+        return [] as ReservationDetails[];
+      }
+
+      let query = supabase
+        .from('reservations' as any)
+        .select(`
+          id,
+          guest_name,
+          guest_phone,
+          guest_email,
+          source,
+          origin_affiliate_code,
+          origin_affiliate_name,
+          date,
+          time,
+          party_size,
+          status,
+          occasion,
+          notes,
+          checked_in_at,
+          checked_in_party_size,
+          created_at,
+          updated_at,
+          public_tracking_code
+        `)
+        .eq('company_id', companyId);
+
+      if (contactHistoryPhone && contactHistoryEmail) {
+        query = query.or(`guest_phone.eq.${contactHistoryPhone},guest_email.eq.${contactHistoryEmail}`);
+      } else if (contactHistoryPhone) {
+        query = query.eq('guest_phone', contactHistoryPhone);
+      } else if (contactHistoryEmail) {
+        query = query.eq('guest_email', contactHistoryEmail);
+      } else {
+        return [] as ReservationDetails[];
+      }
+
+      const { data, error } = await query
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+
+      if (error) throw error;
+
+      return ((data as any[]) ?? []).map((reservation) => ({
+        ...reservation,
+        status: normalizeReservationStatus(reservation.status),
+      })) as ReservationDetails[];
+    },
+    enabled: !!companyId && !!contactHistoryEntry && (!!contactHistoryPhone || !!contactHistoryEmail),
   });
 
   const todayKey = format(new Date(), 'yyyy-MM-dd');
@@ -572,6 +661,16 @@ export default function CompanyWaitlist() {
     toast.success('Link copiado.');
   };
 
+  const openContactHistory = (entry: WaitlistEntry) => {
+    setContactHistoryEntry(entry);
+    setHistoryReservationDetails(null);
+  };
+
+  const closeContactHistory = () => {
+    setContactHistoryEntry(null);
+    setHistoryReservationDetails(null);
+  };
+
   const openDetailsDialog = (entry: WaitlistEntry) => {
     setSelectedEntry(entry);
     setDetailsForm(createWaitlistDetailsForm(entry));
@@ -711,6 +810,29 @@ export default function CompanyWaitlist() {
   const selectedEntryCalledExpired = selectedEntry?.status === 'called'
     ? hasWaitlistCallExpired(selectedEntry.called_at, nowMs)
     : false;
+  const contactHistoryStats = useMemo(() => {
+    const now = Date.now();
+    const checkedInCount = contactHistoryReservations.filter((reservation) => reservation.status === 'checked_in').length;
+    const missedCount = contactHistoryReservations.filter((reservation) => ['cancelled', 'no-show'].includes(reservation.status)).length;
+    const lastVisit = [...contactHistoryReservations]
+      .filter((reservation) => reservation.status === 'checked_in' || getReservationDateTime(reservation).getTime() <= now)
+      .sort((left, right) => {
+        const leftTime = left.checked_in_at ? new Date(left.checked_in_at).getTime() : getReservationDateTime(left).getTime();
+        const rightTime = right.checked_in_at ? new Date(right.checked_in_at).getTime() : getReservationDateTime(right).getTime();
+        return rightTime - leftTime;
+      })[0] ?? null;
+    const nextReservation = [...contactHistoryReservations]
+      .filter((reservation) => reservation.status === 'confirmed' && getReservationDateTime(reservation).getTime() >= now)
+      .sort((left, right) => getReservationDateTime(left).getTime() - getReservationDateTime(right).getTime())[0] ?? null;
+
+    return {
+      total: contactHistoryReservations.length,
+      checkedInCount,
+      missedCount,
+      lastVisit,
+      nextReservation,
+    };
+  }, [contactHistoryReservations]);
 
   return (
     <div className="space-y-6">
@@ -882,6 +1004,19 @@ export default function CompanyWaitlist() {
                     </div>
 
                     <div className="grid w-full gap-2 sm:flex sm:flex-wrap sm:items-center xl:w-auto xl:justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-2 rounded-lg sm:w-auto"
+                        onClick={(event) => {
+                          stopRowAction(event);
+                          openContactHistory(entry);
+                        }}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Histórico
+                      </Button>
+
                       <Button
                         variant="outline"
                         size="sm"
@@ -1234,15 +1369,30 @@ export default function CompanyWaitlist() {
                       Atualize os dados antes de chamar, sentar ou remover o cliente.
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full gap-2 self-start rounded-lg sm:w-auto"
-                    onClick={() => copyTrackingLink(selectedEntry.tracking_code)}
-                  >
-                    <Copy className="h-4 w-4" />
-                    Copiar link
-                  </Button>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full gap-2 self-start rounded-lg sm:w-auto"
+                      onClick={() => {
+                        const entry = selectedEntry;
+                        closeDetailsDialog();
+                        openContactHistory(entry);
+                      }}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Ver histórico
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full gap-2 self-start rounded-lg sm:w-auto"
+                      onClick={() => copyTrackingLink(selectedEntry.tracking_code)}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar link
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1355,6 +1505,199 @@ export default function CompanyWaitlist() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!contactHistoryEntry && !historyReservationDetails} onOpenChange={(open) => !open && closeContactHistory()}>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-3xl overflow-x-hidden overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Histórico do contato</DialogTitle>
+          </DialogHeader>
+
+          {contactHistoryEntry && (
+            <div className="space-y-5 pt-2">
+              <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                <p className="text-lg font-semibold text-foreground">{contactHistoryEntry.guest_name}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" />
+                    {formatBrazilPhone(contactHistoryEntry.guest_phone)}
+                  </span>
+                  {contactHistoryEntry.guest_email && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5" />
+                      {contactHistoryEntry.guest_email}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Busca feita nas reservas desta unidade usando telefone e, quando houver, e-mail do contato.
+                </p>
+              </div>
+
+              {contactHistoryLoading ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {[1, 2, 3, 4].map((item) => (
+                      <Skeleton key={item} className="h-24 w-full rounded-2xl" />
+                    ))}
+                  </div>
+                  {[1, 2, 3].map((item) => (
+                    <Skeleton key={item} className="h-28 w-full rounded-2xl" />
+                  ))}
+                </div>
+              ) : contactHistoryError ? (
+                <div className="rounded-2xl border border-destructive/20 bg-destructive-soft p-4 text-sm text-destructive">
+                  Nao foi possivel carregar o historico deste contato.
+                </div>
+              ) : contactHistoryReservations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/10 p-8 text-center">
+                  <p className="text-base font-semibold text-foreground">Nenhuma reserva encontrada</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Ainda nao encontramos reservas anteriores deste contato nesta unidade.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total de reservas</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{contactHistoryStats.total}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Compareceram</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{contactHistoryStats.checkedInCount}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {contactHistoryStats.missedCount} canceladas ou no-show
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ultima visita</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">
+                        {contactHistoryStats.lastVisit
+                          ? format(
+                            contactHistoryStats.lastVisit.checked_in_at
+                              ? new Date(contactHistoryStats.lastVisit.checked_in_at)
+                              : getReservationDateTime(contactHistoryStats.lastVisit),
+                            "dd/MM/yyyy 'as' HH:mm",
+                            { locale: ptBR },
+                          )
+                          : 'Nenhuma'}
+                      </p>
+                      {contactHistoryStats.lastVisit && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {formatDistanceToNow(
+                            contactHistoryStats.lastVisit.checked_in_at
+                              ? new Date(contactHistoryStats.lastVisit.checked_in_at)
+                              : getReservationDateTime(contactHistoryStats.lastVisit),
+                            { addSuffix: true, locale: ptBR },
+                          )}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Proxima reserva</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">
+                        {contactHistoryStats.nextReservation
+                          ? format(getReservationDateTime(contactHistoryStats.nextReservation), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })
+                          : 'Nenhuma'}
+                      </p>
+                      {contactHistoryStats.nextReservation && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {contactHistoryStats.nextReservation.party_size} pessoas
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 rounded-2xl border border-border bg-card p-5">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Reservas deste contato</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Lista mais recente primeiro para consulta rapida da operacao.
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {contactHistoryReservations.length} {contactHistoryReservations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {contactHistoryReservations.map((reservation) => (
+                        <div key={reservation.id} className="rounded-xl border border-border bg-muted/15 p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</p>
+                                <ReservationStatusBadge status={reservation.status} />
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <CalendarDays className="h-3.5 w-3.5" />
+                                  {format(getReservationDateTime(reservation), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Users className="h-3.5 w-3.5" />
+                                  {reservation.party_size} pessoas
+                                </span>
+                                <span>{formatReservationSource(reservation.source)}</span>
+                              </div>
+
+                              {(reservation.origin_affiliate_name || reservation.occasion) && (
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  {reservation.origin_affiliate_name && (
+                                    <span>Afiliado: {reservation.origin_affiliate_name}</span>
+                                  )}
+                                  {reservation.occasion && (
+                                    <span>Ocasião: {reservation.occasion}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full gap-2 rounded-lg sm:w-auto"
+                              onClick={() => setHistoryReservationDetails(reservation)}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Abrir reserva
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" onClick={closeContactHistory}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ReservationDetailsDialog
+        open={!!historyReservationDetails}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeContactHistory();
+          }
+        }}
+        reservation={historyReservationDetails}
+        slug={slug}
+        onBackToList={() => setHistoryReservationDetails(null)}
+        backLabel="Voltar para o histórico do contato"
+      />
 
       <Dialog open={!!seatEntry} onOpenChange={(open) => !open && closeSeatDialog()}>
         <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
