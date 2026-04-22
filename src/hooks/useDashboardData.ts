@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
+import { getAttributionString, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
 import { differenceInCalendarDays, differenceInDays, eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -120,45 +121,14 @@ const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; c
   },
 };
 
-const PAID_UTM_MEDIUM_VALUES = new Set([
-  'ads',
-  'cpc',
-  'cpm',
-  'cpv',
-  'paid',
-  'paid-social',
-  'paid_social',
-  'ppc',
-  'social_paid',
-]);
-
 function normalizeReservationSource(source: string | null | undefined) {
   return source === 'waitlist' ? 'waitlist' : 'reservation';
 }
 
-function normalizeTextValue(value: unknown) {
-  return typeof value === 'string' ? value.trim() || null : null;
-}
-
-function getAttributionString(
-  snapshot: Record<string, unknown> | null | undefined,
-  key: string,
-) {
-  return normalizeTextValue(snapshot?.[key]);
-}
-
 function isPublicReservation(reservation: RawReservation) {
-  if (normalizeTextValue(reservation.origin_tracking_session_id)) return true;
-  if (normalizeTextValue(reservation.origin_anonymous_id)) return true;
+  if (normalizeTrackingTextValue(reservation.origin_tracking_session_id)) return true;
+  if (normalizeTrackingTextValue(reservation.origin_anonymous_id)) return true;
   return getAttributionString(reservation.attribution_snapshot, 'tracking_source') === 'public_web';
-}
-
-function isPaidTrafficMarker(utmMedium: string | null | undefined) {
-  if (!utmMedium) return false;
-
-  const normalizedMedium = utmMedium.trim().toLowerCase();
-  if (PAID_UTM_MEDIUM_VALUES.has(normalizedMedium)) return true;
-  return normalizedMedium.startsWith('paid');
 }
 
 function classifyReservationOrigin(reservation: RawReservation): ReservationOriginKey {
@@ -170,7 +140,7 @@ function classifyReservationOrigin(reservation: RawReservation): ReservationOrig
     return 'manual';
   }
 
-  if (normalizeTextValue(reservation.origin_affiliate_link_id)) {
+  if (normalizeTrackingTextValue(reservation.origin_affiliate_link_id)) {
     return 'affiliate';
   }
 

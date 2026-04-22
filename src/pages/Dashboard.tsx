@@ -21,7 +21,6 @@ import {
   ArrowUpRight, ArrowDownRight, Minus, ClipboardList, Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -208,6 +207,7 @@ export default function Dashboard() {
   const [period, setPeriod] = useState('this_month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const [uniqueFunnelOnly, setUniqueFunnelOnly] = useState(false);
+  const [adsFunnelOnly, setAdsFunnelOnly] = useState(false);
 
   const { data: companies = [] } = useQuery({
     queryKey: ['dashboard-companies'],
@@ -251,7 +251,7 @@ export default function Dashboard() {
     data: funnelData = [],
     dataUpdatedAt: funnelUpdatedAt = 0,
     isFetching: funnelFetching,
-  } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly);
+  } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly, adsFunnelOnly);
   const {
     data: liveFunnelPresence,
     dataUpdatedAt: liveFunnelUpdatedAt = 0,
@@ -326,6 +326,9 @@ export default function Dashboard() {
     () => reservationOriginBreakdown.items.filter((item) => item.value > 0),
     [reservationOriginBreakdown.items],
   );
+  const funnelDescription = isCompanyContext
+    ? 'Conversão por etapa considerando sessões e jornadas do processo de reserva'
+    : 'Conversão agregada de todas as unidades considerando sessões e jornadas';
   const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0, liveFunnelUpdatedAt || 0);
   const hasFreshnessData = lastDataSyncAt > 0;
   const dataLagMs = hasFreshnessData ? Date.now() - lastDataSyncAt : 0;
@@ -1267,26 +1270,36 @@ export default function Dashboard() {
           </Card>
           {advancedReportsEnabled ? (
             <>
-          <div className="[&>*]:min-w-0">
+          <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-px shadow-sm dark:border-amber-800/50 dark:bg-amber-950/20 [&>*]:min-w-0">
             <ReservationFunnelChart
               data={funnelData}
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
-              description={
-                uniqueFunnelOnly
-                  ? 'Conversão por etapa considerando apenas navegadores ou dispositivos anônimos únicos no período'
-                  : isCompanyContext
-                    ? 'Conversão por etapa considerando sessões e jornadas do processo de reserva'
-                    : 'Conversão agregada de todas as unidades considerando sessões e jornadas'
-              }
+              description={funnelDescription}
               measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}
               headerActions={(
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Checkbox
-                    checked={uniqueFunnelOnly}
-                    onCheckedChange={(checked) => setUniqueFunnelOnly(checked === true)}
-                  />
-                  Mostrar apenas únicos
-                </label>
+                <div className="flex flex-wrap items-center justify-end gap-3 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                    Em desenvolvimento
+                  </span>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={adsFunnelOnly}
+                      onChange={(event) => setAdsFunnelOnly(event.target.checked)}
+                      className="h-4 w-4 rounded-sm border border-primary text-primary accent-primary"
+                    />
+                    Mostrar apenas origem Ads
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={uniqueFunnelOnly}
+                      onChange={(event) => setUniqueFunnelOnly(event.target.checked)}
+                      className="h-4 w-4 rounded-sm border border-primary text-primary accent-primary"
+                    />
+                    Mostrar apenas únicos
+                  </label>
+                </div>
               )}
             />
           </div>

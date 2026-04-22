@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { FUNNEL_STEPS, type FunnelStep } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
+import { hasPaidAttribution, isPaidTrafficMarker } from '@/lib/trackingAttribution';
 
 interface FunnelDataPoint {
   step: FunnelStep;
@@ -13,6 +14,16 @@ interface TrackingEventRow {
   journey_id: string | null;
   reservation_id: string | null;
   session_id: string | null;
+}
+
+interface TrackingSessionAttributionRow {
+  id: string;
+  utm_medium: string | null;
+}
+
+interface ReservationAttributionRow {
+  attribution_snapshot: Record<string, unknown> | null;
+  id: string;
 }
 
 function matchesStep(step: FunnelStep, row: TrackingEventRow) {
@@ -35,9 +46,15 @@ function buildDefaultIdentityKey(step: FunnelStep, row: TrackingEventRow) {
   return row.journey_id ?? row.session_id ?? row.anonymous_id;
 }
 
-export function useFunnelData(companyId?: string, startDate?: Date, endDate?: Date, uniqueOnly = false) {
+export function useFunnelData(
+  companyId?: string,
+  startDate?: Date,
+  endDate?: Date,
+  uniqueOnly = false,
+  adsOnly = false,
+) {
   return useQuery<FunnelDataPoint[]>({
-    queryKey: ['funnel-data', companyId, startDate?.toISOString(), endDate?.toISOString(), uniqueOnly],
+    queryKey: ['funnel-data', companyId, startDate?.toISOString(), endDate?.toISOString(), uniqueOnly, adsOnly],
     queryFn: async () => {
       let query = supabase
         .from('tracking_events' as any)
@@ -68,10 +85,73 @@ export function useFunnelData(companyId?: string, startDate?: Date, endDate?: Da
       }
 
       const rows = (data ?? []) as TrackingEventRow[];
+      let filteredRows = rows;
+
+      if (adsOnly) {
+        const sessionIds = Array.from(new Set(
+          rows
+            .map((row) => row.session_id)
+            .filter((value): value is string => !!value),
+        ));
+        const reservationIds = Array.from(new Set(
+          rows
+            .filter((row) => !row.session_id)
+            .map((row) => row.reservation_id)
+            .filter((value): value is string => !!value),
+        ));
+
+        const [sessionResult, reservationResult] = await Promise.all([
+          sessionIds.length > 0
+            ? supabase
+              .from('tracking_sessions' as any)
+              .select('id, utm_medium')
+              .in('id', sessionIds)
+            : Promise.resolve({ data: [] as TrackingSessionAttributionRow[], error: null }),
+          reservationIds.length > 0
+            ? supabase
+              .from('reservations' as any)
+              .select('id, attribution_snapshot')
+              .in('id', reservationIds)
+            : Promise.resolve({ data: [] as ReservationAttributionRow[], error: null }),
+        ]);
+
+        if (sessionResult.error) {
+          console.error('[FunnelData] Session attribution query error:', sessionResult.error.message ?? sessionResult.error);
+          throw sessionResult.error;
+        }
+
+        if (reservationResult.error) {
+          console.error('[FunnelData] Reservation attribution query error:', reservationResult.error.message ?? reservationResult.error);
+          throw reservationResult.error;
+        }
+
+        const adsSessionIds = new Set(
+          ((sessionResult.data ?? []) as TrackingSessionAttributionRow[])
+            .filter((session) => isPaidTrafficMarker(session.utm_medium))
+            .map((session) => session.id),
+        );
+        const adsReservationIds = new Set(
+          ((reservationResult.data ?? []) as ReservationAttributionRow[])
+            .filter((reservation) => hasPaidAttribution(reservation.attribution_snapshot))
+            .map((reservation) => reservation.id),
+        );
+
+        filteredRows = rows.filter((row) => {
+          if (row.session_id) {
+            return adsSessionIds.has(row.session_id);
+          }
+
+          if (row.reservation_id) {
+            return adsReservationIds.has(row.reservation_id);
+          }
+
+          return false;
+        });
+      }
 
       return FUNNEL_STEPS.map((step) => {
         const identities = new Set(
-          rows
+          filteredRows
             .filter((row) => matchesStep(step, row))
             .map((row) => (uniqueOnly ? row.anonymous_id : buildDefaultIdentityKey(step, row))),
         );

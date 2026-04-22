@@ -11,6 +11,9 @@ interface AppErrorBoundaryState {
   componentStack: string | null;
 }
 
+const DEV_HOOK_RECOVERY_KEY = 'dev-hook-recovery';
+const DEV_HOOK_ERROR_PATTERN = /Cannot read properties of null \(reading 'use(?:Context|Memo|Ref|State)'\)|Invalid hook call/i;
+
 function shouldShowLoginAction(pathname: string) {
   if (!pathname) return true;
 
@@ -29,6 +32,16 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
     componentStack: null,
   };
 
+  componentDidMount() {
+    this.clearDevRecoveryMarker();
+  }
+
+  componentDidUpdate() {
+    if (!this.state.hasError) {
+      this.clearDevRecoveryMarker();
+    }
+  }
+
   static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
     return {
       hasError: true,
@@ -42,11 +55,29 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
     this.setState({
       componentStack: errorInfo.componentStack || null,
     });
+
+    if (
+      import.meta.env.DEV &&
+      typeof window !== 'undefined' &&
+      DEV_HOOK_ERROR_PATTERN.test(error?.message || '')
+    ) {
+      const recoveryKey = `${DEV_HOOK_RECOVERY_KEY}:${window.location.pathname}`;
+
+      if (!window.sessionStorage.getItem(recoveryKey)) {
+        window.sessionStorage.setItem(recoveryKey, '1');
+        window.location.reload();
+      }
+    }
   }
 
   handleReload = () => {
     window.location.reload();
   };
+
+  clearDevRecoveryMarker() {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return;
+    window.sessionStorage.removeItem(`${DEV_HOOK_RECOVERY_KEY}:${window.location.pathname}`);
+  }
 
   render() {
     if (!this.state.hasError) {

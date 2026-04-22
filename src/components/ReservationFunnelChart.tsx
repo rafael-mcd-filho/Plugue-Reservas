@@ -28,7 +28,7 @@ const FUNNEL_COLORS = [
 export default function ReservationFunnelChart({
   data,
   title = 'Funil de Reservas',
-  description = 'Conversao por etapa do processo de reserva',
+  description = 'Conversão por etapa do processo de reserva',
   headerActions,
   measurementLabel = 'Sessões',
 }: ReservationFunnelChartProps) {
