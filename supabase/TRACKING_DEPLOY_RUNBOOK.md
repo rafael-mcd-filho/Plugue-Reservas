@@ -52,15 +52,23 @@ Se houver alteracoes paralelas no ambiente, publicar tambem:
 supabase functions deploy reservation-events
 ```
 
-## 5. Configurar secrets
+## 5. Configurar secret interno
 
-### Obrigatoria
+Defina um valor forte para autenticar os jobs internos.
 
-Secret usada para jobs internos e processamento seguro da fila:
+### Opcional no ambiente
+
+Se quiser manter compatibilidade com chamadas HTTP externas ou rotinas fora do banco, salve o valor tambem como secret da edge function:
 
 ```sh
 supabase secrets set INTERNAL_JOB_SECRET="gere-um-segredo-forte-aqui"
 ```
+
+### Obrigatoria em `system_settings`
+
+Para o cron automatico da fila Meta, esse mesmo valor precisa estar salvo em `system_settings`, na tela de configuracoes do sistema, no campo:
+
+- `Segredo dos Jobs Internos`
 
 ### Opcional
 
@@ -171,18 +179,29 @@ Ativar os toggles desejados:
 
 - migration aplicada sem erro
 - edge functions publicadas
+- `internal_job_secret` preenchido em `system_settings`
 - `page_view` aparecendo em `admin/eventos`
 - `time_select` aparecendo em `admin/eventos` e entrando na Meta como `InitiateCheckout`
 - `reservation_created` aparecendo em `admin/eventos` e entrando na Meta como `Lead`
 - fila Meta registrando payload e resposta
 - painel ao vivo populando com atividade recente
 
-## 12. Observacao sobre cron
+## 12. Processamento automatico da fila Meta
 
-O worker `process-meta-event-queue` ja esta pronto para processamento automatico, mas o agendamento por cron nao foi colocado em migration porque depende da estrategia segura de entrega do `INTERNAL_JOB_SECRET` para o job HTTP.
+A migration `supabase/migrations/20260422130000_schedule_meta_event_queue_job.sql` agenda o worker `process-meta-event-queue` para rodar automaticamente a cada minuto.
 
-A recomendacao e:
+Regras de operacao:
 
-- configurar o secret no ambiente
-- testar o endpoint manualmente
-- so depois criar o agendamento automatizado com o mesmo header `x-job-secret`
+- o job so faz o POST quando `internal_job_secret` estiver preenchido
+- para o cron automatico, o valor precisa estar salvo em `system_settings`
+- o endpoint continua aceitando execucao manual pelo painel admin
+- o botao `Processar fila Meta` permanece como fallback para retentativa operacional ou validacao imediata
+
+Se quiser validar o job automatico por HTTP antes de aguardar o cron:
+
+```sh
+curl -X POST "https://hdpxqqiudiotanrybvcf.supabase.co/functions/v1/process-meta-event-queue" ^
+  -H "Content-Type: application/json" ^
+  -H "x-job-secret: SEU_INTERNAL_JOB_SECRET" ^
+  -d "{}"
+```

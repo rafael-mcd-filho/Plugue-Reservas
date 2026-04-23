@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
+import type { CompanyPanelPermission } from '@/lib/companyPermissions';
 
 export interface ManagedUser {
   id: string;
@@ -9,6 +10,7 @@ export interface ManagedUser {
   phone: string;
   company_id: string | null;
   roles: string[];
+  company_panel_permission_overrides?: Partial<Record<CompanyPanelPermission, boolean>> | null;
   is_banned: boolean;
   last_sign_in: string | null;
   created_at: string;

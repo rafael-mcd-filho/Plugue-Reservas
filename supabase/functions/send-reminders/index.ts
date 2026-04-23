@@ -44,6 +44,39 @@ function getReservationDateTime(date: string, time: string) {
   return new Date(`${date}T${hours}:${minutes}:00-03:00`);
 }
 
+function getHoursBetweenReservationAndCreation(reservation: {
+  created_at?: string | null;
+  date: string;
+  time?: string | null;
+}) {
+  if (!reservation.created_at) return Number.POSITIVE_INFINITY;
+
+  const createdAt = new Date(reservation.created_at);
+  if (Number.isNaN(createdAt.getTime())) return Number.POSITIVE_INFINITY;
+
+  const reservationDateTime = getReservationDateTime(reservation.date, reservation.time || "00:00");
+  return (reservationDateTime.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+}
+
+function filterLateBookedReminders(
+  reservations: any[],
+  minimumHoursBeforeReservation: number,
+  reminderType: "1h" | "24h",
+) {
+  return reservations.filter((reservation: any) => {
+    const hoursUntilReservation = getHoursBetweenReservationAndCreation(reservation);
+
+    if (hoursUntilReservation < minimumHoursBeforeReservation) {
+      console.log(
+        `Skipping ${reminderType} reminder for ${reservation.id}: booked only ${hoursUntilReservation.toFixed(1)}h before`,
+      );
+      return false;
+    }
+
+    return true;
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -101,25 +134,15 @@ Deno.serve(async (req) => {
       return minutesUntilReservation >= 1435 && minutesUntilReservation <= 1445;
     });
 
-    const filtered24h = reservations24h.filter((reservation: any) => {
-      const createdAt = new Date(reservation.created_at);
-      const reservationDateTime = getReservationDateTime(reservation.date, reservation.time || "00:00");
-      const hoursUntilReservation = (reservationDateTime.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
-
-      if (hoursUntilReservation < 24) {
-        console.log(`Skipping 24h reminder for ${reservation.id}: booked only ${hoursUntilReservation.toFixed(1)}h before`);
-        return false;
-      }
-
-      return true;
-    });
+    const filtered1h = filterLateBookedReminders(reservations1h, 1, "1h");
+    const filtered24h = filterLateBookedReminders(reservations24h, 24, "24h");
 
     console.log(
-      `Found ${reservations1h.length} 1h reminders, ${filtered24h.length} 24h reminders (${reservations24h.length - filtered24h.length} skipped)`,
+      `Found ${filtered1h.length} 1h reminders (${reservations1h.length - filtered1h.length} skipped), ${filtered24h.length} 24h reminders (${reservations24h.length - filtered24h.length} skipped)`,
     );
 
     const allReservations = [
-      ...reservations1h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_1h" })),
+      ...filtered1h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_1h" })),
       ...filtered24h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_24h" })),
     ];
 

@@ -16,6 +16,7 @@ import {
   Users as UsersIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,6 +46,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import {
+  buildOperatorPermissionOverrides,
+  COMPANY_PANEL_PERMISSION_METADATA,
+  getCompanyPanelPermissionSelection,
+  getDefaultOperatorPermissionSelection,
+  OPERATOR_ASSIGNABLE_COMPANY_PANEL_PERMISSIONS,
+  type CompanyPanelPermission,
+} from '@/lib/companyPermissions';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
@@ -88,6 +97,111 @@ function getAvatarTone(user: ManagedUser) {
   return avatarToneClasses[seed % avatarToneClasses.length];
 }
 
+type OperatorPermissionSelection = Record<CompanyPanelPermission, boolean>;
+
+function createDefaultOperatorPermissionSelection(): OperatorPermissionSelection {
+  return { ...getDefaultOperatorPermissionSelection() };
+}
+
+function createOperatorPermissionSelection(
+  overrides?: Partial<Record<CompanyPanelPermission, boolean>> | null,
+): OperatorPermissionSelection {
+  return { ...getCompanyPanelPermissionSelection(['operator'], overrides) };
+}
+
+function toggleOperatorPermission(
+  current: OperatorPermissionSelection,
+  permission: CompanyPanelPermission,
+  checked: boolean,
+): OperatorPermissionSelection {
+  const next = {
+    ...current,
+    [permission]: checked,
+  };
+
+  if (permission === 'reservations_view' && !checked) {
+    next.reservations_delete = false;
+  }
+
+  if (permission === 'reservations_delete' && checked) {
+    next.reservations_view = true;
+  }
+
+  return next;
+}
+
+function hasCustomOperatorAccess(user: ManagedUser) {
+  return user.roles.includes('operator')
+    && !!user.company_panel_permission_overrides
+    && Object.keys(user.company_panel_permission_overrides).length > 0;
+}
+
+function OperatorPermissionEditor({
+  value,
+  onChange,
+}: {
+  value: OperatorPermissionSelection;
+  onChange: (next: OperatorPermissionSelection) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">Acessos do operador</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Admin segue com acesso total. Aqui você define só os módulos liberados para operador.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => onChange(createDefaultOperatorPermissionSelection())}
+        >
+          Restaurar padrão
+        </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {OPERATOR_ASSIGNABLE_COMPANY_PANEL_PERMISSIONS.map((permission) => {
+          const metadata = COMPANY_PANEL_PERMISSION_METADATA[permission];
+          const checked = value[permission];
+          const disabled = permission === 'reservations_delete' && !value.reservations_view;
+
+          return (
+            <label
+              key={permission}
+              className={cn(
+                'flex items-start gap-3 rounded-xl border border-border/70 bg-card p-3 transition-colors',
+                checked ? 'border-primary/30 bg-primary-soft/40' : 'hover:border-border',
+                disabled && 'opacity-60',
+              )}
+            >
+              <Checkbox
+                checked={checked}
+                disabled={disabled}
+                onCheckedChange={(nextChecked) => onChange(
+                  toggleOperatorPermission(value, permission, nextChecked === true),
+                )}
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{metadata.label}</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">{metadata.description}</p>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Dica: desmarcar <strong>Reservas</strong> tamb&eacute;m remove a exclus&atilde;o definitiva.
+      </p>
+    </div>
+  );
+}
+
 export default function CompanyUsers() {
   const navigate = useNavigate();
   const { user: currentUser, signOut } = useAuth();
@@ -98,7 +212,13 @@ export default function CompanyUsers() {
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', role: 'operator' });
+  const [editForm, setEditForm] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    role: 'operator',
+    operatorPermissions: createDefaultOperatorPermissionSelection(),
+  });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [passwordDialog, setPasswordDialog] = useState<ManagedUser | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
@@ -110,6 +230,7 @@ export default function CompanyUsers() {
     email: '',
     phone: '',
     role: 'operator',
+    operatorPermissions: createDefaultOperatorPermissionSelection(),
     password: '',
     confirmPassword: '',
   });
@@ -172,6 +293,9 @@ export default function CompanyUsers() {
       email: user.email,
       phone: formatBrazilPhone(user.phone),
       role: primaryRole,
+      operatorPermissions: createOperatorPermissionSelection(
+        primaryRole === 'operator' ? user.company_panel_permission_overrides : null,
+      ),
     });
   };
 
@@ -208,6 +332,9 @@ export default function CompanyUsers() {
         email: normalizedEmail,
         phone: formatBrazilPhone(editForm.phone),
         role: editForm.role,
+        company_panel_permission_overrides: editForm.role === 'operator'
+          ? buildOperatorPermissionOverrides(editForm.operatorPermissions)
+          : null,
       });
 
       toast.success('Usuário atualizado.');
@@ -329,6 +456,9 @@ export default function CompanyUsers() {
             phone: formatBrazilPhone(createForm.phone) || null,
             company_id: companyId,
             role: createForm.role,
+            company_panel_permission_overrides: createForm.role === 'operator'
+              ? buildOperatorPermissionOverrides(createForm.operatorPermissions)
+              : null,
             password: createForm.password,
           },
         ],
@@ -351,6 +481,7 @@ export default function CompanyUsers() {
         email: '',
         phone: '',
         role: 'operator',
+        operatorPermissions: createDefaultOperatorPermissionSelection(),
         password: '',
         confirmPassword: '',
       });
@@ -484,6 +615,11 @@ export default function CompanyUsers() {
                           </span>
                         ))}
                     </div>
+                    {hasCustomOperatorAccess(user) && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Acesso do operador personalizado
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell className="px-5 py-4">
                     <span
@@ -611,7 +747,7 @@ export default function CompanyUsers() {
       />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
@@ -664,6 +800,16 @@ export default function CompanyUsers() {
                 </SelectContent>
               </Select>
             </div>
+            {editForm.role === 'operator' ? (
+              <OperatorPermissionEditor
+                value={editForm.operatorPermissions}
+                onChange={(next) => setEditForm({ ...editForm, operatorPermissions: next })}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
+              </p>
+            )}
             {editWouldRemoveLastAdmin && (
               <p className="text-sm text-destructive">
                 A unidade precisa manter ao menos um admin ativo.
@@ -682,7 +828,7 @@ export default function CompanyUsers() {
       </Dialog>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
@@ -740,6 +886,16 @@ export default function CompanyUsers() {
                 </SelectContent>
               </Select>
             </div>
+            {createForm.role === 'operator' ? (
+              <OperatorPermissionEditor
+                value={createForm.operatorPermissions}
+                onChange={(next) => setCreateForm({ ...createForm, operatorPermissions: next })}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
             </p>

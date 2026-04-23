@@ -21,12 +21,40 @@ interface ResolvedAffiliateLink {
   code: string;
 }
 
+function normalizeAffiliateCodeFromRoute(value: string | null | undefined) {
+  return normalizeAffiliateLinkCode((value || '').split(/[?&#]/, 1)[0]);
+}
+
+function buildCanonicalAffiliateSearch(rawCode: string | null | undefined, currentSearch: string) {
+  const rawValue = (rawCode || '').trim();
+  const separatorIndex = rawValue.search(/[?&#]/);
+  const currentParams = new URLSearchParams(currentSearch);
+
+  if (separatorIndex >= 0) {
+    const embeddedParams = new URLSearchParams(rawValue.slice(separatorIndex + 1));
+    embeddedParams.forEach((value, key) => {
+      if (!currentParams.has(key)) {
+        currentParams.set(key, value);
+      }
+    });
+  }
+
+  const search = currentParams.toString();
+  return search ? `?${search}` : '';
+}
+
 export default function AffiliateCompanyPublicPage() {
   const location = useLocation();
   const { slug, code } = useParams<{ slug: string; code: string }>();
-  const normalizedCode = normalizeAffiliateLinkCode(code);
+  const rawCode = code || '';
+  const normalizedCode = normalizeAffiliateCodeFromRoute(rawCode);
   const slugIsValid = isValidCompanySlug(slug);
   const codeIsValid = isValidAffiliateLinkCode(normalizedCode);
+  const shouldCanonicalizeCode = rawCode.trim() !== normalizedCode;
+
+  if (slugIsValid && codeIsValid && shouldCanonicalizeCode) {
+    return <Navigate to={`/${slug}/f/${encodeURIComponent(normalizedCode)}${buildCanonicalAffiliateSearch(rawCode, location.search)}`} replace />;
+  }
 
   const { data: affiliateLink, isFetched } = useQuery({
     queryKey: ['public-affiliate-link', slug, normalizedCode],

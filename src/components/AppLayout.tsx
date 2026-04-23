@@ -34,11 +34,14 @@ import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
 import NotificationBanner from '@/components/NotificationBanner';
 import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
+import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
-
-type AppRole = 'superadmin' | 'admin' | 'operator';
+import {
+  type AppRole,
+  type CompanyPanelPermission,
+} from '@/lib/companyPermissions';
 
 interface NavItem {
   label: string;
@@ -46,6 +49,7 @@ interface NavItem {
   icon: LucideIcon;
   path: string;
   showFor: AppRole[];
+  requiredPermission?: CompanyPanelPermission;
   matchPrefix?: boolean;
 }
 
@@ -90,10 +94,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     stopImpersonation,
   } = useImpersonation();
 
-  const activeRoles = isImpersonatingCompany ? effectiveRoles : roles;
+  const { activeRoles, hasPermission, permissionsLoading } = useCompanyPermissions();
   const rolesLoaded = !loading && activeRoles.length > 0;
   const sidebarContextLabel = slug ? 'Painel da unidade' : 'Painel global';
   const companyName = companyContext?.companyName || slug || 'Unidade';
+  const hasCompanyPermission = (permission?: CompanyPanelPermission) => !permission || hasPermission(permission);
 
   const companyPrimaryNavItems: NavItem[] = slug
     ? [
@@ -102,35 +107,40 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           description: 'Resumo operacional',
           icon: LayoutDashboard,
           path: `/${slug}/admin`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'dashboard_view',
         },
         {
           label: 'Check-ins',
           description: 'Reservas do dia e atendimento',
           icon: CalendarCheck,
-          path: `/${slug}/admin`,
+          path: `/${slug}/admin/check-ins`,
           showFor: ['operator'],
+          requiredPermission: 'checkins_view',
         },
         {
           label: 'Reservas',
           description: 'Filtros e status',
           icon: CalendarDays,
           path: `/${slug}/admin/reservas`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'reservations_view',
         },
         {
           label: 'Mesas',
           description: 'Capacidade e ocupa\u00E7\u00E3o',
           icon: Grid3X3,
           path: `/${slug}/admin/mesas`,
-          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'tables_view',
+          showFor: ['admin', 'operator', 'superadmin'],
         },
         {
           label: 'Calend\u00E1rio',
           description: 'Agenda do dia',
           icon: CalendarDays,
           path: `/${slug}/admin/calendario`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'calendar_view',
         },
         {
           label: 'Lista de Espera',
@@ -138,6 +148,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           icon: ClipboardList,
           path: `/${slug}/admin/fila`,
           showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'waitlist_view',
         },
       ]
     : [];
@@ -149,35 +160,40 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           description: 'Envios autom\u00E1ticos via WhatsApp',
           icon: Bot,
           path: `/${slug}/admin/automacoes`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'automations_view',
         },
         {
           label: 'Usu\u00E1rios',
           description: 'Acesso da unidade',
           icon: Users,
           path: `/${slug}/admin/usuarios`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'users_view',
         },
         {
           label: 'Leads',
           description: 'Clientes e hist\u00F3rico',
           icon: Contact,
           path: `/${slug}/admin/leads`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'leads_view',
         },
         {
           label: 'Filiados',
           description: 'Links de indica\u00E7\u00E3o e origem',
           icon: Link2,
           path: `/${slug}/admin/filiados`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'affiliates_view',
         },
         {
           label: 'Eventos',
           description: 'Tracking e Meta CAPI',
           icon: Activity,
           path: `/${slug}/admin/eventos`,
-          showFor: ['admin', 'superadmin'],
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'events_view',
         },
       ]
     : [];
@@ -188,7 +204,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         description: 'Hor\u00E1rios e p\u00E1gina',
         icon: Settings,
         path: `/${slug}/admin/configuracoes`,
-        showFor: ['admin', 'superadmin'],
+        showFor: ['admin', 'operator', 'superadmin'],
+        requiredPermission: 'settings_view',
       }
     : null;
 
@@ -236,6 +253,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const visiblePrimaryNavItems = [...companyPrimaryNavItems, ...superadminNavItems].filter((item) => {
     if (!rolesLoaded) return false;
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
+    if (permissionsLoading && item.requiredPermission) return false;
+    if (!hasCompanyPermission(item.requiredPermission)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
       if (item.label === 'Dashboard' && f.advanced_reports === false) return false;
@@ -246,6 +265,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const visibleManagementNavItems = companyManagementNavItems.filter((item) => {
     if (!rolesLoaded) return false;
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
+    if (permissionsLoading && item.requiredPermission) return false;
+    if (!hasCompanyPermission(item.requiredPermission)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
       if (item.path?.includes('/automacoes') && f.whatsapp_integration === false) return false;
@@ -255,6 +276,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const visibleCompanySettingsNavItem = companySettingsNavItem && rolesLoaded
     ? companySettingsNavItem.showFor.some((role) => activeRoles.includes(role))
+      && (!permissionsLoading || !companySettingsNavItem.requiredPermission)
+      && hasCompanyPermission(companySettingsNavItem.requiredPermission)
       ? companySettingsNavItem
       : null
     : null;

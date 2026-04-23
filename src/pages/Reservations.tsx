@@ -58,6 +58,7 @@ import {
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
+import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 
 type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
@@ -165,6 +166,7 @@ function createManualReservationForm(): ManualReservationForm {
 
 export default function Reservations() {
   const { companyId, slug } = useCompanySlug();
+  const { hasPermission } = useCompanyPermissions();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -204,6 +206,7 @@ export default function Reservations() {
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
+  const canDeleteReservations = hasPermission('reservations_delete');
 
   const invalidateReservationQueries = () => {
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
@@ -464,10 +467,9 @@ export default function Reservations() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('reservations' as any)
-        .delete()
-        .eq('id', id);
+      const { error } = await supabase.rpc('delete_company_reservation' as any, {
+        _reservation_id: id,
+      });
 
       if (error) throw error;
     },
@@ -711,6 +713,8 @@ export default function Reservations() {
   };
 
   const openReservationRemovalFlow = (reservationId: string) => {
+    if (!canDeleteReservations) return;
+
     const reservation = reservations.find((item) => item.id === reservationId);
     const allowCancelOption = reservation?.status !== 'cancelled' && reservation?.status !== 'checked_in';
 
@@ -760,6 +764,11 @@ export default function Reservations() {
 
     if (action === 'cancel') {
       saveStatusMutation.mutate({ id: reservationId, status: 'cancelled' });
+      return;
+    }
+
+    if (!canDeleteReservations) {
+      toast.error('Seu perfil nao pode excluir reservas.');
       return;
     }
 
@@ -1249,15 +1258,17 @@ export default function Reservations() {
                             >
                               <Eye className="h-3.5 w-3.5" />
                             </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                              aria-label="Excluir reserva"
-                              onClick={() => openReservationRemovalFlow(reservation.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            {canDeleteReservations && (
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                                aria-label="Excluir reserva"
+                                onClick={() => openReservationRemovalFlow(reservation.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1969,8 +1980,8 @@ export default function Reservations() {
                   </div>
                 </div>
               </button>
-
-              <button
+              {canDeleteReservations && (
+                <button
                 type="button"
                 className="group rounded-xl border border-destructive/45 bg-gradient-to-br from-destructive/[0.12] via-background to-destructive/[0.04] px-3.5 py-3 text-left shadow-[0_18px_36px_-34px_hsl(var(--destructive)/0.95)] transition hover:border-destructive/75 hover:from-destructive/[0.18] hover:to-destructive/[0.08]"
                 onClick={() => selectReservationRemovalAction('delete')}
@@ -1992,7 +2003,8 @@ export default function Reservations() {
                     <Trash2 className="h-4 w-4" />
                   </div>
                 </div>
-              </button>
+                </button>
+              )}
             </div>
           </div>
         </DialogContent>
@@ -2138,15 +2150,17 @@ export default function Reservations() {
                               >
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                                aria-label="Excluir reserva"
-                                onClick={() => openReservationRemovalFlow(reservation.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {canDeleteReservations && (
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                                  aria-label="Excluir reserva"
+                                  onClick={() => openReservationRemovalFlow(reservation.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2205,15 +2219,17 @@ export default function Reservations() {
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                          aria-label="Excluir reserva"
-                          onClick={() => openReservationRemovalFlow(reservation.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canDeleteReservations && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                            aria-label="Excluir reserva"
+                            onClick={() => openReservationRemovalFlow(reservation.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>

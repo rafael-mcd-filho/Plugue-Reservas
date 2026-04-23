@@ -120,12 +120,15 @@ interface MetaAttemptRow {
   error_message: string | null;
   request_payload: Record<string, unknown> | null;
   created_at: string;
+  queue?: Pick<MetaQueueRow, 'event_name' | 'meta_event_name'> | null;
 }
 
 type ClearEventDataScope = 'meta_queue' | 'event_log';
 
 const EVENT_LOG_LIMIT = 100;
 const EVENT_LOG_PAGE_SIZE = 10;
+const META_QUEUE_LIMIT = 100;
+const META_ATTEMPTS_LIMIT = 100;
 const META_QUEUE_PAGE_SIZE = 8;
 const META_ATTEMPTS_PAGE_SIZE = 10;
 const EVENT_TYPE_FILTER_ALL = 'all';
@@ -218,6 +221,13 @@ function formatMetaMapping(eventName: string) {
   return 'Não envia para Meta';
 }
 
+function formatMetaEventOptionLabel(eventName: string) {
+  if (eventName === 'PageView') return 'PageView - abertura da pagina publica';
+  if (eventName === 'InitiateCheckout') return 'InitiateCheckout - data, pessoas e horario';
+  if (eventName === 'Lead') return 'Lead - reserva efetivada';
+  return eventName;
+}
+
 function getSessionAttributionValue(event: TrackingEventRow, key: keyof TrackingSessionRow) {
   const sessionValue = event.session?.[key];
   if (typeof sessionValue === 'string' && sessionValue.trim()) return sessionValue;
@@ -258,12 +268,20 @@ export default function CompanyEvents() {
   const [eventTypeFilter, setEventTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
   const [eventStartDate, setEventStartDate] = useState('');
   const [eventEndDate, setEventEndDate] = useState('');
+  const [metaQueueTypeFilter, setMetaQueueTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
+  const [metaQueueStartDate, setMetaQueueStartDate] = useState('');
+  const [metaQueueEndDate, setMetaQueueEndDate] = useState('');
+  const [metaAttemptsTypeFilter, setMetaAttemptsTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
+  const [metaAttemptsStartDate, setMetaAttemptsStartDate] = useState('');
+  const [metaAttemptsEndDate, setMetaAttemptsEndDate] = useState('');
   const [eventLogPage, setEventLogPage] = useState(1);
   const [metaQueuePage, setMetaQueuePage] = useState(1);
   const [metaAttemptsPage, setMetaAttemptsPage] = useState(1);
 
   const since = useMemo(() => subDays(new Date(), 7).toISOString(), []);
   const hasInvalidEventDateRange = !!eventStartDate && !!eventEndDate && eventStartDate > eventEndDate;
+  const hasInvalidMetaQueueDateRange = !!metaQueueStartDate && !!metaQueueEndDate && metaQueueStartDate > metaQueueEndDate;
+  const hasInvalidMetaAttemptsDateRange = !!metaAttemptsStartDate && !!metaAttemptsEndDate && metaAttemptsStartDate > metaAttemptsEndDate;
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['company-tracking-settings', companyId],
@@ -307,8 +325,6 @@ export default function CompanyEvents() {
         reservationsResult,
         metaSentResult,
         metaFailedResult,
-        metaQueueResult,
-        metaAttemptsResult,
       ] = await Promise.all([
         supabase
           .from('tracking_sessions' as any)
@@ -348,18 +364,6 @@ export default function CompanyEvents() {
           .eq('company_id', companyId)
           .eq('status', 'failed')
           .gte('created_at', since),
-        supabase
-          .from('meta_event_queue' as any)
-          .select('id, reservation_id, event_name, meta_event_name, status, attempts, last_response_status, last_error, payload, sent_at, created_at')
-          .eq('company_id', companyId)
-          .order('created_at', { ascending: false })
-          .limit(20),
-        supabase
-          .from('meta_event_attempts' as any)
-          .select('id, queue_id, reservation_id, status, response_status, response_body, error_message, request_payload, created_at')
-          .eq('company_id', companyId)
-          .order('created_at', { ascending: false })
-          .limit(20),
       ]);
 
       const results = [
@@ -369,8 +373,6 @@ export default function CompanyEvents() {
         reservationsResult,
         metaSentResult,
         metaFailedResult,
-        metaQueueResult,
-        metaAttemptsResult,
       ];
 
       const firstError = results.find((result) => result.error)?.error;
@@ -411,8 +413,6 @@ export default function CompanyEvents() {
 
       return {
         metrics,
-        metaQueue: ((metaQueueResult.data as MetaQueueRow[]) ?? []),
-        metaAttempts: ((metaAttemptsResult.data as MetaAttemptRow[]) ?? []),
       };
     },
     enabled: !!companyId,
@@ -435,6 +435,30 @@ export default function CompanyEvents() {
         new Set(
           (((data as Pick<TrackingEventRow, 'event_name'>[]) ?? [])
             .map((event) => event.event_name)
+            .filter((eventName): eventName is string => typeof eventName === 'string' && eventName.trim().length > 0)),
+        ),
+      ).sort((left, right) => left.localeCompare(right));
+    },
+    enabled: !!companyId,
+    refetchInterval: 30_000,
+  });
+
+  const { data: metaEventTypeOptions = [] } = useQuery({
+    queryKey: ['company-meta-event-types', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('meta_event_queue' as any)
+        .select('meta_event_name')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (error) throw error;
+
+      return Array.from(
+        new Set(
+          (((data as Array<{ meta_event_name?: string | null }>) ?? [])
+            .map((event) => event.meta_event_name)
             .filter((eventName): eventName is string => typeof eventName === 'string' && eventName.trim().length > 0)),
         ),
       ).sort((left, right) => left.localeCompare(right));
@@ -496,6 +520,72 @@ export default function CompanyEvents() {
     refetchInterval: 30_000,
   });
 
+  const { data: metaQueue = [], isLoading: metaQueueLoading } = useQuery({
+    queryKey: ['company-meta-queue', companyId, metaQueueTypeFilter, metaQueueStartDate, metaQueueEndDate],
+    queryFn: async () => {
+      let query = supabase
+        .from('meta_event_queue' as any)
+        .select('id, reservation_id, event_name, meta_event_name, status, attempts, last_response_status, last_error, payload, sent_at, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(META_QUEUE_LIMIT);
+
+      if (metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL) {
+        query = query.eq('meta_event_name', metaQueueTypeFilter);
+      }
+
+      if (metaQueueStartDate) {
+        query = query.gte('created_at', startOfDay(parseISO(metaQueueStartDate)).toISOString());
+      }
+
+      if (metaQueueEndDate) {
+        query = query.lte('created_at', endOfDay(parseISO(metaQueueEndDate)).toISOString());
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return (data as MetaQueueRow[]) ?? [];
+    },
+    enabled: !!companyId && !hasInvalidMetaQueueDateRange,
+    placeholderData: (previousData) => previousData,
+    refetchInterval: 30_000,
+  });
+
+  const { data: metaAttempts = [], isLoading: metaAttemptsLoading } = useQuery({
+    queryKey: ['company-meta-attempts', companyId, metaAttemptsTypeFilter, metaAttemptsStartDate, metaAttemptsEndDate],
+    queryFn: async () => {
+      let attemptsQuery = supabase
+        .from('meta_event_attempts' as any)
+        .select(
+          'id, queue_id, reservation_id, status, response_status, response_body, error_message, request_payload, created_at, queue:meta_event_queue!inner(event_name, meta_event_name)',
+        )
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(META_ATTEMPTS_LIMIT);
+
+      if (metaAttemptsTypeFilter !== EVENT_TYPE_FILTER_ALL) {
+        attemptsQuery = attemptsQuery.eq('queue.meta_event_name', metaAttemptsTypeFilter);
+      }
+
+      if (metaAttemptsStartDate) {
+        attemptsQuery = attemptsQuery.gte('created_at', startOfDay(parseISO(metaAttemptsStartDate)).toISOString());
+      }
+
+      if (metaAttemptsEndDate) {
+        attemptsQuery = attemptsQuery.lte('created_at', endOfDay(parseISO(metaAttemptsEndDate)).toISOString());
+      }
+
+      const { data, error } = await attemptsQuery;
+      if (error) throw error;
+
+      return (data as MetaAttemptRow[]) ?? [];
+    },
+    enabled: !!companyId && !hasInvalidMetaAttemptsDateRange,
+    placeholderData: (previousData) => previousData,
+    refetchInterval: 30_000,
+  });
+
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
       const pixelId = settingsForm.pixel_id.trim();
@@ -541,6 +631,8 @@ export default function CompanyEvents() {
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
+      queryClient.invalidateQueries({ queryKey: ['company-meta-queue', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-meta-attempts', companyId] });
       toast.success(
         `Fila processada. Processados: ${result.processed ?? 0}, enviados: ${result.sent ?? 0}, falhas: ${result.failed ?? 0}, ignorados: ${result.skipped ?? 0}.`,
       );
@@ -564,6 +656,9 @@ export default function CompanyEvents() {
       queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
       queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-meta-event-types', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-meta-queue', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-meta-attempts', companyId] });
       const total = Object.values(result ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
       if (scope === 'event_log') {
         setSelectedEvent(null);
@@ -581,10 +676,10 @@ export default function CompanyEvents() {
     },
   });
 
-  const metaQueue = eventsDashboard?.metaQueue ?? [];
-  const metaAttempts = eventsDashboard?.metaAttempts ?? [];
   const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
   const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL || !!eventStartDate || !!eventEndDate;
+  const hasMetaQueueFiltersActive = metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL || !!metaQueueStartDate || !!metaQueueEndDate;
+  const hasMetaAttemptsFiltersActive = metaAttemptsTypeFilter !== EVENT_TYPE_FILTER_ALL || !!metaAttemptsStartDate || !!metaAttemptsEndDate;
   const selectableEventTypes = useMemo(() => {
     if (eventTypeFilter === EVENT_TYPE_FILTER_ALL || eventTypeOptions.includes(eventTypeFilter)) {
       return eventTypeOptions;
@@ -592,12 +687,38 @@ export default function CompanyEvents() {
 
     return [eventTypeFilter, ...eventTypeOptions];
   }, [eventTypeFilter, eventTypeOptions]);
+  const selectableMetaQueueEventTypes = useMemo(() => {
+    if (metaQueueTypeFilter === EVENT_TYPE_FILTER_ALL || metaEventTypeOptions.includes(metaQueueTypeFilter)) {
+      return metaEventTypeOptions;
+    }
+
+    return [metaQueueTypeFilter, ...metaEventTypeOptions];
+  }, [metaEventTypeOptions, metaQueueTypeFilter]);
+  const selectableMetaAttemptsEventTypes = useMemo(() => {
+    if (metaAttemptsTypeFilter === EVENT_TYPE_FILTER_ALL || metaEventTypeOptions.includes(metaAttemptsTypeFilter)) {
+      return metaEventTypeOptions;
+    }
+
+    return [metaAttemptsTypeFilter, ...metaEventTypeOptions];
+  }, [metaAttemptsTypeFilter, metaEventTypeOptions]);
   const eventLogCountLabel = `${eventLog.length} ${eventLog.length === 1 ? 'resultado' : 'resultados'}`;
+  const metaQueueCountLabel = `${metaQueue.length} ${metaQueue.length === 1 ? 'resultado' : 'resultados'}`;
+  const metaAttemptsCountLabel = `${metaAttempts.length} ${metaAttempts.length === 1 ? 'resultado' : 'resultados'}`;
   const eventLogEmptyMessage = hasInvalidEventDateRange
     ? 'Data inicial não pode ser maior que a data final.'
     : hasEventLogFiltersActive
       ? 'Nenhum evento encontrado para os filtros informados.'
       : 'Nenhum evento registrado ainda.';
+  const metaQueueEmptyMessage = hasInvalidMetaQueueDateRange
+    ? 'Data inicial nao pode ser maior que a data final.'
+    : hasMetaQueueFiltersActive
+      ? 'Nenhum item encontrado para os filtros informados.'
+      : 'Nenhum item na fila ainda.';
+  const metaAttemptsEmptyMessage = hasInvalidMetaAttemptsDateRange
+    ? 'Data inicial nao pode ser maior que a data final.'
+    : hasMetaAttemptsFiltersActive
+      ? 'Nenhuma tentativa encontrada para os filtros informados.'
+      : 'Nenhuma tentativa registrada ainda.';
   const hasAnyEventLogEntries = eventLog.length > 0 || eventTypeOptions.length > 0;
   const eventLogTotalPages = Math.max(1, Math.ceil(eventLog.length / EVENT_LOG_PAGE_SIZE));
   const metaQueueTotalPages = Math.max(1, Math.ceil(metaQueue.length / META_QUEUE_PAGE_SIZE));
@@ -642,6 +763,14 @@ export default function CompanyEvents() {
   }, [eventTypeFilter, eventStartDate, eventEndDate]);
 
   useEffect(() => {
+    setMetaQueuePage(1);
+  }, [metaQueueTypeFilter, metaQueueStartDate, metaQueueEndDate]);
+
+  useEffect(() => {
+    setMetaAttemptsPage(1);
+  }, [metaAttemptsTypeFilter, metaAttemptsStartDate, metaAttemptsEndDate]);
+
+  useEffect(() => {
     if (eventLogPage > eventLogTotalPages) {
       setEventLogPage(eventLogTotalPages);
     }
@@ -663,12 +792,27 @@ export default function CompanyEvents() {
     queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
     queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
     queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['company-meta-event-types', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['company-meta-queue', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['company-meta-attempts', companyId] });
   };
 
   const handleResetEventFilters = () => {
     setEventTypeFilter(EVENT_TYPE_FILTER_ALL);
     setEventStartDate('');
     setEventEndDate('');
+  };
+
+  const handleResetMetaQueueFilters = () => {
+    setMetaQueueTypeFilter(EVENT_TYPE_FILTER_ALL);
+    setMetaQueueStartDate('');
+    setMetaQueueEndDate('');
+  };
+
+  const handleResetMetaAttemptsFilters = () => {
+    setMetaAttemptsTypeFilter(EVENT_TYPE_FILTER_ALL);
+    setMetaAttemptsStartDate('');
+    setMetaAttemptsEndDate('');
   };
 
   const handleClearEventData = (scope: ClearEventDataScope) => {
@@ -1131,7 +1275,74 @@ export default function CompanyEvents() {
                 Limpar
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="meta-queue-type-filter">Tipo de evento</Label>
+                    <Select value={metaQueueTypeFilter} onValueChange={setMetaQueueTypeFilter}>
+                      <SelectTrigger id="meta-queue-type-filter" className="h-9">
+                        <SelectValue placeholder="Todos os tipos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
+                        {selectableMetaQueueEventTypes.map((eventName) => (
+                          <SelectItem key={eventName} value={eventName}>
+                            {formatMetaEventOptionLabel(eventName)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="meta-queue-start-date">Data inicial</Label>
+                    <Input
+                      id="meta-queue-start-date"
+                      type="date"
+                      className="h-9"
+                      value={metaQueueStartDate}
+                      max={metaQueueEndDate || undefined}
+                      onChange={(event) => setMetaQueueStartDate(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="meta-queue-end-date">Data final</Label>
+                    <Input
+                      id="meta-queue-end-date"
+                      type="date"
+                      className="h-9"
+                      value={metaQueueEndDate}
+                      min={metaQueueStartDate || undefined}
+                      onChange={(event) => setMetaQueueEndDate(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-end sm:col-span-2 sm:justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-full sm:w-auto"
+                      onClick={handleResetMetaQueueFilters}
+                      disabled={!hasMetaQueueFiltersActive}
+                    >
+                      Limpar filtros
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className={`text-xs ${hasInvalidMetaQueueDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {hasInvalidMetaQueueDateRange
+                      ? 'Data inicial nao pode ser maior que a data final.'
+                      : `Exibindo ate ${META_QUEUE_LIMIT} itens mais recentes para o recorte atual.`}
+                  </p>
+                  <Badge variant="outline" className="self-start sm:self-auto">{metaQueueCountLabel}</Badge>
+                </div>
+              </div>
+
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1143,10 +1354,16 @@ export default function CompanyEvents() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {metaQueue.length === 0 ? (
+                  {metaQueueLoading && metaQueue.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center text-muted-foreground">
-                        Nenhum item na fila ainda.
+                        Carregando fila Meta...
+                      </TableCell>
+                    </TableRow>
+                  ) : metaQueue.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        {metaQueueEmptyMessage}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -1260,7 +1477,74 @@ export default function CompanyEvents() {
               Request payload, status HTTP e respostas recebidas da API de Conversões.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="meta-attempts-type-filter">Tipo de evento</Label>
+                  <Select value={metaAttemptsTypeFilter} onValueChange={setMetaAttemptsTypeFilter}>
+                    <SelectTrigger id="meta-attempts-type-filter" className="h-9">
+                      <SelectValue placeholder="Todos os tipos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
+                      {selectableMetaAttemptsEventTypes.map((eventName) => (
+                        <SelectItem key={eventName} value={eventName}>
+                          {formatMetaEventOptionLabel(eventName)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="meta-attempts-start-date">Data inicial</Label>
+                  <Input
+                    id="meta-attempts-start-date"
+                    type="date"
+                    className="h-9"
+                    value={metaAttemptsStartDate}
+                    max={metaAttemptsEndDate || undefined}
+                    onChange={(event) => setMetaAttemptsStartDate(event.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="meta-attempts-end-date">Data final</Label>
+                  <Input
+                    id="meta-attempts-end-date"
+                    type="date"
+                    className="h-9"
+                    value={metaAttemptsEndDate}
+                    min={metaAttemptsStartDate || undefined}
+                    onChange={(event) => setMetaAttemptsEndDate(event.target.value)}
+                  />
+                </div>
+
+                <div className="flex items-end sm:col-span-2 sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-full sm:w-auto"
+                    onClick={handleResetMetaAttemptsFilters}
+                    disabled={!hasMetaAttemptsFiltersActive}
+                  >
+                    Limpar filtros
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className={`text-xs ${hasInvalidMetaAttemptsDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
+                  {hasInvalidMetaAttemptsDateRange
+                    ? 'Data inicial nao pode ser maior que a data final.'
+                    : `Exibindo ate ${META_ATTEMPTS_LIMIT} tentativas mais recentes para o recorte atual.`}
+                </p>
+                <Badge variant="outline" className="self-start sm:self-auto">{metaAttemptsCountLabel}</Badge>
+              </div>
+            </div>
+
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1272,10 +1556,16 @@ export default function CompanyEvents() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {metaAttempts.length === 0 ? (
+                {metaAttemptsLoading && metaAttempts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      Nenhuma tentativa registrada ainda.
+                      Carregando tentativas...
+                    </TableCell>
+                  </TableRow>
+                ) : metaAttempts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      {metaAttemptsEmptyMessage}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1305,7 +1595,7 @@ export default function CompanyEvents() {
                           size="sm"
                           onClick={() =>
                             setSelectedPayload({
-                              title: `Tentativa ${formatMetaStatus(attempt.status)} em ${formatDateTime(attempt.created_at)}`,
+                              title: `Tentativa ${attempt.queue?.meta_event_name ?? 'Meta'} ${formatMetaStatus(attempt.status)} em ${formatDateTime(attempt.created_at)}`,
                               content: [
                                 'REQUEST',
                                 buildPayloadPreview(attempt.request_payload) ?? '{}',

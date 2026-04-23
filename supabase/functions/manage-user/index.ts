@@ -22,6 +22,19 @@ type ProfileRow = {
   created_at: string | null;
 };
 
+const OPERATOR_ASSIGNABLE_PANEL_PERMISSIONS = [
+  "dashboard_view",
+  "checkins_view",
+  "reservations_view",
+  "reservations_delete",
+  "calendar_view",
+  "tables_view",
+  "waitlist_view",
+] as const;
+
+type OperatorAssignablePanelPermission = typeof OPERATOR_ASSIGNABLE_PANEL_PERMISSIONS[number];
+type CompanyPanelPermissionOverrides = Partial<Record<OperatorAssignablePanelPermission, boolean>>;
+
 type CallerContext = {
   supabaseAdmin: ReturnType<typeof createClient>;
   callerId: string;
@@ -174,6 +187,36 @@ function normalizeOptionalCompanyId(value: unknown) {
 
 function normalizeEffectiveRole(value: unknown) {
   return value === "admin" || value === "operator" ? value : null;
+}
+
+function normalizeCompanyPanelPermissionOverrides(value: unknown): CompanyPanelPermissionOverrides | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("company_panel_permission_overrides deve ser um objeto");
+  }
+
+  const rawOverrides = value as Record<string, unknown>;
+  const overrides: CompanyPanelPermissionOverrides = {};
+
+  for (const key of Object.keys(rawOverrides)) {
+    if (!OPERATOR_ASSIGNABLE_PANEL_PERMISSIONS.includes(key as OperatorAssignablePanelPermission)) {
+      throw new Error(`Permissao invalida para operador: ${key}`);
+    }
+
+    const nextValue = rawOverrides[key];
+    if (typeof nextValue !== "boolean") {
+      throw new Error(`Valor invalido para a permissao ${key}`);
+    }
+
+    overrides[key as OperatorAssignablePanelPermission] = nextValue;
+  }
+
+  if (overrides.reservations_delete === true && overrides.reservations_view === false) {
+    overrides.reservations_view = true;
+  }
+
+  return Object.keys(overrides).length > 0 ? overrides : null;
 }
 
 function sanitizeOrigin(value: string | null | undefined) {
@@ -393,6 +436,49 @@ async function syncProfileAndAuth(
   throw new Error(normalizePasswordErrorMessage(authError.message));
 }
 
+async function clearCompanyPanelPermissionOverrides(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  companyId?: string | null,
+) {
+  let query = supabaseAdmin
+    .from("company_user_panel_permissions")
+    .delete()
+    .eq("user_id", userId);
+
+  if (companyId) {
+    query = query.eq("company_id", companyId);
+  }
+
+  const { error } = await query;
+  if (error) throw new Error(error.message);
+}
+
+async function syncCompanyPanelPermissionOverrides(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  companyId: string,
+  overrides: CompanyPanelPermissionOverrides | null,
+) {
+  if (!overrides || Object.keys(overrides).length === 0) {
+    await clearCompanyPanelPermissionOverrides(supabaseAdmin, userId, companyId);
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("company_user_panel_permissions")
+    .upsert({
+      user_id: userId,
+      company_id: companyId,
+      permission_overrides: overrides,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: "user_id,company_id",
+    });
+
+  if (error) throw new Error(error.message);
+}
+
 async function assertCallerCanManageTarget(
   context: CallerContext,
   targetRoles: UserRoleRow[],
@@ -565,6 +651,7 @@ Deno.serve(async (req) => {
         }
 
         let profiles: ProfileRow[] = [];
+        let permissionRows: Array<{ user_id: string; permission_overrides: CompanyPanelPermissionOverrides | null }> = [];
         if (userIds.length > 0) {
           const profilesResult = await context.supabaseAdmin
             .from("profiles")
@@ -573,9 +660,21 @@ Deno.serve(async (req) => {
 
           if (profilesResult.error) throw new Error(profilesResult.error.message);
           profiles = (profilesResult.data ?? []) as ProfileRow[];
+
+          if (listCompanyId) {
+            const permissionResult = await context.supabaseAdmin
+              .from("company_user_panel_permissions")
+              .select("user_id, permission_overrides")
+              .eq("company_id", listCompanyId)
+              .in("user_id", userIds);
+
+            if (permissionResult.error) throw new Error(permissionResult.error.message);
+            permissionRows = (permissionResult.data ?? []) as Array<{ user_id: string; permission_overrides: CompanyPanelPermissionOverrides | null }>;
+          }
         }
 
         const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+        const permissionMap = new Map(permissionRows.map((row) => [row.user_id, row.permission_overrides ?? null]));
 
         const users = userIds
           .map((uid) => {
@@ -590,6 +689,7 @@ Deno.serve(async (req) => {
               phone: profile?.phone || "",
               company_id: managedRole?.company_id ?? profile?.company_id ?? null,
               roles: [...new Set(userRoles.map((role) => role.role))],
+              company_panel_permission_overrides: permissionMap.get(uid) ?? null,
               is_banned: profile?.is_active === false,
               last_sign_in: null,
               created_at: profile?.created_at || "",
@@ -670,6 +770,7 @@ Deno.serve(async (req) => {
         const normalizedFullName = full_name !== undefined ? normalizeFullNameValue(full_name) : undefined;
         const normalizedEmail = email !== undefined ? normalizeEmailValue(email) : undefined;
         const normalizedPhone = phone !== undefined ? normalizePhoneValue(phone) : undefined;
+        const normalizedPermissionOverrides = normalizeCompanyPanelPermissionOverrides(body.company_panel_permission_overrides);
 
         if (full_name !== undefined && !normalizedFullName) {
           throw new Error("Informe um nome");
@@ -751,6 +852,23 @@ Deno.serve(async (req) => {
           if (companyRolesError) throw new Error(companyRolesError.message);
         }
 
+        const companyChanged = currentCompanyId !== nextCompanyId;
+        const roleChanged = currentRole?.role !== nextRole;
+        if (currentRole?.role === "operator" && (roleChanged || companyChanged)) {
+          await clearCompanyPanelPermissionOverrides(context.supabaseAdmin, user_id, currentCompanyId);
+        }
+
+        if (nextRole === "operator" && nextCompanyId && normalizedPermissionOverrides !== undefined) {
+          await syncCompanyPanelPermissionOverrides(
+            context.supabaseAdmin,
+            user_id,
+            nextCompanyId,
+            normalizedPermissionOverrides,
+          );
+        } else if (nextRole !== "operator" && normalizedPermissionOverrides !== undefined) {
+          await clearCompanyPanelPermissionOverrides(context.supabaseAdmin, user_id);
+        }
+
         await writeAuditLog(
           context.supabaseAdmin,
           context.callerId,
@@ -765,6 +883,9 @@ Deno.serve(async (req) => {
               company_id: nextCompanyId,
               role: nextRole,
               phone: normalizedPhone ?? profile?.phone ?? null,
+              company_panel_permission_overrides: nextRole === "operator"
+                ? (normalizedPermissionOverrides ?? null)
+                : null,
             },
             scopeCompanyId,
             impersonatedBySuperadmin,
@@ -988,6 +1109,7 @@ Deno.serve(async (req) => {
           const normalizedEmail = normalizeEmailValue(userPayload.email);
           const normalizedPhone = normalizePhoneValue(userPayload.phone);
           const normalizedPassword = normalizePasswordValue(userPayload.password);
+          const normalizedPermissionOverrides = normalizeCompanyPanelPermissionOverrides(userPayload.company_panel_permission_overrides);
 
           if (!userPayload.company_id) {
             results.push({ email: userPayload.email, error: "company_id e obrigatorio" });
@@ -1070,6 +1192,21 @@ Deno.serve(async (req) => {
             continue;
           }
 
+          if ((userPayload.role || "admin") === "operator") {
+            try {
+              await syncCompanyPanelPermissionOverrides(
+                context.supabaseAdmin,
+                newUser.user.id,
+                userPayload.company_id,
+                normalizedPermissionOverrides,
+              );
+            } catch (permissionError: any) {
+              await rollbackCreatedUser(context.supabaseAdmin, newUser.user.id);
+              results.push({ email: normalizedEmail, error: permissionError.message });
+              continue;
+            }
+          }
+
           try {
             await writeAuditLog(
               context.supabaseAdmin,
@@ -1083,6 +1220,9 @@ Deno.serve(async (req) => {
                   email: normalizedEmail,
                   role: userPayload.role || "admin",
                   company_id: userPayload.company_id,
+                  company_panel_permission_overrides: (userPayload.role || "admin") === "operator"
+                    ? (normalizedPermissionOverrides ?? null)
+                    : null,
                 },
                 scopeCompanyId,
                 impersonatedBySuperadmin,
