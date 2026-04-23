@@ -237,6 +237,7 @@ export default function Dashboard() {
     reservationLeadTrend,
     createdReservationTotals,
     reservationOriginBreakdown,
+    reservationOriginDailyStats,
     waitlistDailyStats,
     totals,
     prevTotals,
@@ -689,8 +690,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               {reservationOriginBreakdown.total > 0 ? (
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-center">
-                  <div className="relative h-[280px]">
+                <div className="space-y-6">
+                  <div className="hidden relative h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -1184,8 +1185,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               {reservationOriginBreakdown.total > 0 ? (
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-center">
-                  <div className="relative h-[280px]">
+                <div className="space-y-6">
+                  <div className="hidden relative h-[280px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -1228,37 +1229,117 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                     {reservationOriginBreakdown.items.map((item) => (
                       <div
                         key={item.key}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 p-3"
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5"
                       >
-                        <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-2.5">
                           <span
-                            className="h-3 w-3 shrink-0 rounded-full"
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
                             style={{ backgroundColor: item.color }}
                             aria-hidden="true"
                           />
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="truncate text-[13px] font-medium leading-tight text-foreground">{item.label}</p>
+                            <p className="text-[11px] text-muted-foreground">
                               {item.percentage.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                             </p>
                           </div>
                         </div>
                         <div className="shrink-0 text-right">
-                          <p className="flex items-center justify-end gap-1 text-lg font-semibold text-foreground leading-tight">
-                            <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                          <p className="flex items-center justify-end gap-1 text-base font-semibold text-foreground leading-tight">
+                            <CalendarCheck className="h-3 w-3 text-primary" />
                             {item.value.toLocaleString('pt-BR')}
                           </p>
-                          <p className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-                            <Users className="h-3 w-3 text-info" />
+                          <p className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
+                            <Users className="h-2.5 w-2.5 text-info" />
                             {item.people.toLocaleString('pt-BR')} {item.people === 1 ? 'pessoa' : 'pessoas'}
                           </p>
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  <div className="rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
+                    <div className="hidden mb-3 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Origem por dia</p>
+                        <p className="text-xs text-muted-foreground">
+                          Uma barra empilhada por data de criação, mostrando a composição diária das reservas.
+                        </p>
+                      </div>
+                      <p className="max-w-xl text-right text-xs text-muted-foreground">
+                        Ads só entra quando existe marcador pago explícito no tracking, como utm_medium=paid, paid_social, cpc ou equivalente.
+                      </p>
+                    </div>
+
+                    <div className="h-[320px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={reservationOriginDailyStats} barGap={2} maxBarSize={42}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                          <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                          <RechartsTooltip
+                            cursor={{ fill: 'hsl(28, 85%, 55%, 0.08)' }}
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+
+                              const point = payload[0].payload as Record<string, number | string>;
+                              const dayItems = visibleReservationOriginItems
+                                .map((item) => {
+                                  const reservations = Number(point[item.key] ?? 0);
+                                  const people = Number(point[`${item.key}People`] ?? 0);
+                                  return { ...item, reservations, people };
+                                })
+                                .filter((item) => item.reservations > 0);
+
+                              return (
+                                <div className="min-w-[220px] rounded-xl border border-border bg-background/95 p-3 shadow-lg backdrop-blur-sm">
+                                  <div className="mb-2 border-b border-border/70 pb-2">
+                                    <p className="text-sm font-semibold text-foreground">{String(point.label)}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {Number(point.totalReservations ?? 0).toLocaleString('pt-BR')} reservas ·{' '}
+                                      {Number(point.totalPeople ?? 0).toLocaleString('pt-BR')} pessoas
+                                    </p>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {dayItems.map((item) => (
+                                      <div key={item.key} className="flex items-center justify-between gap-4 text-xs">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                          <span
+                                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                            style={{ backgroundColor: item.color }}
+                                            aria-hidden="true"
+                                          />
+                                          <span className="truncate text-foreground">{item.label}</span>
+                                        </div>
+                                        <span className="shrink-0 text-muted-foreground">
+                                          {item.reservations.toLocaleString('pt-BR')} · {item.people.toLocaleString('pt-BR')}p
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }}
+                          />
+                          <Legend />
+                          {visibleReservationOriginItems.map((item, index) => (
+                            <Bar
+                              key={item.key}
+                              dataKey={item.key}
+                              name={item.label}
+                              stackId="reservation-origin"
+                              fill={item.color}
+                              radius={index === visibleReservationOriginItems.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                            />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
               ) : (

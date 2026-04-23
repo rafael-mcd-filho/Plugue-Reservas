@@ -94,8 +94,26 @@ export interface ReservationOriginBreakdownItem {
   key: ReservationOriginKey;
   label: string;
   value: number;
+  people: number;
   percentage: number;
   color: string;
+}
+
+export interface ReservationOriginDailyStat {
+  date: string;
+  label: string;
+  totalReservations: number;
+  totalPeople: number;
+  direct_organic: number;
+  ads: number;
+  affiliate: number;
+  manual: number;
+  waitlist: number;
+  direct_organicPeople: number;
+  adsPeople: number;
+  affiliatePeople: number;
+  manualPeople: number;
+  waitlistPeople: number;
 }
 
 const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; color: string }> = {
@@ -423,6 +441,64 @@ export function useDashboardData(
     return { total, totalPeople, items };
   }, [createdReservations]);
 
+  const reservationOriginDailyStats = useMemo(() => {
+    const days = eachDayOfInterval({ start: startDate, end: endDate });
+    const byDate: Record<string, ReservationOriginDailyStat> = {};
+
+    for (const reservation of createdReservations) {
+      const createdDate = format(new Date(reservation.created_at), 'yyyy-MM-dd');
+      const originKey = classifyReservationOrigin(reservation);
+      const partySize = reservation.party_size || 1;
+
+      if (!byDate[createdDate]) {
+        byDate[createdDate] = {
+          date: createdDate,
+          label: format(new Date(`${createdDate}T12:00:00`), 'dd/MM', { locale: ptBR }),
+          totalReservations: 0,
+          totalPeople: 0,
+          direct_organic: 0,
+          ads: 0,
+          affiliate: 0,
+          manual: 0,
+          waitlist: 0,
+          direct_organicPeople: 0,
+          adsPeople: 0,
+          affiliatePeople: 0,
+          manualPeople: 0,
+          waitlistPeople: 0,
+        };
+      }
+
+      const bucket = byDate[createdDate];
+      bucket.totalReservations += 1;
+      bucket.totalPeople += partySize;
+      bucket[originKey] += 1;
+
+      const peopleKey = `${originKey}People` as const;
+      bucket[peopleKey] += partySize;
+    }
+
+    return days.map((day): ReservationOriginDailyStat => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      return byDate[dateStr] ?? {
+        date: dateStr,
+        label: format(day, 'dd/MM', { locale: ptBR }),
+        totalReservations: 0,
+        totalPeople: 0,
+        direct_organic: 0,
+        ads: 0,
+        affiliate: 0,
+        manual: 0,
+        waitlist: 0,
+        direct_organicPeople: 0,
+        adsPeople: 0,
+        affiliatePeople: 0,
+        manualPeople: 0,
+        waitlistPeople: 0,
+      };
+    });
+  }, [createdReservations, startDate, endDate]);
+
   const prevTotals = useMemo(() => {
     const acc = {
       reservations: 0,
@@ -711,6 +787,7 @@ export function useDashboardData(
     reservationLeadTrend,
     createdReservationTotals,
     reservationOriginBreakdown,
+    reservationOriginDailyStats,
     waitlistDailyStats,
     totals,
     prevTotals,
