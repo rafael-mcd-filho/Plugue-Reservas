@@ -1,5 +1,10 @@
 ALTER TABLE public.companies
-  ADD COLUMN IF NOT EXISTS show_public_sticky_reserve_button boolean NOT NULL DEFAULT true;
+  ADD COLUMN IF NOT EXISTS show_public_sticky_reserve_button boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS show_public_reservation_exit_prompt boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS public_reservation_exit_prompt_primary_text text NOT NULL DEFAULT 'A experiência de ir ao {empresa} é {b}extraordinária{/b}.',
+  ADD COLUMN IF NOT EXISTS public_reservation_exit_prompt_primary_text_size text NOT NULL DEFAULT 'body',
+  ADD COLUMN IF NOT EXISTS public_reservation_exit_prompt_secondary_text text NOT NULL DEFAULT 'Todo mundo que foi ficou {u}maravilhado{/u}.',
+  ADD COLUMN IF NOT EXISTS public_reservation_exit_prompt_secondary_text_size text NOT NULL DEFAULT 'highlight';
 
 CREATE OR REPLACE VIEW public.companies_public
 WITH (security_invoker = false) AS
@@ -21,7 +26,12 @@ SELECT
   status,
   show_public_whatsapp_button,
   public_waitlist_enabled,
-  show_public_sticky_reserve_button
+  show_public_sticky_reserve_button,
+  show_public_reservation_exit_prompt,
+  public_reservation_exit_prompt_primary_text,
+  public_reservation_exit_prompt_primary_text_size,
+  public_reservation_exit_prompt_secondary_text,
+  public_reservation_exit_prompt_secondary_text_size
 FROM public.companies
 WHERE status = 'active';
 
@@ -50,7 +60,12 @@ RETURNS TABLE (
   reservation_duration integer,
   max_guests_per_slot integer,
   status text,
-  custom_public_page_enabled boolean
+  custom_public_page_enabled boolean,
+  show_public_reservation_exit_prompt boolean,
+  public_reservation_exit_prompt_primary_text text,
+  public_reservation_exit_prompt_primary_text_size text,
+  public_reservation_exit_prompt_secondary_text text,
+  public_reservation_exit_prompt_secondary_text_size text
 )
 LANGUAGE sql
 STABLE
@@ -76,7 +91,12 @@ AS $$
     c.reservation_duration,
     c.max_guests_per_slot,
     c.status,
-    public.company_feature_enabled(c.id, 'custom_public_page') AS custom_public_page_enabled
+    public.company_feature_enabled(c.id, 'custom_public_page') AS custom_public_page_enabled,
+    c.show_public_reservation_exit_prompt,
+    c.public_reservation_exit_prompt_primary_text,
+    c.public_reservation_exit_prompt_primary_text_size,
+    c.public_reservation_exit_prompt_secondary_text,
+    c.public_reservation_exit_prompt_secondary_text_size
   FROM public.companies c
   WHERE c.slug = _slug
     AND c.status = 'active'

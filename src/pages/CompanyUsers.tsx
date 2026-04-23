@@ -136,6 +136,18 @@ function hasCustomOperatorAccess(user: ManagedUser) {
     && Object.keys(user.company_panel_permission_overrides).length > 0;
 }
 
+function hasMatchingOperatorPermissions(
+  left?: Partial<Record<CompanyPanelPermission, boolean>> | null,
+  right?: Partial<Record<CompanyPanelPermission, boolean>> | null,
+) {
+  const leftSelection = getCompanyPanelPermissionSelection(['operator'], left);
+  const rightSelection = getCompanyPanelPermissionSelection(['operator'], right);
+
+  return OPERATOR_ASSIGNABLE_COMPANY_PANEL_PERMISSIONS.every(
+    (permission) => leftSelection[permission] === rightSelection[permission],
+  );
+}
+
 function OperatorPermissionEditor({
   value,
   onChange,
@@ -324,6 +336,10 @@ export default function CompanyUsers() {
       const normalizedEmail = normalizeEmail(editForm.email);
       const shouldReauthenticate = editUser.id === currentUser?.id
         && normalizedEmail !== normalizeEmail(editUser.email);
+      const expectedRole = editForm.role;
+      const expectedPermissionOverrides = expectedRole === 'operator'
+        ? buildOperatorPermissionOverrides(editForm.operatorPermissions)
+        : null;
 
       await invokeManageUser({
         action: 'update_user',
@@ -331,14 +347,37 @@ export default function CompanyUsers() {
         full_name: editForm.full_name,
         email: normalizedEmail,
         phone: formatBrazilPhone(editForm.phone),
-        role: editForm.role,
-        company_panel_permission_overrides: editForm.role === 'operator'
-          ? buildOperatorPermissionOverrides(editForm.operatorPermissions)
-          : null,
+        company_id: companyId,
+        role: expectedRole,
+        company_panel_permission_overrides: expectedPermissionOverrides,
       });
+
+      const refreshedResult = await refetch();
+      const refreshedUser = (refreshedResult.data ?? []).find((user) => user.id === editUser.id);
+
+      if (!refreshedUser) {
+        throw new Error('Usuário atualizado, mas não foi possível confirmar os dados após salvar.');
+      }
+
+      if (!refreshedUser.roles.includes(expectedRole)) {
+        throw new Error('O perfil do usuário não foi atualizado corretamente no backend.');
+      }
+
+      if (
+        expectedRole === 'operator'
+        && !hasMatchingOperatorPermissions(
+          refreshedUser.company_panel_permission_overrides,
+          expectedPermissionOverrides,
+        )
+      ) {
+        throw new Error(
+          'As permissões do operador não foram persistidas no backend. Verifique se a migration e a função manage-user estão publicadas.',
+        );
+      }
 
       toast.success('Usuário atualizado.');
       qc.invalidateQueries({ queryKey: ['company-users', companyId] });
+      qc.invalidateQueries({ queryKey: ['company-panel-permission-overrides', companyId, editUser.id] });
       setEditUser(null);
 
       if (shouldReauthenticate) {

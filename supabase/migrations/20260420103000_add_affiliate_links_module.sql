@@ -246,7 +246,9 @@ $$;
 GRANT EXECUTE ON FUNCTION public.resolve_public_affiliate_link(text, text, text, text, text, text, text, text, text, text) TO anon;
 GRANT EXECUTE ON FUNCTION public.resolve_public_affiliate_link(text, text, text, text, text, text, text, text, text, text) TO authenticated;
 
-CREATE OR REPLACE FUNCTION public.get_affiliate_link_stats(
+DROP FUNCTION IF EXISTS public.get_affiliate_link_stats(uuid, timestamptz, timestamptz);
+
+CREATE FUNCTION public.get_affiliate_link_stats(
   _company_id uuid,
   _start_at timestamptz DEFAULT NULL,
   _end_at timestamptz DEFAULT NULL
@@ -335,7 +337,9 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.get_affiliate_link_stats(uuid, timestamptz, timestamptz) TO authenticated;
 
-CREATE OR REPLACE FUNCTION public.get_affiliate_link_daily_stats(
+DROP FUNCTION IF EXISTS public.get_affiliate_link_daily_stats(uuid, timestamptz, timestamptz, uuid);
+
+CREATE FUNCTION public.get_affiliate_link_daily_stats(
   _company_id uuid,
   _start_at timestamptz DEFAULT NULL,
   _end_at timestamptz DEFAULT NULL,

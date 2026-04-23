@@ -89,6 +89,7 @@ export function useCompanyPermissions() {
     },
     enabled: shouldLoadOverrides,
     initialData: shouldLoadOverrides ? cachedPermissionOverrides : undefined,
+    initialDataUpdatedAt: shouldLoadOverrides && cachedPermissionOverrides !== undefined ? 0 : undefined,
     staleTime: 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
