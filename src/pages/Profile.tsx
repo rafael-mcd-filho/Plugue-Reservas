@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import {
   getEmailValidationMessage,
@@ -16,6 +15,7 @@ import {
   PASSWORD_REQUIREMENTS_TEXT,
 } from '@/lib/validation';
 import { useImpersonation } from '@/hooks/useImpersonation';
+import { invokeManageUserRequest } from '@/hooks/useManageUserInvoker';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -62,12 +62,10 @@ export default function Profile() {
 
     try {
       const normalizedEmail = normalizeEmail(profileForm.email);
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'update_my_account',
-          full_name: fullName,
-          email: normalizedEmail,
-        },
+      const { data, error } = await invokeManageUserRequest({
+        action: 'update_my_account',
+        full_name: fullName,
+        email: normalizedEmail,
       });
 
       if (error) {
@@ -105,11 +103,9 @@ export default function Profile() {
     setSavingPassword(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'update_my_account',
-          password: passwordForm.password,
-        },
+      const { data, error } = await invokeManageUserRequest({
+        action: 'update_my_account',
+        password: passwordForm.password,
       });
 
       if (error) {

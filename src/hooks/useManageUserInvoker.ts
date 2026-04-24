@@ -5,15 +5,31 @@ import { normalizePasswordValidationMessage } from '@/lib/validation';
 
 const MANAGE_USER_TIMEOUT_MS = 15000;
 
-async function invokeManageUserWithTimeout(body: Record<string, unknown>) {
+async function getManageUserAuthHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error('Sessao expirada ou indisponivel. Entre novamente.');
+  }
+
+  return {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
+
+export async function invokeManageUserRequest(body: Record<string, unknown>) {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
+    const headers = await getManageUserAuthHeaders();
+
     return await Promise.race([
-      supabase.functions.invoke('manage-user', { body }),
+      supabase.functions.invoke('manage-user', { body, headers }),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
-          reject(new Error('A função de usuários demorou mais que o esperado para responder. Tente novamente.'));
+          reject(new Error('A funcao de usuarios demorou mais que o esperado para responder. Tente novamente.'));
         }, MANAGE_USER_TIMEOUT_MS);
       }),
     ]);
@@ -39,7 +55,7 @@ export function useManageUserInvoker() {
         : {}),
     };
 
-    const { data, error } = await invokeManageUserWithTimeout(requestBody);
+    const { data, error } = await invokeManageUserRequest(requestBody);
 
     if (error) {
       throw new Error(await getFunctionErrorMessage(error));

@@ -39,9 +39,8 @@ import { useCompaniesFeatureMatrix, type CompanyFeatureState } from '@/hooks/use
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
 import CompanyDialog from '@/components/company/CompanyDialog';
 import { CompanyFeatureBadges } from '@/components/company/CompanyFeatureSwitchList';
-import { supabase } from '@/integrations/supabase/client';
 import type { ManagedUser } from '@/hooks/useUsers';
-import { getFunctionErrorMessage } from '@/lib/functionErrors';
+import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 import { startImpersonationSession } from '@/hooks/useImpersonation';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCnpj, normalizeCnpjDigits } from '@/lib/validation';
@@ -63,10 +62,11 @@ type SortDir = 'asc' | 'desc';
 export default function Companies() {
   const navigate = useNavigate();
   const { id: routeCompanyId } = useParams<{ id?: string }>();
-  const { user: authUser } = useAuth();
+  const { user: authUser, loading: authLoading } = useAuth();
   const { data: companies = [], isLoading } = useCompanies();
   const updateCompany = useUpdateCompany();
   const deleteCompany = useDeleteCompany();
+  const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
   const { data: featureMatrix = {}, isLoading: featureMatrixLoading } = useCompaniesFeatureMatrix(companies);
   const handledRouteRef = useRef<string | null>(null);
 
@@ -86,19 +86,15 @@ export default function Companies() {
     featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier));
 
   const { data: impersonationCandidates = [], isLoading: impersonationCandidatesLoading, isError: impersonationCandidatesError, error: impersonationCandidatesErrorObj } = useQuery({
-    queryKey: ['impersonation-candidates', companyToImpersonate?.id],
+    queryKey: ['impersonation-candidates', companyToImpersonate?.id, manageUserScopeKey],
     queryFn: async () => {
       const companyId = companyToImpersonate?.id;
       if (!companyId) return [];
 
-      const { data, error } = await supabase.functions.invoke('manage-user', {
-        body: {
-          action: 'list_users',
-          company_id: companyId,
-        },
+      const data = await invokeManageUser<{ users?: ManagedUser[] }>({
+        action: 'list_users',
+        company_id: companyId,
       });
-
-      if (error) throw new Error(await getFunctionErrorMessage(error));
 
       return ((data?.users ?? []) as ManagedUser[])
         .filter((user) => !user.is_banned)
@@ -118,7 +114,7 @@ export default function Companies() {
           return (userA.full_name || userA.email).localeCompare(userB.full_name || userB.email);
         });
     },
-    enabled: impersonationDialogOpen && !!companyToImpersonate?.id,
+    enabled: impersonationDialogOpen && !!companyToImpersonate?.id && !!authUser && !authLoading,
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
