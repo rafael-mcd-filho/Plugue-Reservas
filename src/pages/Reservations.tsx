@@ -56,12 +56,18 @@ import {
   normalizeEmail,
 } from '@/lib/validation';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
+import {
+  classifyReservationOrigin,
+  RESERVATION_ORIGIN_CONFIG,
+  type ReservationOriginKey,
+} from '@/lib/reservation-origin';
 import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 
 type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
+type ReservationOriginFilterValue = 'all' | ReservationOriginKey;
 
 interface Reservation {
   id: string;
@@ -69,6 +75,13 @@ interface Reservation {
   table_id: string | null;
   table_map_id: string | null;
   source: string | null;
+  tracking_session?: {
+    utm_medium?: string | null;
+  } | null;
+  origin_tracking_session_id?: string | null;
+  origin_anonymous_id?: string | null;
+  origin_affiliate_link_id?: string | null;
+  attribution_snapshot?: Record<string, unknown> | null;
   guest_name: string;
   guest_phone: string;
   guest_email: string | null;
@@ -170,6 +183,7 @@ export default function Reservations() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [originFilter, setOriginFilter] = useState<ReservationOriginFilterValue>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
   const [dateFilterMode, setDateFilterMode] = useState<'reservation' | 'created'>('reservation');
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
@@ -221,7 +235,7 @@ export default function Reservations() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('reservations' as any)
-        .select('*')
+        .select('*, tracking_session:origin_tracking_session_id(utm_medium)')
         .eq('company_id', companyId)
         .order('date', { ascending: true })
         .order('time', { ascending: true });
@@ -565,6 +579,7 @@ export default function Reservations() {
   const filteredReservations = useMemo(() => {
     const result = sortedReservations
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
+      .filter((reservation) => originFilter === 'all' || classifyReservationOrigin(reservation) === originFilter)
       .filter((reservation) =>
         dateFilterMode === 'reservation'
           ? matchesLocalDateRange(reservation.date, reservationListRange)
@@ -580,7 +595,7 @@ export default function Reservations() {
         );
       });
     return result;
-  }, [dateFilterMode, reservationListRange, search, sortedReservations, statusFilter]);
+  }, [dateFilterMode, originFilter, reservationListRange, search, sortedReservations, statusFilter]);
 
   const listSummary = useMemo(() => {
     const STATUS_ORDER = ['confirmed', 'checked_in', 'cancelled', 'no-show'] as const;
@@ -600,7 +615,7 @@ export default function Reservations() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, statusFilter, reservationListRange, dateFilterMode]);
+  }, [search, statusFilter, originFilter, reservationListRange, dateFilterMode]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -1084,6 +1099,20 @@ export default function Reservations() {
                   <SelectItem value="checked_in">Check-in realizado</SelectItem>
                   <SelectItem value="cancelled">Cancelada</SelectItem>
                   <SelectItem value="no-show">No Show</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={originFilter} onValueChange={(value) => setOriginFilter(value as ReservationOriginFilterValue)}>
+                <SelectTrigger className="h-10 w-full rounded-lg bg-card sm:w-[190px]" aria-label="Filtrar reservas por origem">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as origens</SelectItem>
+                  {(Object.keys(RESERVATION_ORIGIN_CONFIG) as ReservationOriginKey[]).map((originKey) => (
+                    <SelectItem key={originKey} value={originKey}>
+                      {RESERVATION_ORIGIN_CONFIG[originKey].label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 

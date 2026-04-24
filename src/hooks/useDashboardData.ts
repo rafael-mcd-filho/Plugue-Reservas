@@ -29,6 +29,9 @@ interface RawReservation {
   checked_in_party_size: number | null;
   created_at: string;
   source: string | null;
+  tracking_session?: {
+    utm_medium?: string | null;
+  } | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
@@ -82,13 +85,6 @@ export interface HeatmapCellBreakdown {
   scheduled: number;
   waitlist: number;
 }
-
-export type ReservationOriginKey =
-  | 'direct_organic'
-  | 'ads'
-  | 'affiliate'
-  | 'manual'
-  | 'waitlist';
 
 export interface ReservationOriginBreakdownItem {
   key: ReservationOriginKey;
@@ -162,7 +158,8 @@ function classifyReservationOrigin(reservation: RawReservation): ReservationOrig
     return 'affiliate';
   }
 
-  const utmMedium = getAttributionString(reservation.attribution_snapshot, 'utm_medium');
+  const utmMedium = getAttributionString(reservation.attribution_snapshot, 'utm_medium')
+    ?? normalizeTrackingTextValue(reservation.tracking_session?.utm_medium);
   if (isPaidTrafficMarker(utmMedium)) {
     return 'ads';
   }
@@ -191,7 +188,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
         .gte('date', startStr)
         .lte('date', endStr);
 
@@ -268,7 +265,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
         .gte('date', prevStartStr)
         .lte('date', prevEndStr);
 
@@ -287,7 +284,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
         .gte('created_at', rangeStartIso)
         .lte('created_at', rangeEndIso);
 

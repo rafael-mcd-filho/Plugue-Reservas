@@ -249,10 +249,12 @@ export default function Dashboard() {
 
   const funnelCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
   const {
-    data: funnelData = [],
+    data: funnelResult,
     dataUpdatedAt: funnelUpdatedAt = 0,
     isFetching: funnelFetching,
   } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly, adsFunnelOnly);
+  const funnelData = funnelResult?.points ?? [];
+  const funnelAdsDebug = funnelResult?.adsDebug ?? null;
   const {
     data: liveFunnelPresence,
     dataUpdatedAt: liveFunnelUpdatedAt = 0,
@@ -1354,6 +1356,7 @@ export default function Dashboard() {
           <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-px shadow-sm dark:border-amber-800/50 dark:bg-amber-950/20 [&>*]:min-w-0">
             <ReservationFunnelChart
               data={funnelData}
+              adsDebug={funnelAdsDebug}
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
               description={funnelDescription}
               measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}

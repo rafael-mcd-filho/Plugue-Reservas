@@ -178,7 +178,10 @@ function mergeAttributionSnapshot(
   anonymousId: string,
   sessionId: string,
   journeyId: string | null,
+  session: Record<string, unknown> | null,
 ) {
+  const getSessionText = (key: string) => nullableText(session?.[key]);
+
   return {
     tracking_source: "public_web",
     anonymous_id: anonymousId,
@@ -186,16 +189,16 @@ function mergeAttributionSnapshot(
     journey_id: journeyId,
     page_url: nullableText(body.page_url),
     path: nullableText(body.path),
-    referrer: nullableText(body.referrer),
+    referrer: nullableText(body.referrer) ?? getSessionText("referrer"),
     event_source_url: nullableText(body.event_source_url) ?? nullableText(body.page_url),
-    utm_source: nullableText(body.utm_source),
-    utm_medium: nullableText(body.utm_medium),
-    utm_campaign: nullableText(body.utm_campaign),
-    utm_content: nullableText(body.utm_content),
-    utm_term: nullableText(body.utm_term),
-    fbclid: nullableText(body.fbclid),
-    fbp: nullableText(body.fbp),
-    fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
+    utm_source: nullableText(body.utm_source) ?? getSessionText("utm_source"),
+    utm_medium: nullableText(body.utm_medium) ?? getSessionText("utm_medium"),
+    utm_campaign: nullableText(body.utm_campaign) ?? getSessionText("utm_campaign"),
+    utm_content: nullableText(body.utm_content) ?? getSessionText("utm_content"),
+    utm_term: nullableText(body.utm_term) ?? getSessionText("utm_term"),
+    fbclid: nullableText(body.fbclid) ?? getSessionText("fbclid"),
+    fbp: nullableText(body.fbp) ?? getSessionText("fbp"),
+    fbc: deriveFbc(nullableText(body.fbc) ?? getSessionText("fbc"), nullableText(body.fbclid) ?? getSessionText("fbclid")),
     user_data: buildUserDataSnapshot(body, anonymousId),
   };
 }
@@ -334,7 +337,7 @@ Deno.serve(async (req) => {
     }
 
     if (reservationId) {
-      const attributionSnapshot = mergeAttributionSnapshot(body, anonymousId, sessionId, journeyId);
+      const attributionSnapshot = mergeAttributionSnapshot(body, anonymousId, sessionId, journeyId, session);
       const { error: reservationUpdateError } = await supabaseAdmin
         .from("reservations")
         .update({
