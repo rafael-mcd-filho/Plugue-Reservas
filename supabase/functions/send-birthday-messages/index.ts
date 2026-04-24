@@ -1,11 +1,16 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
+  buildBirthdayDispatchKey,
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
+  claimWhatsAppDispatch,
+  enqueueWhatsAppMessageOnce,
+  finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
   getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
   serializeWhatsAppFailure,
+  WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
 import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
 
@@ -13,6 +18,8 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
 };
+
+const BIRTHDAY_ADVANCE_DAYS = 2;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -44,10 +51,12 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
-    const todayMMDD = formatMonthDayInTimeZone(now);
+    const targetDate = new Date(now.getTime() + BIRTHDAY_ADVANCE_DAYS * 24 * 60 * 60 * 1000);
+    const targetMMDD = formatMonthDayInTimeZone(targetDate);
+    const targetDateKey = formatDateKeyInTimeZone(targetDate);
     const todayStr = formatDateKeyInTimeZone(now);
 
-    console.log(`Birthday check for day: ${todayMMDD}`);
+    console.log(`Birthday check for day: ${targetMMDD} (${BIRTHDAY_ADVANCE_DAYS} days ahead)`);
 
     const [
       { data: birthdayReservations },
@@ -111,23 +120,34 @@ Deno.serve(async (req) => {
       });
     }
 
-    const todayBirthdays = birthdayContacts.filter((r: any) => {
+    const upcomingBirthdays = birthdayContacts.filter((r: any) => {
       if (!r.guest_birthdate) return false;
-      return r.guest_birthdate.substring(5) === todayMMDD;
+      return r.guest_birthdate.substring(5) === targetMMDD;
     });
 
-    if (todayBirthdays.length === 0) {
-      console.log('No birthdays today');
+    if (upcomingBirthdays.length === 0) {
+      console.log(`No birthdays in ${BIRTHDAY_ADVANCE_DAYS} days`);
       return new Response(JSON.stringify({ sent: 0 }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Deduplicate by phone+company
+    // Deduplicate by normalized phone+company so the same contact is not sent twice
+    // when the number appears with different formatting across sources.
     const uniqueMap = new Map<string, any>();
-    for (const r of todayBirthdays) {
-      const key = `${r.guest_phone}:${r.company_id}`;
-      if (!uniqueMap.has(key)) uniqueMap.set(key, r);
+    for (const r of upcomingBirthdays) {
+      const phone = formatPhoneForWhatsApp(r.guest_phone);
+      const key = `${phone}:${r.company_id}`;
+      const existing = uniqueMap.get(key);
+
+      if (!existing) {
+        uniqueMap.set(key, { ...r, guest_phone: phone });
+        continue;
+      }
+
+      if (!existing.guest_name && r.guest_name) {
+        uniqueMap.set(key, { ...existing, guest_name: r.guest_name });
+      }
     }
     const uniqueBirthdays = Array.from(uniqueMap.values());
 
@@ -150,13 +170,13 @@ Deno.serve(async (req) => {
 
     const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
 
-    // Check already-sent or queued birthday messages today
+    // Check already-accepted or queued birthday messages today.
     const { data: alreadySent } = await supabaseAdmin
       .from('whatsapp_message_logs')
       .select('phone, company_id')
       .eq('type', 'birthday')
       .gte('created_at', todayStr + 'T00:00:00')
-      .eq('status', 'sent');
+      .in('status', [...WHATSAPP_ACCEPTED_LOG_STATUSES]);
 
     const { data: alreadyQueued } = await supabaseAdmin
       .from('whatsapp_message_queue')
@@ -164,7 +184,7 @@ Deno.serve(async (req) => {
       .eq('type', 'birthday')
       .gte('created_at', todayStr + 'T00:00:00');
 
-    const sentSet = new Set([
+    const processedSet = new Set([
       ...(alreadySent || []).map((l: any) => `${l.phone}:${l.company_id}`),
       ...(alreadyQueued || []).map((l: any) => `${l.phone}:${l.company_id}`),
     ]);
@@ -176,10 +196,23 @@ Deno.serve(async (req) => {
       const automation = (automations || []).find((a: any) => a.company_id === contact.company_id);
       if (!automation) continue;
 
-      const phone = formatPhoneForWhatsApp(contact.guest_phone);
+      const phone = contact.guest_phone;
       const sentKey = `${phone}:${contact.company_id}`;
-      if (sentSet.has(sentKey)) {
+      if (processedSet.has(sentKey)) {
         console.log(`Already sent/queued birthday to ${phone}`);
+        continue;
+      }
+
+      const deliveryKey = buildBirthdayDispatchKey(contact.company_id, targetDateKey, phone);
+      const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
+        deliveryKey,
+        companyId: contact.company_id,
+        automationType: "birthday",
+        phone,
+      });
+
+      if (!claimed) {
+        console.log(`Birthday dispatch already claimed for ${phone}`);
         continue;
       }
 
@@ -190,13 +223,19 @@ Deno.serve(async (req) => {
 
       if (!instance) {
         const failure = buildInstanceNotConfiguredFailure();
-        await supabaseAdmin.from('whatsapp_message_queue').insert({
+        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
           company_id: contact.company_id,
           phone,
           message,
           type: 'birthday',
           error_details: serializeWhatsAppFailure(failure.error),
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "queued",
+          errorDetails: serializeWhatsAppFailure(failure.error),
+        });
+        processedSet.add(sentKey);
         queued++;
         console.log(`Queued birthday for ${phone} (instance not configured)`);
         continue;
@@ -204,13 +243,19 @@ Deno.serve(async (req) => {
 
       if (instance.status !== 'connected') {
         const failure = buildInstanceDisconnectedFailure();
-        await supabaseAdmin.from('whatsapp_message_queue').insert({
+        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
           company_id: contact.company_id,
           phone,
           message,
           type: 'birthday',
           error_details: serializeWhatsAppFailure(failure.error),
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "queued",
+          errorDetails: serializeWhatsAppFailure(failure.error),
+        });
+        processedSet.add(sentKey);
         queued++;
         console.log(`Queued birthday for ${phone} (instance not connected)`);
         continue;
@@ -234,6 +279,11 @@ Deno.serve(async (req) => {
           status: logStatus,
           error_details: null,
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "accepted",
+        });
+        processedSet.add(sentKey);
         sent++;
         continue;
       }
@@ -247,13 +297,19 @@ Deno.serve(async (req) => {
         status: 'error',
         error_details: serializedError,
       });
-      await supabaseAdmin.from('whatsapp_message_queue').insert({
+      await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: contact.company_id,
         phone,
         message,
         type: 'birthday',
         error_details: serializedError,
       });
+      await finalizeWhatsAppDispatch(supabaseAdmin, {
+        deliveryKey,
+        status: "queued",
+        errorDetails: serializedError,
+      });
+      processedSet.add(sentKey);
       queued++;
     }
 

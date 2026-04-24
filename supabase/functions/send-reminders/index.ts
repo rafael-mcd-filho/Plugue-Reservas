@@ -1,11 +1,16 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
+  buildReservationDispatchKey,
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
+  claimWhatsAppDispatch,
+  enqueueWhatsAppMessageOnce,
+  finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
   getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
   serializeWhatsAppFailure,
+  WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
 
@@ -171,7 +176,7 @@ Deno.serve(async (req) => {
         .select("reservation_id, type")
         .in("reservation_id", allReservations.map((reservation: any) => reservation.id))
         .in("type", ["reminder_1h", "reminder_24h"])
-        .eq("status", "sent"),
+        .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]),
       supabaseAdmin
         .from("whatsapp_message_queue")
         .select("reservation_id, type")
@@ -203,11 +208,25 @@ Deno.serve(async (req) => {
 
       const message = replaceTemplateVars(automation.message_template, reservation);
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const deliveryKey = buildReservationDispatchKey(reminderType, reservation.id);
+      const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
+        deliveryKey,
+        companyId: reservation.company_id,
+        automationType: reminderType,
+        reservationId: reservation.id,
+        phone,
+      });
+
+      if (!claimed) {
+        console.log(`Dispatch already claimed for ${reminderType} ${reservation.id}`);
+        continue;
+      }
+
       const instance = instanceMap.get(reservation.company_id);
 
       if (!instance) {
         const failure = buildInstanceNotConfiguredFailure();
-        await supabaseAdmin.from("whatsapp_message_queue").insert({
+        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
           company_id: reservation.company_id,
           reservation_id: reservation.id,
           phone,
@@ -215,13 +234,19 @@ Deno.serve(async (req) => {
           type: reminderType,
           error_details: serializeWhatsAppFailure(failure.error),
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "queued",
+          errorDetails: serializeWhatsAppFailure(failure.error),
+        });
+        queuedSet.add(key);
         errors.push(`${reservation.id}: ${failure.error.message}`);
         continue;
       }
 
       if (instance.status !== "connected") {
         const failure = buildInstanceDisconnectedFailure();
-        await supabaseAdmin.from("whatsapp_message_queue").insert({
+        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
           company_id: reservation.company_id,
           reservation_id: reservation.id,
           phone,
@@ -229,6 +254,12 @@ Deno.serve(async (req) => {
           type: reminderType,
           error_details: serializeWhatsAppFailure(failure.error),
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "queued",
+          errorDetails: serializeWhatsAppFailure(failure.error),
+        });
+        queuedSet.add(key);
         errors.push(`${reservation.id}: ${failure.error.message}`);
         continue;
       }
@@ -252,6 +283,11 @@ Deno.serve(async (req) => {
           status: logStatus,
           error_details: null,
         });
+        await finalizeWhatsAppDispatch(supabaseAdmin, {
+          deliveryKey,
+          status: "accepted",
+        });
+        sentSet.add(key);
         sent++;
         console.log(`${reminderType} sent to ${phone} for reservation ${reservation.id}`);
         continue;
@@ -270,7 +306,7 @@ Deno.serve(async (req) => {
         error_details: serializedError,
       });
 
-      await supabaseAdmin.from("whatsapp_message_queue").insert({
+      await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: reservation.company_id,
         reservation_id: reservation.id,
         phone,
@@ -278,6 +314,12 @@ Deno.serve(async (req) => {
         type: reminderType,
         error_details: serializedError,
       });
+      await finalizeWhatsAppDispatch(supabaseAdmin, {
+        deliveryKey,
+        status: "queued",
+        errorDetails: serializedError,
+      });
+      queuedSet.add(key);
     }
 
     return new Response(JSON.stringify({ sent, total: allReservations.length, errors }), {

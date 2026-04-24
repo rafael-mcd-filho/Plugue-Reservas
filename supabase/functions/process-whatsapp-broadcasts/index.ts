@@ -49,7 +49,9 @@ interface RecipientRow {
   company_id: string;
   reservation_id: string | null;
   phone: string;
+  phone_normalized?: string | null;
   guest_name: string | null;
+  status?: string;
   attempts: number;
   max_attempts: number;
 }
@@ -67,7 +69,7 @@ async function markBroadcastCompletedIfDone(supabase: any, broadcastId: string) 
     .from("whatsapp_broadcast_recipients")
     .select("id", { count: "exact", head: true })
     .eq("broadcast_id", broadcastId)
-    .eq("status", "pending");
+    .in("status", ["pending", "processing"]);
 
   if ((count ?? 0) === 0) {
     await supabase
@@ -91,6 +93,13 @@ async function processBroadcast(
   let skipped = 0;
   let circuitTripped = false;
 
+  await supabase
+    .from("whatsapp_broadcast_recipients")
+    .update({ status: "pending" })
+    .eq("broadcast_id", broadcast.id)
+    .eq("status", "processing")
+    .lt("updated_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
+
   if (!broadcast.started_at) {
     await supabase
       .from("whatsapp_broadcasts")
@@ -113,6 +122,19 @@ async function processBroadcast(
     if (Date.now() >= invocationDeadline) break;
 
     const recipient = recipientList[index];
+    const { data: claimedRecipient } = await supabase
+      .from("whatsapp_broadcast_recipients")
+      .update({ status: "processing", error_details: null })
+      .eq("id", recipient.id)
+      .eq("status", "pending")
+      .select("*")
+      .maybeSingle();
+
+    if (!claimedRecipient) {
+      continue;
+    }
+
+    const activeRecipient = claimedRecipient as RecipientRow;
 
     const { data: broadcastCheck } = await supabase
       .from("whatsapp_broadcasts")
@@ -136,7 +158,7 @@ async function processBroadcast(
       break;
     }
 
-    const phone = formatPhoneForWhatsApp(recipient.phone || "");
+    const phone = formatPhoneForWhatsApp(activeRecipient.phone || "");
     if (!phone) {
       const failureDetails: WhatsAppFailureDetails = {
         code: "invalid_payload",
@@ -151,9 +173,9 @@ async function processBroadcast(
         .update({
           status: "skipped",
           error_details: serializeWhatsAppFailure(failureDetails),
-          attempts: recipient.attempts + 1,
+          attempts: activeRecipient.attempts + 1,
         })
-        .eq("id", recipient.id);
+        .eq("id", activeRecipient.id);
       skipped++;
       continue;
     }
@@ -188,8 +210,8 @@ async function processBroadcast(
           .from("whatsapp_message_logs")
           .insert({
             company_id: broadcast.company_id,
-            reservation_id: recipient.reservation_id,
-            phone: recipient.phone,
+            reservation_id: activeRecipient.reservation_id,
+            phone: activeRecipient.phone,
             message: broadcast.message,
             type: "broadcast",
             status: logStatus,
@@ -201,12 +223,12 @@ async function processBroadcast(
           .from("whatsapp_broadcast_recipients")
           .update({
             status: "sent",
-            attempts: recipient.attempts + 1,
+            attempts: activeRecipient.attempts + 1,
             sent_at: new Date().toISOString(),
             message_log_id: insertedLog?.id ?? null,
             error_details: null,
           })
-          .eq("id", recipient.id);
+          .eq("id", activeRecipient.id);
 
         await recordWhatsAppSuccess(supabase, broadcast.company_id);
         sent++;
@@ -215,10 +237,10 @@ async function processBroadcast(
           .from("whatsapp_broadcast_recipients")
           .update({
             status: "failed",
-            attempts: recipient.attempts + 1,
+            attempts: activeRecipient.attempts + 1,
             error_details: serializeWhatsAppFailure(result.error),
           })
-          .eq("id", recipient.id);
+          .eq("id", activeRecipient.id);
 
         const nextCircuit = await recordWhatsAppFailure(supabase, broadcast.company_id, result.error);
         if (nextCircuit.open) circuitTripped = true;
@@ -237,10 +259,10 @@ async function processBroadcast(
         .from("whatsapp_broadcast_recipients")
         .update({
           status: "failed",
-          attempts: recipient.attempts + 1,
+          attempts: activeRecipient.attempts + 1,
           error_details: serializeWhatsAppFailure(failureDetails),
         })
-        .eq("id", recipient.id);
+        .eq("id", activeRecipient.id);
 
       const nextCircuit = await recordWhatsAppFailure(supabase, broadcast.company_id, failureDetails);
       if (nextCircuit.open) circuitTripped = true;

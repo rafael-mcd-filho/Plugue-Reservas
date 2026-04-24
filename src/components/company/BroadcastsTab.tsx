@@ -41,7 +41,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone } from '@/lib/validation';
+import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { parseWhatsAppErrorDetails } from '@/lib/whatsapp-automations';
 
@@ -80,7 +80,7 @@ interface RecipientRow {
   reservation_id: string | null;
   phone: string;
   guest_name: string | null;
-  status: 'pending' | 'sent' | 'failed' | 'skipped' | 'cancelled';
+  status: 'pending' | 'processing' | 'sent' | 'failed' | 'skipped' | 'cancelled';
   error_details: string | null;
   sent_at: string | null;
   attempts: number;
@@ -115,6 +115,7 @@ const BROADCAST_STATUS_CONFIG: Record<BroadcastStatus, { label: string; classNam
 
 const RECIPIENT_STATUS_CONFIG: Record<RecipientRow['status'], { label: string; className: string }> = {
   pending: { label: 'Aguardando', className: 'text-muted-foreground' },
+  processing: { label: 'Enviando', className: 'text-blue-600' },
   sent: { label: 'Enviado', className: 'text-emerald-600' },
   failed: { label: 'Falhou', className: 'text-destructive' },
   skipped: { label: 'Pulado', className: 'text-amber-600' },
@@ -196,7 +197,7 @@ export default function BroadcastsTab({ companyId }: Props) {
   const uniqueRecipients = useMemo(() => {
     const seen = new Map<string, ReservationCandidate>();
     for (const reservation of reservations) {
-      const digits = (reservation.guest_phone || '').replace(/\D/g, '');
+      const digits = normalizeBrazilPhoneDigits(reservation.guest_phone);
       if (!digits) continue;
       if (!seen.has(digits)) seen.set(digits, reservation);
     }
@@ -811,6 +812,7 @@ function BroadcastDetailsDialog({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="processing">Enviando</SelectItem>
               <SelectItem value="sent">Enviados</SelectItem>
               <SelectItem value="failed">Falharam</SelectItem>
               <SelectItem value="pending">Aguardando</SelectItem>

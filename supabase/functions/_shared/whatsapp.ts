@@ -18,6 +18,8 @@ export interface WhatsAppFailureDetails {
 
 export type WhatsAppAcceptedLogStatus = "pending" | "sent";
 
+export const WHATSAPP_ACCEPTED_LOG_STATUSES: ReadonlyArray<WhatsAppAcceptedLogStatus> = ["pending", "sent"];
+
 export type WhatsAppSendResult =
   | {
       ok: true;
@@ -83,6 +85,108 @@ export function formatPhoneForWhatsApp(phone: string): string {
     digits = `55${digits}`;
   }
   return digits;
+}
+
+export function buildReservationDispatchKey(type: string, reservationId: string): string {
+  return `reservation:${reservationId}:${type}`;
+}
+
+export function buildWaitlistDispatchKey(type: string, waitlistId: string): string {
+  return `waitlist:${waitlistId}:${type}`;
+}
+
+export function buildBirthdayDispatchKey(companyId: string, targetDateKey: string, phone: string): string {
+  return `birthday:${companyId}:${targetDateKey}:${formatPhoneForWhatsApp(phone)}`;
+}
+
+export async function claimWhatsAppDispatch(
+  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: boolean | null; error: { message: string } | null }> },
+  {
+    deliveryKey,
+    companyId,
+    automationType,
+    reservationId = null,
+    phone = null,
+    lockSeconds = 900,
+  }: {
+    deliveryKey: string;
+    companyId: string;
+    automationType: string;
+    reservationId?: string | null;
+    phone?: string | null;
+    lockSeconds?: number;
+  },
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("claim_whatsapp_dispatch", {
+    _delivery_key: deliveryKey,
+    _company_id: companyId,
+    _automation_type: automationType,
+    _reservation_id: reservationId,
+    _phone: phone,
+    _lock_seconds: lockSeconds,
+  });
+
+  if (error) {
+    throw new Error(`Erro ao bloquear dispatch do WhatsApp: ${error.message}`);
+  }
+
+  return data === true;
+}
+
+export async function finalizeWhatsAppDispatch(
+  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message: string } | null }> },
+  {
+    deliveryKey,
+    status,
+    errorDetails = null,
+  }: {
+    deliveryKey: string;
+    status: "accepted" | "queued" | "failed";
+    errorDetails?: string | null;
+  },
+): Promise<void> {
+  const { error } = await supabase.rpc("finalize_whatsapp_dispatch", {
+    _delivery_key: deliveryKey,
+    _status: status,
+    _error: errorDetails,
+  });
+
+  if (error) {
+    throw new Error(`Erro ao finalizar dispatch do WhatsApp: ${error.message}`);
+  }
+}
+
+export async function enqueueWhatsAppMessageOnce(
+  supabase: {
+    from: (table: string) => {
+      insert: (payload: Record<string, unknown>) => Promise<{ error: { code?: string; message: string } | null }>;
+    };
+  },
+  payload: {
+    company_id: string;
+    reservation_id?: string | null;
+    phone: string;
+    message: string;
+    type: string;
+    error_details?: string | null;
+    attempts?: number;
+    max_attempts?: number;
+    status?: string;
+    expires_at?: string;
+    last_attempt_at?: string | null;
+  },
+): Promise<"inserted" | "duplicate"> {
+  const { error } = await supabase.from("whatsapp_message_queue").insert(payload);
+
+  if (!error) {
+    return "inserted";
+  }
+
+  if (error.code === "23505") {
+    return "duplicate";
+  }
+
+  throw new Error(`Erro ao gravar fila do WhatsApp: ${error.message}`);
 }
 
 export function randomIntInRange(min: number, max: number): number {

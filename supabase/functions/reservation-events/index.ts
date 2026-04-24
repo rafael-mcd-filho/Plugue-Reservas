@@ -5,8 +5,13 @@ import {
 } from "../_shared/internal-auth.ts";
 import {
   buildEvolutionNotConfiguredFailure,
+  buildReservationDispatchKey,
   buildInstanceDisconnectedFailure,
   buildInstanceNotConfiguredFailure,
+  buildWaitlistDispatchKey,
+  claimWhatsAppDispatch,
+  enqueueWhatsAppMessageOnce,
+  finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
   getWhatsAppAcceptedLogStatus,
   sendWhatsAppText,
@@ -275,7 +280,7 @@ async function enqueueWhatsAppMessage(
   supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
   payload: Omit<WhatsAppMessagePayload, "status">,
 ) {
-  const { error } = await supabaseAdmin.from("whatsapp_message_queue").insert({
+  await enqueueWhatsAppMessageOnce(supabaseAdmin, {
     company_id: payload.company_id,
     reservation_id: payload.reservation_id ?? null,
     phone: payload.phone,
@@ -283,10 +288,6 @@ async function enqueueWhatsAppMessage(
     type: payload.type,
     error_details: payload.error_details ?? null,
   });
-
-  if (error) {
-    throw new Error(`Erro ao gravar fila do WhatsApp: ${error.message}`);
-  }
 }
 
 async function recordQueuedFailure(
@@ -323,17 +324,39 @@ async function sendReservationAutomation(
 
   if (!automation?.message_template || !reservation.guest_phone) return;
 
-  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { data: recentDup } = await supabaseAdmin
-    .from("whatsapp_message_logs")
-    .select("id")
-    .eq("company_id", reservation.company_id)
-    .eq("reservation_id", reservation.id)
-    .eq("type", logType)
-    .gte("created_at", fiveMinAgo)
-    .limit(1);
+  const deliveryKey = buildReservationDispatchKey(logType, reservation.id);
+  const [{ data: existingLogs }, { data: existingQueue }] = await Promise.all([
+    supabaseAdmin
+      .from("whatsapp_message_logs")
+      .select("id")
+      .eq("company_id", reservation.company_id)
+      .eq("reservation_id", reservation.id)
+      .eq("type", logType)
+      .limit(1),
+    supabaseAdmin
+      .from("whatsapp_message_queue")
+      .select("id")
+      .eq("company_id", reservation.company_id)
+      .eq("reservation_id", reservation.id)
+      .eq("type", logType)
+      .limit(1),
+  ]);
 
-  if (recentDup && recentDup.length > 0) {
+  if ((existingLogs && existingLogs.length > 0) || (existingQueue && existingQueue.length > 0)) {
+    results.whatsapp = "skipped_duplicate";
+    return;
+  }
+
+  const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+  const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
+    deliveryKey,
+    companyId: reservation.company_id,
+    automationType: logType,
+    reservationId: reservation.id,
+    phone,
+  });
+
+  if (!claimed) {
     results.whatsapp = "skipped_duplicate";
     return;
   }
@@ -347,7 +370,6 @@ async function sendReservationAutomation(
   ) {
     message = `${message}\n\nAcompanhe sua reserva:\n${trackingUrl}`;
   }
-  const phone = formatPhoneForWhatsApp(reservation.guest_phone);
 
   if (!evolutionUrl || !evolutionToken) {
     const failure = buildEvolutionNotConfiguredFailure();
@@ -359,6 +381,11 @@ async function sendReservationAutomation(
       message,
       type: logType,
       error_details: serializeWhatsAppFailure(failure.error),
+    });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
@@ -380,6 +407,11 @@ async function sendReservationAutomation(
       type: logType,
       error_details: serializeWhatsAppFailure(failure.error),
     });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
+    });
     return;
   }
 
@@ -393,6 +425,11 @@ async function sendReservationAutomation(
       message,
       type: logType,
       error_details: serializeWhatsAppFailure(failure.error),
+    });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
@@ -417,6 +454,10 @@ async function sendReservationAutomation(
       status: logStatus,
       error_details: null,
     });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "accepted",
+    });
     return;
   }
 
@@ -440,6 +481,11 @@ async function sendReservationAutomation(
     message,
     type: logType,
     error_details: serializedError,
+  });
+  await finalizeWhatsAppDispatch(supabaseAdmin, {
+    deliveryKey,
+    status: "queued",
+    errorDetails: serializedError,
   });
 }
 
@@ -473,18 +519,39 @@ async function sendWaitlistAutomation(
     .replace(/\{telefone\}/g, waitlist.guest_phone || "");
 
   const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
-  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { data: recentDup } = await supabaseAdmin
-    .from("whatsapp_message_logs")
-    .select("id")
-    .eq("company_id", waitlist.company_id)
-    .eq("phone", phone)
-    .eq("type", messageType)
-    .eq("message", message)
-    .gte("created_at", fiveMinAgo)
-    .limit(1);
+  const deliveryKey = buildWaitlistDispatchKey(messageType, waitlist.id);
+  const [{ data: existingLogs }, { data: existingQueue }] = await Promise.all([
+    supabaseAdmin
+      .from("whatsapp_message_logs")
+      .select("id")
+      .eq("company_id", waitlist.company_id)
+      .eq("phone", phone)
+      .eq("type", messageType)
+      .eq("message", message)
+      .limit(1),
+    supabaseAdmin
+      .from("whatsapp_message_queue")
+      .select("id")
+      .eq("company_id", waitlist.company_id)
+      .eq("phone", phone)
+      .eq("type", messageType)
+      .eq("message", message)
+      .limit(1),
+  ]);
 
-  if (recentDup && recentDup.length > 0) {
+  if ((existingLogs && existingLogs.length > 0) || (existingQueue && existingQueue.length > 0)) {
+    results.whatsapp = "skipped_duplicate";
+    return;
+  }
+
+  const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
+    deliveryKey,
+    companyId: waitlist.company_id,
+    automationType: messageType,
+    phone,
+  });
+
+  if (!claimed) {
     results.whatsapp = "skipped_duplicate";
     return;
   }
@@ -499,6 +566,11 @@ async function sendWaitlistAutomation(
       message,
       type: messageType,
       error_details: serializeWhatsAppFailure(failure.error),
+    });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
@@ -519,6 +591,11 @@ async function sendWaitlistAutomation(
       type: messageType,
       error_details: serializeWhatsAppFailure(failure.error),
     });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
+    });
     return;
   }
 
@@ -531,6 +608,11 @@ async function sendWaitlistAutomation(
       message,
       type: messageType,
       error_details: serializeWhatsAppFailure(failure.error),
+    });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "queued",
+      errorDetails: serializeWhatsAppFailure(failure.error),
     });
     return;
   }
@@ -554,6 +636,10 @@ async function sendWaitlistAutomation(
       status: logStatus,
       error_details: null,
     });
+    await finalizeWhatsAppDispatch(supabaseAdmin, {
+      deliveryKey,
+      status: "accepted",
+    });
     return;
   }
 
@@ -575,6 +661,11 @@ async function sendWaitlistAutomation(
     message,
     type: messageType,
     error_details: serializedError,
+  });
+  await finalizeWhatsAppDispatch(supabaseAdmin, {
+    deliveryKey,
+    status: "queued",
+    errorDetails: serializedError,
   });
 }
 

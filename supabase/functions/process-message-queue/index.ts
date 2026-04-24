@@ -10,6 +10,7 @@ import {
   sendWhatsAppText,
   serializeWhatsAppFailure,
   sleep,
+  WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
 import {
   checkWhatsAppCircuit,
@@ -47,25 +48,6 @@ Deno.serve(async (req) => {
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
-
-    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    const processingQuery = supabaseAdmin
-      .from("whatsapp_message_queue")
-      .select("id")
-      .eq("status", "pending")
-      .gte("last_attempt_at", threeMinAgo)
-      .limit(1);
-
-    const { data: processing } = requestedCompanyId
-      ? await processingQuery.eq("company_id", requestedCompanyId)
-      : await processingQuery;
-
-    if (processing && processing.length > 0) {
-      return new Response(JSON.stringify({ skipped: true, reason: "another_process_running" }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
@@ -137,6 +119,16 @@ Deno.serve(async (req) => {
       );
     }
 
+    await supabaseAdmin
+      .from("whatsapp_message_queue")
+      .update({
+        status: "pending",
+        error_details: null,
+      })
+      .in("company_id", eligibleCompanyIds)
+      .eq("status", "processing")
+      .lt("last_attempt_at", new Date(Date.now() - 3 * 60 * 1000).toISOString());
+
     const queueQuery = supabaseAdmin
       .from("whatsapp_message_queue")
       .select("*")
@@ -158,53 +150,78 @@ Deno.serve(async (req) => {
     let sent = 0;
     let failed = 0;
     let circuitTripped = false;
+    let processed = 0;
 
     for (let index = 0; index < pendingMessages.length; index++) {
       const message = pendingMessages[index];
       const instanceName = instanceMap.get(message.company_id);
       if (!instanceName) continue;
 
+      const { data: claimedMessage } = await supabaseAdmin
+        .from("whatsapp_message_queue")
+        .update({
+          status: "processing",
+          last_attempt_at: new Date().toISOString(),
+          error_details: null,
+        })
+        .eq("id", message.id)
+        .eq("status", "pending")
+        .select("*")
+        .maybeSingle();
+
+      if (!claimedMessage) {
+        continue;
+      }
+
+      processed++;
+
+      const activeMessage = claimedMessage as typeof message;
+      const phone = formatPhoneForWhatsApp(activeMessage.phone);
+
       if (index > 0) {
         await sleep(randomIntInRange(MESSAGE_JITTER_MIN_MS, MESSAGE_JITTER_MAX_MS));
       }
 
-      const runtimeCircuit = await checkWhatsAppCircuit(supabaseAdmin, message.company_id);
+      const runtimeCircuit = await checkWhatsAppCircuit(supabaseAdmin, activeMessage.company_id);
       if (runtimeCircuit.open) {
         circuitTripped = true;
+        await supabaseAdmin
+          .from("whatsapp_message_queue")
+          .update({ status: "pending" })
+          .eq("id", activeMessage.id)
+          .eq("status", "processing");
         continue;
       }
 
-      await supabaseAdmin
-        .from("whatsapp_message_queue")
-        .update({ last_attempt_at: new Date().toISOString() })
-        .eq("id", message.id);
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const duplicateLogQuery = supabaseAdmin
+        .from("whatsapp_message_logs")
+        .select("id")
+        .eq("company_id", activeMessage.company_id)
+        .eq("type", activeMessage.type)
+        .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES])
+        .gte("created_at", fiveMinAgo)
+        .limit(1);
 
-      if (message.reservation_id) {
-        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const { data: alreadySent } = await supabaseAdmin
-          .from("whatsapp_message_logs")
-          .select("id")
-          .eq("company_id", message.company_id)
-          .eq("reservation_id", message.reservation_id)
-          .eq("type", message.type)
-          .in("status", ["sent", "pending"])
-          .gte("created_at", fiveMinAgo)
-          .limit(1);
+      const { data: alreadyAccepted } = activeMessage.reservation_id
+        ? await duplicateLogQuery.eq("reservation_id", activeMessage.reservation_id)
+        : await duplicateLogQuery
+          .eq("phone", phone)
+          .eq("message", activeMessage.message);
 
-        if (alreadySent && alreadySent.length > 0) {
-          await supabaseAdmin
-            .from("whatsapp_message_queue")
-            .update({
-              status: "sent",
-              error_details: serializeWhatsAppFailure({
-                code: "unknown_error",
-                title: "Mensagem ja aceita",
-                message: "A fila identificou uma mensagem aceita recentemente pela Evolution e marcou esta entrada como concluida sem reenviar.",
-              }),
-            })
-            .eq("id", message.id);
-          continue;
-        }
+      if (alreadyAccepted && alreadyAccepted.length > 0) {
+        await supabaseAdmin
+          .from("whatsapp_message_queue")
+          .update({
+            status: "sent",
+            error_details: serializeWhatsAppFailure({
+              code: "unknown_error",
+              title: "Mensagem ja aceita",
+              message: "A fila identificou uma mensagem aceita recentemente pela Evolution e marcou esta entrada como concluida sem reenviar.",
+            }),
+          })
+          .eq("id", activeMessage.id);
+        continue;
       }
 
       try {
@@ -212,8 +229,8 @@ Deno.serve(async (req) => {
           evolutionUrl,
           evolutionToken,
           instanceName,
-          formatPhoneForWhatsApp(message.phone),
-          message.message,
+          phone,
+          activeMessage.message,
         );
 
         if (responseData.ok) {
@@ -223,23 +240,23 @@ Deno.serve(async (req) => {
             .update({
               status: "sent",
               last_attempt_at: new Date().toISOString(),
-              attempts: message.attempts + 1,
+              attempts: activeMessage.attempts + 1,
             })
-            .eq("id", message.id);
+            .eq("id", activeMessage.id);
 
           await supabaseAdmin.from("whatsapp_message_logs").insert({
-            company_id: message.company_id,
-            reservation_id: message.reservation_id,
-            phone: message.phone,
-            message: message.message,
-            type: message.type,
+            company_id: activeMessage.company_id,
+            reservation_id: activeMessage.reservation_id,
+            phone: activeMessage.phone,
+            message: activeMessage.message,
+            type: activeMessage.type,
             status: logStatus,
           });
 
-          await recordWhatsAppSuccess(supabaseAdmin, message.company_id);
+          await recordWhatsAppSuccess(supabaseAdmin, activeMessage.company_id);
           sent++;
         } else {
-          const nextAttempts = message.attempts + 1;
+          const nextAttempts = activeMessage.attempts + 1;
           const serializedError = serializeWhatsAppFailure(responseData.error);
           await supabaseAdmin
             .from("whatsapp_message_queue")
@@ -247,17 +264,17 @@ Deno.serve(async (req) => {
               attempts: nextAttempts,
               last_attempt_at: new Date().toISOString(),
               error_details: serializedError,
-              status: nextAttempts >= message.max_attempts ? "failed" : "pending",
+              status: nextAttempts >= activeMessage.max_attempts ? "failed" : "pending",
             })
-            .eq("id", message.id);
-          const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, message.company_id, responseData.error);
+            .eq("id", activeMessage.id);
+          const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, activeMessage.company_id, responseData.error);
           if (nextCircuit.open) {
             circuitTripped = true;
           }
           failed++;
         }
       } catch (error) {
-        const nextAttempts = message.attempts + 1;
+        const nextAttempts = activeMessage.attempts + 1;
         const failureDetails = {
           code: "unknown_error" as const,
           title: "Falha ao processar a fila",
@@ -272,10 +289,10 @@ Deno.serve(async (req) => {
             attempts: nextAttempts,
             last_attempt_at: new Date().toISOString(),
             error_details: serializeWhatsAppFailure(failureDetails),
-            status: nextAttempts >= message.max_attempts ? "failed" : "pending",
+            status: nextAttempts >= activeMessage.max_attempts ? "failed" : "pending",
           })
-          .eq("id", message.id);
-        const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, message.company_id, failureDetails);
+          .eq("id", activeMessage.id);
+        const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, activeMessage.company_id, failureDetails);
         if (nextCircuit.open) {
           circuitTripped = true;
         }
@@ -289,7 +306,7 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        processed: pendingMessages.length,
+        processed,
         sent,
         failed,
         circuit_tripped: circuitTripped,

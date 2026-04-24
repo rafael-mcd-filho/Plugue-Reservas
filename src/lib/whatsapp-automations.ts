@@ -62,9 +62,9 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
   {
     type: 'birthday_message',
     label: 'Mensagem de Aniversário',
-    description: 'Enviada no dia do aniversário do cliente',
+    description: 'Enviada automaticamente 2 dias antes do aniversário do cliente',
     icon: PartyPopper,
-    defaultTemplate: 'Parabéns, {nome}! 🎉 Desejamos um aniversário incrível, cheio de alegria e bons momentos. Quando quiser comemorar com a gente, vai ser um prazer te receber! 🥂',
+    defaultTemplate: 'Oi, {nome}! 🎉 Seu aniversário está chegando e faltam só 2 dias para essa data especial. Quando quiser comemorar com a gente, vai ser um prazer te receber! 🥂',
     variables: ['nome'],
   },
   {
