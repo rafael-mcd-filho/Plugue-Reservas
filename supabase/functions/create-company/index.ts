@@ -63,6 +63,29 @@ function isValidCnpj(value: string) {
   return value === `${base}${firstCheckDigit}${secondCheckDigit}`;
 }
 
+function createProvisioningError(
+  message: string,
+  extras?: {
+    code?: string | null;
+    details?: string | null;
+  },
+) {
+  const error = new Error(message) as Error & {
+    code?: string | null;
+    details?: string | null;
+  };
+
+  if (extras?.code) {
+    error.code = extras.code;
+  }
+
+  if (extras?.details) {
+    error.details = extras.details;
+  }
+
+  return error;
+}
+
 function sanitizeOrigin(value: string | null | undefined) {
   if (!value) return null;
 
@@ -259,7 +282,12 @@ Deno.serve(async (req) => {
         .select()
         .single();
 
-      if (companyError) throw new Error(companyError.message);
+      if (companyError) {
+        throw createProvisioningError(companyError.message, {
+          code: companyError.code,
+          details: companyError.details,
+        });
+      }
       company = createdCompany;
 
       const { data: createdUser, error: userError } = await supabaseAdmin.auth.admin.createUser({
@@ -269,19 +297,32 @@ Deno.serve(async (req) => {
         user_metadata: { full_name: responsible_name || name },
       });
 
-      if (userError) throw new Error(`Erro ao criar usuario: ${userError.message}`);
+      if (userError) {
+        throw createProvisioningError(`Erro ao criar usuario: ${userError.message}`, {
+          code: userError.code,
+        });
+      }
       newUser = createdUser;
 
       const { error: profileError } = await supabaseAdmin
         .from("profiles")
-        .update({
+        .upsert({
+          id: newUser.user.id,
           company_id: company.id,
+          email: normalizedResponsibleEmail,
           phone: normalizedResponsiblePhone,
           full_name: responsible_name || name,
-        })
-        .eq("id", newUser.user.id);
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: "id",
+        });
 
-      if (profileError) throw new Error(`Erro ao vincular perfil: ${profileError.message}`);
+      if (profileError) {
+        throw createProvisioningError(`Erro ao vincular perfil: ${profileError.message}`, {
+          code: profileError.code,
+          details: profileError.details,
+        });
+      }
 
       const { error: roleError } = await supabaseAdmin
         .from("user_roles")
@@ -291,11 +332,20 @@ Deno.serve(async (req) => {
           company_id: company.id,
         });
 
-      if (roleError) throw new Error(`Erro ao atribuir perfil admin: ${roleError.message}`);
+      if (roleError) {
+        throw createProvisioningError(`Erro ao atribuir perfil admin: ${roleError.message}`, {
+          code: roleError.code,
+          details: roleError.details,
+        });
+      }
     } catch (error: any) {
       await rollbackProvisioning();
 
-      return new Response(JSON.stringify({ error: error.message || "Erro ao criar empresa" }), {
+      return new Response(JSON.stringify({
+        error: error.message || "Erro ao criar empresa",
+        code: error.code ?? null,
+        details: error.details ?? null,
+      }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

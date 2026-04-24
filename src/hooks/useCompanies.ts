@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { CompanyPlanTier } from '@/lib/companyFeatures';
+import { getFunctionErrorMessage } from '@/lib/functionErrors';
 
 export type CompanyStatus = 'active' | 'paused';
 
@@ -98,7 +99,13 @@ export function useCreateCompany() {
         body: company,
       });
 
-      if (response.error) throw response.error;
+      if (response.error) {
+        const message = await getFunctionErrorMessage(response.error);
+        const error = new Error(message) as Error & { original?: unknown };
+        error.original = response.error;
+        throw error;
+      }
+
       const result = response.data;
       if (result?.error) throw new Error(result.error);
       return result;
