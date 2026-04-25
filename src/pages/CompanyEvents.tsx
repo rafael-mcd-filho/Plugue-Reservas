@@ -1549,6 +1549,7 @@ export default function CompanyEvents() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Quando</TableHead>
+                  <TableHead>Evento</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>HTTP</TableHead>
                   <TableHead>Resumo</TableHead>
@@ -1558,13 +1559,13 @@ export default function CompanyEvents() {
               <TableBody>
                 {metaAttemptsLoading && metaAttempts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       Carregando tentativas...
                     </TableCell>
                   </TableRow>
                 ) : metaAttempts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       {metaAttemptsEmptyMessage}
                     </TableCell>
                   </TableRow>
@@ -1573,6 +1574,16 @@ export default function CompanyEvents() {
                     <TableRow key={attempt.id}>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {formatDateTime(attempt.created_at)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-[180px] flex-col gap-1">
+                          <Badge variant="secondary" className="w-fit">
+                            {attempt.queue?.meta_event_name ?? 'Meta'}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {attempt.queue?.event_name ? formatEventDisplay(attempt.queue.event_name) : 'Evento de origem indisponivel'}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
