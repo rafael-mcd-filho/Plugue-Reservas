@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { FUNNEL_STEPS, type FunnelStep } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
-import { getAttributionString, hasPaidAttribution, isPaidTrafficMarker } from '@/lib/trackingAttribution';
+import { hasPaidAttribution, isPaidTrafficMarker } from '@/lib/trackingAttribution';
 
 export interface FunnelDataPoint {
   step: FunnelStep;
@@ -27,27 +27,7 @@ interface ReservationAttributionRow {
   id: string;
 }
 
-export interface FunnelAdsDebugEntry {
-  anonymous_id: string;
-  event_name: string;
-  journey_id: string | null;
-  matched_via: 'tracking_session' | 'reservation_snapshot';
-  occurred_at: string | null;
-  reservation_id: string | null;
-  reservation_utm_medium: string | null;
-  session_id: string | null;
-  session_utm_medium: string | null;
-}
-
-export interface FunnelAdsDebugData {
-  adsReservations: Array<{ id: string; utm_medium: string | null }>;
-  adsSessions: Array<{ id: string; utm_medium: string | null }>;
-  completedRows: FunnelAdsDebugEntry[];
-  matchedRowCount: number;
-}
-
 export interface FunnelQueryResult {
-  adsDebug: FunnelAdsDebugData | null;
   points: FunnelDataPoint[];
 }
 
@@ -111,7 +91,6 @@ export function useFunnelData(
 
       const rows = (data ?? []) as TrackingEventRow[];
       let filteredRows = rows;
-      let adsDebug: FunnelAdsDebugData | null = null;
 
       if (adsOnly) {
         const sessionIds = Array.from(new Set(
@@ -156,23 +135,11 @@ export function useFunnelData(
             .filter((session) => isPaidTrafficMarker(session.utm_medium))
             .map((session) => session.id),
         );
-        const sessionUtmMediumById = new Map(
-          ((sessionResult.data ?? []) as TrackingSessionAttributionRow[]).map((session) => [
-            session.id,
-            session.utm_medium,
-          ]),
-        );
 
         const adsReservationIds = new Set(
           ((reservationResult.data ?? []) as ReservationAttributionRow[])
             .filter((reservation) => hasPaidAttribution(reservation.attribution_snapshot))
             .map((reservation) => reservation.id),
-        );
-        const reservationUtmMediumById = new Map(
-          ((reservationResult.data ?? []) as ReservationAttributionRow[]).map((reservation) => [
-            reservation.id,
-            getAttributionString(reservation.attribution_snapshot, 'utm_medium'),
-          ]),
         );
 
         filteredRows = rows.filter((row) => {
@@ -186,48 +153,6 @@ export function useFunnelData(
 
           return false;
         });
-
-        const completedRowsMap = new Map<string, FunnelAdsDebugEntry>();
-
-        for (const row of filteredRows.filter((item) => matchesStep('completed', item))) {
-          const matchedVia = row.session_id
-            ? 'tracking_session'
-            : 'reservation_snapshot';
-          const entry: FunnelAdsDebugEntry = {
-            anonymous_id: row.anonymous_id,
-            event_name: row.event_name,
-            journey_id: row.journey_id,
-            matched_via: matchedVia,
-            occurred_at: row.occurred_at,
-            reservation_id: row.reservation_id,
-            reservation_utm_medium: row.reservation_id
-              ? reservationUtmMediumById.get(row.reservation_id) ?? null
-              : null,
-            session_id: row.session_id,
-            session_utm_medium: row.session_id
-              ? sessionUtmMediumById.get(row.session_id) ?? null
-              : null,
-          };
-          const entryKey = `${entry.reservation_id ?? 'no-reservation'}|${entry.session_id ?? 'no-session'}|${entry.anonymous_id}`;
-          if (!completedRowsMap.has(entryKey)) {
-            completedRowsMap.set(entryKey, entry);
-          }
-        }
-
-        adsDebug = {
-          adsReservations: Array.from(adsReservationIds).sort().map((id) => ({
-            id,
-            utm_medium: reservationUtmMediumById.get(id) ?? null,
-          })),
-          adsSessions: Array.from(adsSessionIds).sort().map((id) => ({
-            id,
-            utm_medium: sessionUtmMediumById.get(id) ?? null,
-          })),
-          completedRows: Array.from(completedRowsMap.values()).sort((left, right) =>
-            (right.occurred_at ?? '').localeCompare(left.occurred_at ?? ''),
-          ),
-          matchedRowCount: filteredRows.length,
-        };
       }
 
       const points = FUNNEL_STEPS.map((step) => {
@@ -245,7 +170,6 @@ export function useFunnelData(
 
       return {
         points,
-        adsDebug,
       };
     },
     enabled: true,
