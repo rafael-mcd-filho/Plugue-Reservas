@@ -689,6 +689,7 @@ export default function ReservationModal({
         city: null,
         state: null,
         country: null,
+        birthdate: form.birthdate || null,
         external_id: trackingSnapshot.anonymous_id,
       };
       const affiliateAttribution = getAffiliateAttribution({

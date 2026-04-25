@@ -54,6 +54,7 @@ export interface TrackingUserData {
   city?: string | null;
   state?: string | null;
   country?: string | null;
+  birthdate?: string | null;
   external_id?: string | null;
 }
 

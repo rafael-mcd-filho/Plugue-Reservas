@@ -36,6 +36,31 @@ function normalizeLocation(value: string | null | undefined) {
   return normalized ? normalized.replace(/[^a-z0-9]/g, "") : null;
 }
 
+function normalizeBirthdate(value: string | null | undefined) {
+  const text = normalizeText(value);
+  if (!text) return null;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const digits = isoMatch ? `${isoMatch[1]}${isoMatch[2]}${isoMatch[3]}` : text.replace(/\D/g, "");
+
+  if (!/^\d{8}$/.test(digits)) return null;
+
+  const year = Number(digits.slice(0, 4));
+  const month = Number(digits.slice(4, 6));
+  const day = Number(digits.slice(6, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return digits;
+}
+
 function asRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {} as Record<string, any>;
@@ -80,6 +105,7 @@ async function buildUserDataPayload(params: {
   state?: string | null;
   zip?: string | null;
   country?: string | null;
+  birthdate?: string | null;
   externalId?: string | null;
   clientIpAddress?: string | null;
   clientUserAgent?: string | null;
@@ -95,6 +121,7 @@ async function buildUserDataPayload(params: {
     st: await sha256(normalizeLocation(params.state ?? null)),
     zp: await sha256(normalizeLocation(params.zip ?? null)),
     country: await sha256(normalizeLocation(params.country ?? null)),
+    db: await sha256(normalizeBirthdate(params.birthdate ?? null)),
     external_id: await sha256(normalizeHashInput(params.externalId ?? null)),
     client_ip_address: normalizeText(params.clientIpAddress ?? null),
     client_user_agent: normalizeText(params.clientUserAgent ?? null),
@@ -320,6 +347,10 @@ Deno.serve(async (req) => {
                   state: trackingUserData.state ?? reservationUserData.state ?? null,
                   zip: trackingUserData.zip ?? reservationUserData.zip ?? null,
                   country: trackingUserData.country ?? reservationUserData.country ?? null,
+                  birthdate: trackingUserData.birthdate
+                    ?? reservationUserData.birthdate
+                    ?? reservation?.guest_birthdate
+                    ?? null,
                   externalId: trackingUserData.external_id
                     ?? payloadContext.anonymous_id
                     ?? reservation?.origin_anonymous_id
@@ -369,6 +400,7 @@ Deno.serve(async (req) => {
                   state: userDataSnapshot.state ?? null,
                   zip: userDataSnapshot.zip ?? null,
                   country: userDataSnapshot.country ?? null,
+                  birthdate: userDataSnapshot.birthdate ?? reservation.guest_birthdate ?? null,
                   externalId: userDataSnapshot.external_id
                     ?? payloadContext.anonymous_id
                     ?? reservation.origin_anonymous_id

@@ -44,6 +44,7 @@ interface TrackingBody {
     city?: string | null;
     state?: string | null;
     country?: string | null;
+    birthdate?: string | null;
     external_id?: string | null;
   } | null;
 }
@@ -83,6 +84,7 @@ function buildUserDataSnapshot(body: TrackingBody, anonymousId: string) {
     city: nullableText(userData.city),
     state: nullableText(userData.state),
     country: nullableText(userData.country),
+    birthdate: nullableText(userData.birthdate),
     external_id: nullableText(userData.external_id) ?? anonymousId,
   };
 }
