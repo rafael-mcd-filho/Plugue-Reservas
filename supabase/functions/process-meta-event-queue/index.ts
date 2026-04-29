@@ -9,6 +9,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
+const DEFAULT_META_CURRENCY = "BRL";
+const DEFAULT_META_LEAD_VALUE = 1;
+
 function normalizeText(value: string | null | undefined) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -67,6 +70,56 @@ function asRecord(value: unknown) {
   }
 
   return value as Record<string, any>;
+}
+
+function normalizeCurrency(value: unknown) {
+  if (typeof value !== "string") return null;
+  const currency = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : null;
+}
+
+function normalizePositiveNumber(value: unknown) {
+  const numberValue = typeof value === "number"
+    ? value
+    : typeof value === "string"
+      ? Number(value.trim().replace(",", "."))
+      : NaN;
+
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
+function stripEmptyValues(record: Record<string, any>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== null && value !== undefined),
+  );
+}
+
+function buildCustomData(params: {
+  metaEventName: string;
+  settings: Record<string, any>;
+  payloadCustomData: Record<string, any>;
+  customData: Record<string, any>;
+}) {
+  const customData = {
+    ...params.payloadCustomData,
+    ...params.customData,
+  };
+
+  if (params.metaEventName === "Lead") {
+    customData.value = normalizePositiveNumber(customData.value)
+      ?? normalizePositiveNumber(params.settings.lead_value)
+      ?? normalizePositiveNumber(params.settings.default_lead_value)
+      ?? normalizePositiveNumber(Deno.env.get("META_DEFAULT_LEAD_VALUE"))
+      ?? DEFAULT_META_LEAD_VALUE;
+
+    customData.currency = normalizeCurrency(customData.currency)
+      ?? normalizeCurrency(params.settings.currency)
+      ?? normalizeCurrency(params.settings.default_currency)
+      ?? normalizeCurrency(Deno.env.get("META_DEFAULT_CURRENCY"))
+      ?? DEFAULT_META_CURRENCY;
+  }
+
+  return stripEmptyValues(customData);
 }
 
 async function sha256(value: string | null) {
@@ -311,6 +364,7 @@ Deno.serve(async (req) => {
       const requestPayload = trackingEvent
         ? await (async () => {
           const eventRecord = asRecord(trackingEvent);
+          const payloadCustomData = asRecord(payloadContext.custom_data);
           const userDataSnapshot = asRecord(payloadContext.user_data);
           const trackingUserData = Object.keys(userDataSnapshot).length > 0
             ? userDataSnapshot
@@ -361,12 +415,17 @@ Deno.serve(async (req) => {
                   fbp: payloadContext.fbp ?? reservation?.origin_fbp ?? session?.fbp ?? null,
                   fbc: payloadContext.fbc ?? reservation?.origin_fbc ?? session?.fbc ?? null,
                 }),
-                custom_data: {
-                  tracking_event_id: eventRecord.id,
-                  step: eventRecord.step ?? null,
-                  path: eventRecord.path ?? null,
-                  reservation_id: eventRecord.reservation_id ?? null,
-                },
+                custom_data: buildCustomData({
+                  metaEventName: queueRow.meta_event_name,
+                  settings: settingsRecord,
+                  payloadCustomData,
+                  customData: {
+                    tracking_event_id: eventRecord.id,
+                    step: eventRecord.step ?? null,
+                    path: eventRecord.path ?? null,
+                    reservation_id: eventRecord.reservation_id ?? null,
+                  },
+                }),
               },
             ],
             test_event_code: normalizeText(settingsRecord.test_event_code),
@@ -374,6 +433,7 @@ Deno.serve(async (req) => {
         })()
         : await (async () => {
           const attributionSnapshot = asRecord(reservation?.attribution_snapshot);
+          const payloadCustomData = asRecord(payloadContext.custom_data);
           const userDataSnapshot = asRecord(attributionSnapshot.user_data);
           const guestName = normalizeText(reservation?.guest_name);
           const guestNameParts = guestName ? guestName.split(/\s+/) : [];
@@ -411,13 +471,18 @@ Deno.serve(async (req) => {
                   fbp: payloadContext.fbp ?? reservation.origin_fbp ?? session?.fbp ?? null,
                   fbc: payloadContext.fbc ?? reservation.origin_fbc ?? session?.fbc ?? null,
                 }),
-                custom_data: {
-                  reservation_id: reservation.id,
-                  reservation_date: reservation.date,
-                  reservation_time: reservation.time,
-                  party_size: reservation.party_size,
-                  status: reservation.status,
-                },
+                custom_data: buildCustomData({
+                  metaEventName: queueRow.meta_event_name,
+                  settings: settingsRecord,
+                  payloadCustomData,
+                  customData: {
+                    reservation_id: reservation.id,
+                    reservation_date: reservation.date,
+                    reservation_time: reservation.time,
+                    party_size: reservation.party_size,
+                    status: reservation.status,
+                  },
+                }),
               },
             ],
             test_event_code: normalizeText(settingsRecord.test_event_code),
