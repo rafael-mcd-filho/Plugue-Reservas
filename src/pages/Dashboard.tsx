@@ -291,25 +291,12 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
         },
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'tracking_events',
-          ...(funnelCompanyId ? { filter: `company_id=eq.${funnelCompanyId}` } : {}),
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['funnel-data'] });
-          queryClient.invalidateQueries({ queryKey: ['live-funnel-presence'] });
-        },
-      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [queryClient, effectiveCompanyId, funnelCompanyId]);
+  }, [queryClient, effectiveCompanyId]);
 
   const avgPerDayRaw = dailyStats.length > 0 ? totals.reservations / dailyStats.length : 0;
   const prevAvgPerDayRaw = dailyStats.length > 0 ? prevTotals.reservations / dailyStats.length : 0;

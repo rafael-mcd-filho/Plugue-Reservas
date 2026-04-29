@@ -1,54 +1,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { FUNNEL_STEPS, type FunnelStep } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
-import { hasPaidAttribution, isPaidTrafficMarker } from '@/lib/trackingAttribution';
 
 export interface FunnelDataPoint {
   step: FunnelStep;
   count: number;
 }
 
-interface TrackingEventRow {
-  anonymous_id: string;
-  event_name: string;
-  journey_id: string | null;
-  occurred_at: string | null;
-  reservation_id: string | null;
-  session_id: string | null;
-}
-
-interface TrackingSessionAttributionRow {
-  id: string;
-  utm_medium: string | null;
-}
-
-interface ReservationAttributionRow {
-  attribution_snapshot: Record<string, unknown> | null;
-  id: string;
-}
-
 export interface FunnelQueryResult {
   points: FunnelDataPoint[];
 }
 
-function matchesStep(step: FunnelStep, row: TrackingEventRow) {
-  if (step === 'page_view') return row.event_name === 'page_view';
-  if (step === 'date_select') return row.event_name === 'date_select';
-  if (step === 'time_select') return row.event_name === 'time_select';
-  if (step === 'form_fill') return row.event_name === 'form_fill' || row.event_name === 'lead_captured';
-  return row.event_name === 'reservation_created';
+interface TrackingFunnelCountRow {
+  step: string | null;
+  event_count: number | string | null;
 }
 
-function buildDefaultIdentityKey(step: FunnelStep, row: TrackingEventRow) {
-  if (step === 'page_view') {
-    return row.session_id ?? row.anonymous_id;
+function normalizeDateRangeBoundary(date: Date | undefined, boundary: 'start' | 'end') {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+
+  const normalized = new Date(date);
+  if (boundary === 'start') {
+    normalized.setHours(0, 0, 0, 0);
+  } else {
+    normalized.setHours(23, 59, 59, 999);
   }
 
-  if (step === 'completed') {
-    return row.reservation_id ?? row.journey_id ?? row.session_id ?? row.anonymous_id;
-  }
+  return normalized.toISOString();
+}
 
-  return row.journey_id ?? row.session_id ?? row.anonymous_id;
+function isFunnelStep(value: string | null): value is FunnelStep {
+  return FUNNEL_STEPS.includes(value as FunnelStep);
 }
 
 export function useFunnelData(
@@ -61,112 +43,29 @@ export function useFunnelData(
   return useQuery<FunnelQueryResult>({
     queryKey: ['funnel-data', companyId, startDate?.toISOString(), endDate?.toISOString(), uniqueOnly, adsOnly],
     queryFn: async () => {
-      let query = supabase
-        .from('tracking_events' as any)
-        .select('event_name, session_id, journey_id, reservation_id, anonymous_id, occurred_at')
-        .eq('tracking_source', 'public');
-
-      if (companyId && companyId !== 'all') {
-        query = query.eq('company_id', companyId);
-      }
-
-      if (startDate instanceof Date && !Number.isNaN(startDate.getTime())) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        query = query.gte('occurred_at', start.toISOString());
-      }
-
-      if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        query = query.lte('occurred_at', end.toISOString());
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await (supabase as any).rpc('get_tracking_funnel_counts', {
+        _company_id: companyId && companyId !== 'all' ? companyId : null,
+        _start_at: normalizeDateRangeBoundary(startDate, 'start'),
+        _end_at: normalizeDateRangeBoundary(endDate, 'end'),
+        _unique_only: uniqueOnly,
+        _ads_only: adsOnly,
+      });
 
       if (error) {
         console.error('[FunnelData] Query error:', error.message ?? error);
         throw error;
       }
 
-      const rows = (data ?? []) as TrackingEventRow[];
-      let filteredRows = rows;
-
-      if (adsOnly) {
-        const sessionIds = Array.from(new Set(
-          rows
-            .map((row) => row.session_id)
-            .filter((value): value is string => !!value),
-        ));
-        const reservationIds = Array.from(new Set(
-          rows
-            .filter((row) => !row.session_id)
-            .map((row) => row.reservation_id)
-            .filter((value): value is string => !!value),
-        ));
-
-        const [sessionResult, reservationResult] = await Promise.all([
-          sessionIds.length > 0
-            ? supabase
-              .from('tracking_sessions' as any)
-              .select('id, utm_medium')
-              .in('id', sessionIds)
-            : Promise.resolve({ data: [] as TrackingSessionAttributionRow[], error: null }),
-          reservationIds.length > 0
-            ? supabase
-              .from('reservations' as any)
-              .select('id, attribution_snapshot')
-              .in('id', reservationIds)
-            : Promise.resolve({ data: [] as ReservationAttributionRow[], error: null }),
-        ]);
-
-        if (sessionResult.error) {
-          console.error('[FunnelData] Session attribution query error:', sessionResult.error.message ?? sessionResult.error);
-          throw sessionResult.error;
-        }
-
-        if (reservationResult.error) {
-          console.error('[FunnelData] Reservation attribution query error:', reservationResult.error.message ?? reservationResult.error);
-          throw reservationResult.error;
-        }
-
-        const adsSessionIds = new Set(
-          ((sessionResult.data ?? []) as TrackingSessionAttributionRow[])
-            .filter((session) => isPaidTrafficMarker(session.utm_medium))
-            .map((session) => session.id),
-        );
-
-        const adsReservationIds = new Set(
-          ((reservationResult.data ?? []) as ReservationAttributionRow[])
-            .filter((reservation) => hasPaidAttribution(reservation.attribution_snapshot))
-            .map((reservation) => reservation.id),
-        );
-
-        filteredRows = rows.filter((row) => {
-          if (row.session_id) {
-            return adsSessionIds.has(row.session_id);
-          }
-
-          if (row.reservation_id) {
-            return adsReservationIds.has(row.reservation_id);
-          }
-
-          return false;
-        });
+      const countsByStep = new Map<FunnelStep, number>();
+      for (const row of ((data ?? []) as TrackingFunnelCountRow[])) {
+        if (!isFunnelStep(row.step)) continue;
+        countsByStep.set(row.step, Number(row.event_count ?? 0));
       }
 
-      const points = FUNNEL_STEPS.map((step) => {
-        const identities = new Set(
-          filteredRows
-            .filter((row) => matchesStep(step, row))
-            .map((row) => (uniqueOnly ? row.anonymous_id : buildDefaultIdentityKey(step, row))),
-        );
-
-        return {
-          step,
-          count: identities.size,
-        };
-      });
+      const points = FUNNEL_STEPS.map((step) => ({
+        step,
+        count: countsByStep.get(step) ?? 0,
+      }));
 
       return {
         points,

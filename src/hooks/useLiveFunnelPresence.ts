@@ -3,13 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 
 export type LiveFunnelStage = 'page_view' | 'date_select' | 'time_select' | 'form_fill' | 'completed';
 
-interface TrackingEventPresenceRow {
-  anonymous_id: string;
-  event_name: string;
-  occurred_at: string;
-  session_id: string | null;
-}
-
 interface LiveFunnelPresenceData {
   totalActive: number;
   windowMinutes: number;
@@ -22,72 +15,45 @@ interface LiveFunnelPresenceData {
 const LIVE_WINDOW_MINUTES = 5;
 const LIVE_STAGES: LiveFunnelStage[] = ['page_view', 'date_select', 'time_select', 'form_fill', 'completed'];
 
-function mapEventToStage(eventName: string): LiveFunnelStage | null {
-  if (eventName === 'reservation_created') return 'completed';
-  if (eventName === 'form_fill' || eventName === 'lead_captured') return 'form_fill';
-  if (eventName === 'time_select') return 'time_select';
-  if (eventName === 'date_select' || eventName === 'booking_started') return 'date_select';
-  if (eventName === 'page_view') return 'page_view';
-  return null;
+interface LiveFunnelPresenceRow {
+  stage: string | null;
+  stage_count: number | string | null;
+  total_active: number | string | null;
+  window_minutes: number | string | null;
 }
 
-function buildPresenceKey(row: TrackingEventPresenceRow) {
-  return row.session_id
-    ? `session:${row.session_id}`
-    : `anonymous:${row.anonymous_id}`;
+function isLiveFunnelStage(value: string | null): value is LiveFunnelStage {
+  return LIVE_STAGES.includes(value as LiveFunnelStage);
 }
 
 export function useLiveFunnelPresence(companyId?: string) {
   return useQuery<LiveFunnelPresenceData>({
     queryKey: ['live-funnel-presence', companyId],
     queryFn: async () => {
-      const cutoff = new Date(Date.now() - LIVE_WINDOW_MINUTES * 60 * 1000).toISOString();
-
-      let query = supabase
-        .from('tracking_events' as any)
-        .select('event_name, session_id, anonymous_id, occurred_at')
-        .eq('tracking_source', 'public')
-        .gte('occurred_at', cutoff);
-
-      if (companyId && companyId !== 'all') {
-        query = query.eq('company_id', companyId);
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await (supabase as any).rpc('get_live_funnel_presence', {
+        _company_id: companyId && companyId !== 'all' ? companyId : null,
+        _window_minutes: LIVE_WINDOW_MINUTES,
+      });
 
       if (error) {
         console.error('[LiveFunnelPresence] Query error:', error.message ?? error);
         throw error;
       }
 
-      const latestByKey = new Map<string, { occurredAt: string; stage: LiveFunnelStage }>();
-
-      for (const row of (data ?? []) as TrackingEventPresenceRow[]) {
-        const stage = mapEventToStage(row.event_name);
-        if (!stage) continue;
-
-        const key = buildPresenceKey(row);
-        const existing = latestByKey.get(key);
-
-        if (!existing || row.occurred_at > existing.occurredAt) {
-          latestByKey.set(key, {
-            occurredAt: row.occurred_at,
-            stage,
-          });
-        }
-      }
-
       const counts = new Map<LiveFunnelStage, number>(
         LIVE_STAGES.map((stage) => [stage, 0]),
       );
+      const rows = ((data ?? []) as LiveFunnelPresenceRow[]);
+      const firstRow = rows[0];
 
-      for (const entry of latestByKey.values()) {
-        counts.set(entry.stage, (counts.get(entry.stage) ?? 0) + 1);
+      for (const row of rows) {
+        if (!isLiveFunnelStage(row.stage)) continue;
+        counts.set(row.stage, Number(row.stage_count ?? 0));
       }
 
       return {
-        totalActive: latestByKey.size,
-        windowMinutes: LIVE_WINDOW_MINUTES,
+        totalActive: Number(firstRow?.total_active ?? 0),
+        windowMinutes: Number(firstRow?.window_minutes ?? LIVE_WINDOW_MINUTES),
         stages: LIVE_STAGES.map((stage) => ({
           stage,
           count: counts.get(stage) ?? 0,
