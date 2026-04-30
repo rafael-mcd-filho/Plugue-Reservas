@@ -1,4 +1,4 @@
-import { Ban, Clock, MessageCircle, PartyPopper, Star, type LucideIcon } from 'lucide-react';
+import { Ban, Clock, MessageCircle, PartyPopper, Star, UserX, type LucideIcon } from 'lucide-react';
 
 export interface WhatsAppAutomationDefinition {
   type: string;
@@ -68,6 +68,14 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     variables: ['nome'],
   },
   {
+    type: 'no_show_message',
+    label: 'Mensagem de No-Show',
+    description: 'Enviada automaticamente às 09:00 do dia seguinte para reservas que não compareceram',
+    icon: UserX,
+    defaultTemplate: 'Olá, {nome}! Notamos que você tinha uma reserva no dia {data} às {hora} e não pôde comparecer.\n\nSentimos sua falta! Se quiser agendar uma nova visita, estamos à disposição. 😊',
+    variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],
+  },
+  {
     type: 'waitlist_entry',
     label: 'Entrada na Lista de Espera',
     description: 'Enviada quando o cliente é adicionado à lista de espera',
@@ -91,6 +99,7 @@ export const WHATSAPP_MESSAGE_TYPE_LABELS: Record<string, string> = {
   reminder_1h: 'Lembrete 1h',
   reminder_24h: 'Lembrete 24h',
   post_visit: 'Pós-visita',
+  no_show: 'No-show',
   birthday: 'Aniversário',
   waitlist_entry: 'Fila - Entrada',
   waitlist_called: 'Fila - Chamado',
