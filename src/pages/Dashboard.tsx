@@ -1182,19 +1182,14 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
-          <Card className="border border-amber-200 bg-amber-50/40 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/20">
+          <Card className="border border-border shadow-sm">
             <CardHeader className="pb-2">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Origem das Reservas"
-                    tooltip="Mostra de onde vieram as reservas criadas no período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data de criação da reserva — quando o agendamento foi feito."
-                  />
-                </CardTitle>
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                  Em desenvolvimento
-                </span>
-              </div>
+              <CardTitle className="text-base">
+                <SectionTitle
+                  title="Origem das Reservas"
+                  tooltip="Mostra de onde vieram as reservas criadas no período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data de criação da reserva — quando o agendamento foi feito."
+                />
+              </CardTitle>
               <CardDescription>
                 Considera a data de criação da reserva. Cada reserva entra em uma única categoria — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
               </CardDescription>
@@ -1367,7 +1362,7 @@ export default function Dashboard() {
           </Card>
           {advancedReportsEnabled ? (
             <>
-          <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-px shadow-sm dark:border-amber-800/50 dark:bg-amber-950/20 [&>*]:min-w-0">
+          <div className="[&>*]:min-w-0">
             <ReservationFunnelChart
               data={funnelData}
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
@@ -1375,9 +1370,6 @@ export default function Dashboard() {
               measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}
               headerActions={(
                 <div className="flex flex-wrap items-center justify-end gap-3 text-sm text-muted-foreground">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                    Em desenvolvimento
-                  </span>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
