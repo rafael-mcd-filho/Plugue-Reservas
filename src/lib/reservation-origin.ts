@@ -1,4 +1,9 @@
-import { getAttributionString, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
+import {
+  getAttributionString,
+  hasMetaClickAttribution,
+  isPaidTrafficMarker,
+  normalizeTrackingTextValue,
+} from '@/lib/trackingAttribution';
 
 export type ReservationOriginKey =
   | 'direct_organic'
@@ -15,8 +20,13 @@ export interface ReservationOriginAware {
   attribution_snapshot?: Record<string, unknown> | null;
   tracking_session?: {
     utm_medium?: string | null;
+    fbclid?: string | null;
+    fbc?: string | null;
   } | null;
   session_utm_medium?: string | null;
+  session_fbclid?: string | null;
+  session_fbc?: string | null;
+  origin_fbc?: string | null;
 }
 
 export const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; color: string }> = {
@@ -59,6 +69,17 @@ export function getReservationPaidAttributionMedium(reservation: ReservationOrig
     ?? null;
 }
 
+export function hasReservationMetaClickAttribution(reservation: ReservationOriginAware) {
+  return hasMetaClickAttribution({
+    snapshot: reservation.attribution_snapshot,
+    fbclid: normalizeTrackingTextValue(reservation.tracking_session?.fbclid)
+      ?? normalizeTrackingTextValue(reservation.session_fbclid),
+    fbc: normalizeTrackingTextValue(reservation.origin_fbc)
+      ?? normalizeTrackingTextValue(reservation.tracking_session?.fbc)
+      ?? normalizeTrackingTextValue(reservation.session_fbc),
+  });
+}
+
 export function classifyReservationOrigin(reservation: ReservationOriginAware): ReservationOriginKey {
   if (normalizeReservationSource(reservation.source) === 'waitlist') {
     return 'waitlist';
@@ -73,7 +94,7 @@ export function classifyReservationOrigin(reservation: ReservationOriginAware): 
   }
 
   const utmMedium = getReservationPaidAttributionMedium(reservation);
-  if (isPaidTrafficMarker(utmMedium)) {
+  if (isPaidTrafficMarker(utmMedium) || hasReservationMetaClickAttribution(reservation)) {
     return 'ads';
   }
 

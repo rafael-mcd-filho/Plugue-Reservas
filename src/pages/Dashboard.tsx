@@ -779,7 +779,7 @@ export default function Dashboard() {
                     </div>
 
                     <p className="text-xs text-muted-foreground">
-                      Ads só entra quando existe marcador pago explícito no tracking, como utm_medium=paid, paid_social, cpc ou equivalente.
+                      Ads entra quando existe UTM pago ou clique Meta identificado por fbclid/fbc. _fbp sozinho não classifica como Ads.
                     </p>
                   </div>
                 </div>
@@ -1282,7 +1282,7 @@ export default function Dashboard() {
                         </p>
                       </div>
                       <p className="max-w-xl text-right text-xs text-muted-foreground">
-                        Ads só entra quando existe marcador pago explícito no tracking, como utm_medium=paid, paid_social, cpc ou equivalente.
+                        Ads entra quando existe UTM pago ou clique Meta identificado por fbclid/fbc. _fbp sozinho não classifica como Ads.
                       </p>
                     </div>
 

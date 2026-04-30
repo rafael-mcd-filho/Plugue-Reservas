@@ -29,8 +29,22 @@ export function isPaidTrafficMarker(utmMedium: string | null | undefined) {
   return normalizedMedium.startsWith('paid');
 }
 
+export function hasMetaClickAttribution(params: {
+  snapshot?: Record<string, unknown> | null;
+  fbclid?: unknown;
+  fbc?: unknown;
+}) {
+  return [
+    getAttributionString(params.snapshot, 'fbclid'),
+    getAttributionString(params.snapshot, 'fbc'),
+    normalizeTrackingTextValue(params.fbclid),
+    normalizeTrackingTextValue(params.fbc),
+  ].some(Boolean);
+}
+
 export function hasPaidAttribution(
   snapshot: Record<string, unknown> | null | undefined,
 ) {
-  return isPaidTrafficMarker(getAttributionString(snapshot, 'utm_medium'));
+  return isPaidTrafficMarker(getAttributionString(snapshot, 'utm_medium'))
+    || hasMetaClickAttribution({ snapshot });
 }

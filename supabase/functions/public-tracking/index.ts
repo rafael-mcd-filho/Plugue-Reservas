@@ -69,7 +69,7 @@ function asMetadata(value: unknown) {
 function deriveFbc(existingFbc: string | null, fbclid: string | null) {
   if (existingFbc) return existingFbc;
   if (!fbclid) return null;
-  return `fb.1.${Math.floor(Date.now() / 1000)}.${fbclid}`;
+  return `fb.1.${Date.now()}.${fbclid}`;
 }
 
 function buildUserDataSnapshot(body: TrackingBody, anonymousId: string) {

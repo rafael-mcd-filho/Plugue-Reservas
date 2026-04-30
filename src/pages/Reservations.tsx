@@ -77,10 +77,13 @@ interface Reservation {
   source: string | null;
   tracking_session?: {
     utm_medium?: string | null;
+    fbclid?: string | null;
+    fbc?: string | null;
   } | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
+  origin_fbc?: string | null;
   attribution_snapshot?: Record<string, unknown> | null;
   guest_name: string;
   guest_phone: string;
@@ -235,7 +238,7 @@ export default function Reservations() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('reservations' as any)
-        .select('*, tracking_session:origin_tracking_session_id(utm_medium)')
+        .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
         .eq('company_id', companyId)
         .order('date', { ascending: true })
         .order('time', { ascending: true });

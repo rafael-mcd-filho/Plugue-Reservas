@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
-import { getAttributionString, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
+import { getAttributionString, hasMetaClickAttribution, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
 import { differenceInCalendarDays, differenceInDays, eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -31,10 +31,13 @@ interface RawReservation {
   source: string | null;
   tracking_session?: {
     utm_medium?: string | null;
+    fbclid?: string | null;
+    fbc?: string | null;
   } | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
+  origin_fbc?: string | null;
   attribution_snapshot?: Record<string, unknown> | null;
 }
 
@@ -160,7 +163,15 @@ function classifyReservationOrigin(reservation: RawReservation): ReservationOrig
 
   const utmMedium = getAttributionString(reservation.attribution_snapshot, 'utm_medium')
     ?? normalizeTrackingTextValue(reservation.tracking_session?.utm_medium);
-  if (isPaidTrafficMarker(utmMedium)) {
+  if (
+    isPaidTrafficMarker(utmMedium)
+    || hasMetaClickAttribution({
+      snapshot: reservation.attribution_snapshot,
+      fbclid: reservation.tracking_session?.fbclid,
+      fbc: normalizeTrackingTextValue(reservation.origin_fbc)
+        ?? normalizeTrackingTextValue(reservation.tracking_session?.fbc),
+    })
+  ) {
     return 'ads';
   }
 
@@ -188,7 +199,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
         .gte('date', startStr)
         .lte('date', endStr);
 
@@ -265,7 +276,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
         .gte('date', prevStartStr)
         .lte('date', prevEndStr);
 
@@ -284,7 +295,7 @@ export function useDashboardData(
     queryFn: async () => {
       let query = supabase
         .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium)')
+        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
         .gte('created_at', rangeStartIso)
         .lte('created_at', rangeEndIso);
 

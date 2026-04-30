@@ -123,6 +123,8 @@ old_funnel_events AS (
     )
   WHERE (
     NOT scenarios.ads_only
+    OR NULLIF(btrim(COALESCE(te.metadata ->> 'fbclid', '')), '') IS NOT NULL
+    OR NULLIF(btrim(COALESCE(te.metadata ->> 'fbc', '')), '') IS NOT NULL
     OR (
       te.session_id IS NOT NULL
       AND EXISTS (
@@ -142,12 +144,13 @@ old_funnel_events AS (
               'social_paid'
             )
             OR lower(btrim(COALESCE(ts.utm_medium, ''))) LIKE 'paid%'
+            OR NULLIF(btrim(COALESCE(ts.fbclid, '')), '') IS NOT NULL
+            OR NULLIF(btrim(COALESCE(ts.fbc, '')), '') IS NOT NULL
           )
       )
     )
     OR (
-      te.session_id IS NULL
-      AND te.reservation_id IS NOT NULL
+      te.reservation_id IS NOT NULL
       AND EXISTS (
         SELECT 1
         FROM public.reservations r
@@ -165,6 +168,8 @@ old_funnel_events AS (
               'social_paid'
             )
             OR lower(btrim(COALESCE(r.attribution_snapshot ->> 'utm_medium', ''))) LIKE 'paid%'
+            OR NULLIF(btrim(COALESCE(r.attribution_snapshot ->> 'fbclid', '')), '') IS NOT NULL
+            OR NULLIF(btrim(COALESCE(r.origin_fbc, r.attribution_snapshot ->> 'fbc', '')), '') IS NOT NULL
           )
       )
     )

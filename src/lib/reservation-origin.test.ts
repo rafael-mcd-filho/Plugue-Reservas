@@ -36,6 +36,30 @@ describe('reservation-origin', () => {
     })).toBe('ads');
   });
 
+  it('classifies public reservations with Meta click identifiers as ads', () => {
+    expect(classifyReservationOrigin({
+      source: 'reservation',
+      origin_tracking_session_id: 'session-1',
+      attribution_snapshot: { tracking_source: 'public_web', fbclid: 'fb-click-id' },
+    })).toBe('ads');
+
+    expect(classifyReservationOrigin({
+      source: 'reservation',
+      origin_tracking_session_id: 'session-1',
+      attribution_snapshot: { tracking_source: 'public_web', utm_medium: 'organic' },
+      tracking_session: { fbc: 'fb.1.123.fb-click-id' },
+    })).toBe('ads');
+  });
+
+  it('does not classify fbp alone as ads', () => {
+    expect(classifyReservationOrigin({
+      source: 'reservation',
+      origin_tracking_session_id: 'session-1',
+      attribution_snapshot: { tracking_source: 'public_web', fbp: 'fb.1.123.browser-id' },
+      tracking_session: { utm_medium: 'organic' },
+    })).toBe('direct_organic');
+  });
+
   it('classifies public non-paid reservations as direct organic', () => {
     expect(classifyReservationOrigin({
       source: 'reservation',

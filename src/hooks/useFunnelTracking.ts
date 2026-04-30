@@ -160,7 +160,7 @@ function getCookie(name: string): string | null {
 function deriveFbc(fbc: string | null, fbclid: string | null): string | null {
   if (fbc) return fbc;
   if (!fbclid) return null;
-  return `fb.1.${Math.floor(Date.now() / 1000)}.${fbclid}`;
+  return `fb.1.${Date.now()}.${fbclid}`;
 }
 
 function getCurrentAttribution() {
