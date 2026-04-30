@@ -302,6 +302,13 @@ export default function Dashboard() {
   const prevAvgPerDayRaw = dailyStats.length > 0 ? prevTotals.reservations / dailyStats.length : 0;
   const avgPerDay = Math.round(avgPerDayRaw);
   const prevAvgPerDay = Math.round(prevAvgPerDayRaw);
+  const avgGuestsPerReservation = totals.reservations > 0
+    ? totals.totalGuests / totals.reservations
+    : 0;
+  const avgGuestsPerReservationLabel = avgGuestsPerReservation.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
   const mainStats = [
     { label: 'Total Reservas', tooltip: 'Número de reservas marcadas para acontecer no período selecionado.', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
@@ -493,7 +500,28 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">·</div>
+            {/* Média de pessoas por reserva */}
+            <Card className="min-w-0 border border-info/20 bg-info-soft/40 shadow-sm sm:w-[174px] sm:flex-none sm:self-center">
+              <CardContent className="flex items-center gap-2.5 px-3 py-2.5">
+                <div className="shrink-0 rounded-md bg-card/80 p-2 text-info">
+                  <TrendingUp className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-medium leading-tight text-muted-foreground">
+                    Média por reserva
+                  </p>
+                  <div className="mt-0.5 flex items-baseline gap-1">
+                    <span className="text-xs font-semibold leading-none text-info">×</span>
+                    <span className="text-lg font-bold leading-none text-foreground">
+                      {avgGuestsPerReservationLabel}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">
+                    pessoas/reserva
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Total pessoas */}
             <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
