@@ -318,18 +318,14 @@ export default function BroadcastsTab({ companyId }: Props) {
         if (recipientsError) throw recipientsError;
       }
 
-      try {
-        await supabase.functions.invoke('process-whatsapp-broadcasts', {
-          body: {
-            company_id: companyId,
-            ...(isImpersonatingCompany && scopeCompanyId
-              ? { scope_company_id: scopeCompanyId, impersonated_by_superadmin: true, effective_role: effectiveRole }
-              : {}),
-          },
-        });
-      } catch {
-        // O cron vai pegar no próximo ciclo — não é erro fatal
-      }
+      supabase.functions.invoke('process-whatsapp-broadcasts', {
+        body: {
+          company_id: companyId,
+          ...(isImpersonatingCompany && scopeCompanyId
+            ? { scope_company_id: scopeCompanyId, impersonated_by_superadmin: true, effective_role: effectiveRole }
+            : {}),
+        },
+      }).catch(() => {});
 
       return createdBroadcast;
     },

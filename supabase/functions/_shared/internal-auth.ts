@@ -64,8 +64,8 @@ export async function getAuthenticatedUser(req: Request) {
   });
 
   const { data: { user }, error } = await supabaseUser.auth.getUser();
-  if (error) {
-    throw new Error(error.message);
+  if (error || !user) {
+    return null;
   }
 
   return user;
