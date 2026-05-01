@@ -614,18 +614,16 @@ export default function BroadcastsTab({ companyId }: Props) {
                 return (
                   <div
                     key={b.id}
-                    className="group rounded-lg border p-4 transition-colors hover:bg-muted/40"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailsBroadcast(b)}
+                    onKeyDown={(e) => e.key === 'Enter' && setDetailsBroadcast(b)}
+                    className="group cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/40"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setDetailsBroadcast(b)}
-                            className="text-left font-medium hover:underline"
-                          >
-                            {b.name}
-                          </button>
+                          <span className="font-medium">{b.name}</span>
                           <Badge variant="outline" className={cn('border text-xs', statusCfg.className)}>
                             {statusCfg.label}
                           </Badge>
@@ -644,7 +642,7 @@ export default function BroadcastsTab({ companyId }: Props) {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setCancelTargetId(b.id)}
+                            onClick={(e) => { e.stopPropagation(); setCancelTargetId(b.id); }}
                             className="gap-2"
                           >
                             <Square className="h-4 w-4" /> Cancelar
@@ -654,7 +652,7 @@ export default function BroadcastsTab({ companyId }: Props) {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => setDeleteTargetId(b.id)}
+                            onClick={(e) => { e.stopPropagation(); setDeleteTargetId(b.id); }}
                             disabled={deleteBroadcastMutation.isPending}
                             className="gap-2 text-muted-foreground hover:text-destructive"
                           >
