@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Send, Users } from 'lucide-react';
+import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -180,33 +180,6 @@ function getVisibleOccasionLabel(occasion: string | null | undefined) {
   return normalizedOccasion.toLowerCase() === 'outro' ? null : normalizedOccasion;
 }
 
-function getAuditChangeEntries(item: ReservationTimelineItem) {
-  if (item.source !== 'audit' || !item.payload || typeof item.payload !== 'object') {
-    return [];
-  }
-
-  if (item.event_name === 'created') {
-    return [];
-  }
-
-  const changes = item.payload.changes;
-  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
-    return [];
-  }
-
-  return Object.entries(changes)
-    .filter(([, change]) => change && typeof change === 'object' && !Array.isArray(change))
-    .map(([field, change]) => {
-      const typedChange = change as { old?: unknown; new?: unknown };
-
-      return {
-        field,
-        label: AUDIT_FIELD_LABELS[field] ?? field,
-        oldValue: formatAuditValue(field, typedChange.old),
-        newValue: formatAuditValue(field, typedChange.new),
-      };
-    });
-}
 
 function getAuditActorLabel(item: ReservationTimelineItem) {
   if (item.source !== 'audit') return null;
@@ -259,7 +232,6 @@ export default function ReservationDetailsDialog({
   showLeadHistory = false,
   onReservationSelect,
 }: ReservationDetailsDialogProps) {
-  const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
   const [auditHistoryOpen, setAuditHistoryOpen] = useState(false);
   const normalizedPhone = normalizeBrazilPhoneDigits(reservation?.guest_phone);
@@ -270,7 +242,6 @@ export default function ReservationDetailsDialog({
 
   useEffect(() => {
     if (!open) {
-      setSelectedPayload(null);
       setEventHistoryOpen(false);
       setAuditHistoryOpen(false);
     }
@@ -386,7 +357,6 @@ export default function ReservationDetailsDialog({
       <div className="space-y-3">
         {items.map((item) => {
           const timelineTitle = formatTimelineTitle(item);
-          const auditChanges = getAuditChangeEntries(item);
           const auditActorLabel = getAuditActorLabel(item);
 
           return (
@@ -420,43 +390,12 @@ export default function ReservationDetailsDialog({
                   )}
                 </div>
 
-                {item.payload && Object.keys(item.payload).length > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full sm:w-auto"
-                    onClick={() =>
-                      setSelectedPayload({
-                        title: `${timelineTitle} (${formatTimelineSource(item.source)})`,
-                        content: JSON.stringify(item.payload, null, 2),
-                      })
-                    }
-                  >
-                    Ver payload
-                  </Button>
-                )}
               </div>
 
               {item.description && (
                 <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                   {item.description}
                 </p>
-              )}
-
-              {auditChanges.length > 0 && (
-                <div className="mt-3 grid gap-2">
-                  {auditChanges.map((change) => (
-                    <div
-                      key={`${item.id}-${change.field}`}
-                      className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs"
-                    >
-                      <p className="font-medium text-foreground">{change.label}</p>
-                      <p className="mt-1 text-muted-foreground">De: {change.oldValue}</p>
-                      <p className="text-muted-foreground">Para: {change.newValue}</p>
-                    </div>
-                  ))}
-                </div>
               )}
             </div>
           );
@@ -642,8 +581,7 @@ export default function ReservationDetailsDialog({
                   <div className="space-y-3">
                     {eventTimeline.map((item) => {
                       const timelineTitle = formatTimelineTitle(item);
-                      const auditChanges = getAuditChangeEntries(item);
-                      const auditActorLabel = getAuditActorLabel(item);
+                                  const auditActorLabel = getAuditActorLabel(item);
 
                       return (
                       <div key={`${item.source}-${item.id}`} className="overflow-hidden rounded-lg border border-border bg-background/80 p-3 text-sm">
@@ -676,42 +614,12 @@ export default function ReservationDetailsDialog({
                             )}
                           </div>
 
-                          {item.payload && Object.keys(item.payload).length > 0 && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full sm:w-auto"
-                              onClick={() =>
-                                setSelectedPayload({
-                                  title: `${timelineTitle} (${formatTimelineSource(item.source)})`,
-                                  content: JSON.stringify(item.payload, null, 2),
-                                })
-                              }
-                            >
-                              Ver payload
-                            </Button>
-                          )}
                         </div>
 
                         {item.description && (
                           <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                             {item.description}
                           </p>
-                        )}
-                        {auditChanges.length > 0 && (
-                          <div className="mt-3 grid gap-2">
-                            {auditChanges.map((change) => (
-                              <div
-                                key={`${item.id}-${change.field}`}
-                                className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs"
-                              >
-                                <p className="font-medium text-foreground">{change.label}</p>
-                                <p className="mt-1 text-muted-foreground">De: {change.oldValue}</p>
-                                <p className="text-muted-foreground">Para: {change.newValue}</p>
-                              </div>
-                            ))}
-                          </div>
                         )}
                       </div>
                     )})}
@@ -877,19 +785,6 @@ export default function ReservationDetailsDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedPayload} onOpenChange={(nextOpen) => !nextOpen && setSelectedPayload(null)}>
-        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Send className="h-4 w-4" />
-              {selectedPayload?.title ?? 'Payload'}
-            </DialogTitle>
-          </DialogHeader>
-          <pre className="overflow-x-auto rounded-lg border border-border bg-muted/30 p-4 text-xs text-foreground">
-            {selectedPayload?.content ?? ''}
-          </pre>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
