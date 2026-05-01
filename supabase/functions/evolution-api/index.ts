@@ -351,10 +351,35 @@ Deno.serve(async (req) => {
 
         // Update status in DB
         const isConnected = parsed?.instance?.state === 'open';
-        await supabaseAdmin.from('company_whatsapp_instances').update({
+
+        const dbUpdate: Record<string, unknown> = {
           status: isConnected ? 'connected' : 'disconnected',
           updated_at: new Date().toISOString(),
-        }).eq('company_id', company_id);
+        };
+
+        if (isConnected) {
+          try {
+            const profileRes = await fetch(`${evolutionUrl}/instance/fetchInstances?instanceName=${instance.instance_name}`, {
+              method: 'GET',
+              headers,
+            });
+            if (profileRes.ok) {
+              const profileData = await profileRes.json();
+              const p = Array.isArray(profileData) ? profileData[0] : profileData;
+              const displayName = p?.profileName ?? p?.instance?.profileName ?? null;
+              const profilePictureUrl = p?.profilePicUrl ?? p?.instance?.profilePicUrl ?? null;
+              const ownerJid = p?.ownerJid ?? p?.owner ?? p?.instance?.owner ?? null;
+              const phoneNumber = ownerJid ? String(ownerJid).split('@')[0] : null;
+              if (displayName) dbUpdate.display_name = displayName;
+              if (profilePictureUrl) dbUpdate.profile_picture_url = profilePictureUrl;
+              if (phoneNumber) dbUpdate.phone_number = phoneNumber;
+            }
+          } catch (profileErr) {
+            console.warn('Could not fetch profile info:', profileErr);
+          }
+        }
+
+        await supabaseAdmin.from('company_whatsapp_instances').update(dbUpdate).eq('company_id', company_id);
 
         break;
       }

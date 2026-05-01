@@ -125,10 +125,31 @@ export default function WhatsAppConnection({ companyId }: Props) {
             {isConnected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
             {isConnected ? 'Conectado' : 'Desconectado'}
           </Badge>
-          {instance?.phone_number && (
-            <span className="text-sm text-muted-foreground">{instance.phone_number}</span>
-          )}
         </div>
+
+        {isConnected && (instance?.display_name || instance?.phone_number || instance?.profile_picture_url) && (
+          <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
+            {instance.profile_picture_url ? (
+              <img
+                src={instance.profile_picture_url}
+                alt="Foto do WhatsApp"
+                className="h-10 w-10 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <Smartphone className="h-5 w-5 text-primary" />
+              </div>
+            )}
+            <div className="min-w-0">
+              {instance.display_name && (
+                <p className="truncate text-sm font-medium text-foreground">{instance.display_name}</p>
+              )}
+              {instance.phone_number && (
+                <p className="truncate text-xs text-muted-foreground">{instance.phone_number}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {(qrCode || pairingCode) && !isConnected && (
           <div className="flex flex-col items-center gap-3 py-4">

@@ -19,6 +19,8 @@ export interface WhatsAppInstance {
   instance_name: string;
   status: string;
   phone_number: string | null;
+  display_name: string | null;
+  profile_picture_url: string | null;
   created_at: string;
   updated_at: string;
 }
