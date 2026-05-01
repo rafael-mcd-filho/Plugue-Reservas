@@ -168,8 +168,6 @@ const DAY_NAMES_BY_INDEX = Object.entries(DAY_MAP).reduce<Record<number, string>
   return acc;
 }, {});
 
-const CLOSING_SOON_THRESHOLD_MINUTES = 60;
-
 interface OpeningSlot {
   day: string;
   open: string;
@@ -180,8 +178,8 @@ interface OpeningSlot {
 
 interface OpeningStatus {
   title: string;
-  description: string;
-  variant: 'open' | 'closing' | 'closed';
+  description: string | null;
+  variant: 'open' | 'closed';
 }
 
 function parseTimeToMinutes(time?: string | null) {
@@ -189,16 +187,6 @@ function parseTimeToMinutes(time?: string | null) {
   const [hours, minutes] = time.split(':').map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   return hours * 60 + minutes;
-}
-
-function describeDuration(totalMinutes: number) {
-  const minutes = Math.max(1, Math.ceil(totalMinutes));
-  if (minutes < 60) return `${minutes} min`;
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (remainingMinutes === 0) return `${hours}h`;
-  return `${hours}h${String(remainingMinutes).padStart(2, '0')}`;
 }
 
 function isSameCalendarDate(a: Date, b: Date) {
@@ -244,13 +232,13 @@ function buildOpeningSlots(hours: OpeningHour[], now: Date) {
   return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-function describeOpeningMoment(slot: OpeningSlot, now: Date) {
+function describeOpeningDay(slot: OpeningSlot, now: Date) {
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
 
-  if (isSameCalendarDate(slot.start, now)) return `hoje às ${slot.open}`;
-  if (isSameCalendarDate(slot.start, tomorrow)) return `amanhã às ${slot.open}`;
-  return `${slot.day} às ${slot.open}`;
+  if (isSameCalendarDate(slot.start, now)) return 'Aberto hoje';
+  if (isSameCalendarDate(slot.start, tomorrow)) return 'Abre amanhã';
+  return `Abre ${format(slot.start, "EEEE, dd/MM", { locale: ptBR })}`;
 }
 
 function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null {
@@ -260,22 +248,18 @@ function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null
   const currentSlot = slots.find((slot) => now >= slot.start && now < slot.end);
 
   if (currentSlot) {
-    const minutesToClose = Math.ceil((currentSlot.end.getTime() - now.getTime()) / 60_000);
-    const nextSlot = slots.find((slot) => slot.start > currentSlot.end);
-
-    if (minutesToClose <= CLOSING_SOON_THRESHOLD_MINUTES) {
-      return {
-        title: `Fechando em ${describeDuration(minutesToClose)}`,
-        description: nextSlot
-          ? `Depois, abrimos novamente ${describeOpeningMoment(nextSlot, now)}.`
-          : 'Consulte o restaurante para confirmar a próxima abertura.',
-        variant: 'closing',
-      };
-    }
-
     return {
-      title: 'Aberto agora',
-      description: `Hoje até ${currentSlot.close}.`,
+      title: 'Aberto hoje',
+      description: null,
+      variant: 'open',
+    };
+  }
+
+  const todaySlot = slots.find((slot) => isSameCalendarDate(slot.start, now));
+  if (todaySlot) {
+    return {
+      title: 'Aberto hoje',
+      description: null,
       variant: 'open',
     };
   }
@@ -283,15 +267,15 @@ function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null
   const nextSlot = slots.find((slot) => slot.start > now);
   if (!nextSlot) {
     return {
-      title: 'Fechado agora',
-      description: 'Consulte o restaurante para confirmar a próxima abertura.',
+      title: 'Fechado hoje',
+      description: null,
       variant: 'closed',
     };
   }
 
   return {
-    title: 'Fechado agora',
-    description: `Próxima abertura ${describeOpeningMoment(nextSlot, now)}.`,
+    title: describeOpeningDay(nextSlot, now),
+    description: null,
     variant: 'closed',
   };
 }
@@ -866,22 +850,22 @@ export default function CompanyPublicPage() {
                         className={cn(
                           'mt-3 rounded-md border px-3 py-2.5',
                           openingStatus.variant === 'open' && 'border-emerald-200 bg-emerald-50 text-emerald-950',
-                          openingStatus.variant === 'closing' && 'border-red-200 bg-red-50 text-red-950',
                           openingStatus.variant === 'closed' && 'border-amber-200 bg-amber-50 text-amber-950',
                         )}
                         role="status"
                       >
                         <p className="text-sm font-semibold">{openingStatus.title}</p>
-                        <p
-                          className={cn(
-                            'mt-0.5 text-xs leading-relaxed',
-                            openingStatus.variant === 'open' && 'text-emerald-800',
-                            openingStatus.variant === 'closing' && 'text-red-800',
-                            openingStatus.variant === 'closed' && 'text-amber-800',
-                          )}
-                        >
-                          {openingStatus.description}
-                        </p>
+                        {openingStatus.description && (
+                          <p
+                            className={cn(
+                              'mt-0.5 text-xs leading-relaxed',
+                              openingStatus.variant === 'open' && 'text-emerald-800',
+                              openingStatus.variant === 'closed' && 'text-amber-800',
+                            )}
+                          >
+                            {openingStatus.description}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
