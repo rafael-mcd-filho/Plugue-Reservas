@@ -1,13 +1,27 @@
 import { type ChangeEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, parseISO } from 'date-fns';
+import {
+  endOfDay,
+  endOfMonth,
+  endOfWeek,
+  format,
+  parseISO,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+  subMonths,
+  subWeeks,
+} from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   Image as ImageIcon,
   Loader2,
   Play,
+  Search,
   Send,
   Square,
   Trash2,
@@ -15,7 +29,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { DateRange } from 'react-day-picker';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +37,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +57,33 @@ import { cn } from '@/lib/utils';
 import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { parseWhatsAppErrorDetails } from '@/lib/whatsapp-automations';
+
+type PeriodPreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+
+const PERIOD_PRESET_LABELS: Record<PeriodPreset, string> = {
+  all: 'Todo o período',
+  today: 'Hoje',
+  yesterday: 'Ontem',
+  this_week: 'Esta semana',
+  last_week: 'Semana passada',
+  this_month: 'Mês atual',
+  last_month: 'Mês anterior',
+  custom: 'Personalizado',
+};
+
+function getPresetDateRange(preset: PeriodPreset): { start: Date | null; end: Date | null } {
+  const now = new Date();
+  switch (preset) {
+    case 'all': return { start: null, end: null };
+    case 'today': return { start: startOfDay(now), end: endOfDay(now) };
+    case 'yesterday': { const y = subDays(startOfDay(now), 1); return { start: y, end: endOfDay(y) }; }
+    case 'this_week': return { start: startOfWeek(now, { weekStartsOn: 0 }), end: endOfDay(now) };
+    case 'last_week': { const lw = subWeeks(now, 1); return { start: startOfWeek(lw, { weekStartsOn: 0 }), end: endOfWeek(lw, { weekStartsOn: 0 }) }; }
+    case 'this_month': return { start: startOfMonth(now), end: endOfDay(now) };
+    case 'last_month': { const lm = subMonths(now, 1); return { start: startOfMonth(lm), end: endOfMonth(lm) }; }
+    case 'custom': return { start: null, end: null };
+  }
+}
 
 interface Props {
   companyId: string;
@@ -140,8 +180,11 @@ export default function BroadcastsTab({ companyId }: Props) {
   const { user } = useAuth();
   const { isImpersonatingCompany, effectiveRole, scopeCompanyId } = useImpersonation();
 
-  const [filterRange, setFilterRange] = useState<DateRange | undefined>();
+  const [filterPeriodPreset, setFilterPeriodPreset] = useState<PeriodPreset>('all');
+  const [filterCustomStart, setFilterCustomStart] = useState('');
+  const [filterCustomEnd, setFilterCustomEnd] = useState('');
   const [filterStatuses, setFilterStatuses] = useState<string[]>(['confirmed', 'checked_in']);
+  const [committedFilters, setCommittedFilters] = useState<{ start: Date | null; end: Date | null; statuses: string[] } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [broadcastName, setBroadcastName] = useState('');
@@ -154,8 +197,9 @@ export default function BroadcastsTab({ companyId }: Props) {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const { data: reservations = [], isFetching: loadingReservations } = useQuery({
-    queryKey: ['broadcast-candidates', companyId, filterRange?.from, filterRange?.to, filterStatuses.join(',')],
+    queryKey: ['broadcast-candidates', companyId, committedFilters?.start?.toISOString(), committedFilters?.end?.toISOString(), committedFilters?.statuses.join(',')],
     queryFn: async () => {
+      if (!committedFilters) return [];
       let query = supabase
         .from('reservations')
         .select('id, guest_name, guest_phone, date, time, party_size, status')
@@ -164,21 +208,21 @@ export default function BroadcastsTab({ companyId }: Props) {
         .order('time', { ascending: true })
         .limit(500);
 
-      if (filterRange?.from) {
-        query = query.gte('date', format(filterRange.from, 'yyyy-MM-dd'));
+      if (committedFilters.start) {
+        query = query.gte('date', format(committedFilters.start, 'yyyy-MM-dd'));
       }
-      if (filterRange?.to) {
-        query = query.lte('date', format(filterRange.to, 'yyyy-MM-dd'));
+      if (committedFilters.end) {
+        query = query.lte('date', format(committedFilters.end, 'yyyy-MM-dd'));
       }
-      if (filterStatuses.length > 0) {
-        query = query.in('status', filterStatuses);
+      if (committedFilters.statuses.length > 0) {
+        query = query.in('status', committedFilters.statuses);
       }
 
       const { data, error } = await query;
       if (error) throw error;
       return (data ?? []) as ReservationCandidate[];
     },
-    enabled: !!companyId && (filterStatuses.length > 0),
+    enabled: !!companyId && committedFilters !== null && committedFilters.statuses.length > 0,
   });
 
   const { data: broadcasts = [], isLoading: loadingBroadcasts } = useQuery({
@@ -299,9 +343,9 @@ export default function BroadcastsTab({ companyId }: Props) {
           delay_min_seconds: delayMin,
           delay_max_seconds: delayMax,
           status: 'running',
-          filter_date_from: filterRange?.from ? format(filterRange.from, 'yyyy-MM-dd') : null,
-          filter_date_to: filterRange?.to ? format(filterRange.to, 'yyyy-MM-dd') : null,
-          filter_statuses: filterStatuses,
+          filter_date_from: committedFilters?.start ? format(committedFilters.start, 'yyyy-MM-dd') : null,
+          filter_date_to: committedFilters?.end ? format(committedFilters.end, 'yyyy-MM-dd') : null,
+          filter_statuses: committedFilters?.statuses ?? [],
           total_recipients: selectedRecipients.length,
         })
         .select('*')
@@ -393,6 +437,16 @@ export default function BroadcastsTab({ companyId }: Props) {
 
   function toggleStatusFilter(status: string) {
     setFilterStatuses((prev) => (prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]));
+  }
+
+  function handleSearch() {
+    const range = filterPeriodPreset === 'custom'
+      ? {
+          start: filterCustomStart ? startOfDay(parseISO(filterCustomStart)) : null,
+          end: filterCustomEnd ? endOfDay(parseISO(filterCustomEnd)) : null,
+        }
+      : getPresetDateRange(filterPeriodPreset);
+    setCommittedFilters({ ...range, statuses: filterStatuses });
     setSelectedIds(new Set());
   }
 
@@ -408,39 +462,72 @@ export default function BroadcastsTab({ companyId }: Props) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-3">
             <div className="space-y-2">
               <Label>Período das reservas</Label>
-              <DateRangePicker
-                value={filterRange}
-                onChange={(range) => {
-                  setFilterRange(range);
-                  setSelectedIds(new Set());
-                }}
-                className="w-full"
-              />
+              <Select value={filterPeriodPreset} onValueChange={(v) => setFilterPeriodPreset(v as PeriodPreset)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(PERIOD_PRESET_LABELS) as PeriodPreset[]).map((key) => (
+                    <SelectItem key={key} value={key}>{PERIOD_PRESET_LABELS[key]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
               <Label>Status das reservas</Label>
-              <div className="flex flex-wrap gap-2">
-                {STATUS_FILTER_OPTIONS.map((option) => {
-                  const active = filterStatuses.includes(option.value);
-                  return (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      size="sm"
-                      variant={active ? 'default' : 'outline'}
-                      onClick={() => toggleStatusFilter(option.value)}
-                    >
-                      {option.label}
-                    </Button>
-                  );
-                })}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="w-full justify-between gap-2">
+                    <span className="truncate">
+                      {filterStatuses.length === 0
+                        ? 'Nenhum selecionado'
+                        : filterStatuses.length === STATUS_FILTER_OPTIONS.length
+                          ? 'Todos os status'
+                          : filterStatuses.map((s) => STATUS_FILTER_OPTIONS.find((o) => o.value === s)?.label).join(', ')}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-2" align="start">
+                  <div className="space-y-1">
+                    {STATUS_FILTER_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <Checkbox
+                          checked={filterStatuses.includes(option.value)}
+                          onCheckedChange={() => toggleStatusFilter(option.value)}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <Button onClick={handleSearch} disabled={filterStatuses.length === 0} className="gap-2">
+              <Search className="h-4 w-4" /> Buscar
+            </Button>
+          </div>
+
+          {filterPeriodPreset === 'custom' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Data inicial</Label>
+                <Input type="date" value={filterCustomStart} onChange={(e) => setFilterCustomStart(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Data final</Label>
+                <Input type="date" value={filterCustomEnd} onChange={(e) => setFilterCustomEnd(e.target.value)} />
               </div>
             </div>
-          </div>
+          )}
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -459,7 +546,9 @@ export default function BroadcastsTab({ companyId }: Props) {
                 </div>
               ) : uniqueRecipients.length === 0 ? (
                 <div className="p-6 text-center text-sm text-muted-foreground">
-                  Nenhuma reserva encontrada para os filtros selecionados.
+                  {committedFilters === null
+                    ? 'Selecione os filtros e clique em "Buscar destinatários" para carregar os leads.'
+                    : 'Nenhuma reserva encontrada para os filtros selecionados.'}
                 </div>
               ) : (
                 <Table>

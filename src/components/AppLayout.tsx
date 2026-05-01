@@ -404,7 +404,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-dvh overflow-hidden bg-background">
       {mobileOpen && (
         <div
           className={cn(

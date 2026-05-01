@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { endOfDay, format, parseISO, startOfDay } from 'date-fns';
+import {
+  endOfDay,
+  endOfMonth,
+  endOfWeek,
+  format,
+  parseISO,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+  subMonths,
+  subWeeks,
+} from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   BadgeCheck,
@@ -10,6 +22,7 @@ import {
   MousePointerClick,
   RefreshCcw,
   Save,
+  Search,
   Send,
   ShieldAlert,
   Trash2,
@@ -36,6 +49,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface TrackingSettingsForm {
   pixel_id: string;
@@ -118,12 +133,29 @@ interface MetaAttemptRow {
 
 type ClearEventDataScope = 'meta_queue' | 'event_log';
 
+type PeriodPreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
 const EVENT_LOG_LIMIT = 100;
 const EVENT_LOG_PAGE_SIZE = 10;
 const META_QUEUE_LIMIT = 100;
 const META_ATTEMPTS_LIMIT = META_QUEUE_LIMIT * 5;
 const META_QUEUE_PAGE_SIZE = 8;
 const EVENT_TYPE_FILTER_ALL = 'all';
+
+const PERIOD_PRESET_LABELS: Record<PeriodPreset, string> = {
+  all: 'Todo o período',
+  today: 'Hoje',
+  yesterday: 'Ontem',
+  this_week: 'Esta semana',
+  last_week: 'Semana passada',
+  this_month: 'Mês atual',
+  last_month: 'Mês anterior',
+  custom: 'Personalizado',
+};
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function createDefaultSettings(): TrackingSettingsForm {
   return {
@@ -135,6 +167,34 @@ function createDefaultSettings(): TrackingSettingsForm {
     send_initiate_checkout: true,
     send_lead: true,
   };
+}
+
+function getPresetDateRange(preset: PeriodPreset): { start: Date | null; end: Date | null } {
+  const now = new Date();
+  switch (preset) {
+    case 'all':
+      return { start: null, end: null };
+    case 'today':
+      return { start: startOfDay(now), end: endOfDay(now) };
+    case 'yesterday': {
+      const y = subDays(startOfDay(now), 1);
+      return { start: y, end: endOfDay(y) };
+    }
+    case 'this_week':
+      return { start: startOfWeek(now, { weekStartsOn: 0 }), end: endOfDay(now) };
+    case 'last_week': {
+      const lw = subWeeks(now, 1);
+      return { start: startOfWeek(lw, { weekStartsOn: 0 }), end: endOfWeek(lw, { weekStartsOn: 0 }) };
+    }
+    case 'this_month':
+      return { start: startOfMonth(now), end: endOfDay(now) };
+    case 'last_month': {
+      const lm = subMonths(now, 1);
+      return { start: startOfMonth(lm), end: endOfMonth(lm) };
+    }
+    case 'custom':
+      return { start: null, end: null };
+  }
 }
 
 function formatDateTime(value: string | null) {
@@ -183,26 +243,17 @@ function getVisiblePages(currentPage: number, totalPages: number) {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
   }
-
-  if (currentPage <= 4) {
-    return [1, 2, 3, 4, 5, 'ellipsis', totalPages] as const;
-  }
-
+  if (currentPage <= 4) return [1, 2, 3, 4, 5, 'ellipsis', totalPages] as const;
   if (currentPage >= totalPages - 3) {
     return [1, 'ellipsis', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages] as const;
   }
-
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages] as const;
 }
 
 function getPaginationSummary(totalItems: number, currentPage: number, pageSize: number, label: string) {
-  if (totalItems === 0) {
-    return `Exibindo 0 de 0 ${label}`;
-  }
-
+  if (totalItems === 0) return `Exibindo 0 de 0 ${label}`;
   const start = (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalItems);
-
   return `Exibindo ${start}-${end} de ${totalItems} ${label}`;
 }
 
@@ -230,7 +281,6 @@ function getMetaLastResponseText(item: MetaQueueRow, attempts: MetaAttemptRow[])
   const latestAttempt = attempts[0] ?? null;
   const httpStatus = latestAttempt?.response_status ?? item.last_response_status;
   const summary = latestAttempt?.error_message ?? latestAttempt?.response_body ?? item.last_error;
-
   if (httpStatus && summary) return `HTTP ${httpStatus} · ${summary}`;
   if (httpStatus) return `HTTP ${httpStatus}`;
   return summary ?? '-';
@@ -249,7 +299,6 @@ function buildMetaQueueDetailContent(item: MetaQueueRow, attempts: MetaAttemptRo
     created_at: item.created_at,
     sent_at: item.sent_at,
   };
-
   const attemptsContent = attempts.length > 0
     ? attempts.map((attempt, index) => [
       `TENTATIVA ${index + 1} - ${formatMetaStatus(attempt.status)} - ${formatDateTime(attempt.created_at)}`,
@@ -263,7 +312,6 @@ function buildMetaQueueDetailContent(item: MetaQueueRow, attempts: MetaAttemptRo
       attempt.response_body ?? attempt.error_message ?? '-',
     ].join('\n')).join('\n\n---\n\n')
     : 'Nenhuma tentativa registrada para este evento.';
-
   return [
     'STATUS ATUAL DA FILA',
     buildPayloadPreview(queueSummary) ?? '{}',
@@ -288,11 +336,15 @@ function formatLocationFromUserData(userData: Record<string, unknown> | null | u
   const country = getRecordText(userData, 'country');
   const zip = getRecordText(userData, 'zip');
   const location = [city, state, country].filter(Boolean).join(', ');
-
   if (location && zip) return `${location} - ${zip}`;
   if (location) return location;
   if (zip) return zip;
   return 'Não coletada automaticamente';
+}
+
+function matchesSearch(haystack: string | null | undefined, needle: string): boolean {
+  if (!haystack) return false;
+  return haystack.toLowerCase().includes(needle);
 }
 
 function DetailItem({ label, value, mono = false }: { label: string; value: string | number | null | undefined; mono?: boolean }) {
@@ -306,6 +358,8 @@ function DetailItem({ label, value, mono = false }: { label: string; value: stri
   );
 }
 
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export default function CompanyEvents() {
   const { companyId, companyName } = useCompanySlug();
   const queryClient = useQueryClient();
@@ -313,17 +367,28 @@ export default function CompanyEvents() {
   const [selectedPayload, setSelectedPayload] = useState<{ title: string; content: string } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<TrackingEventRow | null>(null);
   const [tokenVisible, setTokenVisible] = useState(false);
+
+  // Event log filters
   const [eventTypeFilter, setEventTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
-  const [eventStartDate, setEventStartDate] = useState('');
-  const [eventEndDate, setEventEndDate] = useState('');
-  const [metaQueueTypeFilter, setMetaQueueTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
-  const [metaQueueStartDate, setMetaQueueStartDate] = useState('');
-  const [metaQueueEndDate, setMetaQueueEndDate] = useState('');
+  const [eventPeriodPreset, setEventPeriodPreset] = useState<PeriodPreset>('all');
+  const [eventCustomStart, setEventCustomStart] = useState('');
+  const [eventCustomEnd, setEventCustomEnd] = useState('');
+  const [eventSearch, setEventSearch] = useState('');
   const [eventLogPage, setEventLogPage] = useState(1);
+
+  // Meta queue filters
+  const [metaQueueTypeFilter, setMetaQueueTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
+  const [metaQueuePeriodPreset, setMetaQueuePeriodPreset] = useState<PeriodPreset>('all');
+  const [metaQueueCustomStart, setMetaQueueCustomStart] = useState('');
+  const [metaQueueCustomEnd, setMetaQueueCustomEnd] = useState('');
+  const [metaQueueSearch, setMetaQueueSearch] = useState('');
   const [metaQueuePage, setMetaQueuePage] = useState(1);
 
-  const hasInvalidEventDateRange = !!eventStartDate && !!eventEndDate && eventStartDate > eventEndDate;
-  const hasInvalidMetaQueueDateRange = !!metaQueueStartDate && !!metaQueueEndDate && metaQueueStartDate > metaQueueEndDate;
+  const hasInvalidEventDateRange = eventPeriodPreset === 'custom'
+    && !!eventCustomStart && !!eventCustomEnd && eventCustomStart > eventCustomEnd;
+
+  const hasInvalidMetaQueueDateRange = metaQueuePeriodPreset === 'custom'
+    && !!metaQueueCustomStart && !!metaQueueCustomEnd && metaQueueCustomStart > metaQueueCustomEnd;
 
   const { data: settings } = useQuery({
     queryKey: ['company-tracking-settings', companyId],
@@ -333,7 +398,6 @@ export default function CompanyEvents() {
         .select('*')
         .eq('company_id', companyId)
         .maybeSingle();
-
       if (error) throw error;
       return (data as Partial<TrackingSettingsForm> | null) ?? null;
     },
@@ -341,11 +405,7 @@ export default function CompanyEvents() {
   });
 
   useEffect(() => {
-    if (!settings) {
-      setSettingsForm(createDefaultSettings());
-      return;
-    }
-
+    if (!settings) { setSettingsForm(createDefaultSettings()); return; }
     setSettingsForm({
       pixel_id: settings.pixel_id ?? '',
       access_token: settings.access_token ?? '',
@@ -366,16 +426,12 @@ export default function CompanyEvents() {
         .eq('company_id', companyId)
         .order('occurred_at', { ascending: false })
         .limit(500);
-
       if (error) throw error;
-
-      return Array.from(
-        new Set(
-          (((data as Pick<TrackingEventRow, 'event_name'>[]) ?? [])
-            .map((event) => event.event_name)
-            .filter((eventName): eventName is string => typeof eventName === 'string' && eventName.trim().length > 0)),
-        ),
-      ).sort((left, right) => left.localeCompare(right));
+      return Array.from(new Set(
+        (((data as Pick<TrackingEventRow, 'event_name'>[]) ?? [])
+          .map((e) => e.event_name)
+          .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)),
+      )).sort((a, b) => a.localeCompare(b));
     },
     enabled: !!companyId,
     refetchInterval: 30_000,
@@ -390,24 +446,27 @@ export default function CompanyEvents() {
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
         .limit(500);
-
       if (error) throw error;
-
-      return Array.from(
-        new Set(
-          (((data as Array<{ meta_event_name?: string | null }>) ?? [])
-            .map((event) => event.meta_event_name)
-            .filter((eventName): eventName is string => typeof eventName === 'string' && eventName.trim().length > 0)),
-        ),
-      ).sort((left, right) => left.localeCompare(right));
+      return Array.from(new Set(
+        (((data as Array<{ meta_event_name?: string | null }>) ?? [])
+          .map((e) => e.meta_event_name)
+          .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)),
+      )).sort((a, b) => a.localeCompare(b));
     },
     enabled: !!companyId,
     refetchInterval: 30_000,
   });
 
   const { data: eventLog = [], isLoading: eventLogLoading } = useQuery({
-    queryKey: ['company-event-log', companyId, eventTypeFilter, eventStartDate, eventEndDate],
+    queryKey: ['company-event-log', companyId, eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd],
     queryFn: async () => {
+      const range = eventPeriodPreset === 'custom'
+        ? {
+            start: eventCustomStart ? startOfDay(parseISO(eventCustomStart)) : null,
+            end: eventCustomEnd ? endOfDay(parseISO(eventCustomEnd)) : null,
+          }
+        : getPresetDateRange(eventPeriodPreset);
+
       let query = supabase
         .from('tracking_events' as any)
         .select('id, session_id, journey_id, reservation_id, anonymous_id, event_id, event_name, tracking_source, step, occurred_at, path, page_url, referrer, event_source_url, metadata, user_data_snapshot')
@@ -415,24 +474,16 @@ export default function CompanyEvents() {
         .order('occurred_at', { ascending: false })
         .limit(EVENT_LOG_LIMIT);
 
-      if (eventTypeFilter !== EVENT_TYPE_FILTER_ALL) {
-        query = query.eq('event_name', eventTypeFilter);
-      }
-
-      if (eventStartDate) {
-        query = query.gte('occurred_at', startOfDay(parseISO(eventStartDate)).toISOString());
-      }
-
-      if (eventEndDate) {
-        query = query.lte('occurred_at', endOfDay(parseISO(eventEndDate)).toISOString());
-      }
+      if (eventTypeFilter !== EVENT_TYPE_FILTER_ALL) query = query.eq('event_name', eventTypeFilter);
+      if (range.start) query = query.gte('occurred_at', range.start.toISOString());
+      if (range.end) query = query.lte('occurred_at', range.end.toISOString());
 
       const { data, error } = await query;
       if (error) throw error;
 
       const events = (data as TrackingEventRow[]) ?? [];
       const sessionIds = Array.from(new Set(
-        events.map((event) => event.session_id).filter((value): value is string => !!value),
+        events.map((e) => e.session_id).filter((v): v is string => !!v),
       ));
       const sessionDetailsResult = sessionIds.length > 0
         ? await supabase
@@ -445,7 +496,7 @@ export default function CompanyEvents() {
       if (sessionDetailsResult.error) throw sessionDetailsResult.error;
 
       const sessionsById = new Map(
-        ((sessionDetailsResult.data as TrackingSessionRow[]) ?? []).map((session) => [session.id, session]),
+        ((sessionDetailsResult.data as TrackingSessionRow[]) ?? []).map((s) => [s.id, s]),
       );
 
       return events.map((event) => ({
@@ -459,8 +510,15 @@ export default function CompanyEvents() {
   });
 
   const { data: metaQueue = [], isLoading: metaQueueLoading } = useQuery({
-    queryKey: ['company-meta-queue', companyId, metaQueueTypeFilter, metaQueueStartDate, metaQueueEndDate],
+    queryKey: ['company-meta-queue', companyId, metaQueueTypeFilter, metaQueuePeriodPreset, metaQueueCustomStart, metaQueueCustomEnd],
     queryFn: async () => {
+      const range = metaQueuePeriodPreset === 'custom'
+        ? {
+            start: metaQueueCustomStart ? startOfDay(parseISO(metaQueueCustomStart)) : null,
+            end: metaQueueCustomEnd ? endOfDay(parseISO(metaQueueCustomEnd)) : null,
+          }
+        : getPresetDateRange(metaQueuePeriodPreset);
+
       let query = supabase
         .from('meta_event_queue' as any)
         .select('id, reservation_id, event_name, meta_event_name, status, attempts, last_response_status, last_error, payload, sent_at, created_at')
@@ -468,21 +526,12 @@ export default function CompanyEvents() {
         .order('created_at', { ascending: false })
         .limit(META_QUEUE_LIMIT);
 
-      if (metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL) {
-        query = query.eq('meta_event_name', metaQueueTypeFilter);
-      }
-
-      if (metaQueueStartDate) {
-        query = query.gte('created_at', startOfDay(parseISO(metaQueueStartDate)).toISOString());
-      }
-
-      if (metaQueueEndDate) {
-        query = query.lte('created_at', endOfDay(parseISO(metaQueueEndDate)).toISOString());
-      }
+      if (metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL) query = query.eq('meta_event_name', metaQueueTypeFilter);
+      if (range.start) query = query.gte('created_at', range.start.toISOString());
+      if (range.end) query = query.lte('created_at', range.end.toISOString());
 
       const { data, error } = await query;
       if (error) throw error;
-
       return (data as MetaQueueRow[]) ?? [];
     },
     enabled: !!companyId && !hasInvalidMetaQueueDateRange,
@@ -496,35 +545,64 @@ export default function CompanyEvents() {
     queryKey: ['company-meta-attempts', companyId, metaQueueIds],
     queryFn: async () => {
       if (metaQueueIds.length === 0) return [];
-
-      const attemptsQuery = supabase
+      const { data, error } = await supabase
         .from('meta_event_attempts' as any)
-        .select(
-          'id, queue_id, reservation_id, status, response_status, response_body, error_message, request_payload, created_at, queue:meta_event_queue!inner(event_name, meta_event_name)',
-        )
+        .select('id, queue_id, reservation_id, status, response_status, response_body, error_message, request_payload, created_at, queue:meta_event_queue!inner(event_name, meta_event_name)')
         .eq('company_id', companyId)
         .in('queue_id', metaQueueIds)
         .order('created_at', { ascending: false })
         .limit(META_ATTEMPTS_LIMIT);
-
-      const { data, error } = await attemptsQuery;
       if (error) throw error;
-
       return (data as MetaAttemptRow[]) ?? [];
     },
     enabled: !!companyId && !hasInvalidMetaQueueDateRange,
     refetchInterval: 30_000,
   });
 
+  // ── Search filtering (client-side) ─────────────────────────────────────────
+
+  const filteredEventLog = useMemo(() => {
+    const q = eventSearch.trim().toLowerCase();
+    if (!q) return eventLog;
+    return eventLog.filter((event) => {
+      if (matchesSearch(event.reservation_id, q)) return true;
+      if (matchesSearch(event.anonymous_id, q)) return true;
+      const snapshot = event.user_data_snapshot;
+      if (snapshot) {
+        const serialized = JSON.stringify(snapshot).toLowerCase();
+        if (serialized.includes(q)) return true;
+      }
+      const meta = event.metadata;
+      if (meta) {
+        const serialized = JSON.stringify(meta).toLowerCase();
+        if (serialized.includes(q)) return true;
+      }
+      return false;
+    });
+  }, [eventLog, eventSearch]);
+
+  const filteredMetaQueue = useMemo(() => {
+    const q = metaQueueSearch.trim().toLowerCase();
+    if (!q) return metaQueue;
+    return metaQueue.filter((item) => {
+      if (matchesSearch(item.reservation_id, q)) return true;
+      if (item.payload) {
+        const serialized = JSON.stringify(item.payload).toLowerCase();
+        if (serialized.includes(q)) return true;
+      }
+      return false;
+    });
+  }, [metaQueue, metaQueueSearch]);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
       const pixelId = settingsForm.pixel_id.trim();
       const accessToken = settingsForm.access_token.trim();
-
       if (settingsForm.capi_enabled && (!pixelId || !accessToken)) {
         throw new Error('Informe Pixel ID e Access Token antes de habilitar a Meta CAPI.');
       }
-
       const payload = {
         company_id: companyId,
         ...settingsForm,
@@ -534,20 +612,16 @@ export default function CompanyEvents() {
         test_event_code: settingsForm.test_event_code.trim() || null,
         updated_at: new Date().toISOString(),
       };
-
       const { error } = await supabase
         .from('company_tracking_settings' as any)
         .upsert(payload, { onConflict: 'company_id' });
-
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['company-tracking-settings', companyId] });
       toast.success('Configurações de tracking salvas.');
     },
-    onError: (error: any) => {
-      toast.error(`Erro ao salvar configurações: ${error.message}`);
-    },
+    onError: (error: any) => toast.error(`Erro ao salvar configurações: ${error.message}`),
   });
 
   const processQueueMutation = useMutation({
@@ -555,7 +629,6 @@ export default function CompanyEvents() {
       const { data, error } = await supabase.functions.invoke('process-meta-event-queue', {
         body: { company_id: companyId },
       });
-
       if (error) throw error;
       return (data ?? {}) as { processed?: number; sent?: number; failed?: number; skipped?: number };
     },
@@ -566,9 +639,7 @@ export default function CompanyEvents() {
         `Fila processada. Processados: ${result.processed ?? 0}, enviados: ${result.sent ?? 0}, falhas: ${result.failed ?? 0}, ignorados: ${result.skipped ?? 0}.`,
       );
     },
-    onError: (error: any) => {
-      toast.error(`Erro ao processar fila: ${error.message}`);
-    },
+    onError: (error: any) => toast.error(`Erro ao processar fila: ${error.message}`),
   });
 
   const clearEventDataMutation = useMutation({
@@ -577,7 +648,6 @@ export default function CompanyEvents() {
         _company_id: companyId,
         _scope: scope,
       });
-
       if (error) throw error;
       return data as Record<string, number>;
     },
@@ -587,38 +657,42 @@ export default function CompanyEvents() {
       queryClient.invalidateQueries({ queryKey: ['company-meta-event-types', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-meta-queue', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-meta-attempts', companyId] });
-      const total = Object.values(result ?? {}).reduce((sum, value) => sum + Number(value || 0), 0);
+      const total = Object.values(result ?? {}).reduce((sum, v) => sum + Number(v || 0), 0);
       if (scope === 'event_log') {
         setSelectedEvent(null);
         setEventTypeFilter(EVENT_TYPE_FILTER_ALL);
-        setEventStartDate('');
-        setEventEndDate('');
+        setEventPeriodPreset('all');
+        setEventCustomStart('');
+        setEventCustomEnd('');
+        setEventSearch('');
       }
       toast.success(scope === 'meta_queue'
         ? `Fila Meta limpa. ${total} registro(s) removido(s).`
         : `Log de eventos limpo. ${total} registro(s) removido(s).`,
       );
     },
-    onError: (error: any) => {
-      toast.error(`Erro ao limpar eventos: ${error.message}`);
-    },
+    onError: (error: any) => toast.error(`Erro ao limpar eventos: ${error.message}`),
   });
 
-  const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
-  const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL || !!eventStartDate || !!eventEndDate;
-  const hasMetaQueueFiltersActive = metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL || !!metaQueueStartDate || !!metaQueueEndDate;
-  const selectableEventTypes = useMemo(() => {
-    if (eventTypeFilter === EVENT_TYPE_FILTER_ALL || eventTypeOptions.includes(eventTypeFilter)) {
-      return eventTypeOptions;
-    }
+  // ── Derived values ─────────────────────────────────────────────────────────
 
+  const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
+
+  const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL
+    || eventPeriodPreset !== 'all'
+    || !!eventSearch.trim();
+
+  const hasMetaQueueFiltersActive = metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL
+    || metaQueuePeriodPreset !== 'all'
+    || !!metaQueueSearch.trim();
+
+  const selectableEventTypes = useMemo(() => {
+    if (eventTypeFilter === EVENT_TYPE_FILTER_ALL || eventTypeOptions.includes(eventTypeFilter)) return eventTypeOptions;
     return [eventTypeFilter, ...eventTypeOptions];
   }, [eventTypeFilter, eventTypeOptions]);
-  const selectableMetaQueueEventTypes = useMemo(() => {
-    if (metaQueueTypeFilter === EVENT_TYPE_FILTER_ALL || metaEventTypeOptions.includes(metaQueueTypeFilter)) {
-      return metaEventTypeOptions;
-    }
 
+  const selectableMetaQueueEventTypes = useMemo(() => {
+    if (metaQueueTypeFilter === EVENT_TYPE_FILTER_ALL || metaEventTypeOptions.includes(metaQueueTypeFilter)) return metaEventTypeOptions;
     return [metaQueueTypeFilter, ...metaEventTypeOptions];
   }, [metaEventTypeOptions, metaQueueTypeFilter]);
 
@@ -632,64 +706,56 @@ export default function CompanyEvents() {
     return grouped;
   }, [metaAttempts]);
 
-  const eventLogCountLabel = `${eventLog.length} ${eventLog.length === 1 ? 'resultado' : 'resultados'}`;
-  const metaQueueCountLabel = `${metaQueue.length} ${metaQueue.length === 1 ? 'evento' : 'eventos'} · ${metaAttempts.length} ${metaAttempts.length === 1 ? 'tentativa' : 'tentativas'}`;
+  const eventLogCountLabel = `${filteredEventLog.length} ${filteredEventLog.length === 1 ? 'resultado' : 'resultados'}`;
+  const metaQueueCountLabel = `${filteredMetaQueue.length} ${filteredMetaQueue.length === 1 ? 'evento' : 'eventos'} · ${metaAttempts.length} ${metaAttempts.length === 1 ? 'tentativa' : 'tentativas'}`;
+
   const eventLogEmptyMessage = hasInvalidEventDateRange
     ? 'Data inicial não pode ser maior que a data final.'
     : hasEventLogFiltersActive
       ? 'Nenhum evento encontrado para os filtros informados.'
       : 'Nenhum evento registrado ainda.';
+
   const metaQueueEmptyMessage = hasInvalidMetaQueueDateRange
-    ? 'Data inicial nao pode ser maior que a data final.'
+    ? 'Data inicial não pode ser maior que a data final.'
     : hasMetaQueueFiltersActive
       ? 'Nenhum item encontrado para os filtros informados.'
       : 'Nenhum item na fila ainda.';
+
   const hasAnyEventLogEntries = eventLog.length > 0 || eventTypeOptions.length > 0;
-  const eventLogTotalPages = Math.max(1, Math.ceil(eventLog.length / EVENT_LOG_PAGE_SIZE));
-  const metaQueueTotalPages = Math.max(1, Math.ceil(metaQueue.length / META_QUEUE_PAGE_SIZE));
+  const eventLogTotalPages = Math.max(1, Math.ceil(filteredEventLog.length / EVENT_LOG_PAGE_SIZE));
+  const metaQueueTotalPages = Math.max(1, Math.ceil(filteredMetaQueue.length / META_QUEUE_PAGE_SIZE));
 
   const paginatedEventLog = useMemo(() => {
-    const startIndex = (eventLogPage - 1) * EVENT_LOG_PAGE_SIZE;
-    return eventLog.slice(startIndex, startIndex + EVENT_LOG_PAGE_SIZE);
-  }, [eventLog, eventLogPage]);
+    const start = (eventLogPage - 1) * EVENT_LOG_PAGE_SIZE;
+    return filteredEventLog.slice(start, start + EVENT_LOG_PAGE_SIZE);
+  }, [filteredEventLog, eventLogPage]);
 
   const paginatedMetaQueue = useMemo(() => {
-    const startIndex = (metaQueuePage - 1) * META_QUEUE_PAGE_SIZE;
-    return metaQueue.slice(startIndex, startIndex + META_QUEUE_PAGE_SIZE);
-  }, [metaQueue, metaQueuePage]);
+    const start = (metaQueuePage - 1) * META_QUEUE_PAGE_SIZE;
+    return filteredMetaQueue.slice(start, start + META_QUEUE_PAGE_SIZE);
+  }, [filteredMetaQueue, metaQueuePage]);
 
   const eventLogPageSummary = useMemo(
-    () => getPaginationSummary(eventLog.length, eventLogPage, EVENT_LOG_PAGE_SIZE, 'eventos'),
-    [eventLog.length, eventLogPage],
+    () => getPaginationSummary(filteredEventLog.length, eventLogPage, EVENT_LOG_PAGE_SIZE, 'eventos'),
+    [filteredEventLog.length, eventLogPage],
   );
 
   const metaQueuePageSummary = useMemo(
-    () => getPaginationSummary(metaQueue.length, metaQueuePage, META_QUEUE_PAGE_SIZE, 'itens da fila'),
-    [metaQueue.length, metaQueuePage],
+    () => getPaginationSummary(filteredMetaQueue.length, metaQueuePage, META_QUEUE_PAGE_SIZE, 'itens da fila'),
+    [filteredMetaQueue.length, metaQueuePage],
   );
 
   const eventLogVisiblePages = useMemo(() => getVisiblePages(eventLogPage, eventLogTotalPages), [eventLogPage, eventLogTotalPages]);
   const metaQueueVisiblePages = useMemo(() => getVisiblePages(metaQueuePage, metaQueueTotalPages), [metaQueuePage, metaQueueTotalPages]);
 
-  useEffect(() => {
-    setEventLogPage(1);
-  }, [eventTypeFilter, eventStartDate, eventEndDate]);
+  // ── Effects ────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    setMetaQueuePage(1);
-  }, [metaQueueTypeFilter, metaQueueStartDate, metaQueueEndDate]);
+  useEffect(() => { setEventLogPage(1); }, [eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd, eventSearch]);
+  useEffect(() => { setMetaQueuePage(1); }, [metaQueueTypeFilter, metaQueuePeriodPreset, metaQueueCustomStart, metaQueueCustomEnd, metaQueueSearch]);
+  useEffect(() => { if (eventLogPage > eventLogTotalPages) setEventLogPage(eventLogTotalPages); }, [eventLogPage, eventLogTotalPages]);
+  useEffect(() => { if (metaQueuePage > metaQueueTotalPages) setMetaQueuePage(metaQueueTotalPages); }, [metaQueuePage, metaQueueTotalPages]);
 
-  useEffect(() => {
-    if (eventLogPage > eventLogTotalPages) {
-      setEventLogPage(eventLogTotalPages);
-    }
-  }, [eventLogPage, eventLogTotalPages]);
-
-  useEffect(() => {
-    if (metaQueuePage > metaQueueTotalPages) {
-      setMetaQueuePage(metaQueueTotalPages);
-    }
-  }, [metaQueuePage, metaQueueTotalPages]);
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
@@ -701,14 +767,18 @@ export default function CompanyEvents() {
 
   const handleResetEventFilters = () => {
     setEventTypeFilter(EVENT_TYPE_FILTER_ALL);
-    setEventStartDate('');
-    setEventEndDate('');
+    setEventPeriodPreset('all');
+    setEventCustomStart('');
+    setEventCustomEnd('');
+    setEventSearch('');
   };
 
   const handleResetMetaQueueFilters = () => {
     setMetaQueueTypeFilter(EVENT_TYPE_FILTER_ALL);
-    setMetaQueueStartDate('');
-    setMetaQueueEndDate('');
+    setMetaQueuePeriodPreset('all');
+    setMetaQueueCustomStart('');
+    setMetaQueueCustomEnd('');
+    setMetaQueueSearch('');
   };
 
   const handleClearEventData = (scope: ClearEventDataScope) => {
@@ -717,15 +787,14 @@ export default function CompanyEvents() {
         ? 'Limpar todos os itens da fila Meta desta empresa?'
         : 'Limpar o log de eventos desta empresa? As métricas do período podem mudar.',
     );
-
-    if (confirmed) {
-      clearEventDataMutation.mutate(scope);
-    }
+    if (confirmed) clearEventDataMutation.mutate(scope);
   };
 
   const selectedEventSession = selectedEvent?.session ?? null;
   const selectedEventUserData = selectedEvent?.user_data_snapshot ?? null;
   const selectedEventMetadata = selectedEvent?.metadata ?? null;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <>
@@ -737,14 +806,8 @@ export default function CompanyEvents() {
               Tracking persistido no banco, histórico do funil e operação da Meta CAPI para {companyName}.
             </p>
           </div>
-
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              onClick={handleRefresh}
-            >
+            <Button type="button" variant="outline" className="gap-2" onClick={handleRefresh}>
               <RefreshCcw className="h-4 w-4" />
               Atualizar
             </Button>
@@ -761,12 +824,11 @@ export default function CompanyEvents() {
           </div>
         </div>
 
+        {/* Meta CAPI settings */}
         <Card>
           <CardHeader>
             <CardTitle>Meta CAPI</CardTitle>
-            <CardDescription>
-              Configure o Pixel, token e os tipos de evento que podem entrar na fila da Meta.
-            </CardDescription>
+            <CardDescription>Configure o Pixel, token e os tipos de evento que podem entrar na fila da Meta.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {!metaConfigured && (
@@ -786,7 +848,7 @@ export default function CompanyEvents() {
                 <p className="mt-1 text-sm font-medium text-foreground"><code>time_select</code> {'->'} <code>InitiateCheckout</code></p>
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversao final</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Conversão final</p>
                 <p className="mt-1 text-sm font-medium text-foreground"><code>reservation_created</code> {'->'} <code>Lead</code></p>
               </div>
             </div>
@@ -800,19 +862,18 @@ export default function CompanyEvents() {
                 <Input
                   id="meta-pixel-id"
                   value={settingsForm.pixel_id}
-                  onChange={(event) => setSettingsForm((current) => ({ ...current, pixel_id: event.target.value }))}
+                  onChange={(e) => setSettingsForm((c) => ({ ...c, pixel_id: e.target.value }))}
                   placeholder="123456789012345"
                   autoComplete="off"
                   spellCheck={false}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="meta-test-event-code">Test Event Code</Label>
                 <Input
                   id="meta-test-event-code"
                   value={settingsForm.test_event_code}
-                  onChange={(event) => setSettingsForm((current) => ({ ...current, test_event_code: event.target.value }))}
+                  onChange={(e) => setSettingsForm((c) => ({ ...c, test_event_code: e.target.value }))}
                   placeholder="TEST12345"
                   autoComplete="off"
                   spellCheck={false}
@@ -827,70 +888,37 @@ export default function CompanyEvents() {
                   id="meta-access-token"
                   type={tokenVisible ? 'text' : 'password'}
                   value={settingsForm.access_token}
-                  onChange={(event) => setSettingsForm((current) => ({ ...current, access_token: event.target.value }))}
+                  onChange={(e) => setSettingsForm((c) => ({ ...c, access_token: e.target.value }))}
                   placeholder="EAAB..."
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <Button type="button" variant="outline" onClick={() => setTokenVisible((current) => !current)}>
+                <Button type="button" variant="outline" onClick={() => setTokenVisible((v) => !v)}>
                   {tokenVisible ? 'Ocultar' : 'Ver'}
                 </Button>
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">CAPI habilitada</p>
-                    <p className="text-xs text-muted-foreground">Ativa o envio pela fila.</p>
+              {[
+                { key: 'capi_enabled' as const, label: 'CAPI habilitada', desc: 'Ativa o envio pela fila.' },
+                { key: 'send_page_view' as const, label: 'PageView', desc: 'Abertura da página pública.' },
+                { key: 'send_initiate_checkout' as const, label: 'InitiateCheckout', desc: 'Data, pessoas e horário escolhidos.' },
+                { key: 'send_lead' as const, label: 'Lead', desc: 'Reserva efetivada.' },
+              ].map(({ key, label, desc }) => (
+                <div key={key} className="rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                    <Switch
+                      checked={settingsForm[key]}
+                      onCheckedChange={(checked) => setSettingsForm((c) => ({ ...c, [key]: checked }))}
+                    />
                   </div>
-                  <Switch
-                    checked={settingsForm.capi_enabled}
-                    onCheckedChange={(checked) => setSettingsForm((current) => ({ ...current, capi_enabled: checked }))}
-                  />
                 </div>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">PageView</p>
-                    <p className="text-xs text-muted-foreground">Abertura da página pública.</p>
-                  </div>
-                  <Switch
-                    checked={settingsForm.send_page_view}
-                    onCheckedChange={(checked) => setSettingsForm((current) => ({ ...current, send_page_view: checked }))}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">InitiateCheckout</p>
-                    <p className="text-xs text-muted-foreground">Data, pessoas e horário escolhidos.</p>
-                  </div>
-                  <Switch
-                    checked={settingsForm.send_initiate_checkout}
-                    onCheckedChange={(checked) => setSettingsForm((current) => ({ ...current, send_initiate_checkout: checked }))}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Lead</p>
-                    <p className="text-xs text-muted-foreground">Reserva efetivada.</p>
-                  </div>
-                  <Switch
-                    checked={settingsForm.send_lead}
-                    onCheckedChange={(checked) => setSettingsForm((current) => ({ ...current, send_lead: checked }))}
-                  />
-                </div>
-              </div>
-
+              ))}
             </div>
 
             <div className="flex justify-end">
@@ -908,6 +936,7 @@ export default function CompanyEvents() {
         </Card>
 
         <div className="grid gap-6">
+          {/* Event log */}
           <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -932,7 +961,23 @@ export default function CompanyEvents() {
             <CardContent className="space-y-4">
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Search */}
                   <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="event-search">Pesquisar</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="event-search"
+                        className="h-9 pl-8"
+                        placeholder="Nome, telefone ou ID da reserva..."
+                        value={eventSearch}
+                        onChange={(e) => setEventSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Type filter */}
+                  <div className="space-y-2">
                     <Label htmlFor="event-type-filter">Tipo de evento</Label>
                     <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
                       <SelectTrigger id="event-type-filter" className="h-9">
@@ -940,48 +985,65 @@ export default function CompanyEvents() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
-                        {selectableEventTypes.map((eventName) => (
-                          <SelectItem key={eventName} value={eventName}>
-                            {formatEventOptionLabel(eventName)}
-                          </SelectItem>
+                        {selectableEventTypes.map((name) => (
+                          <SelectItem key={name} value={name}>{formatEventOptionLabel(name)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
+                  {/* Period preset */}
                   <div className="space-y-2">
-                    <Label htmlFor="event-start-date">Data inicial</Label>
-                    <Input
-                      id="event-start-date"
-                      type="date"
-                      className="h-9"
-                      value={eventStartDate}
-                      max={eventEndDate || undefined}
-                      onChange={(event) => setEventStartDate(event.target.value)}
-                    />
+                    <Label htmlFor="event-period">Período</Label>
+                    <Select value={eventPeriodPreset} onValueChange={(v) => setEventPeriodPreset(v as PeriodPreset)}>
+                      <SelectTrigger id="event-period" className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(PERIOD_PRESET_LABELS) as PeriodPreset[]).map((key) => (
+                          <SelectItem key={key} value={key}>{PERIOD_PRESET_LABELS[key]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="event-end-date">Data final</Label>
-                    <Input
-                      id="event-end-date"
-                      type="date"
-                      className="h-9"
-                      value={eventEndDate}
-                      min={eventStartDate || undefined}
-                      onChange={(event) => setEventEndDate(event.target.value)}
-                    />
-                  </div>
+                  {/* Custom date inputs */}
+                  {eventPeriodPreset === 'custom' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="event-start-date">Data inicial</Label>
+                        <Input
+                          id="event-start-date"
+                          type="date"
+                          className="h-9"
+                          value={eventCustomStart}
+                          max={eventCustomEnd || undefined}
+                          onChange={(e) => setEventCustomStart(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="event-end-date">Data final</Label>
+                        <Input
+                          id="event-end-date"
+                          type="date"
+                          className="h-9"
+                          value={eventCustomEnd}
+                          min={eventCustomStart || undefined}
+                          onChange={(e) => setEventCustomEnd(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex items-end sm:col-span-2 sm:justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-full sm:w-auto"
-                        onClick={handleResetEventFilters}
-                        disabled={!hasEventLogFiltersActive}
-                      >
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-full sm:w-auto"
+                      onClick={handleResetEventFilters}
+                      disabled={!hasEventLogFiltersActive}
+                    >
                       Limpar filtros
                     </Button>
                   </div>
@@ -1010,15 +1072,11 @@ export default function CompanyEvents() {
                   <TableBody>
                     {eventLogLoading && eventLog.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
-                          Carregando eventos...
-                        </TableCell>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">Carregando eventos...</TableCell>
                       </TableRow>
-                    ) : eventLog.length === 0 ? (
+                    ) : filteredEventLog.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
-                          {eventLogEmptyMessage}
-                        </TableCell>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">{eventLogEmptyMessage}</TableCell>
                       </TableRow>
                     ) : (
                       paginatedEventLog.map((event) => (
@@ -1029,11 +1087,8 @@ export default function CompanyEvents() {
                           className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           title="Ver detalhes do evento"
                           onClick={() => setSelectedEvent(event)}
-                          onKeyDown={(keyboardEvent) => {
-                            if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                              keyboardEvent.preventDefault();
-                              setSelectedEvent(event);
-                            }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedEvent(event); }
                           }}
                         >
                           <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
@@ -1061,56 +1116,38 @@ export default function CompanyEvents() {
                 </Table>
               </div>
 
-              {eventLog.length > 0 && (
+              {filteredEventLog.length > 0 && (
                 <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs text-muted-foreground">
-                    {eventLogPageSummary} · Pagina {eventLogPage} de {eventLogTotalPages}
+                    {eventLogPageSummary} · Página {eventLogPage} de {eventLogTotalPages}
                   </div>
-
                   {eventLogTotalPages > 1 && (
                     <Pagination className="justify-start sm:justify-end">
                       <PaginationContent>
                         <PaginationItem>
                           <PaginationPrevious
                             href="#"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              if (eventLogPage > 1) {
-                                setEventLogPage(eventLogPage - 1);
-                              }
-                            }}
+                            onClick={(e) => { e.preventDefault(); if (eventLogPage > 1) setEventLogPage(eventLogPage - 1); }}
                             className={cn(eventLogPage === 1 && 'pointer-events-none opacity-50')}
                           />
                         </PaginationItem>
-
                         {eventLogVisiblePages.map((page, index) => (
                           <PaginationItem key={`event-log-${page}-${index}`}>
-                            {page === 'ellipsis' ? (
-                              <PaginationEllipsis />
-                            ) : (
+                            {page === 'ellipsis' ? <PaginationEllipsis /> : (
                               <PaginationLink
                                 href="#"
                                 isActive={page === eventLogPage}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  setEventLogPage(page);
-                                }}
+                                onClick={(e) => { e.preventDefault(); setEventLogPage(page); }}
                               >
                                 {page}
                               </PaginationLink>
                             )}
                           </PaginationItem>
                         ))}
-
                         <PaginationItem>
                           <PaginationNext
                             href="#"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              if (eventLogPage < eventLogTotalPages) {
-                                setEventLogPage(eventLogPage + 1);
-                              }
-                            }}
+                            onClick={(e) => { e.preventDefault(); if (eventLogPage < eventLogTotalPages) setEventLogPage(eventLogPage + 1); }}
                             className={cn(eventLogPage === eventLogTotalPages && 'pointer-events-none opacity-50')}
                           />
                         </PaginationItem>
@@ -1122,14 +1159,15 @@ export default function CompanyEvents() {
             </CardContent>
           </Card>
 
+          {/* Meta queue */}
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <Send className="h-4 w-4" />
-                  Envios Meta
+                  Fila de envio Meta
                 </CardTitle>
-                <CardDescription>Status atual, payload e histórico de tentativas da API de Conversões.</CardDescription>
+                <CardDescription>Status atual dos eventos prontos para envio via CAPI.</CardDescription>
               </div>
               <Button
                 type="button"
@@ -1146,7 +1184,23 @@ export default function CompanyEvents() {
             <CardContent className="space-y-4">
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Search */}
                   <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="meta-search">Pesquisar</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="meta-search"
+                        className="h-9 pl-8"
+                        placeholder="Nome, telefone ou ID da reserva..."
+                        value={metaQueueSearch}
+                        onChange={(e) => setMetaQueueSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Type filter */}
+                  <div className="space-y-2">
                     <Label htmlFor="meta-queue-type-filter">Tipo de evento</Label>
                     <Select value={metaQueueTypeFilter} onValueChange={setMetaQueueTypeFilter}>
                       <SelectTrigger id="meta-queue-type-filter" className="h-9">
@@ -1154,38 +1208,55 @@ export default function CompanyEvents() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
-                        {selectableMetaQueueEventTypes.map((eventName) => (
-                          <SelectItem key={eventName} value={eventName}>
-                            {formatMetaEventOptionLabel(eventName)}
-                          </SelectItem>
+                        {selectableMetaQueueEventTypes.map((name) => (
+                          <SelectItem key={name} value={name}>{formatMetaEventOptionLabel(name)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
+                  {/* Period preset */}
                   <div className="space-y-2">
-                    <Label htmlFor="meta-queue-start-date">Data inicial</Label>
-                    <Input
-                      id="meta-queue-start-date"
-                      type="date"
-                      className="h-9"
-                      value={metaQueueStartDate}
-                      max={metaQueueEndDate || undefined}
-                      onChange={(event) => setMetaQueueStartDate(event.target.value)}
-                    />
+                    <Label htmlFor="meta-queue-period">Período</Label>
+                    <Select value={metaQueuePeriodPreset} onValueChange={(v) => setMetaQueuePeriodPreset(v as PeriodPreset)}>
+                      <SelectTrigger id="meta-queue-period" className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(PERIOD_PRESET_LABELS) as PeriodPreset[]).map((key) => (
+                          <SelectItem key={key} value={key}>{PERIOD_PRESET_LABELS[key]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="meta-queue-end-date">Data final</Label>
-                    <Input
-                      id="meta-queue-end-date"
-                      type="date"
-                      className="h-9"
-                      value={metaQueueEndDate}
-                      min={metaQueueStartDate || undefined}
-                      onChange={(event) => setMetaQueueEndDate(event.target.value)}
-                    />
-                  </div>
+                  {/* Custom date inputs */}
+                  {metaQueuePeriodPreset === 'custom' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="meta-queue-start-date">Data inicial</Label>
+                        <Input
+                          id="meta-queue-start-date"
+                          type="date"
+                          className="h-9"
+                          value={metaQueueCustomStart}
+                          max={metaQueueCustomEnd || undefined}
+                          onChange={(e) => setMetaQueueCustomStart(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="meta-queue-end-date">Data final</Label>
+                        <Input
+                          id="meta-queue-end-date"
+                          type="date"
+                          className="h-9"
+                          value={metaQueueCustomEnd}
+                          min={metaQueueCustomStart || undefined}
+                          onChange={(e) => setMetaQueueCustomEnd(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex items-end sm:col-span-2 sm:justify-end">
                     <Button
@@ -1204,8 +1275,8 @@ export default function CompanyEvents() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className={`text-xs ${hasInvalidMetaQueueDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {hasInvalidMetaQueueDateRange
-                      ? 'Data inicial nao pode ser maior que a data final.'
-                      : `Exibindo ate ${META_QUEUE_LIMIT} eventos mais recentes para o recorte atual.`}
+                      ? 'Data inicial não pode ser maior que a data final.'
+                      : `Exibindo até ${META_QUEUE_LIMIT} itens mais recentes para o recorte atual.`}
                   </p>
                   <Badge variant="outline" className="self-start sm:self-auto">{metaQueueCountLabel}</Badge>
                 </div>
@@ -1225,20 +1296,15 @@ export default function CompanyEvents() {
                 <TableBody>
                   {metaQueueLoading && metaQueue.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
-                        Carregando envios Meta...
-                      </TableCell>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">Carregando envios Meta...</TableCell>
                     </TableRow>
-                  ) : metaQueue.length === 0 ? (
+                  ) : filteredMetaQueue.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
-                        {metaQueueEmptyMessage}
-                      </TableCell>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">{metaQueueEmptyMessage}</TableCell>
                     </TableRow>
                   ) : (
                     paginatedMetaQueue.map((item) => {
                       const itemAttempts = attemptsByQueueId.get(item.id) ?? [];
-
                       return (
                         <TableRow key={item.id}>
                           <TableCell>
@@ -1284,12 +1350,10 @@ export default function CompanyEvents() {
                               variant="outline"
                               size="sm"
                               className="gap-2"
-                              onClick={() =>
-                                setSelectedPayload({
-                                  title: `${item.meta_event_name} · ${formatMetaStatus(item.status)}`,
-                                  content: buildMetaQueueDetailContent(item, itemAttempts),
-                                })
-                              }
+                              onClick={() => setSelectedPayload({
+                                title: `${item.meta_event_name} · ${formatMetaStatus(item.status)}`,
+                                content: buildMetaQueueDetailContent(item, itemAttempts),
+                              })}
                             >
                               <Eye className="h-4 w-4" />
                               Detalhes
@@ -1302,56 +1366,38 @@ export default function CompanyEvents() {
                 </TableBody>
               </Table>
 
-              {metaQueue.length > 0 && (
+              {filteredMetaQueue.length > 0 && (
                 <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs text-muted-foreground">
-                    {metaQueuePageSummary} · Pagina {metaQueuePage} de {metaQueueTotalPages}
+                    {metaQueuePageSummary} · Página {metaQueuePage} de {metaQueueTotalPages}
                   </div>
-
                   {metaQueueTotalPages > 1 && (
                     <Pagination className="justify-start sm:justify-end">
                       <PaginationContent>
                         <PaginationItem>
                           <PaginationPrevious
                             href="#"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              if (metaQueuePage > 1) {
-                                setMetaQueuePage(metaQueuePage - 1);
-                              }
-                            }}
+                            onClick={(e) => { e.preventDefault(); if (metaQueuePage > 1) setMetaQueuePage(metaQueuePage - 1); }}
                             className={cn(metaQueuePage === 1 && 'pointer-events-none opacity-50')}
                           />
                         </PaginationItem>
-
                         {metaQueueVisiblePages.map((page, index) => (
                           <PaginationItem key={`meta-queue-${page}-${index}`}>
-                            {page === 'ellipsis' ? (
-                              <PaginationEllipsis />
-                            ) : (
+                            {page === 'ellipsis' ? <PaginationEllipsis /> : (
                               <PaginationLink
                                 href="#"
                                 isActive={page === metaQueuePage}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  setMetaQueuePage(page);
-                                }}
+                                onClick={(e) => { e.preventDefault(); setMetaQueuePage(page); }}
                               >
                                 {page}
                               </PaginationLink>
                             )}
                           </PaginationItem>
                         ))}
-
                         <PaginationItem>
                           <PaginationNext
                             href="#"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              if (metaQueuePage < metaQueueTotalPages) {
-                                setMetaQueuePage(metaQueuePage + 1);
-                              }
-                            }}
+                            onClick={(e) => { e.preventDefault(); if (metaQueuePage < metaQueueTotalPages) setMetaQueuePage(metaQueuePage + 1); }}
                             className={cn(metaQueuePage === metaQueueTotalPages && 'pointer-events-none opacity-50')}
                           />
                         </PaginationItem>
@@ -1363,17 +1409,16 @@ export default function CompanyEvents() {
             </CardContent>
           </Card>
         </div>
-
       </div>
 
-      <Dialog open={!!selectedEvent} onOpenChange={(nextOpen) => !nextOpen && setSelectedEvent(null)}>
+      {/* Event detail dialog */}
+      <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto overflow-x-hidden sm:max-w-[min(90vw,56rem)]">
           {selectedEvent && (
             <>
               <DialogHeader>
                 <DialogTitle>Detalhes do evento</DialogTitle>
               </DialogHeader>
-
               <div className="min-w-0 space-y-4">
                 <div className="rounded-lg border border-border bg-muted/20 p-4">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1383,9 +1428,7 @@ export default function CompanyEvents() {
                       Meta: {formatMetaMapping(selectedEvent.event_name)}
                     </Badge>
                   </div>
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {formatEventDisplay(selectedEvent.event_name)}
-                  </p>
+                  <p className="mt-3 text-sm text-muted-foreground">{formatEventDisplay(selectedEvent.event_name)}</p>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1448,7 +1491,8 @@ export default function CompanyEvents() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedPayload} onOpenChange={(nextOpen) => !nextOpen && setSelectedPayload(null)}>
+      {/* Payload detail dialog */}
+      <Dialog open={!!selectedPayload} onOpenChange={(open) => !open && setSelectedPayload(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{selectedPayload?.title ?? 'Detalhes'}</DialogTitle>

@@ -91,18 +91,18 @@ export default function AutomationsTab({ companyId }: Props) {
 
   return (
     <Tabs defaultValue="connection" className="space-y-6">
-      <TabsList>
+      <TabsList className="w-full grid grid-cols-4">
         <TabsTrigger value="connection" className="gap-2">
-          <Smartphone className="h-4 w-4" /> Conexão
+          <Smartphone className="h-4 w-4 max-sm:hidden" /> Conexão
         </TabsTrigger>
         <TabsTrigger value="messages" className="gap-2">
-          <Bot className="h-4 w-4" /> Mensagens
+          <Bot className="h-4 w-4 max-sm:hidden" /> Mensagens
         </TabsTrigger>
         <TabsTrigger value="broadcast" className="gap-2">
-          <Send className="h-4 w-4" /> Disparo
+          <Send className="h-4 w-4 max-sm:hidden" /> Disparo
         </TabsTrigger>
         <TabsTrigger value="history" className="gap-2">
-          <History className="h-4 w-4" /> Histórico
+          <History className="h-4 w-4 max-sm:hidden" /> Histórico
         </TabsTrigger>
       </TabsList>
 
