@@ -413,9 +413,17 @@ export function useDashboardData(
     const totalGuests = rawReservations.reduce((sum, r) => sum + (r.party_size || 1), 0);
     const checkedInGuests = rawReservations.reduce((sum, r) => {
       if (normalizeReservationStatus(r.status) !== 'checked_in') return sum;
-      return sum + (r.checked_in_party_size ?? r.party_size ?? 1);
+      return sum + (r.party_size || 1);
     }, 0);
-    return { ...base, totalGuests, checkedInGuests };
+    const noShowGuests = rawReservations.reduce((sum, r) => {
+      if (normalizeReservationStatus(r.status) !== 'no-show') return sum;
+      return sum + (r.party_size || 1);
+    }, 0);
+    const cancelledGuests = rawReservations.reduce((sum, r) => {
+      if (normalizeReservationStatus(r.status) !== 'cancelled') return sum;
+      return sum + (r.party_size || 1);
+    }, 0);
+    return { ...base, totalGuests, checkedInGuests, noShowGuests, cancelledGuests };
   }, [dailyStats, rawReservations]);
 
   const reservationOriginBreakdown = useMemo(() => {

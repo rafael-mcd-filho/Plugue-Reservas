@@ -613,7 +613,11 @@ export default function Dashboard() {
                   {(() => {
                     const total = totals.reservations;
                     const checkIns = totals.completed;
+                    const noShows = totals.noShows;
+                    const cancelled = totals.cancellations;
                     const pctCheckIn = total > 0 ? Math.round((checkIns / total) * 100) : 0;
+                    const pctNoShow = total > 0 ? Math.round((noShows / total) * 100) : 0;
+                    const pctCancelled = total > 0 ? Math.round((cancelled / total) * 100) : 0;
                     return (
                       <div>
                         <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Reservas</p>
@@ -631,16 +635,29 @@ export default function Dashboard() {
                             <span className="text-lg font-bold leading-none text-success">{checkIns.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Check-ins</span>
                           </div>
-                          {total > checkIns && (
+                          {noShows > 0 && (
                             <>
                               <div className="flex items-center justify-center gap-1 sm:flex-1">
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
-                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctCheckIn}%</span>
+                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{pctNoShow}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
                               <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-destructive">{(total - checkIns).toLocaleString('pt-BR')}</span>
+                                <span className="text-lg font-bold leading-none text-destructive">{noShows.toLocaleString('pt-BR')}</span>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
+                              </div>
+                            </>
+                          )}
+                          {cancelled > 0 && (
+                            <>
+                              <div className="flex items-center justify-center gap-1 sm:flex-1">
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
+                                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{pctCancelled}%</span>
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
+                              </div>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
+                                <span className="text-lg font-bold leading-none text-foreground">{cancelled.toLocaleString('pt-BR')}</span>
+                                <span className="mt-0.5 text-[11px] text-muted-foreground">Cancelados</span>
                               </div>
                             </>
                           )}
@@ -652,7 +669,11 @@ export default function Dashboard() {
                   {(() => {
                     const totalGuests = totals.totalGuests;
                     const checkedInGuests = totals.checkedInGuests;
+                    const noShowGuests = totals.noShowGuests;
+                    const cancelledGuests = totals.cancelledGuests;
                     const pctGuests = totalGuests > 0 ? Math.round((checkedInGuests / totalGuests) * 100) : 0;
+                    const pctNoShowGuests = totalGuests > 0 ? Math.round((noShowGuests / totalGuests) * 100) : 0;
+                    const pctCancelledGuests = totalGuests > 0 ? Math.round((cancelledGuests / totalGuests) * 100) : 0;
                     return (
                       <div>
                         <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Pessoas</p>
@@ -670,16 +691,29 @@ export default function Dashboard() {
                             <span className="text-lg font-bold leading-none text-success">{checkedInGuests.toLocaleString('pt-BR')}</span>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Compareceram</span>
                           </div>
-                          {totalGuests > checkedInGuests && (
+                          {noShowGuests > 0 && (
                             <>
                               <div className="flex items-center justify-center gap-1 sm:flex-1">
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
-                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{100 - pctGuests}%</span>
+                                <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{pctNoShowGuests}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
                               <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-destructive">{(totalGuests - checkedInGuests).toLocaleString('pt-BR')}</span>
+                                <span className="text-lg font-bold leading-none text-destructive">{noShowGuests.toLocaleString('pt-BR')}</span>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
+                              </div>
+                            </>
+                          )}
+                          {cancelledGuests > 0 && (
+                            <>
+                              <div className="flex items-center justify-center gap-1 sm:flex-1">
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
+                                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{pctCancelledGuests}%</span>
+                                <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
+                              </div>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
+                                <span className="text-lg font-bold leading-none text-foreground">{cancelledGuests.toLocaleString('pt-BR')}</span>
+                                <span className="mt-0.5 text-[11px] text-muted-foreground">Cancelados</span>
                               </div>
                             </>
                           )}
