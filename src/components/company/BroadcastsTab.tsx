@@ -780,7 +780,7 @@ function BroadcastDetailsDialog({
 
   return (
     <Dialog open={!!broadcast} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[90vw] max-w-5xl">
+      <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{broadcast.name}</DialogTitle>
           <DialogDescription>
@@ -855,11 +855,11 @@ function BroadcastDetailsDialog({
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
-                  <TableHead className="w-[22%]">Nome</TableHead>
-                  <TableHead className="w-[18%]">Telefone</TableHead>
-                  <TableHead className="w-[12%]">Status</TableHead>
-                  <TableHead className="w-[18%]">Enviado em</TableHead>
-                  <TableHead className="w-[30%]">Observação</TableHead>
+                  <TableHead className="whitespace-nowrap">Nome</TableHead>
+                  <TableHead className="whitespace-nowrap">Telefone</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Enviado em</TableHead>
+                  <TableHead>Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -869,10 +869,10 @@ function BroadcastDetailsDialog({
                   const obs = err ? `${err.title}: ${err.message}` : (r.status !== 'sent' && r.error_details ? r.error_details : null);
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.guest_name || '—'}</TableCell>
-                      <TableCell className="tabular-nums">{formatBrazilPhone(r.phone)}</TableCell>
-                      <TableCell className={cfg.className}>{cfg.label}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground tabular-nums">
+                      <TableCell className="whitespace-nowrap font-medium">{r.guest_name || '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap tabular-nums">{formatBrazilPhone(r.phone)}</TableCell>
+                      <TableCell className={cn('whitespace-nowrap', cfg.className)}>{cfg.label}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground tabular-nums">
                         {r.sent_at ? formatDate(r.sent_at) : '—'}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
