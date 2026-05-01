@@ -123,6 +123,8 @@ const RECIPIENT_STATUS_CONFIG: Record<RecipientRow['status'], { label: string; c
 };
 
 const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
+const ALLOWED_BROADCAST_IMAGE_TYPES = new Set(['image/jpeg', 'image/png']);
+const BROADCAST_IMAGE_ACCEPT = 'image/png,image/jpeg';
 
 function formatDate(value: string | null | undefined, pattern = "dd/MM/yyyy 'às' HH:mm") {
   if (!value) return '—';
@@ -232,8 +234,8 @@ export default function BroadcastsTab({ companyId }: Props) {
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Selecione uma imagem válida');
+    if (!ALLOWED_BROADCAST_IMAGE_TYPES.has(file.type)) {
+      toast.error('Use imagem PNG ou JPG. WebP nao e suportado para disparo no WhatsApp.');
       event.target.value = '';
       return;
     }
@@ -242,6 +244,7 @@ export default function BroadcastsTab({ companyId }: Props) {
       event.target.value = '';
       return;
     }
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   }
@@ -269,7 +272,11 @@ export default function BroadcastsTab({ companyId }: Props) {
 
       let uploadedImageUrl: string | null = null;
       if (imageFile) {
-        const extension = (imageFile.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+        if (!ALLOWED_BROADCAST_IMAGE_TYPES.has(imageFile.type)) {
+          throw new Error('Use imagem PNG ou JPG. WebP nao e suportado para disparo no WhatsApp.');
+        }
+
+        const extension = imageFile.type === 'image/png' ? 'png' : 'jpg';
         const filePath = `whatsapp-broadcasts/${companyId}/${Date.now()}.${extension}`;
         const { error: uploadError } = await supabase.storage
           .from('system-assets')
@@ -554,8 +561,8 @@ export default function BroadcastsTab({ companyId }: Props) {
             ) : (
               <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground hover:bg-muted">
                 <Upload className="h-4 w-4" />
-                <span>Clique para anexar uma imagem (máx. 4MB)</span>
-                <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                <span>Clique para anexar uma imagem PNG/JPG (máx. 4MB)</span>
+                <input type="file" accept={BROADCAST_IMAGE_ACCEPT} className="hidden" onChange={handleImageChange} />
               </label>
             )}
           </div>

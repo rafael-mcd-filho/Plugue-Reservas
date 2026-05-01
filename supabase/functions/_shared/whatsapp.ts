@@ -3,6 +3,7 @@ export type WhatsAppDiagnosticCode =
   | "instance_not_configured"
   | "instance_disconnected"
   | "invalid_payload"
+  | "unsupported_media_type"
   | "provider_request_failed"
   | "provider_invalid_response"
   | "unknown_error";
@@ -411,7 +412,19 @@ export async function sendWhatsAppMedia(
   }
 
   const mediaType = options.mediaType ?? "image";
-  const mimeType = options.mimeType ?? "image/jpeg";
+  const mimeType = (options.mimeType ?? "image/jpeg").trim().toLowerCase();
+
+  if (mediaType === "image" && !["image/jpeg", "image/jpg", "image/png"].includes(mimeType)) {
+    return buildFailure(
+      "unsupported_media_type",
+      "Formato de imagem nao suportado",
+      "Envie a imagem em PNG ou JPG. WebP deve ser convertido antes do envio pelo WhatsApp.",
+      {
+        provider_message: `mimetype=${mimeType}`,
+      },
+    );
+  }
+
   const fileName = options.fileName ?? `broadcast.${mimeType.includes("png") ? "png" : "jpg"}`;
 
   let response: Response;
@@ -449,6 +462,8 @@ export async function sendWhatsAppMedia(
       parsed = null;
     }
   }
+
+  console.log(`[sendWhatsAppMedia] HTTP ${response.status} | raw: ${raw.slice(0, 500)}`);
 
   if (response.ok) {
     const providerStatusText = typeof parsed === "object" && parsed && "status" in parsed

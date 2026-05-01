@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Loader2, MapPin, XCircle } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import {
@@ -308,9 +308,9 @@ export default function ReservationTracking() {
                   </div>
                 )}
                 <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Criada há</span>
-                  <span className="font-medium">
-                    {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
+                  <span className="text-muted-foreground">Criada em</span>
+                  <span className="text-right font-medium">
+                    {format(new Date(entry.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                   </span>
                 </div>
               </div>

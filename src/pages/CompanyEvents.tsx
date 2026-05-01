@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { endOfDay, format, parseISO, startOfDay, subDays } from 'date-fns';
+import { endOfDay, format, parseISO, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  Activity,
   BadgeCheck,
   Clock3,
   Eye,
@@ -46,12 +45,6 @@ interface TrackingSettingsForm {
   send_page_view: boolean;
   send_initiate_checkout: boolean;
   send_lead: boolean;
-}
-
-interface DashboardMetricCard {
-  label: string;
-  value: number;
-  description: string;
 }
 
 interface TrackingEventRow {
@@ -128,9 +121,8 @@ type ClearEventDataScope = 'meta_queue' | 'event_log';
 const EVENT_LOG_LIMIT = 100;
 const EVENT_LOG_PAGE_SIZE = 10;
 const META_QUEUE_LIMIT = 100;
-const META_ATTEMPTS_LIMIT = 100;
+const META_ATTEMPTS_LIMIT = META_QUEUE_LIMIT * 5;
 const META_QUEUE_PAGE_SIZE = 8;
-const META_ATTEMPTS_PAGE_SIZE = 10;
 const EVENT_TYPE_FILTER_ALL = 'all';
 
 function createDefaultSettings(): TrackingSettingsForm {
@@ -228,6 +220,62 @@ function formatMetaEventOptionLabel(eventName: string) {
   return eventName;
 }
 
+function getMetaStatusBadgeVariant(status: string) {
+  if (status === 'sent') return 'secondary' as const;
+  if (status === 'failed') return 'destructive' as const;
+  return 'outline' as const;
+}
+
+function getMetaLastResponseText(item: MetaQueueRow, attempts: MetaAttemptRow[]) {
+  const latestAttempt = attempts[0] ?? null;
+  const httpStatus = latestAttempt?.response_status ?? item.last_response_status;
+  const summary = latestAttempt?.error_message ?? latestAttempt?.response_body ?? item.last_error;
+
+  if (httpStatus && summary) return `HTTP ${httpStatus} · ${summary}`;
+  if (httpStatus) return `HTTP ${httpStatus}`;
+  return summary ?? '-';
+}
+
+function buildMetaQueueDetailContent(item: MetaQueueRow, attempts: MetaAttemptRow[]) {
+  const queueSummary = {
+    queue_id: item.id,
+    reservation_id: item.reservation_id,
+    event_name: item.event_name,
+    meta_event_name: item.meta_event_name,
+    status: item.status,
+    attempts: item.attempts,
+    last_response_status: item.last_response_status,
+    last_error: item.last_error,
+    created_at: item.created_at,
+    sent_at: item.sent_at,
+  };
+
+  const attemptsContent = attempts.length > 0
+    ? attempts.map((attempt, index) => [
+      `TENTATIVA ${index + 1} - ${formatMetaStatus(attempt.status)} - ${formatDateTime(attempt.created_at)}`,
+      `HTTP: ${attempt.response_status ?? '-'}`,
+      `Resumo: ${attempt.error_message ?? attempt.response_body ?? '-'}`,
+      '',
+      'REQUEST',
+      buildPayloadPreview(attempt.request_payload) ?? '{}',
+      '',
+      'RESPONSE',
+      attempt.response_body ?? attempt.error_message ?? '-',
+    ].join('\n')).join('\n\n---\n\n')
+    : 'Nenhuma tentativa registrada para este evento.';
+
+  return [
+    'STATUS ATUAL DA FILA',
+    buildPayloadPreview(queueSummary) ?? '{}',
+    '',
+    'PAYLOAD ORIGINAL DA FILA',
+    buildPayloadPreview(item.payload) ?? '{}',
+    '',
+    `TENTATIVAS (${attempts.length})`,
+    attemptsContent,
+  ].join('\n');
+}
+
 function getSessionAttributionValue(event: TrackingEventRow, key: keyof TrackingSessionRow) {
   const sessionValue = event.session?.[key];
   if (typeof sessionValue === 'string' && sessionValue.trim()) return sessionValue;
@@ -271,19 +319,13 @@ export default function CompanyEvents() {
   const [metaQueueTypeFilter, setMetaQueueTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
   const [metaQueueStartDate, setMetaQueueStartDate] = useState('');
   const [metaQueueEndDate, setMetaQueueEndDate] = useState('');
-  const [metaAttemptsTypeFilter, setMetaAttemptsTypeFilter] = useState(EVENT_TYPE_FILTER_ALL);
-  const [metaAttemptsStartDate, setMetaAttemptsStartDate] = useState('');
-  const [metaAttemptsEndDate, setMetaAttemptsEndDate] = useState('');
   const [eventLogPage, setEventLogPage] = useState(1);
   const [metaQueuePage, setMetaQueuePage] = useState(1);
-  const [metaAttemptsPage, setMetaAttemptsPage] = useState(1);
 
-  const since = useMemo(() => subDays(new Date(), 7).toISOString(), []);
   const hasInvalidEventDateRange = !!eventStartDate && !!eventEndDate && eventStartDate > eventEndDate;
   const hasInvalidMetaQueueDateRange = !!metaQueueStartDate && !!metaQueueEndDate && metaQueueStartDate > metaQueueEndDate;
-  const hasInvalidMetaAttemptsDateRange = !!metaAttemptsStartDate && !!metaAttemptsEndDate && metaAttemptsStartDate > metaAttemptsEndDate;
 
-  const { data: settings, isLoading: settingsLoading } = useQuery({
+  const { data: settings } = useQuery({
     queryKey: ['company-tracking-settings', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -314,110 +356,6 @@ export default function CompanyEvents() {
       send_lead: settings.send_lead ?? true,
     });
   }, [settings]);
-
-  const { data: eventsDashboard, isLoading: dashboardLoading } = useQuery({
-    queryKey: ['company-events-dashboard', companyId, since],
-    queryFn: async () => {
-      const [
-        sessionsResult,
-        pageViewsResult,
-        initiateCheckoutResult,
-        reservationsResult,
-        metaSentResult,
-        metaFailedResult,
-      ] = await Promise.all([
-        supabase
-          .from('tracking_sessions' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .gte('started_at', since),
-        supabase
-          .from('tracking_events' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('tracking_source', 'public')
-          .eq('event_name', 'page_view')
-          .gte('occurred_at', since),
-        supabase
-          .from('tracking_events' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('tracking_source', 'public')
-          .eq('event_name', 'time_select')
-          .gte('occurred_at', since),
-        supabase
-          .from('tracking_events' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('tracking_source', 'public')
-          .eq('event_name', 'reservation_created')
-          .gte('occurred_at', since),
-        supabase
-          .from('meta_event_queue' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('status', 'sent')
-          .gte('created_at', since),
-        supabase
-          .from('meta_event_queue' as any)
-          .select('*', { count: 'exact', head: true })
-          .eq('company_id', companyId)
-          .eq('status', 'failed')
-          .gte('created_at', since),
-      ]);
-
-      const results = [
-        sessionsResult,
-        pageViewsResult,
-        initiateCheckoutResult,
-        reservationsResult,
-        metaSentResult,
-        metaFailedResult,
-      ];
-
-      const firstError = results.find((result) => result.error)?.error;
-      if (firstError) throw firstError;
-
-      const metrics: DashboardMetricCard[] = [
-        {
-          label: 'Sessões',
-          value: sessionsResult.count ?? 0,
-          description: 'Visitas registradas nos últimos 7 dias.',
-        },
-        {
-          label: 'Page views',
-          value: pageViewsResult.count ?? 0,
-          description: 'Visualizações públicas persistidas no banco.',
-        },
-        {
-          label: 'InitiateCheckout',
-          value: initiateCheckoutResult.count ?? 0,
-          description: 'Sessões que escolheram data, pessoas e horário.',
-        },
-        {
-          label: 'Lead',
-          value: reservationsResult.count ?? 0,
-          description: 'Reservas efetivadas e tratadas como conversão final na Meta.',
-        },
-        {
-          label: 'Meta enviados',
-          value: metaSentResult.count ?? 0,
-          description: 'Eventos enviados com sucesso para a Meta.',
-        },
-        {
-          label: 'Meta com erro',
-          value: metaFailedResult.count ?? 0,
-          description: 'Eventos que falharam e exigem revisão.',
-        },
-      ];
-
-      return {
-        metrics,
-      };
-    },
-    enabled: !!companyId,
-    refetchInterval: 30_000,
-  });
 
   const { data: eventTypeOptions = [] } = useQuery({
     queryKey: ['company-event-types', companyId],
@@ -552,37 +490,29 @@ export default function CompanyEvents() {
     refetchInterval: 30_000,
   });
 
+  const metaQueueIds = useMemo(() => metaQueue.map((item) => item.id), [metaQueue]);
+
   const { data: metaAttempts = [], isLoading: metaAttemptsLoading } = useQuery({
-    queryKey: ['company-meta-attempts', companyId, metaAttemptsTypeFilter, metaAttemptsStartDate, metaAttemptsEndDate],
+    queryKey: ['company-meta-attempts', companyId, metaQueueIds],
     queryFn: async () => {
-      let attemptsQuery = supabase
+      if (metaQueueIds.length === 0) return [];
+
+      const attemptsQuery = supabase
         .from('meta_event_attempts' as any)
         .select(
           'id, queue_id, reservation_id, status, response_status, response_body, error_message, request_payload, created_at, queue:meta_event_queue!inner(event_name, meta_event_name)',
         )
         .eq('company_id', companyId)
+        .in('queue_id', metaQueueIds)
         .order('created_at', { ascending: false })
         .limit(META_ATTEMPTS_LIMIT);
-
-      if (metaAttemptsTypeFilter !== EVENT_TYPE_FILTER_ALL) {
-        attemptsQuery = attemptsQuery.eq('queue.meta_event_name', metaAttemptsTypeFilter);
-      }
-
-      if (metaAttemptsStartDate) {
-        attemptsQuery = attemptsQuery.gte('created_at', startOfDay(parseISO(metaAttemptsStartDate)).toISOString());
-      }
-
-      if (metaAttemptsEndDate) {
-        attemptsQuery = attemptsQuery.lte('created_at', endOfDay(parseISO(metaAttemptsEndDate)).toISOString());
-      }
 
       const { data, error } = await attemptsQuery;
       if (error) throw error;
 
       return (data as MetaAttemptRow[]) ?? [];
     },
-    enabled: !!companyId && !hasInvalidMetaAttemptsDateRange,
-    placeholderData: (previousData) => previousData,
+    enabled: !!companyId && !hasInvalidMetaQueueDateRange,
     refetchInterval: 30_000,
   });
 
@@ -630,7 +560,6 @@ export default function CompanyEvents() {
       return (data ?? {}) as { processed?: number; sent?: number; failed?: number; skipped?: number };
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
       queryClient.invalidateQueries({ queryKey: ['company-meta-queue', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-meta-attempts', companyId] });
       toast.success(
@@ -653,7 +582,6 @@ export default function CompanyEvents() {
       return data as Record<string, number>;
     },
     onSuccess: (result, scope) => {
-      queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
       queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
       queryClient.invalidateQueries({ queryKey: ['company-meta-event-types', companyId] });
@@ -679,7 +607,6 @@ export default function CompanyEvents() {
   const metaConfigured = settingsForm.capi_enabled && !!settingsForm.pixel_id.trim() && !!settingsForm.access_token.trim();
   const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL || !!eventStartDate || !!eventEndDate;
   const hasMetaQueueFiltersActive = metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL || !!metaQueueStartDate || !!metaQueueEndDate;
-  const hasMetaAttemptsFiltersActive = metaAttemptsTypeFilter !== EVENT_TYPE_FILTER_ALL || !!metaAttemptsStartDate || !!metaAttemptsEndDate;
   const selectableEventTypes = useMemo(() => {
     if (eventTypeFilter === EVENT_TYPE_FILTER_ALL || eventTypeOptions.includes(eventTypeFilter)) {
       return eventTypeOptions;
@@ -694,16 +621,19 @@ export default function CompanyEvents() {
 
     return [metaQueueTypeFilter, ...metaEventTypeOptions];
   }, [metaEventTypeOptions, metaQueueTypeFilter]);
-  const selectableMetaAttemptsEventTypes = useMemo(() => {
-    if (metaAttemptsTypeFilter === EVENT_TYPE_FILTER_ALL || metaEventTypeOptions.includes(metaAttemptsTypeFilter)) {
-      return metaEventTypeOptions;
-    }
 
-    return [metaAttemptsTypeFilter, ...metaEventTypeOptions];
-  }, [metaAttemptsTypeFilter, metaEventTypeOptions]);
+  const attemptsByQueueId = useMemo(() => {
+    const grouped = new Map<string, MetaAttemptRow[]>();
+    for (const attempt of metaAttempts) {
+      const current = grouped.get(attempt.queue_id) ?? [];
+      current.push(attempt);
+      grouped.set(attempt.queue_id, current);
+    }
+    return grouped;
+  }, [metaAttempts]);
+
   const eventLogCountLabel = `${eventLog.length} ${eventLog.length === 1 ? 'resultado' : 'resultados'}`;
-  const metaQueueCountLabel = `${metaQueue.length} ${metaQueue.length === 1 ? 'resultado' : 'resultados'}`;
-  const metaAttemptsCountLabel = `${metaAttempts.length} ${metaAttempts.length === 1 ? 'resultado' : 'resultados'}`;
+  const metaQueueCountLabel = `${metaQueue.length} ${metaQueue.length === 1 ? 'evento' : 'eventos'} · ${metaAttempts.length} ${metaAttempts.length === 1 ? 'tentativa' : 'tentativas'}`;
   const eventLogEmptyMessage = hasInvalidEventDateRange
     ? 'Data inicial não pode ser maior que a data final.'
     : hasEventLogFiltersActive
@@ -714,15 +644,9 @@ export default function CompanyEvents() {
     : hasMetaQueueFiltersActive
       ? 'Nenhum item encontrado para os filtros informados.'
       : 'Nenhum item na fila ainda.';
-  const metaAttemptsEmptyMessage = hasInvalidMetaAttemptsDateRange
-    ? 'Data inicial nao pode ser maior que a data final.'
-    : hasMetaAttemptsFiltersActive
-      ? 'Nenhuma tentativa encontrada para os filtros informados.'
-      : 'Nenhuma tentativa registrada ainda.';
   const hasAnyEventLogEntries = eventLog.length > 0 || eventTypeOptions.length > 0;
   const eventLogTotalPages = Math.max(1, Math.ceil(eventLog.length / EVENT_LOG_PAGE_SIZE));
   const metaQueueTotalPages = Math.max(1, Math.ceil(metaQueue.length / META_QUEUE_PAGE_SIZE));
-  const metaAttemptsTotalPages = Math.max(1, Math.ceil(metaAttempts.length / META_ATTEMPTS_PAGE_SIZE));
 
   const paginatedEventLog = useMemo(() => {
     const startIndex = (eventLogPage - 1) * EVENT_LOG_PAGE_SIZE;
@@ -734,11 +658,6 @@ export default function CompanyEvents() {
     return metaQueue.slice(startIndex, startIndex + META_QUEUE_PAGE_SIZE);
   }, [metaQueue, metaQueuePage]);
 
-  const paginatedMetaAttempts = useMemo(() => {
-    const startIndex = (metaAttemptsPage - 1) * META_ATTEMPTS_PAGE_SIZE;
-    return metaAttempts.slice(startIndex, startIndex + META_ATTEMPTS_PAGE_SIZE);
-  }, [metaAttempts, metaAttemptsPage]);
-
   const eventLogPageSummary = useMemo(
     () => getPaginationSummary(eventLog.length, eventLogPage, EVENT_LOG_PAGE_SIZE, 'eventos'),
     [eventLog.length, eventLogPage],
@@ -749,14 +668,8 @@ export default function CompanyEvents() {
     [metaQueue.length, metaQueuePage],
   );
 
-  const metaAttemptsPageSummary = useMemo(
-    () => getPaginationSummary(metaAttempts.length, metaAttemptsPage, META_ATTEMPTS_PAGE_SIZE, 'tentativas'),
-    [metaAttempts.length, metaAttemptsPage],
-  );
-
   const eventLogVisiblePages = useMemo(() => getVisiblePages(eventLogPage, eventLogTotalPages), [eventLogPage, eventLogTotalPages]);
   const metaQueueVisiblePages = useMemo(() => getVisiblePages(metaQueuePage, metaQueueTotalPages), [metaQueuePage, metaQueueTotalPages]);
-  const metaAttemptsVisiblePages = useMemo(() => getVisiblePages(metaAttemptsPage, metaAttemptsTotalPages), [metaAttemptsPage, metaAttemptsTotalPages]);
 
   useEffect(() => {
     setEventLogPage(1);
@@ -765,10 +678,6 @@ export default function CompanyEvents() {
   useEffect(() => {
     setMetaQueuePage(1);
   }, [metaQueueTypeFilter, metaQueueStartDate, metaQueueEndDate]);
-
-  useEffect(() => {
-    setMetaAttemptsPage(1);
-  }, [metaAttemptsTypeFilter, metaAttemptsStartDate, metaAttemptsEndDate]);
 
   useEffect(() => {
     if (eventLogPage > eventLogTotalPages) {
@@ -782,14 +691,7 @@ export default function CompanyEvents() {
     }
   }, [metaQueuePage, metaQueueTotalPages]);
 
-  useEffect(() => {
-    if (metaAttemptsPage > metaAttemptsTotalPages) {
-      setMetaAttemptsPage(metaAttemptsTotalPages);
-    }
-  }, [metaAttemptsPage, metaAttemptsTotalPages]);
-
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['company-events-dashboard', companyId, since] });
     queryClient.invalidateQueries({ queryKey: ['company-event-log', companyId] });
     queryClient.invalidateQueries({ queryKey: ['company-event-types', companyId] });
     queryClient.invalidateQueries({ queryKey: ['company-meta-event-types', companyId] });
@@ -807,12 +709,6 @@ export default function CompanyEvents() {
     setMetaQueueTypeFilter(EVENT_TYPE_FILTER_ALL);
     setMetaQueueStartDate('');
     setMetaQueueEndDate('');
-  };
-
-  const handleResetMetaAttemptsFilters = () => {
-    setMetaAttemptsTypeFilter(EVENT_TYPE_FILTER_ALL);
-    setMetaAttemptsStartDate('');
-    setMetaAttemptsEndDate('');
   };
 
   const handleClearEventData = (scope: ClearEventDataScope) => {
@@ -863,34 +759,6 @@ export default function CompanyEvents() {
               Processar fila Meta
             </Button>
           </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {(eventsDashboard?.metrics ?? []).map((metric) => (
-            <Card key={metric.label}>
-              <CardHeader className="pb-2">
-                <CardDescription>{metric.label}</CardDescription>
-                <CardTitle className="text-3xl">{metric.value}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{metric.description}</p>
-              </CardContent>
-            </Card>
-          ))}
-
-          {(dashboardLoading || settingsLoading) && !eventsDashboard && (
-            Array.from({ length: 3 }).map((_, index) => (
-              <Card key={index}>
-                <CardHeader className="pb-2">
-                  <CardDescription>Carregando</CardDescription>
-                  <CardTitle className="text-3xl">...</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">Sincronizando dados de tracking.</p>
-                </CardContent>
-              </Card>
-            ))
-          )}
         </div>
 
         <Card>
@@ -1039,7 +907,7 @@ export default function CompanyEvents() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className="grid gap-6">
           <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -1259,9 +1127,9 @@ export default function CompanyEvents() {
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <Send className="h-4 w-4" />
-                  Fila de envio Meta
+                  Envios Meta
                 </CardTitle>
-                <CardDescription>Status atual dos eventos prontos para envio via CAPI.</CardDescription>
+                <CardDescription>Status atual, payload e histórico de tentativas da API de Conversões.</CardDescription>
               </div>
               <Button
                 type="button"
@@ -1337,7 +1205,7 @@ export default function CompanyEvents() {
                   <p className={`text-xs ${hasInvalidMetaQueueDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {hasInvalidMetaQueueDateRange
                       ? 'Data inicial nao pode ser maior que a data final.'
-                      : `Exibindo ate ${META_QUEUE_LIMIT} itens mais recentes para o recorte atual.`}
+                      : `Exibindo ate ${META_QUEUE_LIMIT} eventos mais recentes para o recorte atual.`}
                   </p>
                   <Badge variant="outline" className="self-start sm:self-auto">{metaQueueCountLabel}</Badge>
                 </div>
@@ -1347,60 +1215,89 @@ export default function CompanyEvents() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Evento</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Origem</TableHead>
+                    <TableHead>Status atual</TableHead>
                     <TableHead>Tentativas</TableHead>
-                    <TableHead>Resposta</TableHead>
-                    <TableHead className="text-right">Payload</TableHead>
+                    <TableHead>Última resposta</TableHead>
+                    <TableHead className="text-right">Detalhes</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {metaQueueLoading && metaQueue.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
-                        Carregando fila Meta...
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        Carregando envios Meta...
                       </TableCell>
                     </TableRow>
                   ) : metaQueue.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         {metaQueueEmptyMessage}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paginatedMetaQueue.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{item.meta_event_name}</p>
-                            <p className="text-xs text-muted-foreground">{formatDateTime(item.created_at)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={item.status === 'sent' ? 'secondary' : item.status === 'failed' ? 'destructive' : 'outline'}>
-                            {formatMetaStatus(item.status)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{item.attempts}</TableCell>
-                        <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground">
-                          {item.last_response_status ? `HTTP ${item.last_response_status}` : item.last_error ?? '-'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              setSelectedPayload({
-                                title: `${item.meta_event_name} (${formatMetaStatus(item.status)})`,
-                                content: buildPayloadPreview(item.payload) ?? '{}',
-                              })
-                            }
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    paginatedMetaQueue.map((item) => {
+                      const itemAttempts = attemptsByQueueId.get(item.id) ?? [];
+
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{item.meta_event_name}</p>
+                              <p className="text-xs text-muted-foreground">{formatDateTime(item.created_at)}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="min-w-[160px] space-y-1">
+                              <p className="text-sm text-foreground">{formatEventDisplay(item.event_name)}</p>
+                              <p className="font-mono text-xs text-muted-foreground">{item.event_name}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {item.status === 'sent' ? (
+                                <BadgeCheck className="h-4 w-4 text-emerald-600" />
+                              ) : item.status === 'failed' ? (
+                                <ShieldAlert className="h-4 w-4 text-destructive" />
+                              ) : (
+                                <Clock3 className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <Badge variant={getMetaStatusBadgeVariant(item.status)}>
+                                {formatMetaStatus(item.status)}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{item.attempts}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {metaAttemptsLoading ? 'Carregando logs...' : `${itemAttempts.length} log(s)`}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground">
+                            {getMetaLastResponseText(item, itemAttempts)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              onClick={() =>
+                                setSelectedPayload({
+                                  title: `${item.meta_event_name} · ${formatMetaStatus(item.status)}`,
+                                  content: buildMetaQueueDetailContent(item, itemAttempts),
+                                })
+                              }
+                            >
+                              <Eye className="h-4 w-4" />
+                              Detalhes
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -1467,235 +1364,6 @@ export default function CompanyEvents() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              Histórico de tentativas Meta
-            </CardTitle>
-            <CardDescription>
-              Request payload, status HTTP e respostas recebidas da API de Conversões.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="meta-attempts-type-filter">Tipo de evento</Label>
-                  <Select value={metaAttemptsTypeFilter} onValueChange={setMetaAttemptsTypeFilter}>
-                    <SelectTrigger id="meta-attempts-type-filter" className="h-9">
-                      <SelectValue placeholder="Todos os tipos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={EVENT_TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
-                      {selectableMetaAttemptsEventTypes.map((eventName) => (
-                        <SelectItem key={eventName} value={eventName}>
-                          {formatMetaEventOptionLabel(eventName)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="meta-attempts-start-date">Data inicial</Label>
-                  <Input
-                    id="meta-attempts-start-date"
-                    type="date"
-                    className="h-9"
-                    value={metaAttemptsStartDate}
-                    max={metaAttemptsEndDate || undefined}
-                    onChange={(event) => setMetaAttemptsStartDate(event.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="meta-attempts-end-date">Data final</Label>
-                  <Input
-                    id="meta-attempts-end-date"
-                    type="date"
-                    className="h-9"
-                    value={metaAttemptsEndDate}
-                    min={metaAttemptsStartDate || undefined}
-                    onChange={(event) => setMetaAttemptsEndDate(event.target.value)}
-                  />
-                </div>
-
-                <div className="flex items-end sm:col-span-2 sm:justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-full sm:w-auto"
-                    onClick={handleResetMetaAttemptsFilters}
-                    disabled={!hasMetaAttemptsFiltersActive}
-                  >
-                    Limpar filtros
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className={`text-xs ${hasInvalidMetaAttemptsDateRange ? 'text-destructive' : 'text-muted-foreground'}`}>
-                  {hasInvalidMetaAttemptsDateRange
-                    ? 'Data inicial nao pode ser maior que a data final.'
-                    : `Exibindo ate ${META_ATTEMPTS_LIMIT} tentativas mais recentes para o recorte atual.`}
-                </p>
-                <Badge variant="outline" className="self-start sm:self-auto">{metaAttemptsCountLabel}</Badge>
-              </div>
-            </div>
-
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Quando</TableHead>
-                  <TableHead>Evento</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>HTTP</TableHead>
-                  <TableHead>Resumo</TableHead>
-                  <TableHead className="text-right">Detalhes</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {metaAttemptsLoading && metaAttempts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      Carregando tentativas...
-                    </TableCell>
-                  </TableRow>
-                ) : metaAttempts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      {metaAttemptsEmptyMessage}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  paginatedMetaAttempts.map((attempt) => (
-                    <TableRow key={attempt.id}>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {formatDateTime(attempt.created_at)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex min-w-[180px] flex-col gap-1">
-                          <Badge variant="secondary" className="w-fit">
-                            {attempt.queue?.meta_event_name ?? 'Meta'}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {attempt.queue?.event_name ? formatEventDisplay(attempt.queue.event_name) : 'Evento de origem indisponivel'}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {attempt.status === 'sent' ? (
-                            <BadgeCheck className="h-4 w-4 text-emerald-600" />
-                          ) : (
-                            <ShieldAlert className="h-4 w-4 text-destructive" />
-                          )}
-                          <span>{formatMetaStatus(attempt.status)}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{attempt.response_status ?? '-'}</TableCell>
-                      <TableCell className="max-w-[420px] truncate text-sm text-muted-foreground">
-                        {attempt.error_message ?? attempt.response_body ?? '-'}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setSelectedPayload({
-                              title: `Tentativa ${attempt.queue?.meta_event_name ?? 'Meta'} ${formatMetaStatus(attempt.status)} em ${formatDateTime(attempt.created_at)}`,
-                              content: [
-                                'REQUEST',
-                                buildPayloadPreview(attempt.request_payload) ?? '{}',
-                                '',
-                                'RESPONSE',
-                                attempt.response_body ?? attempt.error_message ?? '',
-                              ].join('\n'),
-                            })
-                          }
-                        >
-                          Ver log
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-
-            {metaAttempts.length > 0 && (
-              <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-muted-foreground">
-                  {metaAttemptsPageSummary} · Pagina {metaAttemptsPage} de {metaAttemptsTotalPages}
-                </div>
-
-                {metaAttemptsTotalPages > 1 && (
-                  <Pagination className="justify-start sm:justify-end">
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          href="#"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            if (metaAttemptsPage > 1) {
-                              setMetaAttemptsPage(metaAttemptsPage - 1);
-                            }
-                          }}
-                          className={cn(metaAttemptsPage === 1 && 'pointer-events-none opacity-50')}
-                        />
-                      </PaginationItem>
-
-                      {metaAttemptsVisiblePages.map((page, index) => (
-                        <PaginationItem key={`meta-attempts-${page}-${index}`}>
-                          {page === 'ellipsis' ? (
-                            <PaginationEllipsis />
-                          ) : (
-                            <PaginationLink
-                              href="#"
-                              isActive={page === metaAttemptsPage}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                setMetaAttemptsPage(page);
-                              }}
-                            >
-                              {page}
-                            </PaginationLink>
-                          )}
-                        </PaginationItem>
-                      ))}
-
-                      <PaginationItem>
-                        <PaginationNext
-                          href="#"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            if (metaAttemptsPage < metaAttemptsTotalPages) {
-                              setMetaAttemptsPage(metaAttemptsPage + 1);
-                            }
-                          }}
-                          className={cn(metaAttemptsPage === metaAttemptsTotalPages && 'pointer-events-none opacity-50')}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2 text-foreground">
-            <Clock3 className="h-4 w-4" />
-            Janela de métricas
-          </div>
-          <p className="mt-2">
-            Os cards desta tela mostram os últimos 7 dias. Os logs abaixo exibem os registros mais recentes gravados no banco.
-          </p>
-        </div>
       </div>
 
       <Dialog open={!!selectedEvent} onOpenChange={(nextOpen) => !nextOpen && setSelectedEvent(null)}>

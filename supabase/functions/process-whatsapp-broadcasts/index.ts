@@ -27,6 +27,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
+const SUPPORTED_BROADCAST_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
+
 interface BroadcastRow {
   id: string;
   company_id: string;
@@ -64,6 +66,18 @@ function mimeTypeFromUrl(url: string): { mime: string; ext: string } {
   return { mime: "image/jpeg", ext: "jpg" };
 }
 
+function normalizeMimeType(value: string | null | undefined) {
+  return (value ?? "").split(";")[0].trim().toLowerCase();
+}
+
+function isSupportedBroadcastImageMime(value: string | null | undefined) {
+  return SUPPORTED_BROADCAST_IMAGE_MIME_TYPES.has(normalizeMimeType(value));
+}
+
+function extensionFromMimeType(value: string) {
+  return normalizeMimeType(value) === "image/png" ? "png" : "jpg";
+}
+
 async function fetchImageAsBase64(url: string): Promise<{ base64: string; mime: string } | null> {
   try {
     const res = await fetch(url);
@@ -74,7 +88,7 @@ async function fetchImageAsBase64(url: string): Promise<{ base64: string; mime: 
     for (let i = 0; i < bytes.byteLength; i++) {
       binary += String.fromCharCode(bytes[i]);
     }
-    const mime = (res.headers.get("content-type") ?? "image/jpeg").split(";")[0].trim();
+    const mime = normalizeMimeType(res.headers.get("content-type")) || "application/octet-stream";
     return { base64: btoa(binary), mime };
   } catch {
     return null;
@@ -203,16 +217,35 @@ async function processBroadcast(
         const { mime: mimeFromUrl, ext } = mimeTypeFromUrl(broadcast.image_url);
         const imageData = await fetchImageAsBase64(broadcast.image_url);
         const mediaSource = imageData ? imageData.base64 : broadcast.image_url;
-        const actualMime = imageData ? imageData.mime : mimeFromUrl;
-        result = await sendWhatsAppMedia(
-          evolutionUrl,
-          evolutionToken,
-          instanceName,
-          phone,
-          mediaSource,
-          broadcast.message,
-          { mediaType: "image", mimeType: actualMime, fileName: `broadcast.${ext}` },
-        );
+        const fetchedMime = normalizeMimeType(imageData?.mime);
+        const actualMime = fetchedMime.startsWith("image/") ? fetchedMime : mimeFromUrl;
+        console.log(`[broadcast] image_url=${broadcast.image_url} | fetched=${!!imageData} | mime=${actualMime} | base64len=${imageData ? imageData.base64.length : 0}`);
+        if (!isSupportedBroadcastImageMime(actualMime)) {
+          const failureDetails: WhatsAppFailureDetails = {
+            code: "unsupported_media_type",
+            title: "Formato de imagem nao suportado",
+            message: "Envie a imagem em PNG ou JPG. WebP deve ser convertido antes do envio pelo WhatsApp.",
+            provider_status: null,
+            provider_message: `mimetype=${actualMime}`,
+            raw: JSON.stringify({
+              image_url: broadcast.image_url,
+              detected_mime: actualMime,
+              fallback_extension: ext,
+            }),
+          };
+          console.warn(`[broadcast] unsupported image mime: ${actualMime} | image_url=${broadcast.image_url}`);
+          result = { ok: false, error: failureDetails };
+        } else {
+          result = await sendWhatsAppMedia(
+            evolutionUrl,
+            evolutionToken,
+            instanceName,
+            phone,
+            mediaSource,
+            broadcast.message,
+            { mediaType: "image", mimeType: actualMime, fileName: `broadcast.${extensionFromMimeType(actualMime)}` },
+          );
+        }
       } else {
         result = await sendWhatsAppText(
           evolutionUrl,
