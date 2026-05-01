@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
 
     const { data: recentMetaErrors } = await adminClient
       .from("meta_event_attempts")
-      .select("id, company_id, reservation_id, error_message, response_body, created_at")
+      .select("id, queue_id, company_id, reservation_id, status, response_status, error_message, response_body, request_payload, created_at, queue:meta_event_queue(event_name, meta_event_name, status, attempts, last_response_status, last_error, payload, created_at, sent_at)")
       .eq("status", "failed")
       .gte("created_at", yesterday)
       .order("created_at", { ascending: false })
@@ -156,14 +156,6 @@ Deno.serve(async (req) => {
     results.companies = {
       total: companies?.length || 0,
     };
-
-    const today = new Date().toISOString().split("T")[0];
-    const { count: todayReservations } = await adminClient
-      .from("reservations")
-      .select("id", { count: "exact", head: true })
-      .eq("date", today);
-
-    results.reservationsToday = todayReservations || 0;
 
     const { data: settings } = await adminClient
       .from("system_settings")

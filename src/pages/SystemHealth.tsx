@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Inbox, Server, Loader2, Send } from 'lucide-react';
+import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Server, Send } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -55,8 +57,83 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
 
+function getMetaErrorQueue(error: any) {
+  return Array.isArray(error?.queue) ? error.queue[0] : error?.queue ?? null;
+}
+
+function parseMaybeJson(value: unknown) {
+  if (typeof value !== 'string') return value ?? null;
+
+  let current: unknown = value.trim();
+  for (let index = 0; index < 2; index += 1) {
+    if (typeof current !== 'string') return current;
+
+    const text = current.trim();
+    if (!text) return null;
+    if (!['{', '[', '"'].includes(text[0])) return text;
+
+    try {
+      current = JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
+  return current;
+}
+
+function getMetaErrorText(value: unknown) {
+  const parsed = parseMaybeJson(value);
+  if (!parsed) return null;
+  if (typeof parsed === 'string') return parsed;
+  if (typeof parsed !== 'object') return String(parsed);
+
+  const record = parsed as Record<string, any>;
+  const metaError = record.error && typeof record.error === 'object'
+    ? record.error as Record<string, any>
+    : record;
+
+  const title = typeof metaError.error_user_title === 'string' ? metaError.error_user_title : null;
+  const message = typeof metaError.error_user_msg === 'string'
+    ? metaError.error_user_msg
+    : typeof metaError.message === 'string'
+      ? metaError.message
+      : null;
+  const code = metaError.code ? `Codigo ${metaError.code}` : null;
+
+  return [title, message, code].filter(Boolean).join(' - ') || JSON.stringify(parsed, null, 2);
+}
+
+function getMetaErrorSummary(error: any) {
+  return getMetaErrorText(error.error_message)
+    ?? getMetaErrorText(error.response_body)
+    ?? 'Sem detalhe informado.';
+}
+
+function buildMetaErrorDetails(error: any) {
+  const queue = getMetaErrorQueue(error);
+
+  return JSON.stringify({
+    attempt: {
+      id: error.id,
+      queue_id: error.queue_id,
+      company_id: error.company_id,
+      company_name: error.company_name,
+      reservation_id: error.reservation_id,
+      status: error.status,
+      response_status: error.response_status,
+      error_message: parseMaybeJson(error.error_message),
+      response_body: parseMaybeJson(error.response_body),
+      created_at: error.created_at,
+    },
+    queue: queue ? { ...queue, payload: parseMaybeJson(queue.payload) } : null,
+    request_payload: parseMaybeJson(error.request_payload),
+  }, null, 2);
+}
+
 export default function SystemHealth() {
   const { data, isLoading, refetch, isFetching, error } = useSystemHealth();
+  const [selectedMetaError, setSelectedMetaError] = useState<any | null>(null);
 
   return (
     <div className="space-y-6">
@@ -141,18 +218,7 @@ export default function SystemHealth() {
           </div>
 
           {/* Quick Stats */}
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card className="border-none shadow-sm">
-              <CardContent className="p-6 flex items-center gap-4">
-                <div className="p-2 rounded-md bg-primary/10">
-                  <Inbox className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-xl font-bold">{data.reservationsToday || 0}</p>
-                  <p className="text-sm text-muted-foreground">Reservas hoje</p>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4 md:grid-cols-3">
             <Card className="border-none shadow-sm">
               <CardContent className="p-6 flex items-center gap-4">
                 <div className="p-2 rounded-md bg-amber-500/10">
@@ -303,7 +369,11 @@ export default function SystemHealth() {
                   </TableHeader>
                   <TableBody>
                     {data.recentMetaErrors.map((err: any) => (
-                      <TableRow key={err.id}>
+                      <TableRow
+                        key={err.id}
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => setSelectedMetaError(err)}
+                      >
                         <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                           {format(new Date(err.created_at), "dd/MM HH:mm", { locale: ptBR })}
                         </TableCell>
@@ -312,7 +382,7 @@ export default function SystemHealth() {
                           {err.reservation_id ? String(err.reservation_id).slice(0, 8) : '—'}
                         </TableCell>
                         <TableCell className="text-sm text-destructive max-w-[420px] truncate">
-                          {err.error_message || err.response_body || '—'}
+                          {getMetaErrorSummary(err)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -321,6 +391,47 @@ export default function SystemHealth() {
               )}
             </CardContent>
           </Card>
+
+          <Dialog open={!!selectedMetaError} onOpenChange={(open) => !open && setSelectedMetaError(null)}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Detalhes do erro Meta CAPI</DialogTitle>
+              </DialogHeader>
+              {selectedMetaError && (
+                <div className="space-y-4">
+                  <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Data</p>
+                      <p className="mt-1 font-medium">{format(new Date(selectedMetaError.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Empresa</p>
+                      <p className="mt-1 font-medium">{selectedMetaError.company_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">HTTP</p>
+                      <p className="mt-1 font-medium">{selectedMetaError.response_status ?? '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Evento</p>
+                      <p className="mt-1 font-medium">{getMetaErrorQueue(selectedMetaError)?.meta_event_name ?? '—'}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm font-semibold text-foreground">Resumo</p>
+                    <p className="mt-2 break-words text-sm text-destructive">
+                      {getMetaErrorSummary(selectedMetaError)}
+                    </p>
+                  </div>
+
+                  <pre className="max-h-[48vh] overflow-auto rounded-lg border border-border bg-muted/20 p-4 text-xs text-foreground whitespace-pre-wrap break-all">
+                    {buildMetaErrorDetails(selectedMetaError)}
+                  </pre>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>
