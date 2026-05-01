@@ -181,6 +181,12 @@ function getVisibleOccasionLabel(occasion: string | null | undefined) {
 }
 
 
+function isDisplayableDescription(description: string | null | undefined): boolean {
+  if (!description) return false;
+  const trimmed = description.trim();
+  return !trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.startsWith('/');
+}
+
 function getAuditActorLabel(item: ReservationTimelineItem) {
   if (item.source !== 'audit') return null;
   if (item.actor_source === 'system') return 'Sistema automático';
@@ -392,7 +398,7 @@ export default function ReservationDetailsDialog({
 
               </div>
 
-              {item.description && (
+              {isDisplayableDescription(item.description) && (
                 <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                   {item.description}
                 </p>
@@ -616,7 +622,7 @@ export default function ReservationDetailsDialog({
 
                         </div>
 
-                        {item.description && (
+                        {isDisplayableDescription(item.description) && (
                           <p className="mt-2 max-w-full whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                             {item.description}
                           </p>
