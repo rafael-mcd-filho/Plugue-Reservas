@@ -149,6 +149,7 @@ export default function BroadcastsTab({ companyId }: Props) {
   const [delayMax, setDelayMax] = useState(40);
   const [detailsBroadcast, setDetailsBroadcast] = useState<BroadcastRow | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const { data: reservations = [], isFetching: loadingReservations } = useQuery({
     queryKey: ['broadcast-candidates', companyId, filterRange?.from, filterRange?.to, filterStatuses.join(',')],
@@ -653,7 +654,7 @@ export default function BroadcastsTab({ companyId }: Props) {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => deleteBroadcastMutation.mutate(b.id)}
+                            onClick={() => setDeleteTargetId(b.id)}
                             disabled={deleteBroadcastMutation.isPending}
                             className="gap-2 text-muted-foreground hover:text-destructive"
                           >
@@ -692,6 +693,31 @@ export default function BroadcastsTab({ companyId }: Props) {
         broadcast={detailsBroadcast}
         onClose={() => setDetailsBroadcast(null)}
       />
+
+      <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir disparo?</DialogTitle>
+            <DialogDescription>
+              O disparo e todo o seu histórico serão removidos permanentemente. Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (deleteTargetId) { deleteBroadcastMutation.mutate(deleteTargetId); setDeleteTargetId(null); } }}
+              disabled={deleteBroadcastMutation.isPending}
+              className="gap-2"
+            >
+              {deleteBroadcastMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Excluir permanentemente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!cancelTargetId} onOpenChange={(open) => !open && setCancelTargetId(null)}>
         <DialogContent>
