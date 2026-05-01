@@ -101,7 +101,9 @@ function formatTimelineTitle(item: ReservationTimelineItem) {
   if (item.event_name === 'reservation_no_show') {
     return 'Marcada como No Show';
   }
-
+  if (item.source === 'meta' && item.event_name) {
+    return `${item.title} · ${item.event_name}`;
+  }
   return item.title;
 }
 
