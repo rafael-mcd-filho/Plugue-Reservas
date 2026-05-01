@@ -780,7 +780,7 @@ function BroadcastDetailsDialog({
 
   return (
     <Dialog open={!!broadcast} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>{broadcast.name}</DialogTitle>
           <DialogDescription>
@@ -855,27 +855,28 @@ function BroadcastDetailsDialog({
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Telefone</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Enviado em</TableHead>
-                  <TableHead>Detalhes</TableHead>
+                  <TableHead className="whitespace-nowrap">Nome</TableHead>
+                  <TableHead className="whitespace-nowrap">Telefone</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Enviado em</TableHead>
+                  <TableHead className="w-full">Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((r) => {
                   const cfg = RECIPIENT_STATUS_CONFIG[r.status];
                   const err = parseWhatsAppErrorDetails(r.error_details);
+                  const obs = err ? `${err.title}: ${err.message}` : (r.status !== 'sent' && r.error_details ? r.error_details : null);
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.guest_name || '—'}</TableCell>
-                      <TableCell>{formatBrazilPhone(r.phone)}</TableCell>
-                      <TableCell className={cfg.className}>{cfg.label}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="whitespace-nowrap font-medium">{r.guest_name || '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatBrazilPhone(r.phone)}</TableCell>
+                      <TableCell className={cn('whitespace-nowrap', cfg.className)}>{cfg.label}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                         {r.sent_at ? formatDate(r.sent_at) : '—'}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {err?.message ?? err?.title ?? (r.status === 'sent' ? '—' : r.error_details ?? '—')}
+                        {obs ?? '—'}
                       </TableCell>
                     </TableRow>
                   );
