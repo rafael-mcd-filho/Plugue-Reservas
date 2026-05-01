@@ -181,6 +181,29 @@ function getVisibleOccasionLabel(occasion: string | null | undefined) {
 }
 
 
+const EDIT_DISPLAY_FIELDS = new Set(['date', 'time', 'party_size', 'guest_name', 'guest_phone', 'guest_email', 'guest_birthdate', 'occasion', 'notes']);
+
+function getReservationEditChanges(item: ReservationTimelineItem) {
+  if (item.event_name !== 'updated' || !item.payload || typeof item.payload !== 'object') {
+    return [];
+  }
+  const changes = item.payload.changes;
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    return [];
+  }
+  return Object.entries(changes)
+    .filter(([field, change]) => EDIT_DISPLAY_FIELDS.has(field) && change && typeof change === 'object' && !Array.isArray(change))
+    .map(([field, change]) => {
+      const typedChange = change as { old?: unknown; new?: unknown };
+      return {
+        field,
+        label: AUDIT_FIELD_LABELS[field] ?? field,
+        oldValue: formatAuditValue(field, typedChange.old),
+        newValue: formatAuditValue(field, typedChange.new),
+      };
+    });
+}
+
 function isDisplayableDescription(description: string | null | undefined): boolean {
   if (!description) return false;
   const trimmed = description.trim();
@@ -403,6 +426,21 @@ export default function ReservationDetailsDialog({
                   {item.description}
                 </p>
               )}
+              {(() => {
+                const editChanges = getReservationEditChanges(item);
+                if (editChanges.length === 0) return null;
+                return (
+                  <div className="mt-3 grid gap-2">
+                    {editChanges.map((change) => (
+                      <div key={change.field} className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs">
+                        <p className="font-medium text-foreground">{change.label}</p>
+                        <p className="mt-1 text-muted-foreground">Antes: {change.oldValue}</p>
+                        <p className="text-muted-foreground">Depois: {change.newValue}</p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -627,6 +665,21 @@ export default function ReservationDetailsDialog({
                             {item.description}
                           </p>
                         )}
+                        {(() => {
+                          const editChanges = getReservationEditChanges(item);
+                          if (editChanges.length === 0) return null;
+                          return (
+                            <div className="mt-3 grid gap-2">
+                              {editChanges.map((change) => (
+                                <div key={change.field} className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs">
+                                  <p className="font-medium text-foreground">{change.label}</p>
+                                  <p className="mt-1 text-muted-foreground">Antes: {change.oldValue}</p>
+                                  <p className="text-muted-foreground">Depois: {change.newValue}</p>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )})}
                   </div>
