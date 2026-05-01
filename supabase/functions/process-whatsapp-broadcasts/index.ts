@@ -64,6 +64,23 @@ function mimeTypeFromUrl(url: string): { mime: string; ext: string } {
   return { mime: "image/jpeg", ext: "jpg" };
 }
 
+async function fetchImageAsBase64(url: string): Promise<{ base64: string; mime: string } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buffer = await res.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const mime = (res.headers.get("content-type") ?? "image/jpeg").split(";")[0].trim();
+    return { base64: btoa(binary), mime };
+  } catch {
+    return null;
+  }
+}
+
 async function markBroadcastCompletedIfDone(supabase: any, broadcastId: string) {
   const { count } = await supabase
     .from("whatsapp_broadcast_recipients")
@@ -183,15 +200,18 @@ async function processBroadcast(
     let result;
     try {
       if (broadcast.image_url) {
-        const { mime, ext } = mimeTypeFromUrl(broadcast.image_url);
+        const { mime: mimeFromUrl, ext } = mimeTypeFromUrl(broadcast.image_url);
+        const imageData = await fetchImageAsBase64(broadcast.image_url);
+        const mediaSource = imageData ? imageData.base64 : broadcast.image_url;
+        const actualMime = imageData ? imageData.mime : mimeFromUrl;
         result = await sendWhatsAppMedia(
           evolutionUrl,
           evolutionToken,
           instanceName,
           phone,
-          broadcast.image_url,
+          mediaSource,
           broadcast.message,
-          { mediaType: "image", mimeType: mime, fileName: `broadcast.${ext}` },
+          { mediaType: "image", mimeType: actualMime, fileName: `broadcast.${ext}` },
         );
       } else {
         result = await sendWhatsAppText(
