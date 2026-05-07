@@ -13,6 +13,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+const STATUS_CHECK_TIMEOUT_MS = 5000;
+const PROFILE_FETCH_TIMEOUT_MS = 2000;
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Evolution API demorou mais de ${Math.round(timeoutMs / 1000)}s para responder`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function normalizeOptionalCompanyId(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
@@ -46,6 +65,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { action, company_id, instance_name, phone, message, log_id } = body;
+    const refreshProfile = body.refresh_profile === true;
     const scopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
     const impersonatedBySuperadmin = body.impersonated_by_superadmin === true;
     const effectiveRole = normalizeEffectiveRole(body.effective_role);
@@ -327,7 +347,7 @@ Deno.serve(async (req) => {
       case 'check_status': {
         const { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
-          .select('instance_name')
+          .select('instance_name, display_name, phone_number, profile_picture_url')
           .eq('company_id', company_id)
           .maybeSingle();
 
@@ -337,13 +357,22 @@ Deno.serve(async (req) => {
           });
         }
 
-        const res = await fetch(`${evolutionUrl}/instance/connectionState/${instance.instance_name}`, {
+        const res = await fetchWithTimeout(`${evolutionUrl}/instance/connectionState/${instance.instance_name}`, {
           method: 'GET',
           headers,
-        });
+        }, STATUS_CHECK_TIMEOUT_MS);
         
         const responseText = await res.text();
         console.log('check_status response:', responseText);
+
+        if (!res.ok) {
+          return new Response(JSON.stringify({
+            error: `Erro ao verificar status (${res.status}): ${responseText.substring(0, 200)}`,
+          }), {
+            status: 502,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         
         let parsed: any;
         try { parsed = JSON.parse(responseText); } catch { parsed = {}; }
@@ -357,12 +386,19 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
         };
 
-        if (isConnected) {
+        const shouldRefreshProfile = isConnected && (
+          refreshProfile ||
+          !instance.display_name ||
+          !instance.phone_number ||
+          !instance.profile_picture_url
+        );
+
+        if (shouldRefreshProfile) {
           try {
-            const profileRes = await fetch(`${evolutionUrl}/instance/fetchInstances?instanceName=${instance.instance_name}`, {
+            const profileRes = await fetchWithTimeout(`${evolutionUrl}/instance/fetchInstances?instanceName=${instance.instance_name}`, {
               method: 'GET',
               headers,
-            });
+            }, PROFILE_FETCH_TIMEOUT_MS);
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               const p = Array.isArray(profileData) ? profileData[0] : profileData;

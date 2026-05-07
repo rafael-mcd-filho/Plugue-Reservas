@@ -32,6 +32,7 @@ export interface EvolutionApiPayload {
   phone?: string;
   message?: string;
   log_id?: string;
+  refresh_profile?: boolean;
 }
 
 export function useAutomationSettings(companyId?: string) {

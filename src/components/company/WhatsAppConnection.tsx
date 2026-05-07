@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Smartphone, QrCode, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,17 +13,18 @@ interface Props {
 
 export default function WhatsAppConnection({ companyId }: Props) {
   const { data: instance, isLoading } = useWhatsAppInstance(companyId);
-  const evolutionApi = useEvolutionApi();
+  const { mutateAsync: invokeEvolutionApi, isPending: evolutionApiPending } = useEvolutionApi();
   const qc = useQueryClient();
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   const handleConnect = async () => {
     try {
       // Step 1: Create instance if needed
       if (!instance) {
-        const createResult = await evolutionApi.mutateAsync({ action: 'create_instance', company_id: companyId });
+        const createResult = await invokeEvolutionApi({ action: 'create_instance', company_id: companyId });
         qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
         
         // create_instance with qrcode:true might already return QR data
@@ -37,7 +38,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
       }
 
       // Step 2: Get QR code via connect endpoint
-      const result = await evolutionApi.mutateAsync({ action: 'get_qrcode', company_id: companyId });
+      const result = await invokeEvolutionApi({ action: 'get_qrcode', company_id: companyId });
       
       if (result?.base64) {
         const src = result.base64.startsWith('data:') ? result.base64 : `data:image/png;base64,${result.base64}`;
@@ -59,7 +60,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
 
   const handleDisconnect = async () => {
     try {
-      await evolutionApi.mutateAsync({ action: 'disconnect', company_id: companyId });
+      await invokeEvolutionApi({ action: 'disconnect', company_id: companyId });
       qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
       setQrCode(null);
       setPairingCode(null);
@@ -70,20 +71,31 @@ export default function WhatsAppConnection({ companyId }: Props) {
     }
   };
 
-  const checkStatus = async () => {
+  const checkStatus = useCallback(async (options?: { refreshProfile?: boolean; silent?: boolean }) => {
+    setCheckingStatus(true);
     try {
-      const result = await evolutionApi.mutateAsync({ action: 'check_status', company_id: companyId });
+      const result = await invokeEvolutionApi({
+        action: 'check_status',
+        company_id: companyId,
+        refresh_profile: options?.refreshProfile ?? false,
+      });
       qc.invalidateQueries({ queryKey: ['whatsapp-instance', companyId] });
       if (result?.instance?.state === 'open') {
         setQrCode(null);
         setPairingCode(null);
         setPolling(false);
-        toast.success('WhatsApp conectado!');
+        if (!options?.silent) toast.success('WhatsApp conectado!');
+      } else if (!options?.silent) {
+        toast.warning('WhatsApp não está conectado no momento.');
       }
-    } catch {
-      // silent
+    } catch (err: any) {
+      if (!options?.silent) {
+        toast.error(err.message || 'Não foi possível verificar o status agora.');
+      }
+    } finally {
+      setCheckingStatus(false);
     }
-  };
+  }, [companyId, invokeEvolutionApi, qc]);
 
   // Poll status when QR is showing
   useEffect(() => {
@@ -91,13 +103,13 @@ export default function WhatsAppConnection({ companyId }: Props) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void checkStatus();
+        void checkStatus({ refreshProfile: true, silent: true });
       }
     };
 
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
-        void checkStatus();
+        void checkStatus({ refreshProfile: true, silent: true });
       }
     }, 5000);
 
@@ -107,7 +119,7 @@ export default function WhatsAppConnection({ companyId }: Props) {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [polling]);
+  }, [checkStatus, polling]);
 
   const isConnected = instance?.status === 'connected';
 
@@ -175,16 +187,22 @@ export default function WhatsAppConnection({ companyId }: Props) {
 
         <div className="flex gap-2">
           {!isConnected ? (
-            <Button onClick={handleConnect} disabled={evolutionApi.isPending} className="gap-2">
-              {evolutionApi.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+            <Button onClick={handleConnect} disabled={evolutionApiPending} className="gap-2">
+              {evolutionApiPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
               {qrCode || pairingCode ? 'Gerar novo QR' : 'Conectar WhatsApp'}
             </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={checkStatus} disabled={evolutionApi.isPending} className="gap-2">
-                <RefreshCw className="h-4 w-4" /> Verificar Status
+              <Button
+                variant="outline"
+                onClick={() => checkStatus({ refreshProfile: false })}
+                disabled={evolutionApiPending || checkingStatus}
+                className="gap-2"
+              >
+                {checkingStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {checkingStatus ? 'Verificando...' : 'Verificar Status'}
               </Button>
-              <Button variant="destructive" onClick={handleDisconnect} disabled={evolutionApi.isPending} className="gap-2">
+              <Button variant="destructive" onClick={handleDisconnect} disabled={evolutionApiPending} className="gap-2">
                 <WifiOff className="h-4 w-4" /> Desconectar
               </Button>
             </>

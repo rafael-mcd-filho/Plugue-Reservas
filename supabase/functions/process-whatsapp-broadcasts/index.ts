@@ -111,6 +111,43 @@ async function markBroadcastCompletedIfDone(supabase: any, broadcastId: string) 
   }
 }
 
+async function syncBroadcastCounts(supabase: any, broadcastId: string) {
+  const { data: totals, error: totalsError } = await supabase
+    .from("whatsapp_broadcast_recipients")
+    .select("status")
+    .eq("broadcast_id", broadcastId);
+
+  if (totalsError) {
+    console.warn(`[broadcast] failed to load recipient counts for ${broadcastId}: ${totalsError.message}`);
+    return;
+  }
+
+  const counts = {
+    total_recipients: 0,
+    sent_count: 0,
+    failed_count: 0,
+    skipped_count: 0,
+    cancelled_count: 0,
+  };
+
+  for (const row of totals ?? []) {
+    counts.total_recipients++;
+    if (row.status === "sent") counts.sent_count++;
+    else if (row.status === "failed") counts.failed_count++;
+    else if (row.status === "skipped") counts.skipped_count++;
+    else if (row.status === "cancelled") counts.cancelled_count++;
+  }
+
+  const { error: updateError } = await supabase
+    .from("whatsapp_broadcasts")
+    .update(counts)
+    .eq("id", broadcastId);
+
+  if (updateError) {
+    console.warn(`[broadcast] failed to update counts for ${broadcastId}: ${updateError.message}`);
+  }
+}
+
 async function processBroadcast(
   supabase: any,
   broadcast: BroadcastRow,
@@ -325,28 +362,7 @@ async function processBroadcast(
     if (circuitTripped) break;
   }
 
-  if (sent || failed || skipped) {
-    const { data: totals } = await supabase
-      .from("whatsapp_broadcast_recipients")
-      .select("status")
-      .eq("broadcast_id", broadcast.id);
-
-    const counts = {
-      sent_count: 0,
-      failed_count: 0,
-      skipped_count: 0,
-      cancelled_count: 0,
-    };
-    for (const row of totals ?? []) {
-      if (row.status === "sent") counts.sent_count++;
-      else if (row.status === "failed") counts.failed_count++;
-      else if (row.status === "skipped") counts.skipped_count++;
-      else if (row.status === "cancelled") counts.cancelled_count++;
-    }
-
-    await supabase.from("whatsapp_broadcasts").update(counts).eq("id", broadcast.id);
-  }
-
+  await syncBroadcastCounts(supabase, broadcast.id);
   await markBroadcastCompletedIfDone(supabase, broadcast.id);
 
   return { sent, failed, skipped, circuitTripped };

@@ -127,6 +127,15 @@ interface RecipientRow {
   created_at: string;
 }
 
+interface BroadcastStatsRow {
+  broadcast_id: string;
+  total_recipients: number;
+  sent_count: number;
+  failed_count: number;
+  skipped_count: number;
+  cancelled_count: number;
+}
+
 interface ReservationCandidate {
   id: string;
   guest_name: string;
@@ -173,6 +182,36 @@ function formatDate(value: string | null | undefined, pattern = "dd/MM/yyyy 'às
   } catch {
     return '—';
   }
+}
+
+function getBroadcastStatsFromRecipients(recipients: RecipientRow[]): Omit<BroadcastStatsRow, 'broadcast_id'> {
+  return recipients.reduce(
+    (stats, recipient) => {
+      stats.total_recipients += 1;
+      if (recipient.status === 'sent') stats.sent_count += 1;
+      else if (recipient.status === 'failed') stats.failed_count += 1;
+      else if (recipient.status === 'skipped') stats.skipped_count += 1;
+      else if (recipient.status === 'cancelled') stats.cancelled_count += 1;
+      return stats;
+    },
+    {
+      total_recipients: 0,
+      sent_count: 0,
+      failed_count: 0,
+      skipped_count: 0,
+      cancelled_count: 0,
+    },
+  );
+}
+
+function getBroadcastStatsFromRow(broadcast: BroadcastRow): Omit<BroadcastStatsRow, 'broadcast_id'> {
+  return {
+    total_recipients: broadcast.total_recipients || 0,
+    sent_count: broadcast.sent_count || 0,
+    failed_count: broadcast.failed_count || 0,
+    skipped_count: broadcast.skipped_count || 0,
+    cancelled_count: broadcast.cancelled_count || 0,
+  };
 }
 
 export default function BroadcastsTab({ companyId }: Props) {
@@ -235,7 +274,27 @@ export default function BroadcastsTab({ companyId }: Props) {
         .order('created_at', { ascending: false })
         .limit(100);
       if (error) throw error;
-      return (data ?? []) as unknown as BroadcastRow[];
+      const rows = (data ?? []) as unknown as BroadcastRow[];
+      if (rows.length === 0) return rows;
+
+      const { data: statsData, error: statsError } = await supabase.rpc(
+        'get_whatsapp_broadcast_stats' as any,
+        { _broadcast_ids: rows.map((row) => row.id) } as any,
+      );
+
+      if (statsError) {
+        console.warn('Nao foi possivel carregar estatisticas dos disparos.', statsError);
+        return rows;
+      }
+
+      const statsByBroadcast = new Map(
+        ((statsData ?? []) as BroadcastStatsRow[]).map((stats) => [stats.broadcast_id, stats]),
+      );
+
+      return rows.map((row) => ({
+        ...row,
+        ...(statsByBroadcast.get(row.id) ?? {}),
+      }));
     },
     enabled: !!companyId,
     refetchInterval: 10000,
@@ -449,6 +508,10 @@ export default function BroadcastsTab({ companyId }: Props) {
     setCommittedFilters({ ...range, statuses: filterStatuses });
     setSelectedIds(new Set());
   }
+
+  const activeDetailsBroadcast = detailsBroadcast
+    ? broadcasts.find((broadcast) => broadcast.id === detailsBroadcast.id) ?? detailsBroadcast
+    : null;
 
   return (
     <div className="space-y-6">
@@ -784,7 +847,7 @@ export default function BroadcastsTab({ companyId }: Props) {
       </Card>
 
       <BroadcastDetailsDialog
-        broadcast={detailsBroadcast}
+        broadcast={activeDetailsBroadcast}
         onClose={() => setDetailsBroadcast(null)}
       />
 
@@ -872,6 +935,20 @@ function BroadcastDetailsDialog({
     return recipients.filter((r) => r.status === statusFilter);
   }, [recipients, statusFilter]);
 
+  const recipientStats = useMemo(() => {
+    if (!broadcast) {
+      return {
+        total_recipients: 0,
+        sent_count: 0,
+        failed_count: 0,
+        skipped_count: 0,
+        cancelled_count: 0,
+      };
+    }
+    if (isLoading && recipients.length === 0) return getBroadcastStatsFromRow(broadcast);
+    return getBroadcastStatsFromRecipients(recipients);
+  }, [broadcast, isLoading, recipients]);
+
   if (!broadcast) return null;
 
   return (
@@ -888,25 +965,25 @@ function BroadcastDetailsDialog({
           <Card>
             <CardContent className="p-3">
               <div className="text-xs text-muted-foreground">Enviados</div>
-              <div className="text-2xl font-semibold text-emerald-600">{broadcast.sent_count}</div>
+              <div className="text-2xl font-semibold text-emerald-600">{recipientStats.sent_count}</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <div className="text-xs text-muted-foreground">Falharam</div>
-              <div className="text-2xl font-semibold text-destructive">{broadcast.failed_count}</div>
+              <div className="text-2xl font-semibold text-destructive">{recipientStats.failed_count}</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <div className="text-xs text-muted-foreground">Pulados</div>
-              <div className="text-2xl font-semibold text-amber-600">{broadcast.skipped_count}</div>
+              <div className="text-2xl font-semibold text-amber-600">{recipientStats.skipped_count}</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <div className="text-xs text-muted-foreground">Cancelados</div>
-              <div className="text-2xl font-semibold text-muted-foreground">{broadcast.cancelled_count}</div>
+              <div className="text-2xl font-semibold text-muted-foreground">{recipientStats.cancelled_count}</div>
             </CardContent>
           </Card>
         </div>
