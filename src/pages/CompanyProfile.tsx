@@ -41,8 +41,8 @@ import {
   getCnpjValidationMessage,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeCnpjDigits,
   normalizeEmail,
+  normalizeOptionalCnpj,
 } from '@/lib/validation';
 
 interface CompanyActivityEvent {
@@ -215,7 +215,7 @@ export default function CompanyProfile() {
     await updateCompany.mutateAsync({
       id: company.id,
       ...form,
-      cnpj: normalizeCnpjDigits(form.cnpj),
+      cnpj: normalizeOptionalCnpj(form.cnpj),
       phone: formatBrazilPhone(form.phone),
       email: normalizeEmail(form.email),
       responsible_email: normalizeEmail(form.responsible_email),

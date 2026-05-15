@@ -135,6 +135,11 @@ export function normalizeCnpjDigits(value: string | null | undefined) {
   return (value || '').replace(/\D/g, '').slice(0, 14);
 }
 
+export function normalizeOptionalCnpj(value: string | null | undefined) {
+  const digits = normalizeCnpjDigits(value);
+  return digits || null;
+}
+
 export function formatCnpj(value: string | null | undefined) {
   const digits = normalizeCnpjDigits(value);
 

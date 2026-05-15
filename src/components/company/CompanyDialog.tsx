@@ -49,8 +49,8 @@ import {
   getCnpjValidationMessage,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeCnpjDigits,
   normalizeEmail,
+  normalizeOptionalCnpj,
 } from '@/lib/validation';
 
 interface CompanyDialogProps {
@@ -433,7 +433,7 @@ export default function CompanyDialog({
 
     const payload: CompanyInsert = {
       ...form,
-      cnpj: normalizeCnpjDigits(form.cnpj),
+      cnpj: normalizeOptionalCnpj(form.cnpj),
       phone: formatBrazilPhone(form.phone),
       email: normalizeEmail(form.email),
       responsible_email: normalizeEmail(form.responsible_email),
