@@ -53,6 +53,7 @@ describe('AutomationsTab', () => {
     const { rerender } = render(<AutomationsTab companyId={companyId} />);
 
     rerender(<AutomationsTab companyId={companyId} />);
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /mensagens/i }), { button: 0, ctrlKey: false });
 
     await waitFor(() => {
       const switches = screen.getAllByRole('switch');
@@ -80,6 +81,7 @@ describe('AutomationsTab', () => {
     });
 
     render(<AutomationsTab companyId={companyId} />);
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /mensagens/i }), { button: 0, ctrlKey: false });
 
     const switches = screen.getAllByRole('switch');
     fireEvent.click(switches[waitlistCalledIndex]);

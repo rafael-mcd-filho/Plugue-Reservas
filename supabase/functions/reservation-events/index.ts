@@ -276,6 +276,23 @@ async function insertWhatsAppLog(
   }
 }
 
+async function noteWhatsAppDeliverySent(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  instanceName: string,
+) {
+  const { error } = await supabaseAdmin.rpc("note_whatsapp_delivery_sent", {
+    _company_id: companyId,
+    _instance_name: instanceName,
+    _min_delay_seconds: 40,
+    _max_delay_seconds: 80,
+  });
+
+  if (error) {
+    console.warn(`Nao foi possivel atualizar a cadencia do WhatsApp: ${error.message}`);
+  }
+}
+
 async function enqueueWhatsAppMessage(
   supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
   payload: Omit<WhatsAppMessagePayload, "status">,
@@ -458,6 +475,7 @@ async function sendReservationAutomation(
       deliveryKey,
       status: "accepted",
     });
+    await noteWhatsAppDeliverySent(supabaseAdmin, reservation.company_id, instance.instance_name);
     return;
   }
 
@@ -640,6 +658,7 @@ async function sendWaitlistAutomation(
       deliveryKey,
       status: "accepted",
     });
+    await noteWhatsAppDeliverySent(supabaseAdmin, waitlist.company_id, instance.instance_name);
     return;
   }
 

@@ -174,6 +174,8 @@ export async function enqueueWhatsAppMessageOnce(
     max_attempts?: number;
     status?: string;
     expires_at?: string;
+    scheduled_for?: string;
+    priority?: number;
     last_attempt_at?: string | null;
   },
 ): Promise<"inserted" | "duplicate"> {

@@ -6,7 +6,6 @@ import {
 import {
   formatPhoneForWhatsApp,
   getWhatsAppAcceptedLogStatus,
-  randomIntInRange,
   sendWhatsAppText,
   serializeWhatsAppFailure,
   sleep,
@@ -18,14 +17,76 @@ import {
   recordWhatsAppSuccess,
 } from "../_shared/whatsapp-circuit.ts";
 
-const MESSAGE_JITTER_MIN_MS = 15_000;
-const MESSAGE_JITTER_MAX_MS = 30_000;
+const DELIVERY_JITTER_MIN_MS = 40_000;
+const DELIVERY_JITTER_MAX_MS = 80_000;
 const BATCH_SIZE = 3;
+const CANDIDATE_LIMIT = 12;
+const MAX_INVOCATION_SECONDS = 140;
+const DEADLINE_BUFFER_MS = 10_000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
+
+async function reserveDeliverySlot(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  instanceName: string,
+): Promise<{ canSend: boolean; waitUntil: Date }> {
+  const { data, error } = await supabaseAdmin.rpc("reserve_whatsapp_delivery_slot", {
+    _company_id: companyId,
+    _instance_name: instanceName,
+    _min_delay_seconds: Math.round(DELIVERY_JITTER_MIN_MS / 1000),
+    _max_delay_seconds: Math.round(DELIVERY_JITTER_MAX_MS / 1000),
+  });
+
+  if (error) {
+    throw new Error(`Erro ao reservar janela de envio do WhatsApp: ${error.message}`);
+  }
+
+  const slot = Array.isArray(data) ? data[0] : data;
+  return {
+    canSend: slot?.can_send === true,
+    waitUntil: slot?.wait_until ? new Date(slot.wait_until) : new Date(),
+  };
+}
+
+async function waitForDeliverySlot(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  messageId: string,
+  companyId: string,
+  instanceName: string,
+  invocationDeadline: number,
+): Promise<boolean> {
+  const slot = await reserveDeliverySlot(supabaseAdmin, companyId, instanceName);
+  if (slot.canSend) return true;
+
+  let deferUntil = slot.waitUntil;
+  const waitMs = slot.waitUntil.getTime() - Date.now();
+  if (
+    waitMs > 0 &&
+    waitMs <= DELIVERY_JITTER_MAX_MS + 5_000 &&
+    Date.now() + waitMs + DEADLINE_BUFFER_MS < invocationDeadline
+  ) {
+    await sleep(waitMs);
+    const nextSlot = await reserveDeliverySlot(supabaseAdmin, companyId, instanceName);
+    if (nextSlot.canSend) return true;
+    deferUntil = nextSlot.waitUntil;
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_message_queue")
+    .update({
+      status: "pending",
+      scheduled_for: deferUntil.toISOString(),
+      error_details: null,
+    })
+    .eq("id", messageId)
+    .eq("status", "processing");
+
+  return false;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -48,6 +109,26 @@ Deno.serve(async (req) => {
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
+    const invocationDeadline = Date.now() + MAX_INVOCATION_SECONDS * 1000;
+    const nowIso = new Date().toISOString();
+    let expireQuery = supabaseAdmin
+      .from("whatsapp_message_queue")
+      .update({
+        status: "expired",
+        error_details: serializeWhatsAppFailure({
+          code: "unknown_error",
+          title: "Mensagem expirada na fila",
+          message: "A janela util de envio da mensagem expirou antes do processamento.",
+        }),
+      })
+      .eq("status", "pending")
+      .lt("expires_at", nowIso);
+
+    if (requestedCompanyId) {
+      expireQuery = expireQuery.eq("company_id", requestedCompanyId);
+    }
+
+    await expireQuery;
 
     const { data: settings } = await supabaseAdmin
       .from("system_settings")
@@ -82,20 +163,6 @@ Deno.serve(async (req) => {
 
     const connectedCompanyIds = instances.map((instance) => instance.company_id);
     const instanceMap = new Map(instances.map((instance) => [instance.company_id, instance.instance_name]));
-
-    await supabaseAdmin
-      .from("whatsapp_message_queue")
-      .update({
-        status: "failed",
-        error_details: serializeWhatsAppFailure({
-          code: "unknown_error",
-          title: "Mensagem expirada na fila",
-          message: "A mensagem expirou na fila após 2 horas sem envio.",
-        }),
-      })
-      .eq("status", "pending")
-      .lt("expires_at", new Date().toISOString())
-      .in("company_id", connectedCompanyIds);
 
     const pausedCompanyIds: string[] = [];
     const eligibleCompanyIds: string[] = [];
@@ -134,9 +201,12 @@ Deno.serve(async (req) => {
       .select("*")
       .in("company_id", eligibleCompanyIds)
       .eq("status", "pending")
+      .lte("scheduled_for", new Date().toISOString())
       .gt("expires_at", new Date().toISOString())
+      .order("priority", { ascending: true })
+      .order("scheduled_for", { ascending: true })
       .order("created_at", { ascending: true })
-      .limit(BATCH_SIZE);
+      .limit(CANDIDATE_LIMIT);
 
     const { data: pendingMessages } = await queueQuery;
 
@@ -151,8 +221,13 @@ Deno.serve(async (req) => {
     let failed = 0;
     let circuitTripped = false;
     let processed = 0;
+    let deferred = 0;
 
     for (let index = 0; index < pendingMessages.length; index++) {
+      if (processed >= BATCH_SIZE || Date.now() >= invocationDeadline) {
+        break;
+      }
+
       const message = pendingMessages[index];
       const instanceName = instanceMap.get(message.company_id);
       if (!instanceName) continue;
@@ -173,14 +248,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      processed++;
-
       const activeMessage = claimedMessage as typeof message;
       const phone = formatPhoneForWhatsApp(activeMessage.phone);
-
-      if (index > 0) {
-        await sleep(randomIntInRange(MESSAGE_JITTER_MIN_MS, MESSAGE_JITTER_MAX_MS));
-      }
 
       const runtimeCircuit = await checkWhatsAppCircuit(supabaseAdmin, activeMessage.company_id);
       if (runtimeCircuit.open) {
@@ -221,8 +290,24 @@ Deno.serve(async (req) => {
             }),
           })
           .eq("id", activeMessage.id);
+        processed++;
         continue;
       }
+
+      const slotReady = await waitForDeliverySlot(
+        supabaseAdmin,
+        activeMessage.id,
+        activeMessage.company_id,
+        instanceName,
+        invocationDeadline,
+      );
+
+      if (!slotReady) {
+        deferred++;
+        continue;
+      }
+
+      processed++;
 
       try {
         const responseData = await sendWhatsAppText(
@@ -309,6 +394,7 @@ Deno.serve(async (req) => {
         processed,
         sent,
         failed,
+        deferred,
         circuit_tripped: circuitTripped,
         paused_company_ids: pausedCompanyIds,
       }),

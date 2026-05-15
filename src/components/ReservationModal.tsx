@@ -192,6 +192,11 @@ export default function ReservationModal({
   const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingTables, setLoadingTables] = useState(false);
+  const [resolvedSlotLookupKey, setResolvedSlotLookupKey] = useState('');
+  const [resolvedTableLookupKey, setResolvedTableLookupKey] = useState('');
+  const [slotAvailabilityError, setSlotAvailabilityError] = useState<string | null>(null);
+  const [tableAvailabilityError, setTableAvailabilityError] = useState<string | null>(null);
+  const [availabilityRetryToken, setAvailabilityRetryToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [confirmedReservation, setConfirmedReservation] = useState<ConfirmedReservation | null>(null);
   const [form, setForm] = useState({
@@ -203,6 +208,8 @@ export default function ReservationModal({
   const [showExitRecoveryPrompt, setShowExitRecoveryPrompt] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const prefillRequestIdRef = useRef(0);
+  const slotAvailabilityRequestIdRef = useRef(0);
+  const tableAvailabilityRequestIdRef = useRef(0);
   const lastPrefillLookupRef = useRef('');
   const whatsappDigits = normalizePhone(form.whatsapp);
   const customerFoundForCurrentPhone = !!prefilledPhoneDigits && prefilledPhoneDigits === whatsappDigits;
@@ -237,6 +244,13 @@ export default function ReservationModal({
     setShowCalendar(false);
     setAvailableTables([]);
     setSlotAvailability({});
+    setLoadingSlots(false);
+    setLoadingTables(false);
+    setResolvedSlotLookupKey('');
+    setResolvedTableLookupKey('');
+    setSlotAvailabilityError(null);
+    setTableAvailabilityError(null);
+    setAvailabilityRetryToken(0);
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
     setPrefilledPhoneDigits('');
@@ -244,6 +258,8 @@ export default function ReservationModal({
     setIdentityFieldsCollapsed(false);
     setShowExitRecoveryPrompt(false);
     prefillRequestIdRef.current = 0;
+    slotAvailabilityRequestIdRef.current += 1;
+    tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
   }, [initialDate, initialPartySize, open]);
 
@@ -270,9 +286,9 @@ export default function ReservationModal({
       return (data as any[]) as TableMapRow[];
     },
     enabled: !!companyId,
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   const { data: allTables = [], isLoading: tablesLoading } = useQuery({
@@ -288,9 +304,9 @@ export default function ReservationModal({
       return (data as any[]) as AvailableTable[];
     },
     enabled: !!companyId,
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   const { data: blockedDates = [] } = useQuery({
@@ -332,6 +348,16 @@ export default function ReservationModal({
     return filterPastTimeSlotsForDate(slots, selectedDate);
   }, [selectedDate, selectedDayHours, reservationDuration]);
 
+  const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const slotLookupKey = useMemo(() => {
+    if (!selectedDateKey || timeSlots.length === 0) return '';
+    return [companyId, selectedDateKey, selectedPartySize, maxGuestsPerSlot, timeSlots.join(',')].join('|');
+  }, [companyId, maxGuestsPerSlot, selectedDateKey, selectedPartySize, timeSlots]);
+  const tableLookupKey = useMemo(() => {
+    if (!selectedDateKey || !selectedTime) return '';
+    return [companyId, selectedDateKey, selectedTime, selectedPartySize].join('|');
+  }, [companyId, selectedDateKey, selectedPartySize, selectedTime]);
+
   useEffect(() => {
     if (!selectedTime || timeSlots.includes(selectedTime)) return;
 
@@ -339,6 +365,9 @@ export default function ReservationModal({
     setSelectedTableId('');
     setSelectedTableMapId('');
     setAvailableTables([]);
+    setResolvedTableLookupKey('');
+    setTableAvailabilityError(null);
+    tableAvailabilityRequestIdRef.current += 1;
   }, [selectedTime, timeSlots]);
 
   const resolveActiveTableMap = useCallback((date: Date, time: string) => {
@@ -379,13 +408,19 @@ export default function ReservationModal({
   // Fetch slot availability when date changes (for step 2 vacancy indicators)
   useEffect(() => {
     if (!selectedDate || !companyId || timeSlots.length === 0) {
+      slotAvailabilityRequestIdRef.current += 1;
       setSlotAvailability({});
+      setResolvedSlotLookupKey('');
+      setSlotAvailabilityError(null);
+      setLoadingSlots(false);
       return;
     }
     if (tablesLoading || tableMapsLoading) return;
     
     const fetchSlotAvailability = async () => {
+      const requestId = ++slotAvailabilityRequestIdRef.current;
       setLoadingSlots(true);
+      setSlotAvailabilityError(null);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
         const { data: slotOccupancy, error: slotOccupancyError } = await supabase.rpc('get_slot_occupancy', {
@@ -431,31 +466,47 @@ export default function ReservationModal({
 
           availability[slot] = { total: totalTables, occupied, available };
         });
+        if (slotAvailabilityRequestIdRef.current !== requestId) return;
         setSlotAvailability(availability);
+        setResolvedSlotLookupKey(slotLookupKey);
       } catch (err) {
         console.error('Error fetching slot availability:', err);
+        if (slotAvailabilityRequestIdRef.current === requestId) {
+          setSlotAvailabilityError('Nao foi possivel atualizar os horarios agora.');
+        }
       } finally {
-        setLoadingSlots(false);
+        if (slotAvailabilityRequestIdRef.current === requestId) {
+          setLoadingSlots(false);
+        }
       }
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, tablesLoading, tableMapsLoading, getEligibleTables]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, tablesLoading, tableMapsLoading, getEligibleTables, slotLookupKey, availabilityRetryToken]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
-    if (!selectedDate || !selectedTime || step !== 2) return;
+    if (!selectedDate || !selectedTime || step !== 2) {
+      tableAvailabilityRequestIdRef.current += 1;
+      setResolvedTableLookupKey('');
+      setTableAvailabilityError(null);
+      setLoadingTables(false);
+      return;
+    }
     if (tablesLoading || tableMapsLoading) return;
 
     if (allTables.length === 0) {
       setAvailableTables([]);
       setSelectedTableId('');
       setSelectedTableMapId('');
+      setResolvedTableLookupKey(tableLookupKey);
       return;
     }
     
     const fetchAndAssignTable = async () => {
+      const requestId = ++tableAvailabilityRequestIdRef.current;
       setLoadingTables(true);
+      setTableAvailabilityError(null);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
@@ -472,6 +523,7 @@ export default function ReservationModal({
         const activeTableMapId = activeTableMap?.id ?? '';
         const available = eligibleTables.filter((table) => !occupiedIds.has(table.id));
         
+        if (tableAvailabilityRequestIdRef.current !== requestId) return;
         setAvailableTables(available);
         setSelectedTableMapId(activeTableMapId || available[0]?.table_map_id || '');
         // Auto-select the smallest table that fits the party (best-fit)
@@ -480,18 +532,25 @@ export default function ReservationModal({
         } else {
           setSelectedTableId('');
         }
+        setResolvedTableLookupKey(tableLookupKey);
       } catch (err) {
         console.error('Error fetching availability:', err);
-        setAvailableTables([]);
-        setSelectedTableId('');
-        setSelectedTableMapId('');
+        if (tableAvailabilityRequestIdRef.current === requestId) {
+          setAvailableTables([]);
+          setSelectedTableId('');
+          setSelectedTableMapId('');
+          setResolvedTableLookupKey(tableLookupKey);
+          setTableAvailabilityError('Nao foi possivel verificar mesa para este horario.');
+        }
       } finally {
-        setLoadingTables(false);
+        if (tableAvailabilityRequestIdRef.current === requestId) {
+          setLoadingTables(false);
+        }
       }
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken]);
 
   const handleReset = () => {
     setStep(1);
@@ -503,6 +562,13 @@ export default function ReservationModal({
     setShowCalendar(false);
     setAvailableTables([]);
     setSlotAvailability({});
+    setLoadingSlots(false);
+    setLoadingTables(false);
+    setResolvedSlotLookupKey('');
+    setResolvedTableLookupKey('');
+    setSlotAvailabilityError(null);
+    setTableAvailabilityError(null);
+    setAvailabilityRetryToken(0);
     setConfirmedReservation(null);
     setForm({ name: '', email: '', birthdate: '', whatsapp: '', occasion: '', observation: '' });
     setPrefilledPhoneDigits('');
@@ -510,7 +576,43 @@ export default function ReservationModal({
     setIdentityFieldsCollapsed(false);
     setShowExitRecoveryPrompt(false);
     prefillRequestIdRef.current = 0;
+    slotAvailabilityRequestIdRef.current += 1;
+    tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
+  };
+
+  const resetAvailabilitySelection = () => {
+    setSelectedTime('');
+    setSelectedTableId('');
+    setSelectedTableMapId('');
+    setAvailableTables([]);
+    setSlotAvailability({});
+    setResolvedSlotLookupKey('');
+    setResolvedTableLookupKey('');
+    setSlotAvailabilityError(null);
+    setTableAvailabilityError(null);
+    slotAvailabilityRequestIdRef.current += 1;
+    tableAvailabilityRequestIdRef.current += 1;
+  };
+
+  const handleDateSelect = (date: Date | undefined) => {
+    setSelectedDate(date);
+    resetAvailabilitySelection();
+  };
+
+  const handlePartySizeChange = (nextSize: number) => {
+    setSelectedPartySize(Math.max(1, Math.min(20, nextSize)));
+    resetAvailabilitySelection();
+  };
+
+  const handleTimeSelect = (time: string) => {
+    setSelectedTime(time);
+    setSelectedTableId('');
+    setSelectedTableMapId('');
+    setAvailableTables([]);
+    setResolvedTableLookupKey('');
+    setTableAvailabilityError(null);
+    tableAvailabilityRequestIdRef.current += 1;
   };
 
   const closeImmediately = () => {
@@ -809,7 +911,7 @@ export default function ReservationModal({
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
-    setSelectedDate(d);
+    handleDateSelect(d);
     setShowCalendar(false);
   };
 
@@ -899,6 +1001,34 @@ export default function ReservationModal({
     return null;
   };
 
+  const isFetchingInitialSlotAvailability = !!slotLookupKey
+    && loadingSlots
+    && resolvedSlotLookupKey !== slotLookupKey;
+  const isPreparingDateAvailability = !!selectedDate
+    && !isLargeParty
+    && (tablesLoading || tableMapsLoading || isFetchingInitialSlotAvailability);
+  const isCheckingSelectedTable = !!selectedTime
+    && (tablesLoading || tableMapsLoading || loadingTables || resolvedTableLookupKey !== tableLookupKey);
+  const showNoTableAvailability = !!selectedTime
+    && !isCheckingSelectedTable
+    && !tableAvailabilityError
+    && availableTables.length === 0;
+  const canContinueToForm = !!selectedTime
+    && !!selectedTableId
+    && !isCheckingSelectedTable
+    && !tableAvailabilityError;
+
+  const handleDateContinue = () => {
+    if (!selectedDate || isPreparingDateAvailability) return;
+    setStep(2);
+    onStepChange?.('date_select');
+  };
+
+  const handleTimeContinue = () => {
+    if (!canContinueToForm) return;
+    setStep(3);
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -985,11 +1115,11 @@ export default function ReservationModal({
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Diminuir número de pessoas"
-                  onClick={() => setSelectedPartySize(Math.max(1, selectedPartySize - 1))}>-</Button>
+                  onClick={() => handlePartySizeChange(selectedPartySize - 1)}>-</Button>
                 <span id="reservation-party-size-value" className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Aumentar número de pessoas"
-                  onClick={() => setSelectedPartySize(Math.min(20, selectedPartySize + 1))}>+</Button>
+                  onClick={() => handlePartySizeChange(selectedPartySize + 1)}>+</Button>
               </div>
             </div>
 
@@ -1026,7 +1156,7 @@ export default function ReservationModal({
                     const isSelected = selectedDate?.toDateString() === date.toDateString();
                     const todayLabel = isToday(date) ? 'Hoje' : isTomorrow(date) ? 'Amanhã' : null;
                     return (
-                      <button key={date.toISOString()} disabled={closed} onClick={() => setSelectedDate(date)}
+                      <button key={date.toISOString()} disabled={closed} onClick={() => handleDateSelect(date)}
                         className={cn(
                           'relative flex flex-col items-center p-3 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
                           closed && 'opacity-40 cursor-not-allowed',
@@ -1072,9 +1202,11 @@ export default function ReservationModal({
 
             {!isLargeParty && (
               <div className="space-y-1">
-                <Button className="w-full" disabled={!selectedDate}
-                  onClick={() => { setStep(2); onStepChange?.('date_select'); }}>
-                  Continuar <ArrowRight className="h-4 w-4 ml-2" />
+                <Button className="w-full" disabled={!selectedDate || isPreparingDateAvailability}
+                  onClick={handleDateContinue}>
+                  {isPreparingDateAvailability && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isPreparingDateAvailability ? 'Preparando horarios...' : 'Continuar'}
+                  {!isPreparingDateAvailability && <ArrowRight className="h-4 w-4 ml-2" />}
                 </Button>
                 {!selectedDate && (
                   <p className="text-xs text-muted-foreground text-center">Selecione uma data para continuar</p>
@@ -1087,7 +1219,7 @@ export default function ReservationModal({
         {/* Step 2: Time + Table */}
         {!showExitRecoveryPrompt && step === 2 && (
           <div className="animate-fade-in space-y-4 pt-2">
-            <Button variant="ghost" size="sm" onClick={() => { setStep(1); setSelectedTime(''); setSelectedTableId(''); }}>
+            <Button variant="ghost" size="sm" onClick={() => { setStep(1); handleTimeSelect(''); }}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
             <p className="text-sm text-muted-foreground text-center">
@@ -1100,10 +1232,26 @@ export default function ReservationModal({
 
             {timeSlots.length === 0 ? (
               <p className="text-center text-sm text-destructive">Nenhum horário disponível para esta data.</p>
-            ) : loadingSlots ? (
-              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
             ) : (
               <>
+                {loadingSlots && (
+                  <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Atualizando disponibilidade...
+                  </p>
+                )}
+                {slotAvailabilityError && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900" role="status">
+                    <p>{slotAvailabilityError}</p>
+                    <button
+                      type="button"
+                      className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
+                      onClick={() => setAvailabilityRetryToken((value) => value + 1)}
+                    >
+                      Tentar novamente
+                    </button>
+                  </div>
+                )}
                 <div
                   className={cn(
                     'animate-fade-in rounded-lg border p-3 shadow-sm',
@@ -1164,7 +1312,7 @@ export default function ReservationModal({
                         : null;
 
                     return (
-                      <button key={time} onClick={() => { if (!isFull) { setSelectedTime(time); setSelectedTableId(''); } }}
+                      <button key={time} onClick={() => { if (!isFull) handleTimeSelect(time); }}
                         disabled={isFull}
                         className={cn(
                           'relative h-10 rounded-md border px-2 py-0.5 text-xs transition-[border-color,background-color,color] duration-150 sm:h-11 sm:text-[13px]',
@@ -1194,17 +1342,28 @@ export default function ReservationModal({
             )}
 
             {/* No table availability message */}
-            {selectedTime && !loadingTables && availableTables.length === 0 && (
+            {showNoTableAvailability && (
               <p className="text-center text-sm text-destructive py-2">Nenhuma mesa disponível para este horário e número de pessoas.</p>
             )}
-            {selectedTime && (loadingTables || tablesLoading) && (
-              <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            {tableAvailabilityError && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900" role="status">
+                <p>{tableAvailabilityError}</p>
+                <button
+                  type="button"
+                  className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
+                  onClick={() => setAvailabilityRetryToken((value) => value + 1)}
+                >
+                  Tentar novamente
+                </button>
+              </div>
             )}
 
             <div className="space-y-1">
-              <Button className="w-full" disabled={!selectedTime || !selectedTableId || loadingTables || tablesLoading}
-                onClick={() => { setStep(3); }}>
-                Continuar <ArrowRight className="h-4 w-4 ml-2" />
+              <Button className="w-full" disabled={!canContinueToForm}
+                onClick={handleTimeContinue}>
+                {isCheckingSelectedTable && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isCheckingSelectedTable ? 'Verificando mesa...' : 'Continuar'}
+                {!isCheckingSelectedTable && <ArrowRight className="h-4 w-4 ml-2" />}
               </Button>
               {!selectedTime && (
                 <p className="text-xs text-muted-foreground text-center">Selecione um horário para continuar</p>

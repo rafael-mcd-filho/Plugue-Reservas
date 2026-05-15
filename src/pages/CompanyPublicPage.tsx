@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
+import { Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -36,10 +36,12 @@ import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
+import { lazyWithReload, preloadLazyImport } from '@/lib/lazyReload';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
-const ReservationModal = lazy(loadReservationModal);
-const FunnelDebugPanel = lazy(() => import('@/components/FunnelDebugPanel'));
+const preloadReservationModal = () => preloadLazyImport(loadReservationModal, 'reservation-modal');
+const ReservationModal = lazyWithReload(loadReservationModal, 'reservation-modal');
+const FunnelDebugPanel = lazyWithReload(() => import('@/components/FunnelDebugPanel'), 'funnel-debug-panel');
 const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
 const PUBLIC_WHATSAPP_MESSAGE = 'Ol\u00E1, vim pela p\u00E1gina de reservas e gostaria de ajuda.';
@@ -447,13 +449,18 @@ export default function CompanyPublicPage() {
 
   const handleOpenReservation = () => {
     void startJourney();
-    void loadReservationModal();
+    void preloadReservationModal();
     setShowReservation(true);
   };
 
   useEffect(() => {
     if (company?.id) trackStep('page_view');
   }, [company?.id, trackStep]);
+
+  useEffect(() => {
+    if (!company?.id) return;
+    void preloadReservationModal();
+  }, [company?.id]);
 
   const { data: blockedDates = [] } = useQuery({
     queryKey: ['blocked-dates-public-page', company?.id],
@@ -809,8 +816,8 @@ export default function CompanyPublicPage() {
               <Button
                 className="group animate-attention-pulse-fast w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
                 size="lg"
-                onMouseEnter={() => void loadReservationModal()}
-                onFocus={() => void loadReservationModal()}
+                onMouseEnter={() => void preloadReservationModal()}
+                onFocus={() => void preloadReservationModal()}
                 onClick={handleOpenReservation}
               >
                 <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
@@ -1039,8 +1046,8 @@ export default function CompanyPublicPage() {
               className="group animate-attention-pulse-fast w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-150"
               size="lg"
               onClick={handleOpenReservation}
-              onMouseEnter={() => void loadReservationModal()}
-              onFocus={() => void loadReservationModal()}
+              onMouseEnter={() => void preloadReservationModal()}
+              onFocus={() => void preloadReservationModal()}
             >
               <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
               Reservar agora

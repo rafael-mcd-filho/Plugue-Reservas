@@ -1,62 +1,58 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildBirthdayDispatchKey,
-  buildInstanceDisconnectedFailure,
-  buildInstanceNotConfiguredFailure,
   claimWhatsAppDispatch,
   enqueueWhatsAppMessageOnce,
   finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
-  getWhatsAppAcceptedLogStatus,
-  sendWhatsAppText,
-  serializeWhatsAppFailure,
   WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
 import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
 
-const BIRTHDAY_ADVANCE_DAYS = 2;
+const BIRTHDAY_ADVANCE_DAYS = 4;
+const PRIORITY_BIRTHDAY = 100;
+const BIRTHDAY_WINDOW_START = "09:05";
+const BIRTHDAY_EXPIRES_AT = "18:00";
+
+function getLocalDateTime(date: string, time: string) {
+  const [hours = "00", minutes = "00"] = time.split(":");
+  return new Date(`${date}T${hours}:${minutes}:00-03:00`);
+}
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     if (!(await isAuthorizedInternalJob(req))) {
-      return new Response(JSON.stringify({ error: 'Nao autorizado' }), {
+      return new Response(JSON.stringify({ error: "Nao autorizado" }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
-
-    const { data: settings } = await supabaseAdmin
-      .from('system_settings')
-      .select('key, value')
-      .in('key', ['evolution_api_url', 'evolution_api_token']);
-
-    const evolutionUrl = settings?.find((s: any) => s.key === 'evolution_api_url')?.value?.replace(/\/+$/, '');
-    const evolutionToken = settings?.find((s: any) => s.key === 'evolution_api_token')?.value;
-
-    if (!evolutionUrl || !evolutionToken) {
-      return new Response(JSON.stringify({ skipped: true, reason: 'evolution_not_configured' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
     const now = new Date();
     const targetDate = new Date(now.getTime() + BIRTHDAY_ADVANCE_DAYS * 24 * 60 * 60 * 1000);
     const targetMMDD = formatMonthDayInTimeZone(targetDate);
     const targetDateKey = formatDateKeyInTimeZone(targetDate);
     const todayStr = formatDateKeyInTimeZone(now);
+    const windowStart = getLocalDateTime(todayStr, BIRTHDAY_WINDOW_START);
+    const expiresAt = getLocalDateTime(todayStr, BIRTHDAY_EXPIRES_AT);
+    const scheduledFor = new Date(Math.max(now.getTime(), windowStart.getTime()));
 
-    console.log(`Birthday check for day: ${targetMMDD} (${BIRTHDAY_ADVANCE_DAYS} days ahead)`);
+    if (scheduledFor >= expiresAt) {
+      return new Response(JSON.stringify({ queued: 0, skipped: true, reason: "outside_birthday_window" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const [
       { data: birthdayReservations },
@@ -65,26 +61,26 @@ Deno.serve(async (req) => {
       { data: birthdayWaitlistCompanions },
     ] = await Promise.all([
       supabaseAdmin
-        .from('reservations')
-        .select('guest_name, guest_phone, guest_birthdate, company_id')
-        .not('guest_birthdate', 'is', null)
-        .not('guest_phone', 'is', null),
+        .from("reservations")
+        .select("guest_name, guest_phone, guest_birthdate, company_id")
+        .not("guest_birthdate", "is", null)
+        .not("guest_phone", "is", null),
       supabaseAdmin
-        .from('reservation_companions')
-        .select('name, phone, birthdate, company_id')
-        .not('birthdate', 'is', null)
-        .not('phone', 'is', null),
+        .from("reservation_companions")
+        .select("name, phone, birthdate, company_id")
+        .not("birthdate", "is", null)
+        .not("phone", "is", null),
       supabaseAdmin
-        .from('waitlist')
-        .select('guest_name, guest_phone, guest_birthdate, company_id')
-        .eq('status', 'seated')
-        .not('guest_birthdate', 'is', null)
-        .not('guest_phone', 'is', null),
+        .from("waitlist")
+        .select("guest_name, guest_phone, guest_birthdate, company_id")
+        .eq("status", "seated")
+        .not("guest_birthdate", "is", null)
+        .not("guest_phone", "is", null),
       supabaseAdmin
-        .from('waitlist_companions')
-        .select('name, phone, birthdate, company_id')
-        .not('birthdate', 'is', null)
-        .not('phone', 'is', null),
+        .from("waitlist_companions")
+        .select("name, phone, birthdate, company_id")
+        .not("birthdate", "is", null)
+        .not("phone", "is", null),
     ]);
 
     const birthdayContacts = [
@@ -115,91 +111,82 @@ Deno.serve(async (req) => {
     ];
 
     if (birthdayContacts.length === 0) {
-      return new Response(JSON.stringify({ sent: 0, reason: 'no_birthdate_data' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ queued: 0, reason: "no_birthdate_data" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const upcomingBirthdays = birthdayContacts.filter((r: any) => {
-      if (!r.guest_birthdate) return false;
-      return r.guest_birthdate.substring(5) === targetMMDD;
+    const upcomingBirthdays = birthdayContacts.filter((contact: any) => {
+      if (!contact.guest_birthdate) return false;
+      return contact.guest_birthdate.substring(5) === targetMMDD;
     });
 
     if (upcomingBirthdays.length === 0) {
-      console.log(`No birthdays in ${BIRTHDAY_ADVANCE_DAYS} days`);
-      return new Response(JSON.stringify({ sent: 0 }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ queued: 0, total: 0 }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Deduplicate by normalized phone+company so the same contact is not sent twice
-    // when the number appears with different formatting across sources.
     const uniqueMap = new Map<string, any>();
-    for (const r of upcomingBirthdays) {
-      const phone = formatPhoneForWhatsApp(r.guest_phone);
-      const key = `${phone}:${r.company_id}`;
+    for (const contact of upcomingBirthdays) {
+      const phone = formatPhoneForWhatsApp(contact.guest_phone);
+      const key = `${phone}:${contact.company_id}`;
       const existing = uniqueMap.get(key);
 
       if (!existing) {
-        uniqueMap.set(key, { ...r, guest_phone: phone });
+        uniqueMap.set(key, { ...contact, guest_phone: phone });
         continue;
       }
 
-      if (!existing.guest_name && r.guest_name) {
-        uniqueMap.set(key, { ...existing, guest_name: r.guest_name });
+      if (!existing.guest_name && contact.guest_name) {
+        uniqueMap.set(key, { ...existing, guest_name: contact.guest_name });
       }
     }
+
     const uniqueBirthdays = Array.from(uniqueMap.values());
+    const companyIds = [...new Set(uniqueBirthdays.map((contact: any) => contact.company_id))];
 
-    console.log(`Found ${uniqueBirthdays.length} unique birthday contacts`);
+    const { data: automations } = await supabaseAdmin
+      .from("automation_settings")
+      .select("*")
+      .in("company_id", companyIds)
+      .eq("type", "birthday_message")
+      .eq("enabled", true);
 
-    const companyIds = [...new Set(uniqueBirthdays.map((r: any) => r.company_id))];
-
-    const [{ data: automations }, { data: instances }] = await Promise.all([
-      supabaseAdmin
-        .from('automation_settings')
-        .select('*')
-        .in('company_id', companyIds)
-        .eq('type', 'birthday_message')
-        .eq('enabled', true),
-      supabaseAdmin
-        .from('company_whatsapp_instances')
-        .select('*')
-        .in('company_id', companyIds),
-    ]);
-
-    const instanceMap = new Map((instances || []).map((i: any) => [i.company_id, i]));
-
-    // Check already-accepted or queued birthday messages today.
     const { data: alreadySent } = await supabaseAdmin
-      .from('whatsapp_message_logs')
-      .select('phone, company_id')
-      .eq('type', 'birthday')
-      .gte('created_at', todayStr + 'T00:00:00')
-      .in('status', [...WHATSAPP_ACCEPTED_LOG_STATUSES]);
+      .from("whatsapp_message_logs")
+      .select("phone, company_id")
+      .eq("type", "birthday")
+      .gte("created_at", `${todayStr}T00:00:00`)
+      .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]);
 
     const { data: alreadyQueued } = await supabaseAdmin
-      .from('whatsapp_message_queue')
-      .select('phone, company_id')
-      .eq('type', 'birthday')
-      .gte('created_at', todayStr + 'T00:00:00');
+      .from("whatsapp_message_queue")
+      .select("phone, company_id")
+      .eq("type", "birthday")
+      .gte("created_at", `${todayStr}T00:00:00`);
 
     const processedSet = new Set([
-      ...(alreadySent || []).map((l: any) => `${l.phone}:${l.company_id}`),
-      ...(alreadyQueued || []).map((l: any) => `${l.phone}:${l.company_id}`),
+      ...(alreadySent || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
+      ...(alreadyQueued || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
     ]);
 
-    let sent = 0;
     let queued = 0;
+    let skipped = 0;
 
     for (const contact of uniqueBirthdays) {
-      const automation = (automations || []).find((a: any) => a.company_id === contact.company_id);
-      if (!automation) continue;
+      const automation = (automations || []).find((item: any) => item.company_id === contact.company_id);
+      if (!automation?.message_template) {
+        skipped++;
+        continue;
+      }
 
       const phone = contact.guest_phone;
       const sentKey = `${phone}:${contact.company_id}`;
       if (processedSet.has(sentKey)) {
-        console.log(`Already sent/queued birthday to ${phone}`);
+        skipped++;
         continue;
       }
 
@@ -212,115 +199,44 @@ Deno.serve(async (req) => {
       });
 
       if (!claimed) {
-        console.log(`Birthday dispatch already claimed for ${phone}`);
+        skipped++;
         continue;
       }
 
-      const message = automation.message_template
-        .replace(/\{nome\}/g, contact.guest_name || '');
-
-      const instance = instanceMap.get(contact.company_id);
-
-      if (!instance) {
-        const failure = buildInstanceNotConfiguredFailure();
-        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-          company_id: contact.company_id,
-          phone,
-          message,
-          type: 'birthday',
-          error_details: serializeWhatsAppFailure(failure.error),
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "queued",
-          errorDetails: serializeWhatsAppFailure(failure.error),
-        });
-        processedSet.add(sentKey);
-        queued++;
-        console.log(`Queued birthday for ${phone} (instance not configured)`);
-        continue;
-      }
-
-      if (instance.status !== 'connected') {
-        const failure = buildInstanceDisconnectedFailure();
-        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-          company_id: contact.company_id,
-          phone,
-          message,
-          type: 'birthday',
-          error_details: serializeWhatsAppFailure(failure.error),
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "queued",
-          errorDetails: serializeWhatsAppFailure(failure.error),
-        });
-        processedSet.add(sentKey);
-        queued++;
-        console.log(`Queued birthday for ${phone} (instance not connected)`);
-        continue;
-      }
-
-      const result = await sendWhatsAppText(
-        evolutionUrl,
-        evolutionToken,
-        instance.instance_name,
-        phone,
-        message,
-      );
-
-      if (result.ok) {
-        const logStatus = getWhatsAppAcceptedLogStatus(result);
-        await supabaseAdmin.from('whatsapp_message_logs').insert({
-          company_id: contact.company_id,
-          phone,
-          message,
-          type: 'birthday',
-          status: logStatus,
-          error_details: null,
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "accepted",
-        });
-        processedSet.add(sentKey);
-        sent++;
-        continue;
-      }
-
-      const serializedError = serializeWhatsAppFailure(result.error);
-      await supabaseAdmin.from('whatsapp_message_logs').insert({
+      const message = automation.message_template.replace(/\{nome\}/g, contact.guest_name || "");
+      const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: contact.company_id,
         phone,
         message,
-        type: 'birthday',
-        status: 'error',
-        error_details: serializedError,
+        type: "birthday",
+        scheduled_for: scheduledFor.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        priority: PRIORITY_BIRTHDAY,
       });
-      await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-        company_id: contact.company_id,
-        phone,
-        message,
-        type: 'birthday',
-        error_details: serializedError,
-      });
+
       await finalizeWhatsAppDispatch(supabaseAdmin, {
         deliveryKey,
         status: "queued",
-        errorDetails: serializedError,
       });
+
       processedSet.add(sentKey);
-      queued++;
+      if (enqueueResult === "inserted") {
+        queued++;
+      } else {
+        skipped++;
+      }
     }
 
-    return new Response(JSON.stringify({ sent, queued, total: uniqueBirthdays.length }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ queued, skipped, total: uniqueBirthdays.length }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
-    console.error('Birthday messages error:', error);
-    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error("Birthday messages error:", error);
+    const msg = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

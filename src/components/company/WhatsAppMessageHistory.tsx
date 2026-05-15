@@ -56,6 +56,8 @@ interface MessageRecord {
   attempts?: number;
   max_attempts?: number;
   expires_at?: string;
+  scheduled_for?: string;
+  priority?: number;
 }
 
 const statusConfig: Record<string, { label: string; icon: typeof CheckCircle2; className: string }> = {
@@ -63,6 +65,7 @@ const statusConfig: Record<string, { label: string; icon: typeof CheckCircle2; c
   error: { label: 'Erro', icon: XCircle, className: 'text-destructive' },
   pending: { label: 'Aceita', icon: Clock, className: 'text-amber-600' },
   failed: { label: 'Falhou', icon: AlertTriangle, className: 'text-destructive' },
+  expired: { label: 'Expirado', icon: Clock, className: 'text-muted-foreground' },
 };
 
 export default function WhatsAppMessageHistory({ companyId }: Props) {
@@ -122,7 +125,8 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
   const errorLogs = useMemo(() => logs.filter((item) => item.status === 'error'), [logs]);
   const pendingQueue = useMemo(() => queue.filter((item) => item.status === 'pending'), [queue]);
   const failedQueue = useMemo(() => queue.filter((item) => item.status === 'failed'), [queue]);
-  const queueItems = useMemo(() => [...pendingQueue, ...failedQueue], [failedQueue, pendingQueue]);
+  const expiredQueue = useMemo(() => queue.filter((item) => item.status === 'expired'), [queue]);
+  const queueItems = useMemo(() => [...pendingQueue, ...failedQueue, ...expiredQueue], [expiredQueue, failedQueue, pendingQueue]);
   const isLoading = logsLoading || queueLoading;
 
   const openIssueDialog = (details: string | null | undefined) => {
@@ -347,6 +351,9 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
             items.map((item) => {
               const isExpired = item.expires_at ? new Date(item.expires_at) < new Date() : false;
               const parsedError = parseWhatsAppErrorDetails(item.error_details);
+              const queueStatusLabel = item.status === 'pending'
+                ? (isExpired ? 'Expirado' : 'Aguardando')
+                : (statusConfig[item.status]?.label ?? 'Falhou');
 
               return (
                 <TableRow key={item.id}>
@@ -366,8 +373,11 @@ export default function WhatsAppMessageHistory({ companyId }: Props) {
                     {item.attempts ?? 0}/{item.max_attempts ?? 0}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={item.status === 'pending' ? 'outline' : 'destructive'} className="text-xs">
-                      {item.status === 'pending' ? (isExpired ? 'Expirado' : 'Aguardando') : 'Falhou'}
+                    <Badge
+                      variant={item.status === 'failed' ? 'destructive' : 'outline'}
+                      className="text-xs"
+                    >
+                      {queueStatusLabel}
                     </Badge>
                   </TableCell>
                   <TableCell>

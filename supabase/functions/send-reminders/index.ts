@@ -1,15 +1,10 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildReservationDispatchKey,
-  buildInstanceDisconnectedFailure,
-  buildInstanceNotConfiguredFailure,
   claimWhatsAppDispatch,
   enqueueWhatsAppMessageOnce,
   finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
-  getWhatsAppAcceptedLogStatus,
-  sendWhatsAppText,
-  serializeWhatsAppFailure,
   WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
@@ -18,6 +13,15 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
 };
+
+const REMINDER_TYPES = ["reminder_1h", "reminder_24h"];
+const SAME_DAY_MIN_MINUTES_BEFORE = 60;
+const SAME_DAY_MAX_MINUTES_BEFORE = 5 * 60;
+const MIN_MINUTES_AFTER_CREATION = 60;
+const DAY_BEFORE_WINDOW_START = "10:00";
+const DAY_BEFORE_WINDOW_END = "17:00";
+const PRIORITY_REMINDER_SOON = 20;
+const PRIORITY_REMINDER_DAY_BEFORE = 60;
 
 function replaceTemplateVars(template: string, reservation: any): string {
   const [hours, minutes] = (reservation.time || "").split(":");
@@ -33,53 +37,66 @@ function replaceTemplateVars(template: string, reservation: any): string {
     .replace(/\{telefone\}/g, reservation.guest_phone || "");
 }
 
-async function getEvolutionConfig(supabaseAdmin: any) {
-  const { data: settings } = await supabaseAdmin
-    .from("system_settings")
-    .select("key, value")
-    .in("key", ["evolution_api_url", "evolution_api_token"]);
-
-  const evolutionUrl = settings?.find((setting: any) => setting.key === "evolution_api_url")?.value?.replace(/\/+$/, "");
-  const evolutionToken = settings?.find((setting: any) => setting.key === "evolution_api_token")?.value;
-  return { evolutionUrl, evolutionToken };
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
 }
 
-function getReservationDateTime(date: string, time: string) {
+function maxDate(...dates: Date[]) {
+  return new Date(Math.max(...dates.map((date) => date.getTime())));
+}
+
+function getLocalDateTime(date: string, time: string) {
   const [hours = "00", minutes = "00"] = time.split(":");
   return new Date(`${date}T${hours}:${minutes}:00-03:00`);
 }
 
-function getHoursBetweenReservationAndCreation(reservation: {
-  created_at?: string | null;
-  date: string;
-  time?: string | null;
-}) {
-  if (!reservation.created_at) return Number.POSITIVE_INFINITY;
-
-  const createdAt = new Date(reservation.created_at);
-  if (Number.isNaN(createdAt.getTime())) return Number.POSITIVE_INFINITY;
-
-  const reservationDateTime = getReservationDateTime(reservation.date, reservation.time || "00:00");
-  return (reservationDateTime.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
+function getCreatedAtDelay(reservation: any) {
+  const createdAt = reservation.created_at ? new Date(reservation.created_at) : null;
+  if (!createdAt || Number.isNaN(createdAt.getTime())) return null;
+  return addMinutes(createdAt, MIN_MINUTES_AFTER_CREATION);
 }
 
-function filterLateBookedReminders(
-  reservations: any[],
-  minimumHoursBeforeReservation: number,
-  reminderType: "1h" | "24h",
-) {
-  return reservations.filter((reservation: any) => {
-    const hoursUntilReservation = getHoursBetweenReservationAndCreation(reservation);
+function getDayBeforeSchedule(reservation: any, now: Date, todayStr: string) {
+  const windowStart = getLocalDateTime(todayStr, DAY_BEFORE_WINDOW_START);
+  const expiresAt = getLocalDateTime(todayStr, DAY_BEFORE_WINDOW_END);
+  const createdDelay = getCreatedAtDelay(reservation);
+  const scheduledFor = maxDate(now, windowStart, ...(createdDelay ? [createdDelay] : []));
 
-    if (hoursUntilReservation < minimumHoursBeforeReservation) {
-      console.log(
-        `Skipping ${reminderType} reminder for ${reservation.id}: booked only ${hoursUntilReservation.toFixed(1)}h before`,
-      );
-      return false;
-    }
+  if (scheduledFor >= expiresAt) {
+    return null;
+  }
 
-    return true;
-  });
+  return {
+    scheduledFor,
+    expiresAt,
+    priority: PRIORITY_REMINDER_DAY_BEFORE,
+  };
+}
+
+function getSameDaySchedule(reservation: any, now: Date) {
+  const reservationAt = getLocalDateTime(reservation.date, reservation.time || "00:00");
+  const minutesUntilReservation = (reservationAt.getTime() - now.getTime()) / (1000 * 60);
+
+  if (
+    minutesUntilReservation < SAME_DAY_MIN_MINUTES_BEFORE ||
+    minutesUntilReservation > SAME_DAY_MAX_MINUTES_BEFORE
+  ) {
+    return null;
+  }
+
+  const expiresAt = addMinutes(reservationAt, -SAME_DAY_MIN_MINUTES_BEFORE);
+  const createdDelay = getCreatedAtDelay(reservation);
+  const scheduledFor = maxDate(now, ...(createdDelay ? [createdDelay] : []));
+
+  if (scheduledFor >= expiresAt) {
+    return null;
+  }
+
+  return {
+    scheduledFor,
+    expiresAt,
+    priority: PRIORITY_REMINDER_SOON,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -96,107 +113,86 @@ Deno.serve(async (req) => {
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
-    const { evolutionUrl, evolutionToken } = await getEvolutionConfig(supabaseAdmin);
-
-    if (!evolutionUrl || !evolutionToken) {
-      console.log("Evolution API not configured, skipping reminders");
-      return new Response(JSON.stringify({ skipped: true, reason: "evolution_not_configured" }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const now = new Date();
     const todayStr = formatDateKeyInTimeZone(now);
-    const tomorrowStr = formatDateKeyInTimeZone(new Date(now.getTime() + 24 * 60 * 60 * 1000));
-
-    console.log(`Checking reminders for ${todayStr} and ${tomorrowStr}`);
+    const tomorrowStr = formatDateKeyInTimeZone(addMinutes(now, 24 * 60));
 
     const [{ data: reservationsToday }, { data: reservationsTomorrow }] = await Promise.all([
       supabaseAdmin
         .from("reservations")
         .select("*")
         .eq("date", todayStr)
-        .eq("status", "confirmed"),
+        .eq("status", "confirmed")
+        .not("guest_phone", "is", null),
       supabaseAdmin
         .from("reservations")
         .select("*")
         .eq("date", tomorrowStr)
-        .eq("status", "confirmed"),
+        .eq("status", "confirmed")
+        .not("guest_phone", "is", null),
     ]);
 
-    const candidateReservations = [...(reservationsToday || []), ...(reservationsTomorrow || [])];
+    const sameDayReservations = (reservationsToday || [])
+      .map((reservation: any) => ({
+        ...reservation,
+        _reminderType: "reminder_1h",
+        _schedule: getSameDaySchedule(reservation, now),
+      }))
+      .filter((reservation: any) => reservation._schedule);
 
-    const reservations1h = candidateReservations.filter((reservation: any) => {
-      const minutesUntilReservation =
-        (getReservationDateTime(reservation.date, reservation.time).getTime() - now.getTime()) / (1000 * 60);
-      return minutesUntilReservation >= 55 && minutesUntilReservation <= 65;
-    });
+    const dayBeforeReservations = (reservationsTomorrow || [])
+      .map((reservation: any) => ({
+        ...reservation,
+        _reminderType: "reminder_24h",
+        _schedule: getDayBeforeSchedule(reservation, now, todayStr),
+      }))
+      .filter((reservation: any) => reservation._schedule);
 
-    const reservations24h = candidateReservations.filter((reservation: any) => {
-      const minutesUntilReservation =
-        (getReservationDateTime(reservation.date, reservation.time).getTime() - now.getTime()) / (1000 * 60);
-      return minutesUntilReservation >= 1435 && minutesUntilReservation <= 1445;
-    });
-
-    const filtered1h = filterLateBookedReminders(reservations1h, 1, "1h");
-    const filtered24h = filterLateBookedReminders(reservations24h, 24, "24h");
-
-    console.log(
-      `Found ${filtered1h.length} 1h reminders (${reservations1h.length - filtered1h.length} skipped), ${filtered24h.length} 24h reminders (${reservations24h.length - filtered24h.length} skipped)`,
-    );
-
-    const allReservations = [
-      ...filtered1h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_1h" })),
-      ...filtered24h.map((reservation: any) => ({ ...reservation, _reminderType: "reminder_24h" })),
-    ];
+    const allReservations = [...sameDayReservations, ...dayBeforeReservations];
 
     if (allReservations.length === 0) {
-      return new Response(JSON.stringify({ sent: 0 }), {
+      return new Response(JSON.stringify({ queued: 0, total: 0 }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const companyIds = [...new Set(allReservations.map((reservation: any) => reservation.company_id))];
+    const reservationIds = allReservations.map((reservation: any) => reservation.id);
 
-    const [{ data: automations }, { data: instances }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
+    const [{ data: automations }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
       supabaseAdmin
         .from("automation_settings")
         .select("*")
         .in("company_id", companyIds)
-        .in("type", ["reminder_1h", "reminder_24h"])
+        .in("type", REMINDER_TYPES)
         .eq("enabled", true),
-      supabaseAdmin
-        .from("company_whatsapp_instances")
-        .select("*")
-        .in("company_id", companyIds),
       supabaseAdmin
         .from("whatsapp_message_logs")
         .select("reservation_id, type")
-        .in("reservation_id", allReservations.map((reservation: any) => reservation.id))
-        .in("type", ["reminder_1h", "reminder_24h"])
+        .in("reservation_id", reservationIds)
+        .in("type", REMINDER_TYPES)
         .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]),
       supabaseAdmin
         .from("whatsapp_message_queue")
         .select("reservation_id, type")
-        .in("reservation_id", allReservations.map((reservation: any) => reservation.id))
-        .in("type", ["reminder_1h", "reminder_24h"]),
+        .in("reservation_id", reservationIds)
+        .in("type", REMINDER_TYPES),
     ]);
 
-    const instanceMap = new Map((instances || []).map((instance: any) => [instance.company_id, instance]));
     const sentSet = new Set((alreadySent || []).map((log: any) => `${log.reservation_id}:${log.type}`));
     const queuedSet = new Set((alreadyQueued || []).map((item: any) => `${item.reservation_id}:${item.type}`));
 
-    let sent = 0;
-    const errors: string[] = [];
+    let queued = 0;
+    let skipped = 0;
 
     for (const reservation of allReservations) {
       const reminderType = reservation._reminderType;
+      const schedule = reservation._schedule;
       const key = `${reservation.id}:${reminderType}`;
 
       if (sentSet.has(key) || queuedSet.has(key)) {
-        console.log(`Skipping duplicate ${reminderType} for ${reservation.id}`);
+        skipped++;
         continue;
       }
 
@@ -204,10 +200,13 @@ Deno.serve(async (req) => {
         (item: any) => item.company_id === reservation.company_id && item.type === reminderType,
       );
 
-      if (!automation) continue;
+      if (!automation?.message_template) {
+        skipped++;
+        continue;
+      }
 
-      const message = replaceTemplateVars(automation.message_template, reservation);
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const message = replaceTemplateVars(automation.message_template, reservation);
       const deliveryKey = buildReservationDispatchKey(reminderType, reservation.id);
       const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
         deliveryKey,
@@ -218,111 +217,35 @@ Deno.serve(async (req) => {
       });
 
       if (!claimed) {
-        console.log(`Dispatch already claimed for ${reminderType} ${reservation.id}`);
+        skipped++;
         continue;
       }
 
-      const instance = instanceMap.get(reservation.company_id);
-
-      if (!instance) {
-        const failure = buildInstanceNotConfiguredFailure();
-        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone,
-          message,
-          type: reminderType,
-          error_details: serializeWhatsAppFailure(failure.error),
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "queued",
-          errorDetails: serializeWhatsAppFailure(failure.error),
-        });
-        queuedSet.add(key);
-        errors.push(`${reservation.id}: ${failure.error.message}`);
-        continue;
-      }
-
-      if (instance.status !== "connected") {
-        const failure = buildInstanceDisconnectedFailure();
-        await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone,
-          message,
-          type: reminderType,
-          error_details: serializeWhatsAppFailure(failure.error),
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "queued",
-          errorDetails: serializeWhatsAppFailure(failure.error),
-        });
-        queuedSet.add(key);
-        errors.push(`${reservation.id}: ${failure.error.message}`);
-        continue;
-      }
-
-      const result = await sendWhatsAppText(
-        evolutionUrl,
-        evolutionToken,
-        instance.instance_name,
-        phone,
-        message,
-      );
-
-      if (result.ok) {
-        const logStatus = getWhatsAppAcceptedLogStatus(result);
-        await supabaseAdmin.from("whatsapp_message_logs").insert({
-          company_id: reservation.company_id,
-          reservation_id: reservation.id,
-          phone,
-          message,
-          type: reminderType,
-          status: logStatus,
-          error_details: null,
-        });
-        await finalizeWhatsAppDispatch(supabaseAdmin, {
-          deliveryKey,
-          status: "accepted",
-        });
-        sentSet.add(key);
-        sent++;
-        console.log(`${reminderType} sent to ${phone} for reservation ${reservation.id}`);
-        continue;
-      }
-
-      const serializedError = serializeWhatsAppFailure(result.error);
-      errors.push(`${reservation.id}: ${result.error.message}`);
-
-      await supabaseAdmin.from("whatsapp_message_logs").insert({
+      const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: reservation.company_id,
         reservation_id: reservation.id,
         phone,
         message,
         type: reminderType,
-        status: "error",
-        error_details: serializedError,
+        scheduled_for: schedule.scheduledFor.toISOString(),
+        expires_at: schedule.expiresAt.toISOString(),
+        priority: schedule.priority,
       });
 
-      await enqueueWhatsAppMessageOnce(supabaseAdmin, {
-        company_id: reservation.company_id,
-        reservation_id: reservation.id,
-        phone,
-        message,
-        type: reminderType,
-        error_details: serializedError,
-      });
       await finalizeWhatsAppDispatch(supabaseAdmin, {
         deliveryKey,
         status: "queued",
-        errorDetails: serializedError,
       });
+
       queuedSet.add(key);
+      if (enqueueResult === "inserted") {
+        queued++;
+      } else {
+        skipped++;
+      }
     }
 
-    return new Response(JSON.stringify({ sent, total: allReservations.length, errors }), {
+    return new Response(JSON.stringify({ queued, skipped, total: allReservations.length }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

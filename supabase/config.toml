@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.send-birthday-messages]
 verify_jwt = false
 
+[functions.send-no-show-messages]
+verify_jwt = false
+
 [functions.expire-waitlist]
 verify_jwt = false
 

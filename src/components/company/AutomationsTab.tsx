@@ -116,7 +116,7 @@ export default function AutomationsTab({ companyId }: Props) {
             <Bot className="h-5 w-5 text-primary" /> Mensagens automáticas
           </h3>
           <p className="text-sm text-muted-foreground">
-            Confirmação, cancelamento e fila disparam por evento. Lembretes, pós-visita e aniversário dependem dos jobs automáticos.
+            Confirmação, cancelamento e fila disparam por evento. Lembretes, pós-visita, aniversário e no-show usam fila com cadência controlada.
           </p>
         </div>
 
