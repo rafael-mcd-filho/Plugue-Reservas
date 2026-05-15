@@ -182,6 +182,8 @@ export function useDashboardData(
   companyId: string | undefined,
   startDate: Date,
   endDate: Date,
+  comparisonStartDate?: Date,
+  comparisonEndDate?: Date,
 ) {
   const startStr = format(startDate, 'yyyy-MM-dd');
   const endStr = format(endDate, 'yyyy-MM-dd');
@@ -189,8 +191,8 @@ export function useDashboardData(
   const rangeEndIso = endOfDay(endDate).toISOString();
 
   const periodDays = differenceInDays(endDate, startDate) + 1;
-  const prevEndDate = subDays(startDate, 1);
-  const prevStartDate = subDays(prevEndDate, periodDays - 1);
+  const prevEndDate = comparisonEndDate ?? subDays(startDate, 1);
+  const prevStartDate = comparisonStartDate ?? subDays(prevEndDate, periodDays - 1);
   const prevStartStr = format(prevStartDate, 'yyyy-MM-dd');
   const prevEndStr = format(prevEndDate, 'yyyy-MM-dd');
 

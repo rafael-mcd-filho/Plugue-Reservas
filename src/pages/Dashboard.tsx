@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  differenceInCalendarDays,
   endOfMonth,
   endOfWeek,
   format,
@@ -80,51 +81,127 @@ function formatDashboardDateRangeLabel(range: DateRange | undefined) {
   return `${format(range.from, 'dd/MM/yyyy')} - ${format(range.to, 'dd/MM/yyyy')}`;
 }
 
+function getPreviousEquivalentRange(startDate: Date, endDate: Date) {
+  const periodDays = differenceInCalendarDays(endDate, startDate) + 1;
+  const comparisonEndDate = subDays(startDate, 1);
+  const comparisonStartDate = subDays(comparisonEndDate, periodDays - 1);
+
+  return { comparisonStartDate, comparisonEndDate };
+}
+
+function getSameMonthToDateRange(date: Date) {
+  const previousMonthStart = startOfMonth(subMonths(date, 1));
+  const previousMonthEnd = endOfMonth(previousMonthStart);
+  const comparisonEndDate = new Date(previousMonthStart);
+  comparisonEndDate.setDate(Math.min(date.getDate(), previousMonthEnd.getDate()));
+
+  return {
+    comparisonStartDate: previousMonthStart,
+    comparisonEndDate,
+  };
+}
+
 function getDashboardPeriodRange(period: string, customRange?: DateRange) {
   const today = new Date();
 
   switch (period) {
     case 'today':
-      return { startDate: today, endDate: today };
+      return {
+        startDate: today,
+        endDate: today,
+        comparisonStartDate: subDays(today, 1),
+        comparisonEndDate: subDays(today, 1),
+        comparisonLabel: 'ontem',
+      };
     case 'yesterday': {
       const yesterday = subDays(today, 1);
-      return { startDate: yesterday, endDate: yesterday };
-    }
-    case 'this_week':
+      const comparisonDate = subWeeks(yesterday, 1);
       return {
-        startDate: startOfWeek(today, { weekStartsOn: 1 }),
-        endDate: today,
+        startDate: yesterday,
+        endDate: yesterday,
+        comparisonStartDate: comparisonDate,
+        comparisonEndDate: comparisonDate,
+        comparisonLabel: 'mesmo dia da semana anterior',
       };
+    }
+    case 'this_week': {
+      const startDate = startOfWeek(today, { weekStartsOn: 1 });
+      return {
+        startDate,
+        endDate: today,
+        comparisonStartDate: subWeeks(startDate, 1),
+        comparisonEndDate: subWeeks(today, 1),
+        comparisonLabel: 'mesma parte da semana anterior',
+      };
+    }
     case 'last_week': {
       const lastWeek = subWeeks(today, 1);
+      const startDate = startOfWeek(lastWeek, { weekStartsOn: 1 });
+      const endDate = endOfWeek(lastWeek, { weekStartsOn: 1 });
       return {
-        startDate: startOfWeek(lastWeek, { weekStartsOn: 1 }),
-        endDate: endOfWeek(lastWeek, { weekStartsOn: 1 }),
+        startDate,
+        endDate,
+        comparisonStartDate: subWeeks(startDate, 1),
+        comparisonEndDate: subWeeks(endDate, 1),
+        comparisonLabel: 'semana fechada anterior',
       };
     }
-    case 'this_month':
+    case 'this_month': {
+      const startDate = startOfMonth(today);
+      const { comparisonStartDate, comparisonEndDate } = getSameMonthToDateRange(today);
       return {
-        startDate: startOfMonth(today),
+        startDate,
         endDate: today,
+        comparisonStartDate,
+        comparisonEndDate,
+        comparisonLabel: 'mesmo período do mês anterior',
       };
+    }
     case 'last_month': {
       const lastMonth = subMonths(today, 1);
+      const comparisonMonth = subMonths(lastMonth, 1);
       return {
         startDate: startOfMonth(lastMonth),
         endDate: endOfMonth(lastMonth),
+        comparisonStartDate: startOfMonth(comparisonMonth),
+        comparisonEndDate: endOfMonth(comparisonMonth),
+        comparisonLabel: 'mês anterior',
       };
     }
     case 'custom':
       if (customRange?.from) {
+        const startDate = customRange.from;
+        const endDate = customRange.to ?? customRange.from;
+        const { comparisonStartDate, comparisonEndDate } = getPreviousEquivalentRange(startDate, endDate);
+
         return {
-          startDate: customRange.from,
-          endDate: customRange.to ?? customRange.from,
+          startDate,
+          endDate,
+          comparisonStartDate,
+          comparisonEndDate,
+          comparisonLabel: 'período anterior equivalente',
         };
       }
 
-      return { startDate: today, endDate: today };
-    default:
-      return { startDate: subDays(today, 29), endDate: today };
+      return {
+        startDate: today,
+        endDate: today,
+        comparisonStartDate: subDays(today, 1),
+        comparisonEndDate: subDays(today, 1),
+        comparisonLabel: 'período anterior equivalente',
+      };
+    default: {
+      const startDate = subDays(today, 29);
+      const endDate = today;
+      const { comparisonStartDate, comparisonEndDate } = getPreviousEquivalentRange(startDate, endDate);
+      return {
+        startDate,
+        endDate,
+        comparisonStartDate,
+        comparisonEndDate,
+        comparisonLabel: 'período anterior equivalente',
+      };
+    }
   }
 }
 
@@ -225,7 +302,7 @@ export default function Dashboard() {
     isCompanyContext ? companyContext?.companyId : undefined,
   );
 
-  const { startDate, endDate } = useMemo(() => {
+  const { startDate, endDate, comparisonStartDate, comparisonEndDate, comparisonLabel } = useMemo(() => {
     return getDashboardPeriodRange(period, customRange);
   }, [period, customRange]);
 
@@ -245,7 +322,7 @@ export default function Dashboard() {
     isLoading: dashLoading,
     isFetching: dashFetching,
     lastUpdatedAt: dashboardUpdatedAt,
-  } = useDashboardData(effectiveCompanyId, startDate, endDate);
+  } = useDashboardData(effectiveCompanyId, startDate, endDate, comparisonStartDate, comparisonEndDate);
 
   const funnelCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
   const {
@@ -298,8 +375,10 @@ export default function Dashboard() {
     };
   }, [queryClient, effectiveCompanyId]);
 
-  const avgPerDayRaw = dailyStats.length > 0 ? totals.reservations / dailyStats.length : 0;
-  const prevAvgPerDayRaw = dailyStats.length > 0 ? prevTotals.reservations / dailyStats.length : 0;
+  const currentPeriodDays = Math.max(differenceInCalendarDays(endDate, startDate) + 1, 1);
+  const comparisonPeriodDays = Math.max(differenceInCalendarDays(comparisonEndDate, comparisonStartDate) + 1, 1);
+  const avgPerDayRaw = totals.reservations / currentPeriodDays;
+  const prevAvgPerDayRaw = prevTotals.reservations / comparisonPeriodDays;
   const avgPerDay = Math.round(avgPerDayRaw);
   const prevAvgPerDay = Math.round(prevAvgPerDayRaw);
   const avgGuestsPerReservation = totals.reservations > 0
@@ -332,7 +411,7 @@ export default function Dashboard() {
   const dataIsSyncing = dashFetching || funnelFetching || liveFunnelFetching;
   const freshnessLabel = dataIsSyncing ? 'Sincronizando' : dataIsStale ? 'Dados com atraso' : 'Tempo real';
 
-  const periodLabel = 'período anterior equivalente';
+  const periodLabel = comparisonLabel;
 
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
