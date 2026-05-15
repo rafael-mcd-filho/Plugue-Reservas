@@ -610,7 +610,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            <div className="flex min-w-0 items-center gap-2 lg:justify-end">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               {slug && (
                 <a
                   href={`/${slug}`}
