@@ -672,7 +672,7 @@ export default function CompanyDialog({
                             value={form.instagram || ''}
                             onChange={(event) => setForm((current) => ({ ...current, instagram: event.target.value }))}
                             onBlur={() => setForm((current) => ({ ...current, instagram: normalizeInstagramHandle(current.instagram) }))}
-                            placeholder="becomagicojoaopessoa"
+                            placeholder="pluguereservas"
                           />
                         </div>
                         <div>

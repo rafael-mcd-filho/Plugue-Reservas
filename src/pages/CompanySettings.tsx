@@ -1066,7 +1066,7 @@ export default function CompanySettings() {
                     value={instagram}
                     onChange={(event) => setInstagram(event.target.value)}
                     onBlur={() => setInstagram((current) => normalizeInstagramHandle(current))}
-                    placeholder="becomagicojoaopessoa"
+                    placeholder="pluguereservas"
                     className={settingsFieldClassName}
                     autoComplete="off"
                     spellCheck={false}
