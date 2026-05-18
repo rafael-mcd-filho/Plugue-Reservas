@@ -45,6 +45,7 @@ import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -236,15 +237,17 @@ export default function Reservations() {
   const { data: reservations = [], isLoading } = useQuery({
     queryKey: ['reservations', companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('reservations' as any)
-        .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
-        .eq('company_id', companyId)
-        .order('date', { ascending: true })
-        .order('time', { ascending: true });
+      const data = await fetchAllSupabasePages<Reservation>((from, to) =>
+        supabase
+          .from('reservations' as any)
+          .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
+          .eq('company_id', companyId)
+          .order('date', { ascending: true })
+          .order('time', { ascending: true })
+          .range(from, to),
+      );
 
-      if (error) throw error;
-      return ((data as Reservation[]) ?? []).map((reservation) => ({
+      return data.map((reservation) => ({
         ...reservation,
         status: normalizeReservationStatus(reservation.status),
       }));
@@ -806,7 +809,6 @@ export default function Reservations() {
 
   const clearDateFilters = () => {
     setReservationListRange(undefined);
-    setReservationListRangeOpen(false);
   };
 
   const clearExportFilters = () => {

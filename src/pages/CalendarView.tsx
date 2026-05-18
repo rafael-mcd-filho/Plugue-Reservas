@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
@@ -119,17 +120,19 @@ export default function CalendarView() {
   const { data: reservations = [], isLoading } = useQuery({
     queryKey: ['calendar-reservations', companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('reservations' as any)
-        .select(
-          'id, company_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at',
-        )
-        .eq('company_id', companyId)
-        .order('date', { ascending: true })
-        .order('time', { ascending: true });
+      const data = await fetchAllSupabasePages<Reservation>((from, to) =>
+        supabase
+          .from('reservations' as any)
+          .select(
+            'id, company_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at',
+          )
+          .eq('company_id', companyId)
+          .order('date', { ascending: true })
+          .order('time', { ascending: true })
+          .range(from, to),
+      );
 
-      if (error) throw error;
-      return ((data ?? []) as Reservation[]).map(normalizeReservationRecord);
+      return data.map(normalizeReservationRecord);
     },
     enabled: !!companyId,
     refetchInterval: 30000,
