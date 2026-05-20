@@ -28,6 +28,7 @@ import {
 } from '@/lib/publicReservationExitPrompt';
 import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
+import { createReservationPayment } from '@/lib/asaas-prepayment-api';
 import {
   formatBrazilPhone,
   getEmailValidationMessage,
@@ -852,6 +853,22 @@ export default function ReservationModal({
         status: 'confirmed',
       };
 
+      const paymentPreparation = await createReservationPayment({
+        company_id: companyId,
+        reservation: reservationData,
+      });
+
+      if (paymentPreparation.requires_payment) {
+        if (!paymentPreparation.payment_token) {
+          throw new Error('Pagamento da reserva criado sem token de acompanhamento.');
+        }
+
+        toast.success('Pre-reserva criada. Finalize o pagamento para confirmar.');
+        clearTrackingJourney?.();
+        window.location.assign(paymentPreparation.payment_url || `/pagamento/${paymentPreparation.payment_token}`);
+        return;
+      }
+
       const { error } = await supabase
         .from('reservations' as any)
         .insert(reservationData as any)
@@ -889,6 +906,9 @@ export default function ReservationModal({
       const message: string = err?.message ?? '';
       if (message.includes('Muitas tentativas')) {
         toast.error(message);
+      } else if (message) {
+        toast.error(message);
+        console.error('[ReservationModal] Submit error:', err);
       } else {
         toast.error('Não foi possível criar a reserva. Tente novamente em instantes.');
         console.error('[ReservationModal] Submit error:', err);

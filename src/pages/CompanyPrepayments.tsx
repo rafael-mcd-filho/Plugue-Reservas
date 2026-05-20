@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { endOfMonth, format, startOfMonth, subDays, subMonths } from 'date-fns';
 import {
   AlertTriangle,
@@ -53,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
+import { supabase } from '@/integrations/supabase/client';
 import type { DateRange } from 'react-day-picker';
 import { getAsaasConfig, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
 import {
@@ -396,14 +397,54 @@ function getAsaasStatusLabel(status: string) {
   return 'Não configurado';
 }
 
+function getRuleBillingTypes(rule: Pick<ReservationPaymentRuleDraft, 'pix_enabled' | 'credit_card_enabled'>) {
+  return [
+    rule.pix_enabled ? 'PIX' : null,
+    rule.credit_card_enabled ? 'CREDIT_CARD' : null,
+  ].filter(Boolean) as ReservationPrepaymentBillingType[];
+}
+
+function mapReservationPaymentRule(row: any, usageCount = 0): ReservationPaymentRuleDraft {
+  const rule = {
+    id: row.id,
+    name: row.name,
+    enabled: Boolean(row.enabled),
+    date_start: row.date_start,
+    date_end: row.date_end,
+    amount_type: row.amount_type,
+    amount: Number(row.base_amount || 0),
+    pix_enabled: Boolean(row.pix_enabled),
+    pix_amount: row.pix_amount === null || row.pix_amount === undefined ? null : Number(row.pix_amount),
+    credit_card_enabled: Boolean(row.credit_card_enabled),
+    credit_card_amount: row.credit_card_amount === null || row.credit_card_amount === undefined ? null : Number(row.credit_card_amount),
+    max_credit_card_installments: row.max_credit_card_installments === null || row.max_credit_card_installments === undefined
+      ? null
+      : Number(row.max_credit_card_installments),
+    payment_deadline_minutes: Number(row.payment_deadline_minutes || 10),
+    customer_notice: row.customer_notice ?? '',
+    cancellation_policy: row.cancellation_policy ?? '',
+    usage_count: usageCount,
+    created_by: row.created_by ?? null,
+    activated_at: row.activated_at ?? null,
+    archived_at: row.archived_at ?? null,
+    archived_by: row.archived_by ?? null,
+    archived_reason: row.archived_reason ?? null,
+  } satisfies Omit<ReservationPaymentRuleDraft, 'billing_types'>;
+
+  return {
+    ...rule,
+    billing_types: getRuleBillingTypes(rule),
+  };
+}
+
 export default function CompanyPrepayments() {
   const { companyId } = useCompanySlug();
+  const queryClient = useQueryClient();
   const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(companyId);
   const [asaasConfig, setAsaasConfig] = useState(DEFAULT_ASAAS_CONFIG_PREVIEW);
   const [tokenDraft, setTokenDraft] = useState('');
   const [savedWebhookUrl, setSavedWebhookUrl] = useState<string | null>(null);
   const [webhookAuthToken, setWebhookAuthToken] = useState<string | null>(null);
-  const [rules, setRules] = useState<ReservationPaymentRuleDraft[]>(MOCK_RULES);
   const [ruleForm, setRuleForm] = useState<RuleFormState>(() => createRuleForm());
   const [ruleTab, setRuleTab] = useState<RuleTab>('active');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all');
@@ -448,6 +489,123 @@ export default function CompanyPrepayments() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a configuração Asaas.');
+    },
+  });
+
+  const rulesQuery = useQuery({
+    queryKey: ['reservation-payment-rules', companyId],
+    queryFn: async () => {
+      if (!companyId) throw new Error('Empresa nao identificada.');
+
+      const { data, error } = await supabase
+        .from('reservation_payment_rules' as any)
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as any[];
+      const ruleIds = rows.map((row) => row.id).filter(Boolean);
+      const usageCounts = new Map<string, number>();
+
+      if (ruleIds.length > 0) {
+        const { data: payments, error: paymentsError } = await supabase
+          .from('reservation_payments' as any)
+          .select('rule_id')
+          .in('rule_id', ruleIds);
+
+        if (paymentsError) throw paymentsError;
+
+        ((payments ?? []) as any[]).forEach((payment) => {
+          if (!payment.rule_id) return;
+          usageCounts.set(payment.rule_id, (usageCounts.get(payment.rule_id) ?? 0) + 1);
+        });
+      }
+
+      return rows.map((row) => mapReservationPaymentRule(row, usageCounts.get(row.id) ?? 0));
+    },
+    enabled: Boolean(companyId),
+  });
+  const rules = rulesQuery.data ?? [];
+
+  const invalidateRules = () => {
+    if (!companyId) return;
+    queryClient.invalidateQueries({ queryKey: ['reservation-payment-rules', companyId] });
+  };
+
+  const createRuleMutation = useMutation({
+    mutationFn: async (payload: Record<string, unknown>) => {
+      const { error } = await supabase
+        .from('reservation_payment_rules' as any)
+        .insert(payload);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      invalidateRules();
+      setRuleForm(createRuleForm());
+      setRuleTab('inactive');
+      toast.success('Regra adicionada em Desativadas.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Nao foi possivel salvar a regra.');
+    },
+  });
+
+  const toggleRuleMutation = useMutation({
+    mutationFn: async ({ rule, enabled }: { rule: ReservationPaymentRuleDraft; enabled: boolean }) => {
+      const { error } = await supabase
+        .from('reservation_payment_rules' as any)
+        .update({
+          enabled,
+          activated_at: enabled ? new Date().toISOString() : rule.activated_at,
+        })
+        .eq('id', rule.id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateRules();
+      setRuleTab(variables.enabled ? 'active' : 'inactive');
+      toast.success(variables.enabled ? 'Regra ativada.' : 'Regra desativada.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Nao foi possivel atualizar a regra.');
+    },
+  });
+
+  const removeRuleMutation = useMutation({
+    mutationFn: async ({ rule, archive }: { rule: ReservationPaymentRuleDraft; archive: boolean }) => {
+      if (archive) {
+        const { error } = await supabase
+          .from('reservation_payment_rules' as any)
+          .update({
+            enabled: false,
+            archived_at: new Date().toISOString(),
+            archived_reason: 'Arquivada pelo painel',
+          })
+          .eq('id', rule.id);
+        if (error) throw error;
+        return;
+      }
+
+      const { error } = await supabase
+        .from('reservation_payment_rules' as any)
+        .delete()
+        .eq('id', rule.id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      invalidateRules();
+      setPendingRuleAction(null);
+      if (variables.archive) {
+        setRuleTab('archived');
+        toast.success('Regra arquivada.');
+      } else {
+        toast.success('Regra excluida.');
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Nao foi possivel remover a regra.');
     },
   });
 
@@ -659,6 +817,10 @@ export default function CompanyPrepayments() {
     const maxCreditCardInstallments = Number.parseInt(ruleForm.max_credit_card_installments, 10);
     const deadline = Number.parseInt(ruleForm.payment_deadline_minutes, 10);
 
+    if (!companyId) {
+      toast.error('Empresa nao identificada.');
+      return;
+    }
     if (!name) {
       toast.error('Informe o nome da regra.');
       return;
@@ -692,40 +854,23 @@ export default function CompanyPrepayments() {
       return;
     }
 
-    const billingTypes: ReservationPrepaymentBillingType[] = [
-      ruleForm.pix_enabled ? 'PIX' : null,
-      ruleForm.credit_card_enabled ? 'CREDIT_CARD' : null,
-    ].filter(Boolean) as ReservationPrepaymentBillingType[];
-
-    const createdRule: ReservationPaymentRuleDraft = {
-      id: `draft-${Date.now()}`,
+    createRuleMutation.mutate({
+      company_id: companyId,
       name,
       enabled: false,
       date_start: ruleForm.date_start,
       date_end: ruleForm.date_end,
       amount_type: ruleForm.amount_type,
-      amount,
+      base_amount: amount,
       pix_enabled: ruleForm.pix_enabled,
       pix_amount: ruleForm.pix_enabled ? pixAmount : null,
       credit_card_enabled: ruleForm.credit_card_enabled,
       credit_card_amount: ruleForm.credit_card_enabled ? creditCardAmount : null,
       max_credit_card_installments: ruleForm.credit_card_enabled ? maxCreditCardInstallments : null,
       payment_deadline_minutes: deadline,
-      billing_types: billingTypes,
       customer_notice: ruleForm.customer_notice.trim(),
       cancellation_policy: ruleForm.cancellation_policy.trim(),
-      usage_count: 0,
-      created_by: null,
-      activated_at: null,
-      archived_at: null,
-      archived_by: null,
-      archived_reason: null,
-    };
-
-    setRules((current) => [createdRule, ...current]);
-    setRuleForm(createRuleForm());
-    setRuleTab('inactive');
-    toast.success('Regra adicionada em Desativadas.');
+    });
   };
 
   const toggleRule = (ruleId: string, enabled: boolean) => {
@@ -744,11 +889,7 @@ export default function CompanyPrepayments() {
       }
     }
 
-    setRules((current) => current.map((rule) => rule.id === ruleId
-      ? { ...rule, enabled, activated_at: enabled ? new Date().toISOString() : rule.activated_at }
-      : rule));
-    setRuleTab(enabled ? 'active' : 'inactive');
-    toast.success(enabled ? 'Regra ativada.' : 'Regra desativada.');
+    toggleRuleMutation.mutate({ rule: selectedRule, enabled });
   };
 
   const removeOrArchiveRule = (ruleId: string) => {
@@ -761,26 +902,10 @@ export default function CompanyPrepayments() {
   const confirmRuleRemoval = () => {
     if (!pendingRule) return;
 
-    if (pendingRule.usage_count > 0) {
-      setRules((current) => current.map((rule) =>
-        rule.id === pendingRule.id
-          ? {
-            ...rule,
-            enabled: false,
-            archived_at: new Date().toISOString(),
-            archived_by: null,
-            archived_reason: 'Arquivada pelo painel',
-          }
-          : rule));
-      setRuleTab('archived');
-      toast.success('Regra arquivada.');
-      setPendingRuleAction(null);
-      return;
-    }
-
-    setRules((current) => current.filter((rule) => rule.id !== pendingRule.id));
-    toast.success('Regra excluída.');
-    setPendingRuleAction(null);
+    removeRuleMutation.mutate({
+      rule: pendingRule,
+      archive: pendingRule.usage_count > 0,
+    });
   };
 
   const cloneRule = (ruleId: string) => {
@@ -1176,9 +1301,13 @@ export default function CompanyPrepayments() {
                   />
                 </div>
 
-                <Button className="w-full" onClick={handleRuleSave}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Adicionar regra
+                <Button className="w-full" onClick={handleRuleSave} disabled={createRuleMutation.isPending}>
+                  {createRuleMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  {createRuleMutation.isPending ? 'Salvando regra...' : 'Adicionar regra'}
                 </Button>
                 </CardContent>
               </Card>

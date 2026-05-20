@@ -67,20 +67,24 @@ export interface CreateReservationPaymentRequest {
     origin_tracking_session_id?: string | null;
     origin_tracking_journey_id?: string | null;
     origin_anonymous_id?: string | null;
+    origin_affiliate_link_id?: string | null;
+    origin_affiliate_code?: string | null;
+    origin_affiliate_name?: string | null;
     origin_fbp?: string | null;
     origin_fbc?: string | null;
     attribution_snapshot?: Record<string, unknown>;
   };
 }
 
-export interface CreateReservationPaymentResponse {
+export type CreateReservationPaymentResponse = {
   requires_payment: boolean;
-  reservation_id: string;
-  payment_token: string;
-  payment_url: string;
-  expires_at: string;
-  status: ReservationPaymentStatus;
-}
+  reason?: 'feature_disabled' | 'no_rule';
+  reservation_id?: string;
+  payment_token?: string;
+  payment_url?: string;
+  expires_at?: string;
+  status?: ReservationPaymentStatus;
+};
 
 export interface SelectReservationPaymentMethodRequest {
   payment_token: string;

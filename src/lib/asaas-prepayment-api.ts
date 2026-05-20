@@ -2,6 +2,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFunctionErrorMessage } from '@/lib/functionErrors';
 import type {
   AsaasConfigStatus,
+  CreateReservationPaymentRequest,
+  CreateReservationPaymentResponse,
   PublicReservationPaymentSummary,
   ReservationPrepaymentBillingType,
   SelectReservationPaymentMethodRequest,
@@ -80,6 +82,14 @@ export async function checkReservationPayment(paymentToken: string) {
     'check-reservation-payment',
     { payment_token: paymentToken },
     'Não foi possível consultar o pagamento.',
+  );
+}
+
+export async function createReservationPayment(body: CreateReservationPaymentRequest) {
+  return invokeReservationPaymentFunction<CreateReservationPaymentResponse>(
+    'create-reservation-payment',
+    body,
+    'Nao foi possivel preparar o pagamento da reserva.',
   );
 }
 
