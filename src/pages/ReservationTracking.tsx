@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type SVGProps } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Loader2, MapPin, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Clock3, CreditCard, Loader2, MapPin, Pencil, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -17,12 +17,36 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
+import { getReservationPaymentByTrackingCode } from '@/lib/asaas-prepayment-api';
 import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
-import { isValidCompanySlug } from '@/lib/validation';
+import { isValidCompanySlug, toBrazilWhatsAppNumber } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
+
+function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        fill="currentColor"
+        d="M12 2.25a9.75 9.75 0 0 0-8.35 14.78L2.3 21.7l4.84-1.27A9.75 9.75 0 1 0 12 2.25Z"
+      />
+      <path
+        fill="white"
+        d="M9.25 6.65c-.23 0-.45.11-.63.31-.31.33-.82.83-.82 1.94s.81 2.18.92 2.33c.11.14 1.58 2.52 3.83 3.44 1.87.75 2.25.6 2.66.56.41-.04 1.32-.54 1.51-1.06.19-.53.19-.97.13-1.06-.05-.09-.19-.15-.39-.25-.2-.1-1.16-.57-1.34-.64-.18-.06-.31-.09-.45.12-.13.2-.52.63-.63.77-.12.13-.24.15-.43.05-.2-.1-.84-.31-1.6-1-.59-.53-.99-1.19-1.12-1.39-.12-.2-.02-.3.09-.4.09-.09.2-.23.3-.34.1-.11.13-.2.2-.32.07-.13.03-.25-.01-.34-.05-.1-.44-1.12-.61-1.53-.16-.39-.33-.4-.45-.4h-.38Z"
+      />
+    </svg>
+  );
+}
 
 interface ReservationEntry {
   id: string;
@@ -127,6 +151,7 @@ export default function ReservationTracking() {
   const queryClient = useQueryClient();
   const slugIsValid = isValidCompanySlug(slug);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const { data: company, isLoading: companyLoading, error: companyError } = useQuery({
     queryKey: ['company-public-reservation', slug],
@@ -134,18 +159,18 @@ export default function ReservationTracking() {
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
 
       if (!rpcResult.error) {
-        const rows = (rpcResult.data ?? []) as Array<{ id: string; name: string; logo_url: string | null }>;
+        const rows = (rpcResult.data ?? []) as Array<{ id: string; name: string; logo_url: string | null; whatsapp: string | null }>;
         return rows.length > 0 ? rows[0] : null;
       }
 
       const { data, error } = await supabase
         .from('companies_public' as any)
-        .select('id, name, logo_url')
+        .select('id, name, logo_url, whatsapp')
         .eq('slug', slug!)
         .maybeSingle();
 
       if (error) throw error;
-      return data as { id: string; name: string; logo_url: string | null } | null;
+      return data as unknown as { id: string; name: string; logo_url: string | null; whatsapp: string | null } | null;
     },
     enabled: slugIsValid,
   });
@@ -215,6 +240,21 @@ export default function ReservationTracking() {
   });
 
   const isLoading = companyLoading || entryLoading;
+  const isPendingPayment = entry?.status === 'pending_payment';
+
+  const paymentQuery = useQuery({
+    queryKey: ['reservation-tracking-payment', code],
+    queryFn: () => getReservationPaymentByTrackingCode(code!),
+    enabled: Boolean(code) && isPendingPayment,
+    retry: false,
+    refetchInterval: 10000,
+  });
+  const activePayment = paymentQuery.data;
+  const paymentIsActive =
+    !!activePayment &&
+    (activePayment.status === 'pending' || activePayment.status === 'awaiting_method') &&
+    new Date(activePayment.expires_at).getTime() > Date.now();
+  const paymentResumeUrl = paymentIsActive ? `/pagamento/${activePayment!.payment_token}` : null;
 
   useEffect(() => {
     syncPublicCompanyIcons(company?.logo_url);
@@ -341,6 +381,15 @@ export default function ReservationTracking() {
 
               {canCancel && (
                 <div className="space-y-3 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setEditDialogOpen(true)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Alterar reserva
+                  </Button>
                   <p className="text-xs text-muted-foreground">
                     Se não puder comparecer, você pode cancelar a própria reserva por aqui.
                   </p>
@@ -353,6 +402,19 @@ export default function ReservationTracking() {
                   >
                     {cancelReservation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Cancelar reserva
+                  </Button>
+                </div>
+              )}
+              {isPendingPayment && paymentResumeUrl && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Sua mesa fica bloqueada até o pagamento ser concluído. Conclua dentro do prazo para confirmar a reserva.
+                  </p>
+                  <Button asChild className="w-full">
+                    <Link to={paymentResumeUrl}>
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      Continuar pagamento
+                    </Link>
                   </Button>
                 </div>
               )}
@@ -375,6 +437,17 @@ export default function ReservationTracking() {
           </Card>
         </div>
       </div>
+
+      <AlterReservationDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        companyName={company.name}
+        companyWhatsapp={company.whatsapp ?? null}
+        guestName={entry.guest_name}
+        date={entry.date}
+        time={entry.time}
+        partySize={entry.party_size}
+      />
 
       <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <AlertDialogContent>
@@ -400,5 +473,66 @@ export default function ReservationTracking() {
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function AlterReservationDialog({
+  open,
+  onOpenChange,
+  companyName,
+  companyWhatsapp,
+  guestName,
+  date,
+  time,
+  partySize,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  companyName: string;
+  companyWhatsapp: string | null;
+  guestName: string;
+  date: string;
+  time: string;
+  partySize: number;
+}) {
+  const whatsappNumber = toBrazilWhatsAppNumber(companyWhatsapp);
+  const formattedDate = format(new Date(`${date}T12:00:00`), "dd/MM/yyyy", { locale: ptBR });
+  const formattedTime = time.slice(0, 5);
+  const message =
+    `Olá! Gostaria de alterar uma reserva em ${companyName}.\n` +
+    `Nome: ${guestName}\n` +
+    `Data: ${formattedDate}\n` +
+    `Horário: ${formattedTime}\n` +
+    `Pessoas: ${partySize}`;
+  const whatsappUrl = whatsappNumber
+    ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+    : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Alterar reserva</DialogTitle>
+          <DialogDescription>
+            Alterações de reserva são feitas de forma rápida pelo WhatsApp. Clique no botão abaixo para falar com o restaurante.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Voltar
+          </Button>
+          {whatsappUrl ? (
+            <Button asChild className="bg-emerald-600 text-white hover:bg-emerald-700">
+              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
+                <WhatsAppIcon className="mr-2 h-4 w-4" />
+                Falar pelo WhatsApp
+              </a>
+            </Button>
+          ) : (
+            <Button disabled>WhatsApp indisponível</Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

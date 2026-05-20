@@ -61,6 +61,14 @@ export async function getReservationPayment(paymentToken: string) {
   );
 }
 
+export async function getReservationPaymentByTrackingCode(trackingCode: string) {
+  return invokeReservationPaymentFunction<ReservationPaymentFunctionResponse>(
+    'get-reservation-payment',
+    { tracking_code: trackingCode },
+    'Não foi possível carregar o pagamento da reserva.',
+  );
+}
+
 export async function selectReservationPaymentMethod(
   paymentToken: string,
   billingType: ReservationPrepaymentBillingType,
