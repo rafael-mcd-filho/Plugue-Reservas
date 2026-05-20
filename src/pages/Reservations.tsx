@@ -140,10 +140,14 @@ interface ManualReservationForm {
 }
 
 const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: string }> = [
+  { value: 'pending_payment', label: 'Aguardando pagamento' },
   { value: 'confirmed', label: 'Confirmada' },
   { value: 'checked_in', label: 'Check-in realizado' },
   { value: 'cancelled', label: 'Cancelada' },
   { value: 'no-show', label: 'No Show' },
+  { value: 'payment_expired', label: 'Pagamento expirado' },
+  { value: 'payment_cancelled', label: 'Pagamento cancelado' },
+  { value: 'paid_after_expiration', label: 'Pago apos expirar' },
 ];
 
 function normalizePhone(phone: string | null | undefined) {
@@ -1100,10 +1104,11 @@ export default function Reservations() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os status</SelectItem>
-                  <SelectItem value="confirmed">Confirmada</SelectItem>
-                  <SelectItem value="checked_in">Check-in realizado</SelectItem>
-                  <SelectItem value="cancelled">Cancelada</SelectItem>
-                  <SelectItem value="no-show">No Show</SelectItem>
+                  {RESERVATION_STATUS_OPTIONS.map((status) => (
+                    <SelectItem key={status.value} value={status.value}>
+                      {status.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 

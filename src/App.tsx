@@ -6,13 +6,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
+import { CompanySlugProvider, useCompanySlug } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyPermissions } from "@/hooks/useCompanyPermissions";
+import { useCompanyFeatureFlags } from "@/hooks/useCompanyFeatures";
 import type { AppRole, CompanyPanelPermission } from "@/lib/companyPermissions";
+import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
@@ -24,12 +26,14 @@ const SettingsPage = lazyWithReload(() => import("@/pages/Settings"));
 const CompanySettings = lazyWithReload(() => import("@/pages/CompanySettings"));
 const CompanyEvents = lazyWithReload(() => import("@/pages/CompanyEvents"));
 const CompanyAutomations = lazyWithReload(() => import("@/pages/CompanyAutomations"));
+const CompanyPrepayments = lazyWithReload(() => import("@/pages/CompanyPrepayments"));
 const CompanyUsers = lazyWithReload(() => import("@/pages/CompanyUsers"));
 const CompanyWaitlist = lazyWithReload(() => import("@/pages/CompanyWaitlist"));
 const OperatorTodayReservations = lazyWithReload(() => import("@/pages/OperatorTodayReservations"));
 const PublicWaitlistPage = lazyWithReload(() => import("@/pages/PublicWaitlistPage"));
 const WaitlistTracking = lazyWithReload(() => import("@/pages/WaitlistTracking"));
 const ReservationTracking = lazyWithReload(() => import("@/pages/ReservationTracking"));
+const PublicReservationPayment = lazyWithReload(() => import("@/pages/PublicReservationPayment"));
 const AffiliateCompanyPublicPage = lazyWithReload(() => import("@/pages/AffiliateCompanyPublicPage"));
 const Profile = lazyWithReload(() => import("@/pages/Profile"));
 const Leads = lazyWithReload(() => import("@/pages/Leads"));
@@ -154,10 +158,12 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 function CompanyAdminRoute({
   allowedRoles,
   requiredCompanyPermission,
+  requiredCompanyFeature,
   children,
 }: {
   allowedRoles: AppRole[];
   requiredCompanyPermission?: CompanyPanelPermission;
+  requiredCompanyFeature?: CompanyFeatureKey;
   children: ReactNode;
 }) {
   const content = (
@@ -168,9 +174,34 @@ function CompanyAdminRoute({
 
   return (
     <ProtectedRoute allowedRoles={allowedRoles} requiredCompanyPermission={requiredCompanyPermission}>
-      <CompanySlugProvider>{content}</CompanySlugProvider>
+      <CompanySlugProvider>
+        <CompanyFeatureRouteGate requiredCompanyFeature={requiredCompanyFeature}>
+          {content}
+        </CompanyFeatureRouteGate>
+      </CompanySlugProvider>
     </ProtectedRoute>
   );
+}
+
+function CompanyFeatureRouteGate({
+  requiredCompanyFeature,
+  children,
+}: {
+  requiredCompanyFeature?: CompanyFeatureKey;
+  children: ReactNode;
+}) {
+  const { companyId } = useCompanySlug();
+  const { data: featureFlags, isLoading } = useCompanyFeatureFlags(
+    requiredCompanyFeature ? companyId : undefined,
+  );
+
+  if (!requiredCompanyFeature) return <>{children}</>;
+  if (isLoading) return <PanelPageSkeleton />;
+  if (featureFlags?.features[requiredCompanyFeature] === false) {
+    return <Navigate to="/acesso-negado" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 function HomeRedirect() {
@@ -385,6 +416,14 @@ const App = () => (
                   </SuspenseRoute>
                 }
               />
+              <Route
+                path="/pagamento/:paymentToken"
+                element={
+                  <SuspenseRoute fallback={<PublicPageSkeleton />}>
+                    <PublicReservationPayment />
+                  </SuspenseRoute>
+                }
+              />
 
               <Route
                 path="/:slug/admin"
@@ -446,6 +485,18 @@ const App = () => (
                     requiredCompanyPermission="automations_view"
                   >
                     <CompanyAutomations />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/pagamentos-antecipados"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="settings_view"
+                    requiredCompanyFeature="reservation_prepayment"
+                  >
+                    <CompanyPrepayments />
                   </CompanyAdminRoute>
                 }
               />

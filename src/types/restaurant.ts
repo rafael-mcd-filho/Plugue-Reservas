@@ -1,4 +1,12 @@
-export type ReservationStatus = 'confirmed' | 'checked_in' | 'cancelled' | 'no-show';
+export type ReservationStatus =
+  | 'pending_payment'
+  | 'confirmed'
+  | 'checked_in'
+  | 'cancelled'
+  | 'no-show'
+  | 'payment_expired'
+  | 'payment_cancelled'
+  | 'paid_after_expiration';
 
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance';
 

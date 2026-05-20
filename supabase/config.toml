@@ -44,3 +44,24 @@ verify_jwt = true
 
 [functions.audit-access]
 verify_jwt = true
+
+[functions.save-asaas-config]
+verify_jwt = true
+
+[functions.create-reservation-payment]
+verify_jwt = false
+
+[functions.select-reservation-payment-method]
+verify_jwt = false
+
+[functions.get-reservation-payment]
+verify_jwt = false
+
+[functions.check-reservation-payment]
+verify_jwt = false
+
+[functions.asaas-webhook]
+verify_jwt = false
+
+[functions.expire-reservation-payments]
+verify_jwt = false

@@ -3,10 +3,14 @@ import { cn } from '@/lib/utils';
 import type { ReservationStatus, TableStatus } from '@/types/restaurant';
 
 const reservationStatusConfig: Record<ReservationStatus, { className: string }> = {
+  pending_payment: { className: 'bg-warning-soft text-warning border-warning/20' },
   confirmed: { className: 'bg-primary-soft text-primary border-primary/20' },
   checked_in: { className: 'bg-info-soft text-info border-info/20' },
   cancelled: { className: 'bg-destructive-soft text-destructive border-destructive/20' },
   'no-show': { className: 'bg-destructive-soft text-destructive border-destructive/20' },
+  payment_expired: { className: 'bg-muted text-muted-foreground border-border' },
+  payment_cancelled: { className: 'bg-destructive-soft text-destructive border-destructive/20' },
+  paid_after_expiration: { className: 'bg-warning-soft text-warning border-warning/20' },
 };
 
 const tableStatusConfig: Record<TableStatus, { label: string; className: string }> = {

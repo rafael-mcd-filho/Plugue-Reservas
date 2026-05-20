@@ -27,30 +27,35 @@ export function useCompanyFeatureFlags(companyId?: string) {
     queryFn: async () => {
       if (!companyId) return null;
 
-      const [{ data: company, error: companyError }, rpcResult] = await Promise.all([
+      const [{ data: company, error: companyError }, rpcResult, overridesResult] = await Promise.all([
         supabase
           .from('companies' as any)
           .select('*')
           .eq('id', companyId)
           .maybeSingle(),
         (supabase as any).rpc('get_company_feature_flags', { _company_id: companyId }),
+        supabase
+          .from('company_feature_overrides' as any)
+          .select('feature_key, enabled')
+          .eq('company_id', companyId),
       ]);
 
       if (companyError) throw companyError;
 
       const planTier = normalizeCompanyPlanTier(company?.plan_tier);
-      if (rpcResult.error) {
-        return {
-          planTier,
-          features: getPlanDefaultFeatures(planTier),
-        };
-      }
-
-      const rpcRows = (rpcResult.data ?? []) as Array<{ feature_key: CompanyFeatureKey; enabled: boolean }>;
+      const rpcRows = rpcResult.error
+        ? []
+        : (rpcResult.data ?? []) as Array<{ feature_key: CompanyFeatureKey; enabled: boolean }>;
       const overrideMap = rpcRows.reduce((acc, row) => {
         acc[row.feature_key] = row.enabled;
         return acc;
       }, {} as Partial<Record<CompanyFeatureKey, boolean>>);
+
+      if (!overridesResult.error) {
+        for (const row of (overridesResult.data ?? []) as Array<{ feature_key: CompanyFeatureKey; enabled: boolean }>) {
+          overrideMap[row.feature_key] = row.enabled;
+        }
+      }
 
       return {
         planTier,

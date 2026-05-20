@@ -1,0 +1,495 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, CheckCircle2, Clock3, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import {
+  checkReservationPayment,
+  getReservationPayment,
+  selectReservationPaymentMethod,
+} from '@/lib/asaas-prepayment-api';
+import {
+  formatPrepaymentAmount,
+  getPaymentStatusLabel,
+  type PublicReservationPaymentSummary,
+  type ReservationPaymentStatus,
+  type ReservationPrepaymentBillingType,
+} from '@/lib/asaas-prepayment-contracts';
+
+const DEFAULT_DEADLINE_SECONDS = 10 * 60;
+
+function formatReservationDate(date: string, time: string) {
+  const [year, month, day] = date.split('-');
+  return `${day}/${month}/${year} às ${time.slice(0, 5)}`;
+}
+
+function getRemainingSeconds(expiresAt: string | null | undefined, now: number) {
+  if (!expiresAt) return 0;
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresAtMs)) return 0;
+  return Math.max(0, Math.floor((expiresAtMs - now) / 1000));
+}
+
+function formatRemainingTime(seconds: number) {
+  if (seconds <= 0) return 'Esgotado';
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function getStatusView(status: ReservationPaymentStatus) {
+  if (status === 'paid') {
+    return {
+      icon: CheckCircle2,
+      title: 'Reserva confirmada',
+      description: 'Pagamento recebido. Sua reserva está confirmada.',
+      color: 'text-success',
+      barClassName: 'bg-success',
+    };
+  }
+
+  if (status === 'expired') {
+    return {
+      icon: XCircle,
+      title: 'Pré-reserva expirada',
+      description: 'O prazo de pagamento terminou e a mesa foi liberada para novas reservas.',
+      color: 'text-muted-foreground',
+      barClassName: 'bg-muted-foreground/40',
+    };
+  }
+
+  if (status === 'cancelled') {
+    return {
+      icon: XCircle,
+      title: 'Pagamento cancelado',
+      description: 'O link desta pré-reserva foi cancelado.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
+  if (status === 'late_paid') {
+    return {
+      icon: AlertCircle,
+      title: 'Pagamento em análise',
+      description: 'O pagamento foi detectado depois do prazo. Nossa equipe vai validar a disponibilidade da mesa.',
+      color: 'text-warning',
+      barClassName: 'bg-warning',
+    };
+  }
+
+  if (status === 'failed') {
+    return {
+      icon: AlertCircle,
+      title: 'Não foi possível processar',
+      description: 'Houve uma falha ao processar o pagamento. Entre em contato com a equipe do restaurante.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
+  if (status === 'awaiting_method') {
+    return {
+      icon: Clock3,
+      title: 'Escolha a forma de pagamento',
+      description: 'Selecione Pix ou cartão para abrir o checkout seguro do Asaas.',
+      color: 'text-primary',
+      barClassName: 'bg-primary',
+    };
+  }
+
+  return {
+    icon: Clock3,
+    title: 'Aguardando pagamento',
+    description: 'Finalize o pagamento no Asaas dentro do prazo para confirmar a reserva.',
+    color: 'text-primary',
+    barClassName: 'bg-primary',
+  };
+}
+
+function useNow(enabled: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [enabled]);
+
+  return now;
+}
+
+export default function PublicReservationPayment() {
+  const { paymentToken = '' } = useParams<{ paymentToken: string }>();
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => ['reservation-payment', paymentToken] as const, [paymentToken]);
+
+  const paymentQuery = useQuery({
+    queryKey,
+    queryFn: () => getReservationPayment(paymentToken),
+    enabled: Boolean(paymentToken),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'pending' || status === 'awaiting_method' ? 5000 : false;
+    },
+  });
+
+  const payment = paymentQuery.data;
+  const showPaymentActions = payment?.status === 'pending' || payment?.status === 'awaiting_method';
+  const now = useNow(Boolean(showPaymentActions));
+  const remainingSeconds = payment ? getRemainingSeconds(payment.expires_at, now) : 0;
+  const progress = showPaymentActions
+    ? Math.min(100, Math.max(0, (remainingSeconds / DEFAULT_DEADLINE_SECONDS) * 100))
+    : payment?.status === 'paid'
+      ? 100
+      : 0;
+
+  const selectMethodMutation = useMutation({
+    mutationFn: (billingType: ReservationPrepaymentBillingType) => selectReservationPaymentMethod(paymentToken, billingType),
+    onSuccess: (updatedPayment) => {
+      queryClient.setQueryData(queryKey, updatedPayment);
+      if (updatedPayment.payment_link_url) {
+        window.location.assign(updatedPayment.payment_link_url);
+        return;
+      }
+      toast.success('Link de pagamento criado.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível criar o link de pagamento.');
+    },
+  });
+
+  const checkPaymentMutation = useMutation({
+    mutationFn: () => checkReservationPayment(paymentToken),
+    onSuccess: (updatedPayment) => {
+      queryClient.setQueryData(queryKey, updatedPayment);
+      if (updatedPayment.confirmation?.status === 'paid' || updatedPayment.status === 'paid') {
+        toast.success('Pagamento confirmado. Sua reserva foi confirmada.');
+        return;
+      }
+      if (updatedPayment.message) {
+        toast.info(updatedPayment.message);
+        return;
+      }
+      toast.info('Pagamento ainda não confirmado pelo Asaas.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
+    },
+  });
+
+  if (!paymentToken) {
+    return <PaymentPageShell errorTitle="Link inválido" errorMessage="O token do pagamento não foi informado." />;
+  }
+
+  if (paymentQuery.isLoading) {
+    return (
+      <PaymentPageShell>
+        <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-border bg-card">
+          <div className="text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+            <p className="mt-3 text-sm text-muted-foreground">Carregando pagamento da reserva...</p>
+          </div>
+        </div>
+      </PaymentPageShell>
+    );
+  }
+
+  if (paymentQuery.error || !payment) {
+    return (
+      <PaymentPageShell
+        errorTitle="Pagamento não encontrado"
+        errorMessage={paymentQuery.error instanceof Error ? paymentQuery.error.message : 'Não foi possível carregar este pagamento.'}
+        onRetry={() => paymentQuery.refetch()}
+      />
+    );
+  }
+
+  const statusView = getStatusView(payment.status);
+  const StatusIcon = statusView.icon;
+
+  return (
+    <PaymentPageShell>
+      <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <main className="space-y-6">
+          <div className="space-y-2">
+            <Badge variant="secondary">{payment.rule_name}</Badge>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Pagamento da reserva</h1>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Esta página mantém as opções da sua pré-reserva. Se fechar o navegador ou trocar de aparelho, volte por este link para acompanhar o pagamento.
+            </p>
+          </div>
+
+          <Card className="overflow-hidden border-border shadow-card">
+            <div className={`h-1.5 ${statusView.barClassName}`} />
+            <CardContent className="space-y-6 p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-primary/10 p-3">
+                    <StatusIcon className={`h-6 w-6 ${statusView.color}`} />
+                  </div>
+                  <div>
+                    <h2 className={`text-lg font-semibold ${statusView.color}`}>{statusView.title}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">{statusView.description}</p>
+                  </div>
+                </div>
+                <Badge variant={payment.status === 'paid' ? 'default' : 'secondary'}>
+                  {getPaymentStatusLabel(payment.status)}
+                </Badge>
+              </div>
+
+              {showPaymentActions && (
+                <div className="space-y-3 rounded-lg border border-border bg-background p-4">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground">Tempo restante</span>
+                    <span className="font-medium text-foreground">{formatRemainingTime(remainingSeconds)}</span>
+                  </div>
+                  <Progress value={progress} />
+                  <p className="text-xs text-muted-foreground">
+                    Quando o prazo terminar, o link será removido e a mesa será liberada.
+                  </p>
+                </div>
+              )}
+
+              {showPaymentActions && (
+                <PaymentActionArea
+                  payment={payment}
+                  checking={checkPaymentMutation.isPending}
+                  selectingBillingType={selectMethodMutation.variables}
+                  onSelectMethod={(billingType) => selectMethodMutation.mutate(billingType)}
+                  onOpenPaymentLink={() => handleOpenPaymentLink(payment)}
+                  onCheckPayment={() => checkPaymentMutation.mutate()}
+                />
+              )}
+
+              {!showPaymentActions && payment.status !== 'paid' && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Pagamento encerrado</AlertTitle>
+                  <AlertDescription>
+                    Esta pré-reserva não aceita mais pagamento por este link. Inicie uma nova reserva ou fale com o restaurante.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        </main>
+
+        <PaymentSummary payment={payment} />
+      </div>
+    </PaymentPageShell>
+  );
+}
+
+function handleOpenPaymentLink(payment: PublicReservationPaymentSummary) {
+  if (!payment.payment_link_url) {
+    toast.error('Link de pagamento indisponível.');
+    return;
+  }
+  window.open(payment.payment_link_url, '_blank', 'noopener,noreferrer');
+}
+
+function PaymentActionArea({
+  payment,
+  checking,
+  selectingBillingType,
+  onSelectMethod,
+  onOpenPaymentLink,
+  onCheckPayment,
+}: {
+  payment: PublicReservationPaymentSummary;
+  checking: boolean;
+  selectingBillingType: ReservationPrepaymentBillingType | undefined;
+  onSelectMethod: (billingType: ReservationPrepaymentBillingType) => void;
+  onOpenPaymentLink: () => void;
+  onCheckPayment: () => void;
+}) {
+  return (
+    <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background p-5 text-center">
+        <div className="rounded-full bg-primary/10 p-4">
+          <ExternalLink className="h-8 w-8 text-primary" />
+        </div>
+        <div>
+          <p className="font-medium text-foreground">Checkout Asaas</p>
+          <p className="mt-1 text-xs text-muted-foreground">Pix e cartão são finalizados fora do nosso frontend.</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm text-muted-foreground">Valor do sinal</p>
+          <p className="text-3xl font-semibold text-foreground">{formatPrepaymentAmount(payment.base_amount)}</p>
+          {payment.customer_notice && <p className="mt-1 text-sm text-muted-foreground">{payment.customer_notice}</p>}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {payment.pix_amount && (
+            <PaymentMethodBox
+              icon="pix"
+              title="Pix"
+              amount={payment.pix_amount}
+              description="Abre o link Pix do Asaas."
+              disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
+              loading={selectingBillingType === 'PIX'}
+              selected={payment.billing_type === 'PIX'}
+              onSelect={() => onSelectMethod('PIX')}
+            />
+          )}
+          {payment.credit_card_amount && (
+            <PaymentMethodBox
+              icon="card"
+              title="Cartão"
+              amount={payment.credit_card_amount}
+              description={`Em até ${payment.max_credit_card_installments ?? 1}x no Asaas.`}
+              disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
+              loading={selectingBillingType === 'CREDIT_CARD'}
+              selected={payment.billing_type === 'CREDIT_CARD'}
+              onSelect={() => onSelectMethod('CREDIT_CARD')}
+            />
+          )}
+        </div>
+
+        {payment.status === 'pending' && (
+          <div className="rounded-lg border border-border bg-background p-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button onClick={onOpenPaymentLink} disabled={!payment.payment_link_url} className="sm:flex-1">
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Abrir link Asaas
+              </Button>
+              <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="sm:flex-1">
+                {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                Já paguei
+              </Button>
+            </div>
+            {payment.payment_link_external_reference && (
+              <p className="mt-3 truncate text-xs text-muted-foreground">
+                Ref. Asaas: {payment.payment_link_external_reference}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PaymentMethodBox({
+  icon,
+  title,
+  amount,
+  description,
+  disabled,
+  loading,
+  selected,
+  onSelect,
+}: {
+  icon: 'pix' | 'card';
+  title: string;
+  amount: number;
+  description: string;
+  disabled: boolean;
+  loading: boolean;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const Icon = icon === 'pix' ? QrCode : CreditCard;
+
+  return (
+    <div className={`rounded-lg border bg-background p-3 ${selected ? 'border-primary/50' : 'border-border'}`}>
+      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+        <Icon className="h-4 w-4 text-primary" />
+        {title}
+        {selected && <Badge variant="secondary">Selecionado</Badge>}
+      </div>
+      <p className="text-xl font-semibold text-foreground">{formatPrepaymentAmount(amount)}</p>
+      <p className="mt-1 min-h-8 text-xs text-muted-foreground">{description}</p>
+      <Button variant="outline" size="sm" className="mt-3 w-full" disabled={disabled} onClick={onSelect}>
+        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        Escolher {title}
+      </Button>
+    </div>
+  );
+}
+
+function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary }) {
+  return (
+    <aside className="space-y-4">
+      <Card className="border-border shadow-card">
+        <CardContent className="space-y-4 p-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Reserva</p>
+            <h2 className="mt-1 text-lg font-semibold text-foreground">{payment.company.name}</h2>
+          </div>
+          <div className="space-y-3 text-sm">
+            <SummaryLine label="Cliente" value={payment.reservation.guest_name} />
+            <SummaryLine label="Data" value={formatReservationDate(payment.reservation.date, payment.reservation.time)} />
+            <SummaryLine label="Pessoas" value={String(payment.reservation.party_size)} />
+            <SummaryLine label="Token" value={payment.payment_token} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border shadow-card">
+        <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Política</p>
+          <p>{payment.cancellation_policy || 'Consulte o restaurante para detalhes da política desta reserva.'}</p>
+          <Button asChild variant="outline" className="w-full">
+            <Link to="/">Iniciar nova reserva</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </aside>
+  );
+}
+
+function PaymentPageShell({
+  children,
+  errorTitle,
+  errorMessage,
+  onRetry,
+}: {
+  children?: ReactNode;
+  errorTitle?: string;
+  errorMessage?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="min-h-screen bg-secondary px-4 py-6 text-foreground sm:py-10">
+      {children || (
+        <div className="mx-auto max-w-xl">
+          <Alert className="border-destructive/30">
+            <AlertCircle className="h-4 w-4 text-destructive" />
+            <AlertTitle>{errorTitle}</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+          <div className="mt-4 flex gap-2">
+            {onRetry && (
+              <Button variant="outline" onClick={onRetry}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Tentar novamente
+              </Button>
+            )}
+            <Button asChild variant="outline">
+              <Link to="/">Iniciar nova reserva</Link>
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border pb-2 last:border-0 last:pb-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="max-w-[190px] truncate text-right font-medium text-foreground">{value}</span>
+    </div>
+  );
+}

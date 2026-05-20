@@ -47,6 +47,12 @@ interface CancelReservationResult {
 }
 
 const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon: typeof CheckCircle2; title: string; description: string; color: string }> = {
+  pending_payment: {
+    icon: Clock3,
+    title: 'Aguardando pagamento',
+    description: 'Sua mesa fica reservada temporariamente enquanto o pagamento aguarda confirmação.',
+    color: 'text-warning',
+  },
   confirmed: {
     icon: CheckCircle2,
     title: 'Reserva confirmada',
@@ -76,6 +82,24 @@ const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon
     title: 'Não compareceu',
     description: 'Esta reserva foi marcada como não comparecimento.',
     color: 'text-muted-foreground',
+  },
+  payment_expired: {
+    icon: XCircle,
+    title: 'Pagamento expirado',
+    description: 'O prazo de pagamento terminou e a mesa foi liberada.',
+    color: 'text-muted-foreground',
+  },
+  payment_cancelled: {
+    icon: XCircle,
+    title: 'Pagamento cancelado',
+    description: 'O link de pagamento desta pré-reserva foi cancelado.',
+    color: 'text-destructive',
+  },
+  paid_after_expiration: {
+    icon: AlertCircle,
+    title: 'Pagamento em analise',
+    description: 'O pagamento foi detectado depois do prazo e precisa de validacao da equipe.',
+    color: 'text-warning',
   },
   no_show: {
     icon: AlertCircle,

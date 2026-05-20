@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ClipboardList,
   Contact,
+  CreditCard,
   ExternalLink,
   Grid3X3,
   LayoutDashboard,
@@ -42,6 +43,7 @@ import {
   type AppRole,
   type CompanyPanelPermission,
 } from '@/lib/companyPermissions';
+import type { CompanyFeatureKey } from '@/lib/companyFeatures';
 
 interface NavItem {
   label: string;
@@ -50,6 +52,7 @@ interface NavItem {
   path: string;
   showFor: AppRole[];
   requiredPermission?: CompanyPanelPermission;
+  requiredFeature?: CompanyFeatureKey;
   matchPrefix?: boolean;
 }
 
@@ -164,6 +167,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           requiredPermission: 'automations_view',
         },
         {
+          label: 'Pagamentos',
+          description: 'Sinal Asaas por data',
+          icon: CreditCard,
+          path: `/${slug}/admin/pagamentos-antecipados`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'settings_view',
+          requiredFeature: 'reservation_prepayment',
+        },
+        {
           label: 'Usu\u00E1rios',
           description: 'Acesso da unidade',
           icon: Users,
@@ -258,6 +270,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
       if (item.label === 'Dashboard' && f.advanced_reports === false) return false;
+      if (item.requiredFeature && f[item.requiredFeature] === false) return false;
     }
     return true;
   });
@@ -270,6 +283,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
       if (item.path?.includes('/automacoes') && f.whatsapp_integration === false) return false;
+      if (item.requiredFeature && f[item.requiredFeature] === false) return false;
     }
     return true;
   });

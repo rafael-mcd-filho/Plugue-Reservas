@@ -4,7 +4,8 @@ export type CompanyFeatureKey =
   | 'custom_public_page'
   | 'advanced_reports'
   | 'active_communication'
-  | 'flow_protection';
+  | 'flow_protection'
+  | 'reservation_prepayment';
 
 export interface CompanyFeatureDefinition {
   key: CompanyFeatureKey;
@@ -50,6 +51,12 @@ export const COMPANY_FEATURE_DEFINITIONS: CompanyFeatureDefinition[] = [
     shortLabel: 'Proteções',
     description: 'Habilita configurações de proteção do fluxo público de reservas.',
   },
+  {
+    key: 'reservation_prepayment',
+    label: 'Pagamentos antecipados',
+    shortLabel: 'Pagamentos',
+    description: 'Habilita regras de sinal por Pix e cartão via Asaas antes de confirmar reservas.',
+  },
 ];
 
 const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>> = {
@@ -59,6 +66,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     advanced_reports: false,
     active_communication: false,
     flow_protection: false,
+    reservation_prepayment: false,
   },
   pro: {
     whatsapp_integration: true,
@@ -66,6 +74,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     advanced_reports: false,
     active_communication: true,
     flow_protection: true,
+    reservation_prepayment: false,
   },
   enterprise: {
     whatsapp_integration: true,
@@ -73,6 +82,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     advanced_reports: true,
     active_communication: true,
     flow_protection: true,
+    reservation_prepayment: false,
   },
 };
 

@@ -1,0 +1,183 @@
+export type AsaasBillingType = "PIX" | "CREDIT_CARD";
+
+export type AsaasPaymentLinkChargeType = "DETACHED" | "RECURRENT" | "INSTALLMENT";
+
+export interface AsaasPaymentLinkPayload {
+  name: string;
+  description?: string;
+  endDate?: string;
+  value: number;
+  billingType: AsaasBillingType;
+  chargeType: AsaasPaymentLinkChargeType;
+  maxInstallmentCount?: number;
+  externalReference?: string;
+  notificationEnabled?: boolean;
+  callback?: {
+    successUrl?: string;
+    autoRedirect?: boolean;
+  };
+  isAddressRequired?: boolean;
+}
+
+export interface AsaasPaymentLinkResponse {
+  id: string;
+  name?: string;
+  url?: string;
+  link?: string;
+  paymentLinkUrl?: string;
+  active?: boolean;
+  deleted?: boolean;
+  externalReference?: string | null;
+}
+
+export class AsaasApiError extends Error {
+  status: number;
+  payload: unknown;
+
+  constructor(message: string, status: number, payload: unknown) {
+    super(message);
+    this.name = "AsaasApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+function getAsaasBaseUrl() {
+  return (Deno.env.get("ASAAS_API_BASE_URL") || "https://api.asaas.com/v3").replace(/\/+$/, "");
+}
+
+function buildUrl(path: string) {
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${getAsaasBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export async function asaasRequest<T>(
+  apiToken: string,
+  path: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("access_token", apiToken);
+  headers.set("User-Agent", Deno.env.get("ASAAS_USER_AGENT") || "PlugueReservas/1.0");
+
+  let body = init.body;
+  if (init.json !== undefined) {
+    headers.set("Content-Type", "application/json");
+    body = JSON.stringify(init.json);
+  }
+
+  const response = await fetch(buildUrl(path), {
+    ...init,
+    headers,
+    body,
+  });
+
+  const responseText = await response.text();
+  let payload: unknown = null;
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = responseText;
+    }
+  }
+
+  if (!response.ok) {
+    const message = Array.isArray((payload as any)?.errors)
+      ? (payload as any).errors.map((error: any) => error.description || error.code).filter(Boolean).join("; ")
+      : `Asaas request failed with status ${response.status}`;
+    throw new AsaasApiError(message, response.status, payload);
+  }
+
+  return payload as T;
+}
+
+export function getAsaasPaymentLinkUrl(paymentLink: AsaasPaymentLinkResponse) {
+  return paymentLink.url ?? paymentLink.paymentLinkUrl ?? paymentLink.link ?? null;
+}
+
+export async function createAsaasPaymentLink(apiToken: string, payload: AsaasPaymentLinkPayload) {
+  return await asaasRequest<AsaasPaymentLinkResponse>(apiToken, "/paymentLinks", {
+    method: "POST",
+    json: payload,
+  });
+}
+
+export async function listAsaasPaymentLinks(
+  apiToken: string,
+  params: {
+    offset?: number;
+    limit?: number;
+    active?: boolean;
+    includeDeleted?: boolean;
+    name?: string;
+    externalReference?: string;
+  } = {},
+) {
+  const query = new URLSearchParams();
+  if (typeof params.offset === "number") query.set("offset", String(params.offset));
+  if (typeof params.limit === "number") query.set("limit", String(params.limit));
+  if (typeof params.active === "boolean") query.set("active", String(params.active));
+  if (typeof params.includeDeleted === "boolean") query.set("includeDeleted", String(params.includeDeleted));
+  if (params.name) query.set("name", params.name);
+  if (params.externalReference) query.set("externalReference", params.externalReference);
+
+  return await asaasRequest<{ data?: AsaasPaymentLinkResponse[] }>(
+    apiToken,
+    `/paymentLinks${query.toString() ? `?${query.toString()}` : ""}`,
+    { method: "GET" },
+  );
+}
+
+export async function getAsaasPaymentLink(apiToken: string, paymentLinkId: string) {
+  return await asaasRequest<AsaasPaymentLinkResponse>(
+    apiToken,
+    `/paymentLinks/${encodeURIComponent(paymentLinkId)}`,
+    {
+      method: "GET",
+    },
+  );
+}
+
+export async function deleteAsaasPaymentLink(apiToken: string, paymentLinkId: string) {
+  return await asaasRequest<unknown>(apiToken, `/paymentLinks/${encodeURIComponent(paymentLinkId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function validateAsaasPaymentLinksAccess(apiToken: string) {
+  return await asaasRequest<unknown>(apiToken, "/paymentLinks?limit=1", {
+    method: "GET",
+  });
+}
+
+export async function getAsaasPaymentStatus(apiToken: string, paymentId: string) {
+  const response = await asaasRequest<{ status?: string }>(
+    apiToken,
+    `/payments/${encodeURIComponent(paymentId)}/status`,
+    { method: "GET" },
+  );
+
+  return typeof response.status === "string" ? response.status : null;
+}
+
+export async function deleteAsaasPayment(apiToken: string, paymentId: string) {
+  return await asaasRequest<unknown>(apiToken, `/payments/${encodeURIComponent(paymentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function isAsaasPaidStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "RECEIVED" || normalized === "CONFIRMED" || normalized === "RECEIVED_IN_CASH";
+}
+
+export function isAsaasPaymentApprovalEvent(eventType: string | null | undefined) {
+  const normalized = String(eventType || "").toUpperCase();
+  return normalized === "PAYMENT_RECEIVED" || normalized === "PAYMENT_CONFIRMED";
+}
+
+export function isAsaasPaymentCancelledEvent(eventType: string | null | undefined) {
+  const normalized = String(eventType || "").toUpperCase();
+  return normalized === "PAYMENT_DELETED" || normalized === "PAYMENT_REFUNDED" || normalized === "PAYMENT_CHARGEBACK_REQUESTED";
+}

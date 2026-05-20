@@ -1,4 +1,4 @@
-import { BarChart3, Globe, MessageCircle } from 'lucide-react';
+import { BarChart3, CreditCard, Globe, MessageCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { COMPANY_FEATURE_DEFINITIONS, CompanyFeatureKey } from '@/lib/companyFeatures';
@@ -78,5 +78,6 @@ export function CompanyFeatureBadges({ features }: { features?: CompanyFeatureSt
 function getFeatureIcon(featureKey: CompanyFeatureKey) {
   if (featureKey === 'whatsapp_integration') return <MessageCircle className="h-4 w-4" />;
   if (featureKey === 'custom_public_page') return <Globe className="h-4 w-4" />;
+  if (featureKey === 'reservation_prepayment') return <CreditCard className="h-4 w-4" />;
   return <BarChart3 className="h-4 w-4" />;
 }
