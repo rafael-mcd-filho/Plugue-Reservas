@@ -104,6 +104,8 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
+    const url = new URL(req.url);
+    const requestedCompanyId = url.searchParams.get("company_id");
     const body = await readJson(req);
     const eventType = String(body.event || body.eventType || "").toUpperCase();
     const asaasPaymentId = getAsaasPaymentId(body);
@@ -114,7 +116,11 @@ Deno.serve(async (req) => {
     const supabaseAdmin = createSupabaseAdminClient();
 
     let payment = await findReservationPayment(supabaseAdmin, asaasPaymentId, asaasPaymentLinkId);
-    const companyId = payment?.company_id ?? null;
+    if (payment?.company_id && requestedCompanyId && payment.company_id !== requestedCompanyId) {
+      return jsonResponse({ error: "Company mismatch" }, 401);
+    }
+
+    const companyId = payment?.company_id ?? requestedCompanyId ?? null;
     const authorized = await validateWebhookToken(supabaseAdmin, providedToken, companyId);
     if (!authorized) {
       return jsonResponse({ error: "Unauthorized webhook" }, 401);

@@ -54,11 +54,15 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = (Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
 
+    const webhookUrl = supabaseUrl
+      ? `${supabaseUrl}/functions/v1/asaas-webhook?company_id=${encodeURIComponent(companyId)}`
+      : null;
+
     return jsonResponse({
       status: data.status,
       last_validated_at: data.last_validated_at,
       last_error: data.last_error,
-      webhook_url: supabaseUrl ? `${supabaseUrl}/functions/v1/asaas-webhook` : null,
+      webhook_url: webhookUrl,
       webhook_auth_token: data.webhook_auth_token,
     });
   } catch (error: any) {

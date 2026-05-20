@@ -257,6 +257,10 @@ const MOCK_FINANCIAL_DAILY = [
 
 const DEFAULT_CUSTOMER_NOTICE = 'O valor pago será abatido da conta no dia da visita.';
 const DEFAULT_CANCELLATION_POLICY = 'Se o pagamento não for confirmado dentro do prazo, a pré-reserva expira e a mesa volta a ficar disponível.';
+const SUPABASE_FUNCTIONS_BASE_URL = (
+  import.meta.env.VITE_SUPABASE_URL || 'https://hdpxqqiudiotanrybvcf.supabase.co'
+).replace(/\/+$/, '');
+
 const LEGACY_CUSTOMER_NOTICES = new Set([
   'Este valor sera abatido da conta no dia da visita.',
   'Este valor será abatido da conta no dia da visita.',
@@ -539,8 +543,8 @@ export default function CompanyPrepayments() {
   const pendingRule = pendingRuleAction ? rules.find((rule) => rule.id === pendingRuleAction.ruleId) : null;
   const ruleActionIsArchive = Boolean(pendingRule && pendingRule.usage_count > 0);
   const fallbackWebhookUrl = companyId
-    ? `https://<projeto-supabase>.functions.supabase.co/asaas-webhook?company_id=${companyId}`
-    : 'https://<projeto-supabase>.functions.supabase.co/asaas-webhook?company_id=<empresa>';
+    ? `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=${encodeURIComponent(companyId)}`
+    : `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=<empresa>`;
   const webhookUrl = savedWebhookUrl ?? fallbackWebhookUrl;
 
   const handleSummaryPresetChange = (preset: SummaryPeriodPreset) => {
