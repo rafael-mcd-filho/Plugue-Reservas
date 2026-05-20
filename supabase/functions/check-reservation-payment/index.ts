@@ -68,6 +68,33 @@ Deno.serve(async (req) => {
     const { payment, reservation, company } = await loadContext(supabaseAdmin, paymentToken);
 
     if (payment.status === "awaiting_method") {
+      if (paymentIsExpired(payment)) {
+        const nowIso = new Date().toISOString();
+        const { data: expiredPayment, error: expireError } = await supabaseAdmin
+          .from("reservation_payments")
+          .update({
+            status: "expired",
+            error_details: "Prazo expirado sem escolha de metodo",
+            cancelled_at: nowIso,
+            last_checked_at: nowIso,
+          })
+          .eq("id", payment.id)
+          .select("*")
+          .single();
+
+        if (expireError) throw new Error(expireError.message);
+
+        await supabaseAdmin.from("reservations").update({ status: "payment_expired" }).eq("id", reservation.id);
+        await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
+          source: "manual_check",
+          reason: "awaiting_method",
+        });
+
+        return jsonResponse(
+          toPublicPaymentSummary(expiredPayment, { ...reservation, status: "payment_expired" }, company),
+        );
+      }
+
       return jsonResponse({
         ...toPublicPaymentSummary(payment, reservation, company),
         message: "Escolha Pix ou cartao antes de consultar o pagamento",
@@ -144,7 +171,7 @@ Deno.serve(async (req) => {
 
       return jsonResponse({
         ...toPublicPaymentSummary(payment, reservation, company),
-        message: "Ainda aguardando o Asaas gerar ou avisar a cobranca deste link",
+        message: "Ainda nao recebemos a confirmacao do pagamento",
       });
     }
 

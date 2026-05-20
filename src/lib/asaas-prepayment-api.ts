@@ -64,16 +64,18 @@ export async function getReservationPayment(paymentToken: string) {
 export async function selectReservationPaymentMethod(
   paymentToken: string,
   billingType: ReservationPrepaymentBillingType,
+  options: { cpf?: string } = {},
 ) {
-  const body: SelectReservationPaymentMethodRequest = {
+  const body: SelectReservationPaymentMethodRequest & { cpf?: string } = {
     payment_token: paymentToken,
     billing_type: billingType,
+    ...(options.cpf ? { cpf: options.cpf } : {}),
   };
 
   return invokeReservationPaymentFunction<ReservationPaymentFunctionResponse>(
     'select-reservation-payment-method',
     body,
-    'Não foi possível criar o link de pagamento.',
+    'Não foi possível criar o pagamento.',
   );
 }
 

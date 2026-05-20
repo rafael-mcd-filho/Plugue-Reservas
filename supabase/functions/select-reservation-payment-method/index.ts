@@ -127,6 +127,10 @@ function addDaysToDate(date: Date, days: number) {
   return next;
 }
 
+function isValidCpfCnpj(value: string) {
+  return value.length === 11 || value.length === 14;
+}
+
 async function handlePixPayment(
   supabaseAdmin: any,
   apiToken: string,
@@ -134,11 +138,17 @@ async function handlePixPayment(
   reservation: any,
   company: any,
   chargedAmount: number,
+  cpfCnpj: string | null,
 ) {
   const externalReference = buildPaymentLinkExternalReference(payment.payment_token, "PIX");
 
+  if (!cpfCnpj || !isValidCpfCnpj(cpfCnpj)) {
+    return jsonResponse({ error: "CPF ou CNPJ obrigatorio para gerar Pix", code: "cpf_required" }, 400);
+  }
+
   const customerPayload = {
     name: reservation.guest_name?.trim() || "Cliente Plugue Reservas",
+    cpfCnpj,
     mobilePhone: cleanDigits(reservation.guest_phone) || undefined,
     email: reservation.guest_email?.trim() || undefined,
     externalReference,
@@ -373,6 +383,7 @@ Deno.serve(async (req) => {
     const body = await readJson(req);
     const paymentToken = typeof body.payment_token === "string" ? body.payment_token : null;
     const billingType = String(body.billing_type || "").toUpperCase() as AsaasBillingType;
+    const cpfCnpj = cleanDigits(body.cpf ?? body.cpf_cnpj ?? body.cpfCnpj);
 
     if (!paymentToken) return jsonResponse({ error: "Token do pagamento obrigatorio" }, 400);
     if (billingType !== "PIX" && billingType !== "CREDIT_CARD") {
@@ -413,7 +424,15 @@ Deno.serve(async (req) => {
     const maxInstallments = billingType === "CREDIT_CARD" ? getMaxInstallments(payment) : 1;
 
     if (billingType === "PIX") {
-      return await handlePixPayment(supabaseAdmin, asaasConfig.api_token, payment, reservation, company, chargedAmount);
+      return await handlePixPayment(
+        supabaseAdmin,
+        asaasConfig.api_token,
+        payment,
+        reservation,
+        company,
+        chargedAmount,
+        cpfCnpj || null,
+      );
     }
 
     return await handleCardPayment(

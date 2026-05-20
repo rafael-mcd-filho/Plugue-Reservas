@@ -7,6 +7,16 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import {
   checkReservationPayment,
@@ -52,6 +62,30 @@ function buildHelpWhatsappUrl(payment: PublicReservationPaymentSummary) {
 
 function buildNewReservationUrl(payment: PublicReservationPaymentSummary) {
   return payment.company.slug ? `/${payment.company.slug}` : '/';
+}
+
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function maskCpfCnpj(value: string) {
+  const digits = onlyDigits(value).slice(0, 14);
+  if (digits.length <= 11) {
+    return digits
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2');
+  }
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+}
+
+function isValidCpfCnpj(value: string) {
+  const digits = onlyDigits(value);
+  return digits.length === 11 || digits.length === 14;
 }
 
 const DEFAULT_DEADLINE_SECONDS = 10 * 60;
@@ -182,10 +216,15 @@ export default function PublicReservationPayment() {
       ? 100
       : 0;
 
+  const [pixCpfDialogOpen, setPixCpfDialogOpen] = useState(false);
+  const [pixCpfValue, setPixCpfValue] = useState('');
+
   const selectMethodMutation = useMutation({
-    mutationFn: (billingType: ReservationPrepaymentBillingType) => selectReservationPaymentMethod(paymentToken, billingType),
+    mutationFn: ({ billingType, cpf }: { billingType: ReservationPrepaymentBillingType; cpf?: string }) =>
+      selectReservationPaymentMethod(paymentToken, billingType, cpf ? { cpf } : undefined),
     onSuccess: (updatedPayment) => {
       queryClient.setQueryData(queryKey, updatedPayment);
+      setPixCpfDialogOpen(false);
       if (updatedPayment.billing_type === 'PIX' && updatedPayment.pix_qr_code_base64) {
         toast.success('Pix gerado, escaneie o QR Code ou copie o código abaixo.');
         return;
@@ -209,6 +248,10 @@ export default function PublicReservationPayment() {
         toast.success('Pagamento confirmado. Sua reserva foi confirmada.');
         return;
       }
+      if (updatedPayment.status === 'expired') {
+        toast.info('O prazo desta pré-reserva expirou.');
+        return;
+      }
       if (updatedPayment.message) {
         toast.info(updatedPayment.message);
         return;
@@ -219,6 +262,31 @@ export default function PublicReservationPayment() {
       toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
     },
   });
+
+  const isExpiredTimer = Boolean(showPaymentActions && payment && remainingSeconds <= 0);
+  useEffect(() => {
+    if (!isExpiredTimer) return;
+    if (checkPaymentMutation.isPending) return;
+    checkPaymentMutation.mutate();
+  }, [isExpiredTimer, checkPaymentMutation]);
+
+  const handleSelectMethod = (billingType: ReservationPrepaymentBillingType) => {
+    if (billingType === 'PIX') {
+      setPixCpfValue('');
+      setPixCpfDialogOpen(true);
+      return;
+    }
+    selectMethodMutation.mutate({ billingType });
+  };
+
+  const handleConfirmPixCpf = () => {
+    const digits = onlyDigits(pixCpfValue);
+    if (!isValidCpfCnpj(digits)) {
+      toast.error('Informe um CPF ou CNPJ válido.');
+      return;
+    }
+    selectMethodMutation.mutate({ billingType: 'PIX', cpf: digits });
+  };
 
   if (!paymentToken) {
     return <PaymentPageShell errorTitle="Link inválido" errorMessage="O token do pagamento não foi informado." />;
@@ -292,15 +360,25 @@ export default function PublicReservationPayment() {
                 </div>
               )}
 
-              {showPaymentActions && (
+              {showPaymentActions && remainingSeconds > 0 && (
                 <PaymentActionArea
                   payment={payment}
                   checking={checkPaymentMutation.isPending}
-                  selectingBillingType={selectMethodMutation.variables}
-                  onSelectMethod={(billingType) => selectMethodMutation.mutate(billingType)}
+                  selectingBillingType={selectMethodMutation.variables?.billingType}
+                  onSelectMethod={handleSelectMethod}
                   onOpenPaymentLink={() => handleOpenPaymentLink(payment)}
                   onCheckPayment={() => checkPaymentMutation.mutate()}
                 />
+              )}
+
+              {showPaymentActions && remainingSeconds <= 0 && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Prazo expirado</AlertTitle>
+                  <AlertDescription>
+                    O tempo para concluir esta pré-reserva acabou. A mesa foi liberada — inicie uma nova reserva para tentar novamente.
+                  </AlertDescription>
+                </Alert>
               )}
 
               {!showPaymentActions && payment.status !== 'paid' && (
@@ -318,7 +396,74 @@ export default function PublicReservationPayment() {
 
         <PaymentSummary payment={payment} />
       </div>
+
+      <PixCpfDialog
+        open={pixCpfDialogOpen}
+        value={pixCpfValue}
+        loading={selectMethodMutation.isPending && selectMethodMutation.variables?.billingType === 'PIX'}
+        onChange={setPixCpfValue}
+        onCancel={() => setPixCpfDialogOpen(false)}
+        onConfirm={handleConfirmPixCpf}
+      />
     </PaymentPageShell>
+  );
+}
+
+function PixCpfDialog({
+  open,
+  value,
+  loading,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  value: string;
+  loading: boolean;
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => (next ? null : onCancel())}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Informe seu CPF ou CNPJ</DialogTitle>
+          <DialogDescription>
+            O CPF/CNPJ é obrigatório no Pix para identificar o pagador. Não cobramos nada extra.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onConfirm();
+          }}
+          className="space-y-3"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="pix-cpf-input">CPF ou CNPJ</Label>
+            <Input
+              id="pix-cpf-input"
+              autoFocus
+              inputMode="numeric"
+              placeholder="000.000.000-00"
+              value={maskCpfCnpj(value)}
+              onChange={(event) => onChange(event.target.value)}
+              maxLength={18}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Gerar Pix
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -404,12 +549,12 @@ function PaymentActionArea({
 
         {payment.status === 'pending' && payment.billing_type === 'CREDIT_CARD' && (
           <div className="rounded-lg border border-border bg-background p-3">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button onClick={onOpenPaymentLink} disabled={!payment.payment_link_url} className="sm:flex-1">
+            <div className="flex flex-col gap-2">
+              <Button onClick={onOpenPaymentLink} disabled={!payment.payment_link_url} className="w-full">
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Abrir pagamento do cartão
               </Button>
-              <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="sm:flex-1">
+              <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="w-full">
                 {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Já paguei
               </Button>
