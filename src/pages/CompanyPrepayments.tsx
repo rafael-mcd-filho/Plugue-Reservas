@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { endOfMonth, format, startOfMonth, subDays, subMonths } from 'date-fns';
 import {
   AlertTriangle,
@@ -54,7 +54,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import type { DateRange } from 'react-day-picker';
-import { saveAsaasConfig } from '@/lib/asaas-prepayment-api';
+import { getAsaasConfig, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
 import {
   DEFAULT_ASAAS_CONFIG_PREVIEW,
   calculateReservationPaymentAmount,
@@ -415,10 +415,20 @@ export default function CompanyPrepayments() {
   const [summaryRange, setSummaryRange] = useState<DateRange>(() => getSummaryPresetRange('last_7_days'));
 
   const prepaymentEnabled = featureFlags?.features.reservation_prepayment ?? false;
-  const asaasConfigMutation = useMutation({
-    mutationFn: ({ apiToken }: { apiToken: string }) => {
+  const asaasConfigQuery = useQuery({
+    queryKey: ['asaas-config', companyId],
+    queryFn: () => {
       if (!companyId) throw new Error('Empresa não identificada.');
-      return saveAsaasConfig(companyId, apiToken);
+      return getAsaasConfig(companyId);
+    },
+    enabled: Boolean(companyId),
+  });
+  const asaasConfigMutation = useMutation({
+    mutationFn: ({ apiToken, mode }: { apiToken?: string; mode: 'save' | 'test' }) => {
+      if (!companyId) throw new Error('Empresa não identificada.');
+      return mode === 'test'
+        ? testAsaasConfig(companyId, apiToken)
+        : saveAsaasConfig(companyId, apiToken ?? '');
     },
     onSuccess: (result) => {
       setAsaasConfig({
@@ -440,6 +450,20 @@ export default function CompanyPrepayments() {
       toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a configuração Asaas.');
     },
   });
+
+  useEffect(() => {
+    if (!asaasConfigQuery.data) return;
+
+    const result = asaasConfigQuery.data;
+    setAsaasConfig({
+      status: result.status,
+      fromCompanyAccount: true,
+      lastValidatedAt: result.last_validated_at,
+      lastError: result.last_error,
+    });
+    setSavedWebhookUrl(result.webhook_url);
+    setWebhookAuthToken(result.webhook_auth_token);
+  }, [asaasConfigQuery.data]);
 
   useEffect(() => {
     setRuleForm((current) => {
@@ -546,6 +570,8 @@ export default function CompanyPrepayments() {
     ? `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=${encodeURIComponent(companyId)}`
     : `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=<empresa>`;
   const webhookUrl = savedWebhookUrl ?? fallbackWebhookUrl;
+  const hasSavedAsaasToken = asaasConfig.status !== 'not_configured' && Boolean(webhookAuthToken || asaasConfig.lastValidatedAt);
+  const asaasStatusLabel = asaasConfigQuery.isLoading ? 'Carregando...' : getAsaasStatusLabel(asaasConfig.status);
 
   const handleSummaryPresetChange = (preset: SummaryPeriodPreset) => {
     setSummaryPeriodPreset(preset);
@@ -599,14 +625,18 @@ export default function CompanyPrepayments() {
     }
   };
 
-  const submitAsaasConfig = (clearTokenAfterSave: boolean) => {
+  const submitAsaasConfig = (mode: 'save' | 'test', clearTokenAfterSave: boolean) => {
     const apiToken = tokenDraft.trim();
-    if (!apiToken) {
+    if (mode === 'save' && !apiToken) {
       toast.error('Informe um token Asaas.');
       return;
     }
+    if (mode === 'test' && !apiToken && !hasSavedAsaasToken) {
+      toast.error('Salve um token Asaas antes de testar a conexão.');
+      return;
+    }
 
-    asaasConfigMutation.mutate({ apiToken }, {
+    asaasConfigMutation.mutate({ apiToken: apiToken || undefined, mode }, {
       onSuccess: () => {
         if (clearTokenAfterSave) setTokenDraft('');
       },
@@ -614,11 +644,11 @@ export default function CompanyPrepayments() {
   };
 
   const handleConfigTest = () => {
-    submitAsaasConfig(false);
+    submitAsaasConfig('test', false);
   };
 
   const handleConfigSave = () => {
-    submitAsaasConfig(true);
+    submitAsaasConfig('save', true);
   };
 
   const handleRuleSave = () => {
@@ -820,16 +850,26 @@ export default function CompanyPrepayments() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="asaas-token">Token Asaas</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="asaas-token">Token Asaas</Label>
+                    {hasSavedAsaasToken && (
+                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
+                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                        Token salvo
+                      </Badge>
+                    )}
+                  </div>
                   <Input
                     id="asaas-token"
                     type="password"
                     value={tokenDraft}
                     onChange={(event) => setTokenDraft(event.target.value)}
-                    placeholder="$aact_YTU5..."
+                    placeholder={hasSavedAsaasToken ? 'Token configurado. Cole um novo token para substituir.' : '$aact_YTU5...'}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Depois de salvo, o token não deve ser exibido novamente.
+                    {hasSavedAsaasToken
+                      ? 'Por segurança, o token salvo não é exibido. Use este campo apenas para substituir.'
+                      : 'Depois de salvo, o token não deve ser exibido novamente.'}
                   </p>
                 </div>
 
@@ -837,7 +877,7 @@ export default function CompanyPrepayments() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs text-muted-foreground">Status da integração</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">{getAsaasStatusLabel(asaasConfig.status)}</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{asaasStatusLabel}</p>
                     </div>
                     <Badge variant={asaasConfig.status === 'configured' ? 'default' : 'secondary'}>
                       Conta real
@@ -887,9 +927,13 @@ export default function CompanyPrepayments() {
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Button onClick={handleConfigSave} disabled={asaasConfigMutation.isPending}>
                     {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                    Salvar token
+                    {hasSavedAsaasToken ? 'Atualizar token' : 'Salvar token'}
                   </Button>
-                  <Button variant="outline" onClick={handleConfigTest} disabled={asaasConfigMutation.isPending}>
+                  <Button
+                    variant="outline"
+                    onClick={handleConfigTest}
+                    disabled={asaasConfigMutation.isPending || (!tokenDraft.trim() && !hasSavedAsaasToken)}
+                  >
                     {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
                     Testar conexão
                   </Button>

@@ -19,7 +19,17 @@ export interface SaveAsaasConfigResponse {
   last_validated_at: string | null;
   last_error: string | null;
   webhook_url: string | null;
-  webhook_auth_token: string;
+  webhook_auth_token: string | null;
+  has_api_token: boolean;
+}
+
+export interface GetAsaasConfigResponse {
+  status: AsaasConfigStatus;
+  last_validated_at: string | null;
+  last_error: string | null;
+  webhook_url: string | null;
+  webhook_auth_token: string | null;
+  has_api_token: boolean;
 }
 
 async function invokeReservationPaymentFunction<T>(
@@ -77,9 +87,33 @@ export async function saveAsaasConfig(companyId: string, apiToken: string) {
   return invokeReservationPaymentFunction<SaveAsaasConfigResponse>(
     'save-asaas-config',
     {
+      action: 'save',
       company_id: companyId,
       api_token: apiToken,
     },
     'Não foi possível salvar a configuração Asaas.',
+  );
+}
+
+export async function getAsaasConfig(companyId: string) {
+  return invokeReservationPaymentFunction<GetAsaasConfigResponse>(
+    'save-asaas-config',
+    {
+      action: 'get',
+      company_id: companyId,
+    },
+    'Não foi possível carregar a configuração Asaas.',
+  );
+}
+
+export async function testAsaasConfig(companyId: string, apiToken?: string) {
+  return invokeReservationPaymentFunction<GetAsaasConfigResponse>(
+    'save-asaas-config',
+    {
+      action: 'test',
+      company_id: companyId,
+      ...(apiToken ? { api_token: apiToken } : {}),
+    },
+    'Não foi possível testar a configuração Asaas.',
   );
 }
