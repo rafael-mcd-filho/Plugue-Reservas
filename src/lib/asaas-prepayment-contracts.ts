@@ -105,6 +105,8 @@ export interface PublicReservationPaymentSummary {
   paid_at: string | null;
   payment_link_url: string | null;
   payment_link_external_reference: string | null;
+  pix_qr_code_base64: string | null;
+  pix_copy_paste: string | null;
   rule_name: string;
   customer_notice: string | null;
   cancellation_policy: string | null;

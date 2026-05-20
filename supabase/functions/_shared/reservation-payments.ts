@@ -338,6 +338,9 @@ export function toPublicPaymentSummary(
   const pixAmount = pixEnabled ? calculateMethodAmount(payment, reservation, "PIX") : null;
   const cardAmount = cardEnabled ? calculateMethodAmount(payment, reservation, "CREDIT_CARD") : null;
   const snapshot = getRuleSnapshot(payment);
+  const metadata = (payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {}) as Record<string, unknown>;
+  const pixQrCodeBase64 = typeof metadata.pix_qr_code_base64 === "string" ? metadata.pix_qr_code_base64 : null;
+  const pixCopyPaste = typeof metadata.pix_copy_paste === "string" ? metadata.pix_copy_paste : null;
 
   return {
     payment_token: payment.payment_token,
@@ -353,6 +356,8 @@ export function toPublicPaymentSummary(
     paid_at: payment.paid_at,
     payment_link_url: payment.payment_link_url,
     payment_link_external_reference: payment.payment_link_external_reference,
+    pix_qr_code_base64: pixQrCodeBase64,
+    pix_copy_paste: pixCopyPaste,
     rule_name: snapshot.name ?? "Pagamento antecipado",
     customer_notice: snapshot.customer_notice ?? null,
     cancellation_policy: snapshot.cancellation_policy ?? null,

@@ -211,6 +211,71 @@ export async function validateAsaasPaymentLinksAccess(apiToken: string) {
   });
 }
 
+export interface AsaasCustomerPayload {
+  name: string;
+  cpfCnpj?: string;
+  email?: string;
+  mobilePhone?: string;
+  externalReference?: string;
+}
+
+export interface AsaasCustomerResponse {
+  id: string;
+  name?: string;
+  email?: string;
+  mobilePhone?: string;
+  cpfCnpj?: string;
+}
+
+export async function createAsaasCustomer(apiToken: string, payload: AsaasCustomerPayload) {
+  return await asaasRequest<AsaasCustomerResponse>(apiToken, "/customers", {
+    method: "POST",
+    json: payload,
+  });
+}
+
+export interface AsaasPaymentPayload {
+  customer: string;
+  billingType: AsaasBillingType;
+  value: number;
+  dueDate: string;
+  description?: string;
+  externalReference?: string;
+  postalService?: boolean;
+}
+
+export interface AsaasPaymentResponse {
+  id: string;
+  status?: string;
+  invoiceUrl?: string;
+  dueDate?: string;
+  value?: number;
+  netValue?: number;
+  billingType?: string;
+}
+
+export async function createAsaasPayment(apiToken: string, payload: AsaasPaymentPayload) {
+  return await asaasRequest<AsaasPaymentResponse>(apiToken, "/payments", {
+    method: "POST",
+    json: payload,
+  });
+}
+
+export interface AsaasPixQrCodeResponse {
+  encodedImage: string;
+  payload: string;
+  expirationDate?: string;
+  success?: boolean;
+}
+
+export async function getAsaasPixQrCode(apiToken: string, paymentId: string) {
+  return await asaasRequest<AsaasPixQrCodeResponse>(
+    apiToken,
+    `/payments/${encodeURIComponent(paymentId)}/pixQrCode`,
+    { method: "GET" },
+  );
+}
+
 export async function getAsaasPaymentStatus(apiToken: string, paymentId: string) {
   const response = await asaasRequest<{ status?: string }>(
     apiToken,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode, type SVGProps } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Clock3, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, Copy, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -186,14 +186,18 @@ export default function PublicReservationPayment() {
     mutationFn: (billingType: ReservationPrepaymentBillingType) => selectReservationPaymentMethod(paymentToken, billingType),
     onSuccess: (updatedPayment) => {
       queryClient.setQueryData(queryKey, updatedPayment);
+      if (updatedPayment.billing_type === 'PIX' && updatedPayment.pix_qr_code_base64) {
+        toast.success('Pix gerado, escaneie o QR Code ou copie o código abaixo.');
+        return;
+      }
       if (updatedPayment.payment_link_url) {
         window.location.assign(updatedPayment.payment_link_url);
         return;
       }
-      toast.success('Link de pagamento criado.');
+      toast.success('Pagamento preparado.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível criar o link de pagamento.');
+      toast.error(error instanceof Error ? error.message : 'Não foi possível criar o pagamento.');
     },
   });
 
@@ -341,6 +345,15 @@ function PaymentActionArea({
   onOpenPaymentLink: () => void;
   onCheckPayment: () => void;
 }) {
+  const showPixEmbedded =
+    payment.status === 'pending' && payment.billing_type === 'PIX' && payment.pix_qr_code_base64;
+
+  if (showPixEmbedded) {
+    return (
+      <PixEmbeddedView payment={payment} checking={checking} onCheckPayment={onCheckPayment} />
+    );
+  }
+
   return (
     <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
       <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background p-5 text-center">
@@ -349,7 +362,9 @@ function PaymentActionArea({
         </div>
         <div>
           <p className="font-medium text-foreground">Pagamento seguro</p>
-          <p className="mt-1 text-xs text-muted-foreground">Você é direcionado para um ambiente protegido para concluir o Pix ou cartão.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Pix é exibido aqui na hora. O cartão abre em um ambiente protegido para concluir a cobrança.
+          </p>
         </div>
       </div>
 
@@ -366,7 +381,7 @@ function PaymentActionArea({
               icon="pix"
               title="Pix"
               amount={payment.pix_amount}
-              description="Pague na hora pelo QR Code ou copia e cola."
+              description="Gera QR Code e código copia-cola na hora."
               disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
               loading={selectingBillingType === 'PIX'}
               selected={payment.billing_type === 'PIX'}
@@ -387,12 +402,12 @@ function PaymentActionArea({
           )}
         </div>
 
-        {payment.status === 'pending' && (
+        {payment.status === 'pending' && payment.billing_type === 'CREDIT_CARD' && (
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button onClick={onOpenPaymentLink} disabled={!payment.payment_link_url} className="sm:flex-1">
                 <ExternalLink className="mr-2 h-4 w-4" />
-                Abrir pagamento
+                Abrir pagamento do cartão
               </Button>
               <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="sm:flex-1">
                 {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
@@ -401,6 +416,80 @@ function PaymentActionArea({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PixEmbeddedView({
+  payment,
+  checking,
+  onCheckPayment,
+}: {
+  payment: PublicReservationPaymentSummary;
+  checking: boolean;
+  onCheckPayment: () => void;
+}) {
+  const copyCode = async () => {
+    if (!payment.pix_copy_paste) return;
+    try {
+      await navigator.clipboard.writeText(payment.pix_copy_paste);
+      toast.success('Código Pix copiado.');
+    } catch {
+      toast.error('Não foi possível copiar. Selecione e copie manualmente.');
+    }
+  };
+
+  return (
+    <div className="grid gap-5 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
+      <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-white p-4 text-center">
+        {payment.pix_qr_code_base64 ? (
+          <img
+            src={`data:image/png;base64,${payment.pix_qr_code_base64}`}
+            alt="QR Code Pix"
+            className="h-56 w-56"
+          />
+        ) : (
+          <div className="flex h-56 w-56 items-center justify-center rounded-md border border-dashed border-border bg-muted">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">Escaneie pelo app do seu banco</p>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm text-muted-foreground">Valor a pagar</p>
+          <p className="text-3xl font-semibold text-foreground">
+            {formatPrepaymentAmount(payment.amount ?? payment.pix_amount ?? payment.base_amount)}
+          </p>
+          {payment.customer_notice && (
+            <p className="mt-1 text-sm text-muted-foreground">{payment.customer_notice}</p>
+          )}
+        </div>
+
+        {payment.pix_copy_paste && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Código Pix copia e cola</p>
+            <div className="rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground break-all">
+              {payment.pix_copy_paste}
+            </div>
+            <Button onClick={copyCode} variant="outline" className="w-full sm:w-auto">
+              <Copy className="mr-2 h-4 w-4" />
+              Copiar código Pix
+            </Button>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-border bg-background p-3">
+          <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="w-full">
+            {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Já paguei
+          </Button>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Após o pagamento, a confirmação aparece aqui automaticamente em alguns segundos.
+          </p>
+        </div>
       </div>
     </div>
   );
