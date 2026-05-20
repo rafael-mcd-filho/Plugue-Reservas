@@ -368,6 +368,7 @@ export function toPublicPaymentSummary(
       time: reservation.time,
       party_size: reservation.party_size,
       status: reservation.status,
+      public_tracking_code: reservation.public_tracking_code ?? null,
     },
     company: {
       id: company.id,

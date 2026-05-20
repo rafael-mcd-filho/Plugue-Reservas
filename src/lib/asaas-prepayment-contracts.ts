@@ -116,6 +116,7 @@ export interface PublicReservationPaymentSummary {
     time: string;
     party_size: number;
     status: string;
+    public_tracking_code: string | null;
   };
   company: {
     name: string;

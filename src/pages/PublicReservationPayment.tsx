@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode, type SVGProps } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Clock3, Copy, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -63,6 +63,13 @@ function buildHelpWhatsappUrl(payment: PublicReservationPaymentSummary) {
 function buildNewReservationUrl(payment: PublicReservationPaymentSummary) {
   return payment.company.slug ? `/${payment.company.slug}` : '/';
 }
+
+function buildReservationTrackingUrl(payment: PublicReservationPaymentSummary) {
+  if (!payment.company.slug || !payment.reservation.public_tracking_code) return null;
+  return `/${payment.company.slug}/reserva/${payment.reservation.public_tracking_code}`;
+}
+
+const PAID_REDIRECT_DELAY_SECONDS = 10;
 
 function onlyDigits(value: string) {
   return value.replace(/\D/g, '');
@@ -193,6 +200,7 @@ function useNow(enabled: boolean) {
 
 export default function PublicReservationPayment() {
   const { paymentToken = '' } = useParams<{ paymentToken: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => ['reservation-payment', paymentToken] as const, [paymentToken]);
 
@@ -269,6 +277,31 @@ export default function PublicReservationPayment() {
     if (checkPaymentMutation.isPending) return;
     checkPaymentMutation.mutate();
   }, [isExpiredTimer, checkPaymentMutation]);
+
+  const trackingUrl = payment ? buildReservationTrackingUrl(payment) : null;
+  const isPaid = payment?.status === 'paid';
+  const [paidCountdown, setPaidCountdown] = useState(PAID_REDIRECT_DELAY_SECONDS);
+
+  useEffect(() => {
+    if (!isPaid || !trackingUrl) {
+      setPaidCountdown(PAID_REDIRECT_DELAY_SECONDS);
+      return undefined;
+    }
+
+    setPaidCountdown(PAID_REDIRECT_DELAY_SECONDS);
+    const interval = window.setInterval(() => {
+      setPaidCountdown((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(interval);
+          navigate(trackingUrl);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [isPaid, trackingUrl, navigate]);
 
   const handleSelectMethod = (billingType: ReservationPrepaymentBillingType) => {
     if (billingType === 'PIX') {
@@ -394,7 +427,7 @@ export default function PublicReservationPayment() {
           </Card>
         </main>
 
-        <PaymentSummary payment={payment} />
+        <PaymentSummary payment={payment} paidCountdown={isPaid ? paidCountdown : null} trackingUrl={trackingUrl} />
       </div>
 
       <PixCpfDialog
@@ -678,9 +711,18 @@ function PaymentMethodBox({
   );
 }
 
-function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary }) {
+function PaymentSummary({
+  payment,
+  paidCountdown,
+  trackingUrl,
+}: {
+  payment: PublicReservationPaymentSummary;
+  paidCountdown: number | null;
+  trackingUrl: string | null;
+}) {
   const helpWhatsappUrl = buildHelpWhatsappUrl(payment);
   const newReservationUrl = buildNewReservationUrl(payment);
+  const isPaid = payment.status === 'paid';
 
   return (
     <aside className="space-y-4">
@@ -698,23 +740,37 @@ function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary 
         </CardContent>
       </Card>
 
-      <Card className="border-border shadow-card">
-        <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">Política</p>
-          <p>{payment.cancellation_policy || 'Consulte o restaurante para detalhes da política desta reserva.'}</p>
-          {helpWhatsappUrl && (
-            <Button asChild className="w-full bg-emerald-600 text-white hover:bg-emerald-700">
-              <a href={helpWhatsappUrl} target="_blank" rel="noopener noreferrer">
-                <WhatsAppIcon className="mr-2 h-4 w-4" />
-                Falar pelo WhatsApp
-              </a>
+      {isPaid && trackingUrl ? (
+        <Card className="border-border shadow-card">
+          <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Acompanhe sua reserva</p>
+            <p>
+              Vamos te redirecionar para a página de acompanhamento em <strong>{paidCountdown ?? 0}s</strong>. Você pode acompanhar e gerenciar sua reserva por lá.
+            </p>
+            <Button asChild className="w-full">
+              <Link to={trackingUrl}>Ir agora</Link>
             </Button>
-          )}
-          <Button asChild variant="outline" className="w-full">
-            <Link to={newReservationUrl}>Iniciar nova reserva</Link>
-          </Button>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : !isPaid ? (
+        <Card className="border-border shadow-card">
+          <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Política</p>
+            <p>{payment.cancellation_policy || 'Consulte o restaurante para detalhes da política desta reserva.'}</p>
+            {helpWhatsappUrl && (
+              <Button asChild className="w-full bg-emerald-600 text-white hover:bg-emerald-700">
+                <a href={helpWhatsappUrl} target="_blank" rel="noopener noreferrer">
+                  <WhatsAppIcon className="mr-2 h-4 w-4" />
+                  Falar pelo WhatsApp
+                </a>
+              </Button>
+            )}
+            <Button asChild variant="outline" className="w-full">
+              <Link to={newReservationUrl}>Iniciar nova reserva</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
     </aside>
   );
 }
