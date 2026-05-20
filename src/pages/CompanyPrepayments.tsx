@@ -55,7 +55,7 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { supabase } from '@/integrations/supabase/client';
 import type { DateRange } from 'react-day-picker';
-import { getAsaasConfig, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
+import { checkReservationPayment, getAsaasConfig, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
 import {
   DEFAULT_ASAAS_CONFIG_PREVIEW,
   calculateReservationPaymentAmount,
@@ -93,20 +93,29 @@ interface PendingRuleAction {
   ruleId: string;
 }
 
-interface MockReservationPayment {
+interface ReservationPaymentRow {
   id: string;
+  payment_token: string | null;
   customer_name: string;
   reservation_date: string;
   reservation_time: string;
   party_size: number;
   rule_name: string;
   amount: number;
-  billing_type: ReservationPrepaymentBillingType;
+  billing_type: ReservationPrepaymentBillingType | null;
   installments: number | null;
   status: ReservationPaymentStatus;
   expires_at: string | null;
   paid_at: string | null;
   created_at: string;
+}
+
+interface FinancialDailyPoint {
+  date: string;
+  day: string;
+  paid: number;
+  expired: number;
+  pending: number;
 }
 
 const today = new Date();
@@ -132,129 +141,58 @@ const PAYMENT_STATUS_OPTIONS: Array<{ value: PaymentStatusFilter; label: string 
 
 const PAYMENT_PAGE_SIZE = 8;
 
-const MOCK_RULES: ReservationPaymentRuleDraft[] = [
-  {
-    id: 'draft-valentines',
-    name: 'Dia dos Namorados',
-    enabled: true,
-    date_start: '2026-06-12',
-    date_end: '2026-06-12',
-    amount_type: 'per_person',
-    amount: 80,
-    pix_enabled: true,
-    pix_amount: 80,
-    credit_card_enabled: true,
-    credit_card_amount: 90,
-    max_credit_card_installments: 2,
-    payment_deadline_minutes: 10,
-    billing_types: ['PIX', 'CREDIT_CARD'],
-    customer_notice: 'O valor pago será abatido da conta no dia da visita.',
-    cancellation_policy: 'A pré-reserva expira automaticamente se o pagamento não for confirmado dentro do prazo.',
-    usage_count: 18,
-    created_by: null,
-    activated_at: '2026-05-10T12:00:00.000Z',
-    archived_at: null,
-    archived_by: null,
-    archived_reason: null,
-  },
-  {
-    id: 'draft-reveillon',
-    name: 'Réveillon',
-    enabled: false,
-    date_start: '2026-12-31',
-    date_end: '2027-01-01',
-    amount_type: 'fixed_per_reservation',
-    amount: 300,
-    pix_enabled: true,
-    pix_amount: 300,
-    credit_card_enabled: true,
-    credit_card_amount: 330,
-    max_credit_card_installments: 2,
-    payment_deadline_minutes: 30,
-    billing_types: ['PIX', 'CREDIT_CARD'],
-    customer_notice: 'Sinal de reserva abatido do consumo final.',
-    cancellation_policy: 'A mesa fica bloqueada apenas durante o prazo de pagamento.',
-    usage_count: 0,
-    created_by: null,
-    activated_at: null,
-    archived_at: null,
-    archived_by: null,
-    archived_reason: null,
-  },
-];
+function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
+  const reservation = row?.reservation ?? {};
+  const snapshot = (row?.rule_snapshot && typeof row.rule_snapshot === 'object') ? row.rule_snapshot : {};
+  const amount = typeof row?.charged_amount === 'number' && row.charged_amount > 0
+    ? row.charged_amount
+    : Number(row?.base_amount ?? 0);
 
-const MOCK_PAYMENTS: MockReservationPayment[] = [
-  {
-    id: 'pay-001',
-    customer_name: 'Marina Alves',
-    reservation_date: '2026-06-12',
-    reservation_time: '20:00',
-    party_size: 2,
-    rule_name: 'Dia dos Namorados',
-    amount: 160,
-    billing_type: 'PIX',
-    installments: null,
-    status: 'paid',
-    expires_at: '2026-05-19T18:15:00.000Z',
-    paid_at: '2026-05-19T18:08:00.000Z',
-    created_at: '2026-05-19T18:00:00.000Z',
-  },
-  {
-    id: 'pay-002',
-    customer_name: 'Rafael Costa',
-    reservation_date: '2026-06-12',
-    reservation_time: '21:00',
-    party_size: 4,
-    rule_name: 'Dia dos Namorados',
-    amount: 360,
-    billing_type: 'CREDIT_CARD',
-    installments: 2,
-    status: 'pending',
-    expires_at: '2026-05-19T20:30:00.000Z',
-    paid_at: null,
-    created_at: '2026-05-19T20:15:00.000Z',
-  },
-  {
-    id: 'pay-003',
-    customer_name: 'Bianca Lima',
-    reservation_date: '2026-06-12',
-    reservation_time: '19:30',
-    party_size: 2,
-    rule_name: 'Dia dos Namorados',
-    amount: 160,
-    billing_type: 'PIX',
-    installments: null,
-    status: 'expired',
-    expires_at: '2026-05-18T16:20:00.000Z',
-    paid_at: null,
-    created_at: '2026-05-18T16:05:00.000Z',
-  },
-  {
-    id: 'pay-004',
-    customer_name: 'Eduardo Rocha',
-    reservation_date: '2026-06-12',
-    reservation_time: '22:00',
-    party_size: 3,
-    rule_name: 'Dia dos Namorados',
-    amount: 270,
-    billing_type: 'CREDIT_CARD',
-    installments: 2,
-    status: 'late_paid',
-    expires_at: '2026-05-17T13:40:00.000Z',
-    paid_at: '2026-05-17T14:02:00.000Z',
-    created_at: '2026-05-17T13:25:00.000Z',
-  },
-];
+  return {
+    id: row?.id ?? '',
+    payment_token: row?.payment_token ?? null,
+    customer_name: reservation?.guest_name ?? 'Cliente',
+    reservation_date: reservation?.date ?? '',
+    reservation_time: typeof reservation?.time === 'string' ? reservation.time.slice(0, 5) : '',
+    party_size: Number(reservation?.party_size ?? 0),
+    rule_name: typeof snapshot?.name === 'string' && snapshot.name ? snapshot.name : 'Pagamento antecipado',
+    amount,
+    billing_type: (row?.billing_type ?? null) as ReservationPrepaymentBillingType | null,
+    installments: typeof row?.max_installments === 'number' ? row.max_installments : null,
+    status: row?.status as ReservationPaymentStatus,
+    expires_at: row?.expires_at ?? null,
+    paid_at: row?.paid_at ?? null,
+    created_at: row?.created_at ?? new Date().toISOString(),
+  };
+}
 
-const MOCK_FINANCIAL_DAILY = [
-  { date: '2026-05-13', day: '13/05', paid: 12, expired: 3, pending: 2 },
-  { date: '2026-05-14', day: '14/05', paid: 16, expired: 4, pending: 1 },
-  { date: '2026-05-15', day: '15/05', paid: 20, expired: 6, pending: 4 },
-  { date: '2026-05-16', day: '16/05', paid: 24, expired: 5, pending: 3 },
-  { date: '2026-05-17', day: '17/05', paid: 31, expired: 8, pending: 5 },
-  { date: '2026-05-18', day: '18/05', paid: 18, expired: 4, pending: 2 },
-  { date: '2026-05-19', day: '19/05', paid: 10, expired: 2, pending: 1 },
-];
+function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Date, to: Date): FinancialDailyPoint[] {
+  const buckets = new Map<string, FinancialDailyPoint>();
+  const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const end = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+
+  while (cursor.getTime() <= end.getTime()) {
+    const key = format(cursor, 'yyyy-MM-dd');
+    const day = format(cursor, 'dd/MM');
+    buckets.set(key, { date: key, day, paid: 0, expired: 0, pending: 0 });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  for (const payment of payments) {
+    const key = payment.created_at.slice(0, 10);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    if (payment.status === 'paid' || payment.status === 'late_paid') {
+      bucket.paid += 1;
+    } else if (payment.status === 'expired') {
+      bucket.expired += 1;
+    } else if (payment.status === 'pending' || payment.status === 'awaiting_method') {
+      bucket.pending += 1;
+    }
+  }
+
+  return Array.from(buckets.values());
+}
 
 const DEFAULT_CUSTOMER_NOTICE = 'O valor pago será abatido da conta no dia da visita.';
 const DEFAULT_CANCELLATION_POLICY = 'Se o pagamento não for confirmado dentro do prazo, a pré-reserva expira e a mesa volta a ficar disponível.';
@@ -379,6 +317,7 @@ function findActiveRuleConflict(rule: ReservationPaymentRuleDraft, rules: Reserv
 
 function getPaymentStatusClass(status: ReservationPaymentStatus) {
   const classes: Record<ReservationPaymentStatus, string> = {
+    awaiting_method: 'border-warning/30 bg-warning/10 text-warning',
     pending: 'border-warning/30 bg-warning/10 text-warning',
     paid: 'border-success/30 bg-success/10 text-success',
     expired: 'border-destructive/30 bg-destructive/10 text-destructive',
@@ -656,19 +595,47 @@ export default function CompanyPrepayments() {
     if (activeRules.length === 0) return 10;
     return Math.round(activeRules.reduce((sum, rule) => sum + rule.payment_deadline_minutes, 0) / activeRules.length);
   }, [activeRules]);
-  const filteredFinancialDaily = useMemo(
-    () => {
-      const from = summaryRange?.from;
-      const to = summaryRange?.to ?? from;
-      if (!from || !to) return [];
-
-      const start = toDateKey(from);
-      const end = toDateKey(to);
-
-      return MOCK_FINANCIAL_DAILY.filter((item) => item.date >= start && item.date <= end);
-    },
-    [summaryRange],
+  const summaryQueryKey = useMemo(
+    () => [
+      'reservation-payments-summary',
+      companyId,
+      summaryRange?.from ? toDateKey(summaryRange.from) : null,
+      summaryRange?.to ? toDateKey(summaryRange.to) : (summaryRange?.from ? toDateKey(summaryRange.from) : null),
+    ] as const,
+    [companyId, summaryRange],
   );
+
+  const summaryPaymentsQuery = useQuery({
+    queryKey: summaryQueryKey,
+    enabled: Boolean(companyId && summaryRange?.from),
+    queryFn: async () => {
+      const from = summaryRange!.from!;
+      const to = summaryRange?.to ?? from;
+      const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
+      const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
+
+      const { data, error } = await (supabase as any)
+        .from('reservation_payments')
+        .select(
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+        )
+        .eq('company_id', companyId)
+        .gte('created_at', startIso)
+        .lte('created_at', endIso)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
+    },
+  });
+  const summaryPayments = summaryPaymentsQuery.data ?? [];
+
+  const filteredFinancialDaily = useMemo<FinancialDailyPoint[]>(() => {
+    const from = summaryRange?.from;
+    const to = summaryRange?.to ?? from;
+    if (!from || !to) return [];
+    return buildDailyFinancialBuckets(summaryPayments, from, to);
+  }, [summaryPayments, summaryRange]);
   const chartTotals = useMemo(
     () => filteredFinancialDaily.reduce(
       (acc, item) => ({
@@ -680,25 +647,49 @@ export default function CompanyPrepayments() {
     ),
     [filteredFinancialDaily],
   );
-  const filteredPayments = useMemo(
-    () => {
-      const from = paymentRange?.from;
-      const to = paymentRange?.to ?? from;
-      if (!from || !to) return [];
 
-      const start = toDateKey(from);
-      const end = toDateKey(to);
-
-      return MOCK_PAYMENTS.filter((payment) => {
-        const paymentDate = payment.created_at.slice(0, 10);
-        const matchesStatus = paymentStatusFilter === 'all' || payment.status === paymentStatusFilter;
-        const matchesPeriod = paymentDate >= start && paymentDate <= end;
-
-        return matchesStatus && matchesPeriod;
-      });
-    },
-    [paymentRange, paymentStatusFilter],
+  const paymentsListQueryKey = useMemo(
+    () => [
+      'reservation-payments-list',
+      companyId,
+      paymentRange?.from ? toDateKey(paymentRange.from) : null,
+      paymentRange?.to ? toDateKey(paymentRange.to) : (paymentRange?.from ? toDateKey(paymentRange.from) : null),
+      paymentStatusFilter,
+    ] as const,
+    [companyId, paymentRange, paymentStatusFilter],
   );
+
+  const paymentsListQuery = useQuery({
+    queryKey: paymentsListQueryKey,
+    enabled: Boolean(companyId && paymentRange?.from),
+    queryFn: async () => {
+      const from = paymentRange!.from!;
+      const to = paymentRange?.to ?? from;
+      const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
+      const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
+
+      let query = (supabase as any)
+        .from('reservation_payments')
+        .select(
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+        )
+        .eq('company_id', companyId)
+        .gte('created_at', startIso)
+        .lte('created_at', endIso)
+        .order('created_at', { ascending: false });
+
+      if (paymentStatusFilter === 'pending') {
+        query = query.in('status', ['pending', 'awaiting_method']);
+      } else if (paymentStatusFilter !== 'all') {
+        query = query.eq('status', paymentStatusFilter);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
+    },
+  });
+  const filteredPayments = paymentsListQuery.data ?? [];
   const paymentPageCount = Math.max(1, Math.ceil(filteredPayments.length / PAYMENT_PAGE_SIZE));
   const currentPaymentPage = Math.min(paymentPage, paymentPageCount);
   const paginatedPayments = useMemo(
@@ -709,17 +700,46 @@ export default function CompanyPrepayments() {
     [currentPaymentPage, filteredPayments],
   );
   const paymentTotals = useMemo(
-    () => MOCK_PAYMENTS.reduce(
+    () => filteredPayments.reduce(
       (acc, payment) => ({
-        paid: acc.paid + (payment.status === 'paid' ? 1 : 0),
-        pending: acc.pending + (payment.status === 'pending' ? 1 : 0),
+        paid: acc.paid + (payment.status === 'paid' || payment.status === 'late_paid' ? 1 : 0),
+        pending: acc.pending + (payment.status === 'pending' || payment.status === 'awaiting_method' ? 1 : 0),
         expired: acc.expired + (payment.status === 'expired' ? 1 : 0),
-        paidAmount: acc.paidAmount + (payment.status === 'paid' ? payment.amount : 0),
+        paidAmount: acc.paidAmount + ((payment.status === 'paid' || payment.status === 'late_paid') ? payment.amount : 0),
       }),
       { paid: 0, pending: 0, expired: 0, paidAmount: 0 },
     ),
-    [],
+    [filteredPayments],
   );
+
+  const refreshPaymentsData = () => {
+    if (!companyId) return;
+    queryClient.invalidateQueries({ queryKey: ['reservation-payments-list', companyId] });
+    queryClient.invalidateQueries({ queryKey: ['reservation-payments-summary', companyId] });
+  };
+
+  const checkPaymentMutation = useMutation({
+    mutationFn: async (paymentToken: string) => checkReservationPayment(paymentToken),
+    onSuccess: (data) => {
+      refreshPaymentsData();
+      if (data.status === 'paid') {
+        toast.success('Pagamento confirmado.');
+        return;
+      }
+      if (data.status === 'expired') {
+        toast.info('Esse pagamento já está expirado.');
+        return;
+      }
+      if (data.message) {
+        toast.info(data.message);
+        return;
+      }
+      toast.info('Status atualizado.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
+    },
+  });
   const summaryPeriodLabel = formatDateRangePickerLabel(summaryRange);
   const paymentPeriodLabel = formatDateRangePickerLabel(paymentRange);
   const pendingRule = pendingRuleAction ? rules.find((rule) => rule.id === pendingRuleAction.ruleId) : null;
@@ -1070,7 +1090,7 @@ export default function CompanyPrepayments() {
               <CardHeader>
                 <CardTitle>Funcionamento padrão</CardTitle>
                 <CardDescription>
-                  Estes pontos ficam fixos para o MVP.
+                  Estes pontos são fixos para todas as regras de pagamento antecipado.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-2">
@@ -1389,7 +1409,14 @@ export default function CompanyPrepayments() {
                 <>
                   <div className="space-y-2">
                     {paginatedPayments.map((payment) => (
-                      <PaymentListItem key={payment.id} payment={payment} />
+                      <PaymentListItem
+                        key={payment.id}
+                        payment={payment}
+                        onCheck={(token) => checkPaymentMutation.mutate(token)}
+                        isChecking={
+                          checkPaymentMutation.isPending && checkPaymentMutation.variables === payment.payment_token
+                        }
+                      />
                     ))}
                   </div>
                   <div className="flex flex-col gap-3 border-t border-border pt-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
@@ -1531,8 +1558,17 @@ export default function CompanyPrepayments() {
                   value={`${Math.round((chartTotals.paid / Math.max(chartTotals.paid + chartTotals.expired, 1)) * 100)}%`}
                   tone="default"
                 />
-                <Button variant="outline" className="mt-2 w-full" onClick={() => toast.info('A consulta real será ligada depois das Edge Functions.')}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
+                <Button
+                  variant="outline"
+                  className="mt-2 w-full"
+                  onClick={refreshPaymentsData}
+                  disabled={summaryPaymentsQuery.isFetching}
+                >
+                  {summaryPaymentsQuery.isFetching ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
                   Atualizar dados
                 </Button>
               </CardContent>
@@ -1725,10 +1761,20 @@ function RuleListItem({
   );
 }
 
-function PaymentListItem({ payment }: { payment: MockReservationPayment }) {
-  const paymentMoment = payment.status === 'paid'
+function PaymentListItem({
+  payment,
+  onCheck,
+  isChecking,
+}: {
+  payment: ReservationPaymentRow;
+  onCheck: (paymentToken: string) => void;
+  isChecking: boolean;
+}) {
+  const paymentMoment = payment.status === 'paid' || payment.status === 'late_paid'
     ? `Pago em ${formatDateTime(payment.paid_at)}`
-    : `Expira em ${formatDateTime(payment.expires_at)}`;
+    : payment.expires_at
+      ? `Expira em ${formatDateTime(payment.expires_at)}`
+      : '';
 
   return (
     <div className="rounded-md border border-border bg-background px-3 py-2.5">
@@ -1741,7 +1787,9 @@ function PaymentListItem({ payment }: { payment: MockReservationPayment }) {
             </Badge>
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
-            {payment.rule_name} · {formatShortDate(payment.reservation_date)} às {payment.reservation_time}
+            {payment.rule_name}
+            {payment.reservation_date ? ` · ${formatShortDate(payment.reservation_date)}` : ''}
+            {payment.reservation_time ? ` às ${payment.reservation_time}` : ''}
           </p>
         </div>
 
@@ -1752,17 +1800,23 @@ function PaymentListItem({ payment }: { payment: MockReservationPayment }) {
         <div>
           <p className="text-sm font-medium text-foreground">{formatPrepaymentAmount(payment.amount)}</p>
           <p className="text-xs text-muted-foreground">
-            {getBillingTypeLabel(payment.billing_type)}{payment.installments ? ` ${payment.installments}x` : ''}
+            {payment.billing_type ? getBillingTypeLabel(payment.billing_type) : 'Sem método'}
+            {payment.installments && payment.installments > 1 ? ` ${payment.installments}x` : ''}
           </p>
         </div>
 
         <div className="text-xs text-muted-foreground">
           <p>Criado em {formatDateTime(payment.created_at)}</p>
-          <p>{paymentMoment}</p>
+          {paymentMoment && <p>{paymentMoment}</p>}
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => toast.info('Consulta real será ligada na Edge Function check-reservation-payment.')}>
-          <RefreshCw className="mr-2 h-4 w-4" />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!payment.payment_token || isChecking}
+          onClick={() => payment.payment_token && onCheck(payment.payment_token)}
+        >
+          {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
           Consultar
         </Button>
       </div>
