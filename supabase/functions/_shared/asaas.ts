@@ -10,6 +10,7 @@ export interface AsaasPaymentLinkPayload {
   billingType: AsaasBillingType;
   chargeType: AsaasPaymentLinkChargeType;
   maxInstallmentCount?: number;
+  dueDateLimitDays?: number;
   externalReference?: string;
   notificationEnabled?: boolean;
   callback?: {
@@ -17,6 +18,65 @@ export interface AsaasPaymentLinkPayload {
     autoRedirect?: boolean;
   };
   isAddressRequired?: boolean;
+}
+
+export interface AsaasAccountSite {
+  id?: string;
+  name?: string;
+  url?: string;
+  mainSite?: boolean;
+}
+
+export async function listAsaasAccountSites(apiToken: string) {
+  return await asaasRequest<{ data?: AsaasAccountSite[] }>(apiToken, "/myAccount/sites", {
+    method: "GET",
+  });
+}
+
+export async function createAsaasAccountSite(
+  apiToken: string,
+  payload: { name: string; url: string; mainSite?: boolean },
+) {
+  return await asaasRequest<AsaasAccountSite>(apiToken, "/myAccount/sites", {
+    method: "POST",
+    json: payload,
+  });
+}
+
+function normalizeSiteUrl(value: string | undefined | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.hostname}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureAsaasAccountSite(
+  apiToken: string,
+  desiredUrl: string,
+  desiredName: string,
+) {
+  const normalizedDesired = normalizeSiteUrl(desiredUrl);
+  if (!normalizedDesired) return false;
+
+  try {
+    const existing = await listAsaasAccountSites(apiToken);
+    const items = Array.isArray(existing?.data) ? existing.data : [];
+    const alreadyExists = items.some((site) => normalizeSiteUrl(site?.url ?? null) === normalizedDesired);
+    if (alreadyExists) return true;
+
+    await createAsaasAccountSite(apiToken, {
+      name: desiredName.slice(0, 60),
+      url: normalizedDesired,
+      mainSite: items.length === 0,
+    });
+    return true;
+  } catch (error) {
+    console.warn("ensureAsaasAccountSite failed", error);
+    return false;
+  }
 }
 
 export interface AsaasPaymentLinkResponse {

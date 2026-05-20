@@ -28,7 +28,7 @@ async function loadContext(supabaseAdmin: any, paymentToken: string) {
 
   const [{ data: reservation, error: reservationError }, { data: company, error: companyError }] = await Promise.all([
     supabaseAdmin.from("reservations").select("*").eq("id", payment.reservation_id).maybeSingle(),
-    supabaseAdmin.from("companies").select("id, name, slug, logo_url").eq("id", payment.company_id).maybeSingle(),
+    supabaseAdmin.from("companies").select("id, name, slug, logo_url, phone, whatsapp").eq("id", payment.company_id).maybeSingle(),
   ]);
 
   if (reservationError) throw new Error(reservationError.message);

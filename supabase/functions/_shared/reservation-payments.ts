@@ -58,6 +58,8 @@ export interface CompanyRecord {
   name: string;
   slug?: string | null;
   logo_url?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
 }
 
 export function jsonResponse(body: unknown, status = 200) {
@@ -367,6 +369,8 @@ export function toPublicPaymentSummary(
       name: company.name,
       logo_url: company.logo_url ?? null,
       slug: company.slug ?? null,
+      phone: company.phone ?? null,
+      whatsapp: company.whatsapp ?? null,
     },
   };
 }

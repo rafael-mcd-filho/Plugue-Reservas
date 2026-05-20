@@ -1,5 +1,5 @@
 import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
-import { validateAsaasPaymentLinksAccess } from "../_shared/asaas.ts";
+import { ensureAsaasAccountSite, validateAsaasPaymentLinksAccess } from "../_shared/asaas.ts";
 import { corsHeaders, jsonResponse, readJson } from "../_shared/reservation-payments.ts";
 
 function buildWebhookUrl(companyId: string) {
@@ -7,6 +7,32 @@ function buildWebhookUrl(companyId: string) {
   return supabaseUrl
     ? `${supabaseUrl}/functions/v1/asaas-webhook?company_id=${encodeURIComponent(companyId)}`
     : null;
+}
+
+function getAppOriginUrl() {
+  const candidate = Deno.env.get("APP_URL") || Deno.env.get("SITE_URL") || "";
+  return candidate.trim();
+}
+
+async function tryRegisterAsaasSite(
+  supabaseAdmin: any,
+  companyId: string,
+  apiToken: string,
+) {
+  const appUrl = getAppOriginUrl();
+  if (!appUrl) return;
+
+  try {
+    const { data: company } = await supabaseAdmin
+      .from("companies")
+      .select("name")
+      .eq("id", companyId)
+      .maybeSingle();
+    const companyName = (company?.name as string | undefined) || "Plugue Reservas";
+    await ensureAsaasAccountSite(apiToken, appUrl, companyName);
+  } catch (error) {
+    console.warn("tryRegisterAsaasSite failed", error);
+  }
 }
 
 function publicConfigResponse(companyId: string, data: any) {
@@ -70,6 +96,10 @@ Deno.serve(async (req) => {
         lastError = error?.message || "Nao foi possivel validar o token Asaas";
       }
 
+      if (status === "configured") {
+        await tryRegisterAsaasSite(supabaseAdmin, companyId, tokenToValidate);
+      }
+
       const updatePayload = existing
         ? {
           status,
@@ -113,6 +143,10 @@ Deno.serve(async (req) => {
     } catch (error: any) {
       status = "error";
       lastError = error?.message || "Nao foi possivel validar o token Asaas";
+    }
+
+    if (status === "configured") {
+      await tryRegisterAsaasSite(supabaseAdmin, companyId, apiToken);
     }
 
     const { data: existing } = await supabaseAdmin

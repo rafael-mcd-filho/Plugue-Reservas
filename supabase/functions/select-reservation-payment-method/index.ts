@@ -1,7 +1,9 @@
 import { createSupabaseAdminClient } from "../_shared/internal-auth.ts";
 import {
+  AsaasApiError,
   createAsaasPaymentLink,
   deleteAsaasPaymentLink,
+  ensureAsaasAccountSite,
   getAsaasPaymentLinkUrl,
   type AsaasBillingType,
   type AsaasPaymentLinkPayload,
@@ -34,7 +36,7 @@ async function resolvePaymentContext(supabaseAdmin: any, paymentToken: string) {
 
   const [{ data: reservation, error: reservationError }, { data: company, error: companyError }] = await Promise.all([
     supabaseAdmin.from("reservations").select("*").eq("id", payment.reservation_id).maybeSingle(),
-    supabaseAdmin.from("companies").select("id, name, slug, logo_url").eq("id", payment.company_id).maybeSingle(),
+    supabaseAdmin.from("companies").select("id, name, slug, logo_url, phone, whatsapp").eq("id", payment.company_id).maybeSingle(),
   ]);
 
   if (reservationError) throw new Error(reservationError.message);
@@ -73,6 +75,7 @@ function getPaymentLinkPayload(
     value: chargedAmount,
     billingType,
     chargeType: isInstallmentCard ? "INSTALLMENT" : "DETACHED",
+    dueDateLimitDays: 1,
     externalReference: buildPaymentLinkExternalReference(payment.payment_token, billingType),
     notificationEnabled: false,
     isAddressRequired: false,
@@ -87,6 +90,29 @@ function getPaymentLinkPayload(
   }
 
   return payload;
+}
+
+function getAppOriginUrl() {
+  const candidate = Deno.env.get("APP_URL") || Deno.env.get("SITE_URL") || "";
+  return candidate.trim();
+}
+
+function isAsaasDomainMissingError(error: unknown) {
+  if (!(error instanceof AsaasApiError)) return false;
+  const message = String(error.message || "").toLowerCase();
+  return message.includes("dom") && message.includes("conta");
+}
+
+function friendlyAsaasError(billingType: AsaasBillingType, error: unknown) {
+  if (isAsaasDomainMissingError(error)) {
+    if (billingType === "CREDIT_CARD") {
+      return "Pagamento por cartao temporariamente indisponivel. Use Pix ou fale com o restaurante.";
+    }
+    return "Configuracao do pagamento incompleta. Fale com o restaurante para liberar o link.";
+  }
+
+  if (error instanceof Error && error.message) return error.message;
+  return "Nao foi possivel criar o link de pagamento.";
 }
 
 Deno.serve(async (req) => {
@@ -141,10 +167,56 @@ Deno.serve(async (req) => {
     const chargedAmount = calculateMethodAmount(payment, reservation, billingType);
     const maxInstallments = billingType === "CREDIT_CARD" ? getMaxInstallments(payment) : 1;
     const externalReference = buildPaymentLinkExternalReference(payment.payment_token, billingType);
-    const asaasPaymentLink = await createAsaasPaymentLink(
-      asaasConfig.api_token,
-      getPaymentLinkPayload(payment, reservation, billingType, chargedAmount, maxInstallments),
-    );
+    const paymentLinkPayload = getPaymentLinkPayload(payment, reservation, billingType, chargedAmount, maxInstallments);
+
+    let asaasPaymentLink;
+    try {
+      asaasPaymentLink = await createAsaasPaymentLink(asaasConfig.api_token, paymentLinkPayload);
+    } catch (error) {
+      if (isAsaasDomainMissingError(error)) {
+        const appUrl = getAppOriginUrl();
+        if (appUrl) {
+          const registered = await ensureAsaasAccountSite(
+            asaasConfig.api_token,
+            appUrl,
+            company.name || "Plugue Reservas",
+          );
+          if (registered) {
+            try {
+              asaasPaymentLink = await createAsaasPaymentLink(asaasConfig.api_token, paymentLinkPayload);
+            } catch (retryError) {
+              await recordPaymentEvent(supabaseAdmin, payment, "payment_link_creation_failed", {
+                billing_type: billingType,
+                stage: "after_site_registration",
+                error: retryError instanceof Error ? retryError.message : String(retryError),
+              });
+              return jsonResponse({ error: friendlyAsaasError(billingType, retryError) }, 502);
+            }
+          } else {
+            await recordPaymentEvent(supabaseAdmin, payment, "payment_link_creation_failed", {
+              billing_type: billingType,
+              stage: "site_registration_failed",
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return jsonResponse({ error: friendlyAsaasError(billingType, error) }, 502);
+          }
+        } else {
+          await recordPaymentEvent(supabaseAdmin, payment, "payment_link_creation_failed", {
+            billing_type: billingType,
+            stage: "no_app_url",
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return jsonResponse({ error: friendlyAsaasError(billingType, error) }, 502);
+        }
+      } else {
+        await recordPaymentEvent(supabaseAdmin, payment, "payment_link_creation_failed", {
+          billing_type: billingType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return jsonResponse({ error: friendlyAsaasError(billingType, error) }, 502);
+      }
+    }
+
     const paymentLinkUrl = getAsaasPaymentLinkUrl(asaasPaymentLink);
 
     if (!paymentLinkUrl) {

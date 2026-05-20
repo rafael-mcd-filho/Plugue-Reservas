@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type SVGProps } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Clock3, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,39 @@ import {
   type ReservationPaymentStatus,
   type ReservationPrepaymentBillingType,
 } from '@/lib/asaas-prepayment-contracts';
+import { toBrazilWhatsAppNumber } from '@/lib/validation';
+
+function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        fill="currentColor"
+        d="M12 2.25a9.75 9.75 0 0 0-8.35 14.78L2.3 21.7l4.84-1.27A9.75 9.75 0 1 0 12 2.25Z"
+      />
+      <path
+        fill="white"
+        d="M9.25 6.65c-.23 0-.45.11-.63.31-.31.33-.82.83-.82 1.94s.81 2.18.92 2.33c.11.14 1.58 2.52 3.83 3.44 1.87.75 2.25.6 2.66.56.41-.04 1.32-.54 1.51-1.06.19-.53.19-.97.13-1.06-.05-.09-.19-.15-.39-.25-.2-.1-1.16-.57-1.34-.64-.18-.06-.31-.09-.45.12-.13.2-.52.63-.63.77-.12.13-.24.15-.43.05-.2-.1-.84-.31-1.6-1-.59-.53-.99-1.19-1.12-1.39-.12-.2-.02-.3.09-.4.09-.09.2-.23.3-.34.1-.11.13-.2.2-.32.07-.13.03-.25-.01-.34-.05-.1-.44-1.12-.61-1.53-.16-.39-.33-.4-.45-.4h-.38Z"
+      />
+    </svg>
+  );
+}
+
+function buildHelpWhatsappUrl(payment: PublicReservationPaymentSummary) {
+  const whatsappNumber = toBrazilWhatsAppNumber(payment.company.whatsapp);
+  if (!whatsappNumber) return null;
+
+  const formattedDate = formatReservationDate(payment.reservation.date, payment.reservation.time);
+  const message =
+    `Ola! Preciso de ajuda com o pagamento da minha reserva em ${payment.company.name}.\n` +
+    `Data: ${formattedDate}\n` +
+    `Cliente: ${payment.reservation.guest_name}`;
+
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+}
+
+function buildNewReservationUrl(payment: PublicReservationPaymentSummary) {
+  return payment.company.slug ? `/${payment.company.slug}` : '/';
+}
 
 const DEFAULT_DEADLINE_SECONDS = 10 * 60;
 
@@ -97,7 +130,7 @@ function getStatusView(status: ReservationPaymentStatus) {
     return {
       icon: Clock3,
       title: 'Escolha a forma de pagamento',
-      description: 'Selecione Pix ou cartão para abrir o checkout seguro do Asaas.',
+      description: 'Selecione Pix ou cartão para abrir o checkout seguro.',
       color: 'text-primary',
       barClassName: 'bg-primary',
     };
@@ -106,7 +139,7 @@ function getStatusView(status: ReservationPaymentStatus) {
   return {
     icon: Clock3,
     title: 'Aguardando pagamento',
-    description: 'Finalize o pagamento no Asaas dentro do prazo para confirmar a reserva.',
+    description: 'Finalize o pagamento dentro do prazo para confirmar a reserva.',
     color: 'text-primary',
     barClassName: 'bg-primary',
   };
@@ -176,7 +209,7 @@ export default function PublicReservationPayment() {
         toast.info(updatedPayment.message);
         return;
       }
-      toast.info('Pagamento ainda não confirmado pelo Asaas.');
+      toast.info('Pagamento ainda não confirmado.');
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
@@ -218,7 +251,6 @@ export default function PublicReservationPayment() {
       <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-6">
           <div className="space-y-2">
-            <Badge variant="secondary">{payment.rule_name}</Badge>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Pagamento da reserva</h1>
             <p className="max-w-2xl text-sm text-muted-foreground">
               Esta página mantém as opções da sua pré-reserva. Se fechar o navegador ou trocar de aparelho, volte por este link para acompanhar o pagamento.
@@ -313,11 +345,11 @@ function PaymentActionArea({
     <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
       <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background p-5 text-center">
         <div className="rounded-full bg-primary/10 p-4">
-          <ExternalLink className="h-8 w-8 text-primary" />
+          <ShieldCheck className="h-8 w-8 text-primary" />
         </div>
         <div>
-          <p className="font-medium text-foreground">Checkout Asaas</p>
-          <p className="mt-1 text-xs text-muted-foreground">Pix e cartão são finalizados fora do nosso frontend.</p>
+          <p className="font-medium text-foreground">Pagamento seguro</p>
+          <p className="mt-1 text-xs text-muted-foreground">Você é direcionado para um ambiente protegido para concluir o Pix ou cartão.</p>
         </div>
       </div>
 
@@ -334,7 +366,7 @@ function PaymentActionArea({
               icon="pix"
               title="Pix"
               amount={payment.pix_amount}
-              description="Abre o link Pix do Asaas."
+              description="Pague na hora pelo QR Code ou copia e cola."
               disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
               loading={selectingBillingType === 'PIX'}
               selected={payment.billing_type === 'PIX'}
@@ -346,7 +378,7 @@ function PaymentActionArea({
               icon="card"
               title="Cartão"
               amount={payment.credit_card_amount}
-              description={`Em até ${payment.max_credit_card_installments ?? 1}x no Asaas.`}
+              description={`Em até ${payment.max_credit_card_installments ?? 1}x no cartão.`}
               disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
               loading={selectingBillingType === 'CREDIT_CARD'}
               selected={payment.billing_type === 'CREDIT_CARD'}
@@ -360,18 +392,13 @@ function PaymentActionArea({
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button onClick={onOpenPaymentLink} disabled={!payment.payment_link_url} className="sm:flex-1">
                 <ExternalLink className="mr-2 h-4 w-4" />
-                Abrir link Asaas
+                Abrir pagamento
               </Button>
               <Button variant="outline" onClick={onCheckPayment} disabled={checking} className="sm:flex-1">
                 {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Já paguei
               </Button>
             </div>
-            {payment.payment_link_external_reference && (
-              <p className="mt-3 truncate text-xs text-muted-foreground">
-                Ref. Asaas: {payment.payment_link_external_reference}
-              </p>
-            )}
           </div>
         )}
       </div>
@@ -418,6 +445,9 @@ function PaymentMethodBox({
 }
 
 function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary }) {
+  const helpWhatsappUrl = buildHelpWhatsappUrl(payment);
+  const newReservationUrl = buildNewReservationUrl(payment);
+
   return (
     <aside className="space-y-4">
       <Card className="border-border shadow-card">
@@ -430,7 +460,6 @@ function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary 
             <SummaryLine label="Cliente" value={payment.reservation.guest_name} />
             <SummaryLine label="Data" value={formatReservationDate(payment.reservation.date, payment.reservation.time)} />
             <SummaryLine label="Pessoas" value={String(payment.reservation.party_size)} />
-            <SummaryLine label="Token" value={payment.payment_token} />
           </div>
         </CardContent>
       </Card>
@@ -439,8 +468,16 @@ function PaymentSummary({ payment }: { payment: PublicReservationPaymentSummary 
         <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
           <p className="font-medium text-foreground">Política</p>
           <p>{payment.cancellation_policy || 'Consulte o restaurante para detalhes da política desta reserva.'}</p>
+          {helpWhatsappUrl && (
+            <Button asChild className="w-full bg-emerald-600 text-white hover:bg-emerald-700">
+              <a href={helpWhatsappUrl} target="_blank" rel="noopener noreferrer">
+                <WhatsAppIcon className="mr-2 h-4 w-4" />
+                Falar pelo WhatsApp
+              </a>
+            </Button>
+          )}
           <Button asChild variant="outline" className="w-full">
-            <Link to="/">Iniciar nova reserva</Link>
+            <Link to={newReservationUrl}>Iniciar nova reserva</Link>
           </Button>
         </CardContent>
       </Card>

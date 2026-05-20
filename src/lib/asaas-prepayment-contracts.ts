@@ -118,6 +118,9 @@ export interface PublicReservationPaymentSummary {
   company: {
     name: string;
     logo_url: string | null;
+    slug: string | null;
+    phone: string | null;
+    whatsapp: string | null;
   };
 }
 
