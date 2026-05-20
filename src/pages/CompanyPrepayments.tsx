@@ -384,6 +384,7 @@ export default function CompanyPrepayments() {
   const [tokenDraft, setTokenDraft] = useState('');
   const [savedWebhookUrl, setSavedWebhookUrl] = useState<string | null>(null);
   const [webhookAuthToken, setWebhookAuthToken] = useState<string | null>(null);
+  const [isEditingAsaasConfig, setIsEditingAsaasConfig] = useState(false);
   const [ruleForm, setRuleForm] = useState<RuleFormState>(() => createRuleForm());
   const [ruleTab, setRuleTab] = useState<RuleTab>('active');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all');
@@ -815,8 +816,11 @@ export default function CompanyPrepayments() {
     }
 
     asaasConfigMutation.mutate({ apiToken: apiToken || undefined, mode }, {
-      onSuccess: () => {
+      onSuccess: (data) => {
         if (clearTokenAfterSave) setTokenDraft('');
+        if (mode === 'save' && data.status === 'configured') {
+          setIsEditingAsaasConfig(false);
+        }
       },
     });
   };
@@ -994,110 +998,175 @@ export default function CompanyPrepayments() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="asaas-token">Token Asaas</Label>
-                    {hasSavedAsaasToken && (
-                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
-                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                        Token salvo
-                      </Badge>
-                    )}
-                  </div>
-                  <Input
-                    id="asaas-token"
-                    type="password"
-                    value={tokenDraft}
-                    onChange={(event) => setTokenDraft(event.target.value)}
-                    placeholder={hasSavedAsaasToken ? 'Token configurado. Cole um novo token para substituir.' : '$aact_YTU5...'}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {hasSavedAsaasToken
-                      ? 'Por segurança, o token salvo não é exibido. Use este campo apenas para substituir.'
-                      : 'Depois de salvo, o token não deve ser exibido novamente.'}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-border bg-background p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Status da integração</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">{asaasStatusLabel}</p>
+                {hasSavedAsaasToken && asaasConfig.status === 'configured' && !isEditingAsaasConfig ? (
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3 rounded-lg border border-success/20 bg-success/5 p-4">
+                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">Conta Asaas configurada</p>
+                        <p className="text-xs text-muted-foreground">
+                          Integração ativa. Última validação: {formatDateTime(asaasConfig.lastValidatedAt)}
+                        </p>
+                      </div>
                     </div>
-                    <Badge variant={asaasConfig.status === 'configured' ? 'default' : 'secondary'}>
-                      Conta real
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Última validação: {formatDateTime(asaasConfig.lastValidatedAt)}
-                  </p>
-                  {asaasConfig.lastError && (
-                    <p className="mt-1 text-xs text-destructive">{asaasConfig.lastError}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Webhook Asaas</Label>
-                  <div className="flex gap-2">
-                    <Input value={webhookUrl} readOnly className="font-mono text-xs" />
-                    <Button type="button" variant="outline" size="icon" onClick={handleCopyWebhookUrl} aria-label="Copiar URL do webhook">
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    A URL real será retornada pela Edge Function quando o token for salvo.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Token do webhook</Label>
-                  <div className="flex gap-2">
-                    <Input value={webhookAuthToken ?? 'Salve o token Asaas para gerar'} readOnly className="font-mono text-xs" />
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon"
-                      onClick={handleCopyWebhookToken}
-                      disabled={!webhookAuthToken}
-                      aria-label="Copiar token do webhook"
+                      className="w-full"
+                      onClick={() => setIsEditingAsaasConfig(true)}
                     >
-                      <Copy className="h-4 w-4" />
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      Editar configuração
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Configure este token no header `asaas-access-token` do webhook no painel Asaas.
-                  </p>
-                </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="asaas-token">Token Asaas</Label>
+                        {hasSavedAsaasToken && (
+                          <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Token salvo
+                          </Badge>
+                        )}
+                      </div>
+                      <Input
+                        id="asaas-token"
+                        type="password"
+                        value={tokenDraft}
+                        onChange={(event) => setTokenDraft(event.target.value)}
+                        placeholder={hasSavedAsaasToken ? 'Token configurado. Cole um novo token para substituir.' : '$aact_YTU5...'}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {hasSavedAsaasToken
+                          ? 'Por segurança, o token salvo não é exibido. Use este campo apenas para substituir.'
+                          : 'Depois de salvo, o token não deve ser exibido novamente.'}
+                      </p>
+                    </div>
 
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Button onClick={handleConfigSave} disabled={asaasConfigMutation.isPending}>
-                    {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                    {hasSavedAsaasToken ? 'Atualizar token' : 'Salvar token'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleConfigTest}
-                    disabled={asaasConfigMutation.isPending || (!tokenDraft.trim() && !hasSavedAsaasToken)}
-                  >
-                    {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                    Testar conexão
-                  </Button>
-                </div>
+                    <div className="rounded-lg border border-border bg-background p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Status da integração</p>
+                          <p className="mt-1 text-sm font-medium text-foreground">{asaasStatusLabel}</p>
+                        </div>
+                        <Badge variant={asaasConfig.status === 'configured' ? 'default' : 'secondary'}>
+                          Conta real
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Última validação: {formatDateTime(asaasConfig.lastValidatedAt)}
+                      </p>
+                      {asaasConfig.lastError && (
+                        <p className="mt-1 text-xs text-destructive">{asaasConfig.lastError}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>URL do webhook</Label>
+                      <div className="flex gap-2">
+                        <Input value={webhookUrl} readOnly className="font-mono text-xs" />
+                        <Button type="button" variant="outline" size="icon" onClick={handleCopyWebhookUrl} aria-label="Copiar URL do webhook">
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Cadastre esta URL no painel Asaas em Integrações → Webhooks.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Token do webhook</Label>
+                      <div className="flex gap-2">
+                        <Input value={webhookAuthToken ?? 'Salve o token Asaas para gerar'} readOnly className="font-mono text-xs" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handleCopyWebhookToken}
+                          disabled={!webhookAuthToken}
+                          aria-label="Copiar token do webhook"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Configure este token no header <code>asaas-access-token</code> do webhook no painel Asaas.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Button onClick={handleConfigSave} disabled={asaasConfigMutation.isPending}>
+                        {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                        {hasSavedAsaasToken ? 'Atualizar token' : 'Salvar token'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleConfigTest}
+                        disabled={asaasConfigMutation.isPending || (!tokenDraft.trim() && !hasSavedAsaasToken)}
+                      >
+                        {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                        Testar conexão
+                      </Button>
+                    </div>
+
+                    {hasSavedAsaasToken && asaasConfig.status === 'configured' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="w-full"
+                        onClick={() => {
+                          setIsEditingAsaasConfig(false);
+                          setTokenDraft('');
+                        }}
+                      >
+                        Voltar para visão simplificada
+                      </Button>
+                    )}
+                  </>
+                )}
               </CardContent>
             </Card>
 
             <Card className="border-border shadow-card">
               <CardHeader>
-                <CardTitle>Funcionamento padrão</CardTitle>
+                <CardTitle>Como configurar no Asaas</CardTitle>
                 <CardDescription>
-                  Estes pontos são fixos para todas as regras de pagamento antecipado.
+                  Siga este passo a passo na conta Asaas da empresa para liberar os pagamentos.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                <ConfigPoint icon={CreditCard} title="Sinal abatido" description="O sinal configurado entra como crédito para consumo no dia da visita." />
-                <ConfigPoint icon={QrCode} title="Links Asaas" description="Pix e cartão abrem um link de pagamento do Asaas, sem coletar dados no nosso frontend." />
-                <ConfigPoint icon={Clock3} title="Prazo padrão" description="A mesa fica bloqueada por 10 minutos, salvo prazo diferente definido na regra." />
-                <ConfigPoint icon={CalendarRange} title="Dia inteiro" description="Uma regra ativa vale para todos os horários da data escolhida." />
+              <CardContent className="space-y-3">
+                <TutorialStep
+                  number={1}
+                  title="Crie ou acesse a conta Asaas da empresa"
+                  description="Use a conta Asaas (sandbox para testes ou produção) que receberá os pagamentos. Cada empresa precisa ter o próprio token."
+                />
+                <TutorialStep
+                  number={2}
+                  title="Gere o token de integração"
+                  description="No painel Asaas, abra Minha Conta → Integrações → API e gere um token. Copie o token gerado."
+                />
+                <TutorialStep
+                  number={3}
+                  title="Salve o token aqui"
+                  description="Cole o token no campo Token Asaas ao lado e clique em Salvar token. Vamos validar a conexão e gerar a URL e o token do webhook."
+                />
+                <TutorialStep
+                  number={4}
+                  title="Cadastre o site no Asaas (cartão)"
+                  description="Em Minha Conta → Informações, cadastre o domínio público da reserva (https://plugguest.com.br). É exigência da Asaas para liberar cobrança por cartão."
+                />
+                <TutorialStep
+                  number={5}
+                  title="Configure o webhook no painel Asaas"
+                  description="Em Integrações → Webhooks, adicione a URL e o token mostrados ao lado. Marque pelo menos os eventos PAYMENT_RECEIVED, PAYMENT_CONFIRMED e PAYMENT_RECEIVED_IN_CASH."
+                />
+                <TutorialStep
+                  number={6}
+                  title="Crie sua primeira regra"
+                  description="Vá para a aba Regras e crie uma regra de pagamento antecipado para a data ou evento desejado. A regra entra desativada para revisão antes de afetar o fluxo público."
+                />
               </CardContent>
             </Card>
           </div>
@@ -1629,25 +1698,23 @@ function MetricCard({
   );
 }
 
-function ConfigPoint({
-  icon: Icon,
+function TutorialStep({
+  number,
   title,
   description,
 }: {
-  icon: LucideIcon;
+  number: number;
   title: string;
   description: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-background p-4">
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-primary/10 p-2 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-foreground">{title}</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
-        </div>
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+        {number}
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
       </div>
     </div>
   );

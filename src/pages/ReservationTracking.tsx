@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
-import { getReservationPaymentByTrackingCode } from '@/lib/asaas-prepayment-api';
+import { checkReservationPayment, getReservationPaymentByTrackingCode } from '@/lib/asaas-prepayment-api';
 import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { isValidCompanySlug, toBrazilWhatsAppNumber } from '@/lib/validation';
@@ -255,6 +255,31 @@ export default function ReservationTracking() {
     (activePayment.status === 'pending' || activePayment.status === 'awaiting_method') &&
     new Date(activePayment.expires_at).getTime() > Date.now();
   const paymentResumeUrl = paymentIsActive ? `/pagamento/${activePayment!.payment_token}` : null;
+  const paymentNeedsExpireCheck =
+    !!activePayment &&
+    (
+      activePayment.status === 'expired'
+      || activePayment.status === 'cancelled'
+      || activePayment.status === 'failed'
+      || ((activePayment.status === 'pending' || activePayment.status === 'awaiting_method') &&
+        new Date(activePayment.expires_at).getTime() <= Date.now())
+    );
+
+  const reconcileExpiredPayment = useMutation({
+    mutationFn: (token: string) => checkReservationPayment(token),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['reservation-tracking', code] });
+      await queryClient.invalidateQueries({ queryKey: ['reservation-tracking-payment', code] });
+    },
+  });
+
+  useEffect(() => {
+    if (!isPendingPayment) return;
+    if (!paymentNeedsExpireCheck) return;
+    if (!activePayment?.payment_token) return;
+    if (reconcileExpiredPayment.isPending) return;
+    reconcileExpiredPayment.mutate(activePayment.payment_token);
+  }, [isPendingPayment, paymentNeedsExpireCheck, activePayment?.payment_token, reconcileExpiredPayment]);
 
   useEffect(() => {
     syncPublicCompanyIcons(company?.logo_url);
@@ -390,9 +415,6 @@ export default function ReservationTracking() {
                     <Pencil className="mr-2 h-4 w-4" />
                     Alterar reserva
                   </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Se não puder comparecer, você pode cancelar a própria reserva por aqui.
-                  </p>
                   <Button
                     type="button"
                     variant="outline"
@@ -403,6 +425,9 @@ export default function ReservationTracking() {
                     {cancelReservation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Cancelar reserva
                   </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Se não puder comparecer, você pode cancelar a própria reserva.
+                  </p>
                 </div>
               )}
               {isPendingPayment && paymentResumeUrl && (
