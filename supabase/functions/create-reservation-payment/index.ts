@@ -66,6 +66,7 @@ Deno.serve(async (req) => {
     const body = await readJson(req);
     const companyId = typeof body.company_id === "string" ? body.company_id : null;
     const reservation = body.reservation ?? {};
+    const dryRun = body.dry_run === true;
 
     if (!companyId) return jsonResponse({ error: "Empresa obrigatoria" }, 400);
     if (!reservation.date || !reservation.time || !reservation.guest_name || !reservation.guest_phone) {
@@ -109,6 +110,23 @@ Deno.serve(async (req) => {
     if (asaasConfigError) throw new Error(asaasConfigError.message);
     if (!asaasConfig || asaasConfig.status !== "configured") {
       return jsonResponse({ error: "Integracao Asaas nao configurada para esta empresa" }, 409);
+    }
+
+    if (dryRun) {
+      return jsonResponse({
+        requires_payment: true,
+        dry_run: true,
+        feature_enabled: true,
+        rule: {
+          id: rule.id,
+          name: rule.name,
+          date_start: rule.date_start,
+          date_end: rule.date_end,
+          enabled: rule.enabled,
+          archived_at: rule.archived_at,
+        },
+        asaas_configured: true,
+      });
     }
 
     const reservationData = {
