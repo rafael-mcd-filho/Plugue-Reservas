@@ -28,6 +28,7 @@ import {
 } from '@/lib/publicReservationExitPrompt';
 import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
+import { findOpeningHoursForDayIndex } from '@/lib/openingHours';
 import { createReservationPayment } from '@/lib/asaas-prepayment-api';
 import {
   formatBrazilPhone,
@@ -338,9 +339,7 @@ export default function ReservationModal({
 
   const selectedDayHours = useMemo(() => {
     if (!selectedDate) return null;
-    const dayIndex = selectedDate.getDay();
-    const dayName = Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0];
-    return openingHours.find(h => h.day === dayName) || null;
+    return findOpeningHoursForDayIndex(openingHours, selectedDate.getDay());
   }, [selectedDate, openingHours]);
 
   const timeSlots = useMemo(() => {
@@ -919,9 +918,7 @@ export default function ReservationModal({
   };
 
   const isDayClosed = (date: Date) => {
-    const dayIndex = date.getDay();
-    const dayName = Object.entries(DAY_MAP).find(([, v]) => v === dayIndex)?.[0];
-    const hours = openingHours.find(h => h.day === dayName);
+    const hours = findOpeningHoursForDayIndex(openingHours, date.getDay());
     if (!hours) return true;
     if (hours.closed === true) return true;
     // Check blocked dates (all_day only for calendar disable)

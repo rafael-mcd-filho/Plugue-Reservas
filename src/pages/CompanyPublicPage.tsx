@@ -37,6 +37,7 @@ import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCo
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 import { lazyWithReload, preloadLazyImport } from '@/lib/lazyReload';
+import { findOpeningHoursForDayIndex, getDayIndexFromName } from '@/lib/openingHours';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const preloadReservationModal = () => preloadLazyImport(loadReservationModal, 'reservation-modal');
@@ -198,8 +199,7 @@ function isSameCalendarDate(a: Date, b: Date) {
 }
 
 function getOpeningHourByDayIndex(hours: OpeningHour[], dayIndex: number) {
-  const dayName = DAY_NAMES_BY_INDEX[dayIndex];
-  return dayName ? hours.find((hour) => hour.day === dayName) || null : null;
+  return findOpeningHoursForDayIndex(hours, dayIndex);
 }
 
 function buildOpeningSlots(hours: OpeningHour[], now: Date) {
@@ -531,9 +531,7 @@ export default function CompanyPublicPage() {
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
   const activePublicNotice = publicNotice && publicNotice.id !== dismissedNoticeId ? publicNotice : null;
   const getOpeningHourForDate = (date: Date) => {
-    const dayIndex = date.getDay();
-    const dayName = Object.entries(DAY_MAP).find(([, value]) => value === dayIndex)?.[0];
-    return openingHours.find((hour) => hour.day === dayName) || null;
+    return findOpeningHoursForDayIndex(openingHours, date.getDay());
   };
 
   const isAllDayBlocked = (iso: string) => blockedDates.some((blocked) => blocked.date === iso && blocked.all_day);
@@ -879,17 +877,20 @@ export default function CompanyPublicPage() {
                 </div>
 
                 <div className="mt-4 space-y-0">
-                  {openingHours.map((hour) => (
+                  {openingHours.map((hour) => {
+                    const isToday = getDayIndexFromName(hour.day) === new Date().getDay();
+                    return (
                     <div
                       key={hour.day}
-                      className={`flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 ${hour.day === (Object.entries(DAY_MAP).find(([, value]) => value === new Date().getDay())?.[0] || '') ? 'font-semibold text-foreground' : 'text-foreground'}`}
+                      className={`flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
                     >
-                      <span className={`text-sm ${hour.day === (Object.entries(DAY_MAP).find(([, value]) => value === new Date().getDay())?.[0] || '') ? 'font-bold text-primary' : ''}`}>{hour.day}</span>
+                      <span className={`text-sm ${isToday ? 'font-bold text-primary' : ''}`}>{hour.day}</span>
                       <span className={`text-sm ${hour.closed ? 'text-muted-foreground' : ''}`}>
                         {hour.closed ? 'Fechado' : `${hour.open} - ${hour.close}`}
                       </span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>

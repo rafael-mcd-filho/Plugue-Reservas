@@ -95,7 +95,7 @@ const DEFAULT_HOURS: OpeningHour[] = [
   { day: 'Qua', open: '17:30', close: '22:30' },
   { day: 'Qui', open: '17:30', close: '22:30' },
   { day: 'Sex', open: '17:30', close: '22:30' },
-  { day: 'Sab', open: '17:30', close: '22:30' },
+  { day: 'Sáb', open: '17:30', close: '22:30' },
   { day: 'Dom', open: '17:30', close: '22:30' },
 ];
 
