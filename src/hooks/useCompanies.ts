@@ -36,6 +36,8 @@ export interface Company {
   payment_methods: Record<string, boolean> | null;
   reservation_duration: number | null;
   max_guests_per_slot: number | null;
+  large_party_whatsapp_threshold?: number | null;
+  reservation_late_tolerance_minutes?: number | null;
   status: CompanyStatus;
   created_at: string;
   updated_at: string;

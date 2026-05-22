@@ -26,7 +26,7 @@ import {
   normalizePublicReservationExitPromptTextSize,
   renderPublicReservationExitPromptText,
 } from '@/lib/publicReservationExitPrompt';
-import { buildLargePartyWhatsappUrl, isLargePartyReservation } from '@/lib/reservation-flow';
+import { buildLargePartyWhatsappUrl, isLargePartyReservation, normalizeLargePartyThreshold } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
 import { findOpeningHoursForDayIndex } from '@/lib/openingHours';
 import { createReservationPayment } from '@/lib/asaas-prepayment-api';
@@ -55,6 +55,7 @@ interface ReservationModalProps {
   openingHours: OpeningHour[];
   reservationDuration?: number;
   maxGuestsPerSlot?: number;
+  largePartyThreshold?: number;
   initialDate?: string | null;
   initialPartySize?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
@@ -172,6 +173,7 @@ export default function ReservationModal({
   openingHours,
   reservationDuration = 30,
   maxGuestsPerSlot = 0,
+  largePartyThreshold,
   initialDate,
   initialPartySize = 2,
   onStepChange,
@@ -982,8 +984,9 @@ export default function ReservationModal({
     && selectedSlotAvailability.available > 0
     && selectedSlotAvailability.available <= 2;
   const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
-  const isLargeParty = isLargePartyReservation(selectedPartySize);
-  const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp);
+  const resolvedLargePartyThreshold = normalizeLargePartyThreshold(largePartyThreshold);
+  const isLargeParty = isLargePartyReservation(selectedPartySize, resolvedLargePartyThreshold);
+  const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp, resolvedLargePartyThreshold);
   const whatsappHelperText = (() => {
     if (prefillStatus === 'searching') {
       return 'Buscando cadastro para esse WhatsApp...';
@@ -1147,7 +1150,7 @@ export default function ReservationModal({
                 </div>
                 <div className="space-y-2">
                   <p className="text-base font-semibold text-foreground">
-                    Reservas a partir de 10 pessoas precisam ser confirmadas pelo WhatsApp.
+                    Reservas a partir de {resolvedLargePartyThreshold} pessoas precisam ser confirmadas pelo WhatsApp.
                   </p>
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     O processo e rapido, e nossa equipe finaliza tudo com voce por la.

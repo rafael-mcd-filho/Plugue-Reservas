@@ -150,11 +150,13 @@ export type Database = {
           google_maps_url: string | null
           id: string
           instagram: string | null
+          large_party_whatsapp_threshold: number
           logo_url: string | null
           max_guests_per_slot: number | null
           name: string
           opening_hours: Json | null
           payment_methods: Json | null
+          reservation_late_tolerance_minutes: number
           phone: string | null
           razao_social: string | null
           reservation_duration: number
@@ -175,11 +177,13 @@ export type Database = {
           google_maps_url?: string | null
           id?: string
           instagram?: string | null
+          large_party_whatsapp_threshold?: number
           logo_url?: string | null
           max_guests_per_slot?: number | null
           name: string
           opening_hours?: Json | null
           payment_methods?: Json | null
+          reservation_late_tolerance_minutes?: number
           phone?: string | null
           razao_social?: string | null
           reservation_duration?: number
@@ -200,11 +204,13 @@ export type Database = {
           google_maps_url?: string | null
           id?: string
           instagram?: string | null
+          large_party_whatsapp_threshold?: number
           logo_url?: string | null
           max_guests_per_slot?: number | null
           name?: string
           opening_hours?: Json | null
           payment_methods?: Json | null
+          reservation_late_tolerance_minutes?: number
           phone?: string | null
           razao_social?: string | null
           reservation_duration?: number
@@ -842,11 +848,13 @@ export type Database = {
           google_maps_url: string | null
           id: string | null
           instagram: string | null
+          large_party_whatsapp_threshold: number | null
           logo_url: string | null
           max_guests_per_slot: number | null
           name: string | null
           opening_hours: Json | null
           payment_methods: Json | null
+          reservation_late_tolerance_minutes: number | null
           phone: string | null
           reservation_duration: number | null
           slug: string | null
@@ -859,11 +867,13 @@ export type Database = {
           google_maps_url?: string | null
           id?: string | null
           instagram?: string | null
+          large_party_whatsapp_threshold?: number | null
           logo_url?: string | null
           max_guests_per_slot?: number | null
           name?: string | null
           opening_hours?: Json | null
           payment_methods?: Json | null
+          reservation_late_tolerance_minutes?: number | null
           phone?: string | null
           reservation_duration?: number | null
           slug?: string | null
@@ -876,11 +886,13 @@ export type Database = {
           google_maps_url?: string | null
           id?: string | null
           instagram?: string | null
+          large_party_whatsapp_threshold?: number | null
           logo_url?: string | null
           max_guests_per_slot?: number | null
           name?: string | null
           opening_hours?: Json | null
           payment_methods?: Json | null
+          reservation_late_tolerance_minutes?: number | null
           phone?: string | null
           reservation_duration?: number | null
           slug?: string | null
