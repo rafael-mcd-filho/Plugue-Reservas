@@ -786,7 +786,7 @@ export default function CompanyUsers() {
       />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
+        <DialogContent className="flex max-h-[90vh] sm:max-w-3xl flex-col">
           <DialogHeader>
             <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
@@ -869,7 +869,7 @@ export default function CompanyUsers() {
       </Dialog>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
+        <DialogContent className="flex max-h-[90vh] sm:max-w-3xl flex-col">
           <DialogHeader>
             <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
