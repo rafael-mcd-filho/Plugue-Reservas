@@ -938,9 +938,7 @@ export default function CompanyUsers() {
                   Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
                 </p>
               )}
-              <p className="text-xs text-muted-foreground">
-                O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
-              </p>
+
               <div>
                 <Label htmlFor="create-user-password">Senha inicial *</Label>
                 <Input
