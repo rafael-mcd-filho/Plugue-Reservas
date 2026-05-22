@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Server, Send } from 'lucide-react';
+import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Server, Send, Copy, KeyRound } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+const SUPABASE_FUNCTIONS_BASE_URL = (
+  import.meta.env.VITE_SUPABASE_URL || 'https://hdpxqqiudiotanrybvcf.supabase.co'
+).replace(/\/+$/, '');
 
 function useSystemHealth() {
   return useQuery({
@@ -36,7 +40,7 @@ function useSystemHealth() {
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === 'healthy' || status === 'connected') return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
+  if (status === 'healthy' || status === 'connected' || status === 'configured') return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
   if (status === 'warning') return <AlertTriangle className="h-5 w-5 text-warning" />;
   if (status === 'error' || status === 'disconnected') return <XCircle className="h-5 w-5 text-destructive" />;
   if (status === 'not_configured') return <AlertTriangle className="h-5 w-5 text-warning" />;
@@ -47,6 +51,7 @@ function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; variant: 'default' | 'destructive' | 'secondary' | 'outline' }> = {
     healthy: { label: 'Saudável', variant: 'default' },
     connected: { label: 'Conectado', variant: 'default' },
+    configured: { label: 'Configurado', variant: 'default' },
     error: { label: 'Erro', variant: 'destructive' },
     disconnected: { label: 'Desconectado', variant: 'destructive' },
     warning: { label: 'Atenção', variant: 'outline' },
@@ -131,9 +136,16 @@ function buildMetaErrorDetails(error: any) {
   }, null, 2);
 }
 
+function copySystemValue(value: string | null | undefined) {
+  if (!value || typeof navigator === 'undefined' || !navigator.clipboard) return;
+  void navigator.clipboard.writeText(value);
+}
+
 export default function SystemHealth() {
   const { data, isLoading, refetch, isFetching, error } = useSystemHealth();
   const [selectedMetaError, setSelectedMetaError] = useState<any | null>(null);
+  const asaasWebhookGlobalUrl = data?.asaasWebhook?.globalUrl
+    || `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook`;
 
   return (
     <div className="space-y-6">
@@ -173,7 +185,7 @@ export default function SystemHealth() {
       ) : (
         <>
           {/* Service Status Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
             <ServiceCard
               icon={<Database className="h-5 w-5" />}
               title="Banco de Dados"
@@ -215,6 +227,12 @@ export default function SystemHealth() {
                 data.metaQueue?.failureWindowHours ? `falhas em ${data.metaQueue.failureWindowHours}h` : null,
               ].filter(Boolean).join(' • ')}
             />
+            <ServiceCard
+              icon={<KeyRound className="h-5 w-5" />}
+              title="Webhook Asaas"
+              status={data.asaasWebhook?.status || 'not_configured'}
+              detail={data.asaasWebhook?.tokenSource || 'token global ausente'}
+            />
           </div>
 
           {/* Quick Stats */}
@@ -253,6 +271,37 @@ export default function SystemHealth() {
               </CardContent>
             </Card>
           </div>
+
+          <Card className="border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-primary" /> Webhook Asaas compartilhado
+              </CardTitle>
+              <CardDescription>
+                Use apenas quando uma mesma conta Asaas atende várias empresas. A empresa será resolvida pelo ID da cobrança salvo no banco.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
+              <SystemCopyField
+                label="URL global"
+                value={asaasWebhookGlobalUrl}
+                placeholder="URL indisponível"
+              />
+              <SystemCopyField
+                label={`Token (${data.asaasWebhook?.headerName || 'asaas-access-token'})`}
+                value={data.asaasWebhook?.token}
+                placeholder="ASAAS_WEBHOOK_AUTH_TOKEN não configurado"
+              />
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm lg:col-span-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={data.asaasWebhook?.status || 'not_configured'} />
+                  <span className="text-muted-foreground">
+                    Fonte: {data.asaasWebhook?.tokenSource || 'nenhum secret global encontrado'}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* WhatsApp Instances */}
           {data.whatsapp?.instances?.length > 0 && (
@@ -445,7 +494,7 @@ function ServiceCard({ icon, title, status, detail, error }: {
   detail?: string;
   error?: string;
 }) {
-  const isOk = status === 'healthy' || status === 'connected';
+  const isOk = status === 'healthy' || status === 'connected' || status === 'configured';
   return (
     <Card className="border-none shadow-sm">
       <CardContent className="p-6">
@@ -464,5 +513,37 @@ function ServiceCard({ icon, title, status, detail, error }: {
         {error && <p className="text-xs text-destructive mt-3 truncate">{error}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+function SystemCopyField({
+  label,
+  value,
+  placeholder,
+}: {
+  label: string;
+  value?: string | null;
+  placeholder: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background p-2">
+        <code className="min-w-0 flex-1 truncate text-xs text-foreground">
+          {value || placeholder}
+        </code>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          disabled={!value}
+          onClick={() => copySystemValue(value)}
+          aria-label={`Copiar ${label}`}
+        >
+          <Copy className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
   );
 }

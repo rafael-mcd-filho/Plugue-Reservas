@@ -65,6 +65,21 @@ Deno.serve(async (req) => {
       error: dbError?.message || null,
     };
 
+    const asaasWebhookAuthToken = Deno.env.get("ASAAS_WEBHOOK_AUTH_TOKEN");
+    const legacyAsaasWebhookToken = Deno.env.get("ASAAS_WEBHOOK_TOKEN");
+    const asaasWebhookToken = asaasWebhookAuthToken || legacyAsaasWebhookToken || "";
+    results.asaasWebhook = {
+      status: asaasWebhookToken ? "configured" : "not_configured",
+      globalUrl: `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/asaas-webhook`,
+      headerName: "asaas-access-token",
+      token: asaasWebhookToken || null,
+      tokenSource: asaasWebhookAuthToken
+        ? "ASAAS_WEBHOOK_AUTH_TOKEN"
+        : legacyAsaasWebhookToken
+          ? "ASAAS_WEBHOOK_TOKEN"
+          : null,
+    };
+
     const { data: instances } = await adminClient
       .from("company_whatsapp_instances")
       .select("id, instance_name, status, phone_number, company_id, updated_at");
