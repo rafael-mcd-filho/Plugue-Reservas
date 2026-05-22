@@ -1024,7 +1024,9 @@ export default function Leads() {
       const lead = map.get(key)!;
       const state = getStateFromPhone(visit.guest_phone);
 
-      lead.total_reservations += 1;
+      if (normalizeVisitStatus(visit.status) === 'checked_in' || visit.status === 'seated') {
+        lead.total_reservations += 1;
+      }
       lead.reservations.push(visit);
 
       if (visit.guest_name) {
