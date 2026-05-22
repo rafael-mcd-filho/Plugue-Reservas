@@ -29,6 +29,7 @@ import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
 import { checkReservationPayment, getReservationPaymentByTrackingCode } from '@/lib/asaas-prepayment-api';
 import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { isValidCompanySlug, toBrazilWhatsAppNumber } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
@@ -134,16 +135,7 @@ const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon
 };
 
 function getStatusMessage(status: ReservationStatus | 'completed' | 'no_show') {
-  if (status === 'no-show' || status === 'no_show') {
-    return {
-      icon: AlertCircle,
-      title: 'No Show',
-      description: 'Esta reserva foi marcada como No Show.',
-      color: 'text-muted-foreground',
-    };
-  }
-
-  return statusMessages[status];
+  return statusMessages[status === 'no_show' ? 'no-show' : status];
 }
 
 export default function ReservationTracking() {
@@ -159,18 +151,30 @@ export default function ReservationTracking() {
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
 
       if (!rpcResult.error) {
-        const rows = (rpcResult.data ?? []) as Array<{ id: string; name: string; logo_url: string | null; whatsapp: string | null }>;
+        const rows = (rpcResult.data ?? []) as Array<{
+          id: string;
+          name: string;
+          logo_url: string | null;
+          whatsapp: string | null;
+          reservation_late_tolerance_minutes?: number | null;
+        }>;
         return rows.length > 0 ? rows[0] : null;
       }
 
       const { data, error } = await supabase
         .from('companies_public' as any)
-        .select('id, name, logo_url, whatsapp')
+        .select('id, name, logo_url, whatsapp, reservation_late_tolerance_minutes')
         .eq('slug', slug!)
         .maybeSingle();
 
       if (error) throw error;
-      return data as unknown as { id: string; name: string; logo_url: string | null; whatsapp: string | null } | null;
+      return data as unknown as {
+        id: string;
+        name: string;
+        logo_url: string | null;
+        whatsapp: string | null;
+        reservation_late_tolerance_minutes?: number | null;
+      } | null;
     },
     enabled: slugIsValid,
   });
@@ -316,6 +320,9 @@ export default function ReservationTracking() {
   const status = getStatusMessage(normalizedStatus) || statusMessages.confirmed;
   const StatusIcon = status.icon;
   const canCancel = normalizedStatus === 'confirmed';
+  const lateToleranceMinutes = normalizeReservationLateToleranceMinutes(company.reservation_late_tolerance_minutes);
+  const showLateToleranceNotice = normalizedStatus === 'confirmed' && lateToleranceMinutes > 0;
+  const lateToleranceUnit = lateToleranceMinutes === 1 ? 'minuto' : 'minutos';
 
   return (
     <>
@@ -349,7 +356,7 @@ export default function ReservationTracking() {
                 <p className="mt-1 text-muted-foreground">{status.description}</p>
               </div>
 
-              {normalizedStatus === 'confirmed' && (
+              {showLateToleranceNotice && (
                 <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 text-left">
                   <div className="flex items-start gap-3">
                     <div className="rounded-full bg-primary/10 p-2 text-primary">
@@ -358,7 +365,7 @@ export default function ReservationTracking() {
                     <div className="space-y-1">
                       <p className="text-sm font-semibold text-foreground">Tolerância de atraso</p>
                       <p className="text-sm leading-6 text-muted-foreground">
-                        Existe tolerância de até 10 minutos de atraso no horário da sua reserva.
+                        Existe tolerância de até {lateToleranceMinutes} {lateToleranceUnit} de atraso no horário da sua reserva.
                       </p>
                     </div>
                   </div>
@@ -372,8 +379,8 @@ export default function ReservationTracking() {
                 </div>
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Data</span>
-                  <span className="font-medium">
-                    {format(new Date(`${entry.date}T12:00:00`), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                  <span className="text-right font-medium">
+                    {format(new Date(`${entry.date}T12:00:00`), 'dd/MM/yyyy')}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4">

@@ -449,7 +449,6 @@ export default function CompanyPublicPage() {
 
   const handleOpenReservation = () => {
     void startJourney();
-    void preloadReservationModal();
     setShowReservation(true);
   };
 
@@ -1057,38 +1056,30 @@ export default function CompanyPublicPage() {
         </div>
       )}
 
-      {showReservation && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm text-muted-foreground">Carregando...</p>
-            </div>
-          </div>
-        }>
-          <ReservationModal
-            open={showReservation}
-            onOpenChange={setShowReservation}
-            slug={slug ?? ''}
-            companyId={company.id}
-            companyName={company.name}
-            companyWhatsapp={company.whatsapp}
-            openingHours={openingHours}
-            reservationDuration={(company as any).reservation_duration ?? 30}
-            maxGuestsPerSlot={(company as any).max_guests_per_slot ?? 0}
-            initialDate={null}
-            initialPartySize={2}
-            onStepChange={(step) => trackStep(step)}
-            getTrackingSnapshot={getTrackingSnapshot}
-            clearTrackingJourney={clearJourney}
-            exitRecoveryEnabled={publicReservationExitPromptEnabled}
-            exitRecoveryPrimaryText={publicReservationExitPromptPrimaryText}
-            exitRecoveryPrimaryTextSize={publicReservationExitPromptPrimaryTextSize}
-            exitRecoverySecondaryText={publicReservationExitPromptSecondaryText}
-            exitRecoverySecondaryTextSize={publicReservationExitPromptSecondaryTextSize}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ReservationModal
+          open={showReservation}
+          onOpenChange={setShowReservation}
+          slug={slug ?? ''}
+          companyId={company.id}
+          companyName={company.name}
+          companyWhatsapp={company.whatsapp}
+          openingHours={openingHours}
+          reservationDuration={(company as any).reservation_duration ?? 30}
+          maxGuestsPerSlot={(company as any).max_guests_per_slot ?? 0}
+          largePartyThreshold={(company as any).large_party_whatsapp_threshold ?? 10}
+          initialDate={null}
+          initialPartySize={2}
+          onStepChange={(step) => trackStep(step)}
+          getTrackingSnapshot={getTrackingSnapshot}
+          clearTrackingJourney={clearJourney}
+          exitRecoveryEnabled={publicReservationExitPromptEnabled}
+          exitRecoveryPrimaryText={publicReservationExitPromptPrimaryText}
+          exitRecoveryPrimaryTextSize={publicReservationExitPromptPrimaryTextSize}
+          exitRecoverySecondaryText={publicReservationExitPromptSecondaryText}
+          exitRecoverySecondaryTextSize={publicReservationExitPromptSecondaryTextSize}
+        />
+      </Suspense>
     </div>
   );
 }
