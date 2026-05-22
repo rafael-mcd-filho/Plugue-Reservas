@@ -791,7 +791,7 @@ export default function CompanyUsers() {
             <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEdit} className="mt-4 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto space-y-4 px-1">
+            <div className="flex-1 overflow-y-auto space-y-4 pl-1 pr-3">
               <div>
                 <Label htmlFor="edit-user-full-name">Nome completo</Label>
                 <Input
@@ -874,7 +874,7 @@ export default function CompanyUsers() {
             <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="mt-4 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto space-y-4 px-1">
+            <div className="flex-1 overflow-y-auto space-y-4 pl-1 pr-3">
               <div>
                 <Label htmlFor="create-user-full-name">Nome completo *</Label>
                 <Input
