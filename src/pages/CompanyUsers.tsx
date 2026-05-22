@@ -786,12 +786,12 @@ export default function CompanyUsers() {
       />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
+        <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
           <DialogHeader>
             <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEdit} className="mt-4 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            <div className="flex-1 overflow-y-auto space-y-4 px-1">
               <div>
                 <Label htmlFor="edit-user-full-name">Nome completo</Label>
                 <Input
@@ -869,12 +869,12 @@ export default function CompanyUsers() {
       </Dialog>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
+        <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
           <DialogHeader>
             <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="mt-4 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            <div className="flex-1 overflow-y-auto space-y-4 px-1">
               <div>
                 <Label htmlFor="create-user-full-name">Nome completo *</Label>
                 <Input
