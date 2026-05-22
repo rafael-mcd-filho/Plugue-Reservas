@@ -786,75 +786,77 @@ export default function CompanyUsers() {
       />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
           <DialogHeader>
             <DialogTitle>Editar usuário</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleEdit} className="mt-4 space-y-4">
-            <div>
-              <Label htmlFor="edit-user-full-name">Nome completo</Label>
-              <Input
-                id="edit-user-full-name"
-                name="full_name"
-                value={editForm.full_name}
-                onChange={(event) => setEditForm({ ...editForm, full_name: event.target.value })}
-                autoComplete="name"
-              />
+          <form onSubmit={handleEdit} className="mt-4 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              <div>
+                <Label htmlFor="edit-user-full-name">Nome completo</Label>
+                <Input
+                  id="edit-user-full-name"
+                  name="full_name"
+                  value={editForm.full_name}
+                  onChange={(event) => setEditForm({ ...editForm, full_name: event.target.value })}
+                  autoComplete="name"
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-user-email">E-mail</Label>
+                <Input
+                  id="edit-user-email"
+                  name="email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
+                  autoComplete="email"
+                  inputMode="email"
+                  spellCheck={false}
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-user-phone">Telefone</Label>
+                <Input
+                  id="edit-user-phone"
+                  name="phone"
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={15}
+                />
+              </div>
+              <div>
+                <Label>Perfil</Label>
+                <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })}>
+                  <SelectTrigger aria-label="Perfil do usuário">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="operator">Operador</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {editForm.role === 'operator' ? (
+                <OperatorPermissionEditor
+                  value={editForm.operatorPermissions}
+                  onChange={(next) => setEditForm({ ...editForm, operatorPermissions: next })}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
+                </p>
+              )}
+              {editWouldRemoveLastAdmin && (
+                <p className="text-sm text-destructive">
+                  A unidade precisa manter ao menos um admin ativo.
+                </p>
+              )}
             </div>
-            <div>
-              <Label htmlFor="edit-user-email">E-mail</Label>
-              <Input
-                id="edit-user-email"
-                name="email"
-                type="email"
-                value={editForm.email}
-                onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
-                autoComplete="email"
-                inputMode="email"
-                spellCheck={false}
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-user-phone">Telefone</Label>
-              <Input
-                id="edit-user-phone"
-                name="phone"
-                type="tel"
-                value={editForm.phone}
-                onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={15}
-              />
-            </div>
-            <div>
-              <Label>Perfil</Label>
-              <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })}>
-                <SelectTrigger aria-label="Perfil do usuário">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="operator">Operador</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {editForm.role === 'operator' ? (
-              <OperatorPermissionEditor
-                value={editForm.operatorPermissions}
-                onChange={(next) => setEditForm({ ...editForm, operatorPermissions: next })}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
-              </p>
-            )}
-            {editWouldRemoveLastAdmin && (
-              <p className="text-sm text-destructive">
-                A unidade precisa manter ao menos um admin ativo.
-              </p>
-            )}
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-3 border-t pt-4 mt-4 shrink-0">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>
                 Cancelar
               </Button>
@@ -867,105 +869,107 @@ export default function CompanyUsers() {
       </Dialog>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
           <DialogHeader>
             <DialogTitle>Novo usuário</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreate} className="mt-4 space-y-4">
-            <div>
-              <Label htmlFor="create-user-full-name">Nome completo *</Label>
-              <Input
-                id="create-user-full-name"
-                name="full_name"
-                value={createForm.full_name}
-                onChange={(event) => setCreateForm({ ...createForm, full_name: event.target.value })}
-                placeholder="Nome do usuário"
-                autoComplete="name"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="create-user-email">E-mail *</Label>
-              <Input
-                id="create-user-email"
-                name="email"
-                type="email"
-                value={createForm.email}
-                onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })}
-                placeholder="email@empresa.com"
-                autoComplete="email"
-                inputMode="email"
-                spellCheck={false}
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="create-user-phone">Telefone</Label>
-              <Input
-                id="create-user-phone"
-                name="phone"
-                type="tel"
-                value={createForm.phone}
-                onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
-                placeholder="(11) 99999-9999"
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={15}
-              />
-            </div>
-            <div>
-              <Label>Perfil *</Label>
-              <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })}>
-                <SelectTrigger aria-label="Perfil do novo usuário">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="operator">Operador</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {createForm.role === 'operator' ? (
-              <OperatorPermissionEditor
-                value={createForm.operatorPermissions}
-                onChange={(next) => setCreateForm({ ...createForm, operatorPermissions: next })}
-              />
-            ) : (
+          <form onSubmit={handleCreate} className="mt-4 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              <div>
+                <Label htmlFor="create-user-full-name">Nome completo *</Label>
+                <Input
+                  id="create-user-full-name"
+                  name="full_name"
+                  value={createForm.full_name}
+                  onChange={(event) => setCreateForm({ ...createForm, full_name: event.target.value })}
+                  placeholder="Nome do usuário"
+                  autoComplete="name"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="create-user-email">E-mail *</Label>
+                <Input
+                  id="create-user-email"
+                  name="email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })}
+                  placeholder="email@empresa.com"
+                  autoComplete="email"
+                  inputMode="email"
+                  spellCheck={false}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="create-user-phone">Telefone</Label>
+                <Input
+                  id="create-user-phone"
+                  name="phone"
+                  type="tel"
+                  value={createForm.phone}
+                  onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
+                  placeholder="(11) 99999-9999"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={15}
+                />
+              </div>
+              <div>
+                <Label>Perfil *</Label>
+                <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })}>
+                  <SelectTrigger aria-label="Perfil do novo usuário">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="operator">Operador</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {createForm.role === 'operator' ? (
+                <OperatorPermissionEditor
+                  value={createForm.operatorPermissions}
+                  onChange={(next) => setCreateForm({ ...createForm, operatorPermissions: next })}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
-                Admin tem acesso completo fixo em todos os m&oacute;dulos da unidade.
+                O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
               </p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              O usuário será vinculado automaticamente a {companyName}. Um link único de acesso será gerado.
-            </p>
-            <div>
-              <Label htmlFor="create-user-password">Senha inicial *</Label>
-              <Input
-                id="create-user-password"
-                name="password"
-                type="password"
-                value={createForm.password}
-                onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })}
-                placeholder="Defina a senha de acesso"
-                autoComplete="new-password"
-                required
-              />
-              <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS_TEXT}</p>
+              <div>
+                <Label htmlFor="create-user-password">Senha inicial *</Label>
+                <Input
+                  id="create-user-password"
+                  name="password"
+                  type="password"
+                  value={createForm.password}
+                  onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })}
+                  placeholder="Defina a senha de acesso"
+                  autoComplete="new-password"
+                  required
+                />
+                <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS_TEXT}</p>
+              </div>
+              <div>
+                <Label htmlFor="create-user-confirm-password">Confirmar senha *</Label>
+                <Input
+                  id="create-user-confirm-password"
+                  name="confirm_password"
+                  type="password"
+                  value={createForm.confirmPassword}
+                  onChange={(event) => setCreateForm({ ...createForm, confirmPassword: event.target.value })}
+                  placeholder="Repita a senha"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="create-user-confirm-password">Confirmar senha *</Label>
-              <Input
-                id="create-user-confirm-password"
-                name="confirm_password"
-                type="password"
-                value={createForm.confirmPassword}
-                onChange={(event) => setCreateForm({ ...createForm, confirmPassword: event.target.value })}
-                placeholder="Repita a senha"
-                autoComplete="new-password"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-3 border-t pt-4 mt-4 shrink-0">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>
                 Cancelar
               </Button>
