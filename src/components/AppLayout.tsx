@@ -7,7 +7,6 @@ import {
   Building2,
   CalendarCheck,
   CalendarDays,
-  ChevronDown,
   ClipboardList,
   Contact,
   CreditCard,
@@ -78,7 +77,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY) === 'true';
   });
-  const [companyMenuOpen, setCompanyMenuOpen] = useState(true);
   const { user, profile, roles, loading, signOut } = useAuth();
   const { data: systemBranding } = useSystemBranding();
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
@@ -89,8 +87,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const {
     isImpersonatingCompany,
     impersonatedSlug,
-    impersonatedUserName,
-    impersonatedUserEmail,
     effectiveRole,
     effectiveRoles,
     auditMetadata,
@@ -207,19 +203,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'events_view',
         },
+        {
+          label: 'Configura\u00E7\u00F5es',
+          description: 'Hor\u00E1rios e p\u00E1gina',
+          icon: Settings,
+          path: `/${slug}/admin/configuracoes`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'settings_view',
+        },
       ]
     : [];
-
-  const companySettingsNavItem: NavItem | null = slug
-    ? {
-        label: 'Configura\u00E7\u00F5es',
-        description: 'Hor\u00E1rios e p\u00E1gina',
-        icon: Settings,
-        path: `/${slug}/admin/configuracoes`,
-        showFor: ['admin', 'operator', 'superadmin'],
-        requiredPermission: 'settings_view',
-      }
-    : null;
 
   const superadminNavItems: NavItem[] = !slug
     ? [
@@ -288,18 +281,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
-  const visibleCompanySettingsNavItem = companySettingsNavItem && rolesLoaded
-    ? companySettingsNavItem.showFor.some((role) => activeRoles.includes(role))
-      && (!permissionsLoading || !companySettingsNavItem.requiredPermission)
-      && hasCompanyPermission(companySettingsNavItem.requiredPermission)
-      ? companySettingsNavItem
-      : null
-    : null;
-
   const visibleNavItems = [
     ...visiblePrimaryNavItems,
     ...visibleManagementNavItems,
-    ...(visibleCompanySettingsNavItem ? [visibleCompanySettingsNavItem] : []),
   ];
   const profilePath = slug ? `/${slug}/admin/perfil` : '/perfil';
 
@@ -315,8 +299,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     [location.pathname, visibleNavItems],
   );
   const isProfileRoute = location.pathname === profilePath;
-  const hasCompanySettingsNav = !!visibleCompanySettingsNavItem;
-  const isCompanySettingsRouteActive = visibleCompanySettingsNavItem ? isNavItemActive(visibleCompanySettingsNavItem) : false;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
   const showHeaderContextBadges = !isOperatorPanel;
   const showHeaderMeta = showHeaderContextBadges || isImpersonatingCompany;
@@ -344,12 +326,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY, String(desktopSidebarPinned));
   }, [desktopSidebarPinned]);
-
-  useEffect(() => {
-    if (isCompanySettingsRouteActive) {
-      setCompanyMenuOpen(true);
-    }
-  }, [isCompanySettingsRouteActive]);
 
   useEffect(() => {
     if (loading || !userId) return;
@@ -454,49 +430,38 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-4 pb-4">
-          {slug ? (
-            <div className="space-y-4">
-              <div
-                className={cn(
-                  'overflow-hidden rounded-lg border transition-colors',
-                  companyMenuOpen
-                    ? 'border-primary/70 bg-primary/10'
-                    : 'border-sidebar-border bg-sidebar-accent/60',
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (hasCompanySettingsNav) {
-                      setCompanyMenuOpen((current) => !current);
-                    }
-                  }}
-                  className={cn(
-                    'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
-                    companyMenuOpen ? 'hover:bg-primary/5' : 'hover:bg-sidebar-accent',
-                    hasCompanySettingsNav ? '' : 'cursor-default',
-                  )}
-                >
-                  <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
-                  <span className="min-w-0 flex-1 break-words text-sm font-medium text-sidebar-foreground">
-                    {companyName}
-                  </span>
-                  {hasCompanySettingsNav && (
-                    <ChevronDown
-                      className={cn(
-                        'h-4 w-4 shrink-0 text-sidebar-foreground/45 transition-transform',
-                        companyMenuOpen && 'rotate-180',
-                      )}
-                    />
-                  )}
-                </button>
-
-                {hasCompanySettingsNav && companyMenuOpen && (
-                  <div className="border-t border-primary/20 px-2 pb-2 pt-1">
-                    {renderNavLink(visibleCompanySettingsNavItem!)}
+        <nav className="flex-1 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border hover:[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/30">
+          {!rolesLoaded ? (
+            <div className="space-y-4" aria-busy="true" aria-label="Carregando menu">
+              {slug && (
+                <div className="h-[46px] animate-pulse rounded-lg bg-sidebar-accent/40" />
+              )}
+              <div className="space-y-2">
+                <div className="ml-2 h-3 w-16 animate-pulse rounded bg-sidebar-accent/40" />
+                <div className="space-y-1">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="h-9 animate-pulse rounded-lg bg-sidebar-accent/40" />
+                  ))}
+                </div>
+              </div>
+              {slug && (
+                <div className="space-y-2">
+                  <div className="ml-2 h-3 w-16 animate-pulse rounded bg-sidebar-accent/40" />
+                  <div className="space-y-1">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="h-9 animate-pulse rounded-lg bg-sidebar-accent/40" />
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
+            </div>
+          ) : slug ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-lg border border-sidebar-border/80 bg-sidebar-accent/30 px-3 py-2.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
+                <span className="min-w-0 flex-1 break-words text-sm font-medium text-sidebar-foreground">
+                  {companyName}
+                </span>
               </div>
 
               <div className="space-y-2">
@@ -535,9 +500,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {profile ? (
             <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/60 p-3">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/15 text-sidebar-primary">
-                  <User className="h-4 w-4" />
-                </div>
+                {companyContext?.companyLogoUrl ? (
+                  <img
+                    src={companyContext.companyLogoUrl}
+                    alt={companyContext.companyName}
+                    className="h-8 w-8 shrink-0 rounded-md border border-sidebar-border bg-sidebar object-cover"
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/15 text-sidebar-primary">
+                    <User className="h-4 w-4" />
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-sidebar-foreground">
                     {profile.full_name || profile.email}
@@ -547,16 +520,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
               <div className="mt-2 rounded-md border border-sidebar-border bg-sidebar px-2.5 py-1.5">
                 <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/40">{'Sess\u00E3o atual'}</p>
-                <p className="mt-0.5 text-xs text-sidebar-foreground/75">
-                  {isImpersonatingCompany
-                    ? `Superadmin impersonando ${formatRoleLabel(effectiveRole)}`
-                    : rolesLabel}
-                </p>
-                {isImpersonatingCompany && (
-                  <p className="truncate text-xs text-sidebar-foreground/45">
-                    {impersonatedUserName || impersonatedUserEmail}
-                  </p>
-                )}
+                <p className="mt-0.5 text-xs text-sidebar-foreground/75">{rolesLabel}</p>
               </div>
 
               <Button
@@ -572,7 +536,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
               <Button
                 variant="ghost"
-                className="mt-2 w-full justify-start gap-2 rounded-md text-sidebar-foreground/75 hover:bg-sidebar-border hover:text-sidebar-foreground"
+                className="mt-2 w-full justify-start gap-2 rounded-md text-sidebar-foreground/75 hover:bg-destructive/10 hover:text-destructive"
                 onClick={handleSignOut}
               >
                 <LogOut className="h-4 w-4" />

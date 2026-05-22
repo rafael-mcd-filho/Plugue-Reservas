@@ -12,6 +12,7 @@ interface CompanySlugContextType {
   slug: string;
   companyId: string;
   companyName: string;
+  companyLogoUrl: string | null;
 }
 
 const CompanySlugContext = createContext<CompanySlugContextType | undefined>(undefined);
@@ -45,14 +46,15 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('companies' as any)
-        .select('id, name, slug')
+        .select('id, name, slug, logo_url')
         .eq('slug', slug!)
         .maybeSingle();
       if (error) throw error;
       return data as any;
     },
-    enabled: slugIsValid && !impersonatedCompany,
+    enabled: slugIsValid,
     initialData: impersonatedCompany ?? undefined,
+    initialDataUpdatedAt: impersonatedCompany ? 0 : undefined,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -90,7 +92,7 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <CompanySlugContext.Provider value={{ slug: company.slug, companyId: company.id, companyName: company.name }}>
+    <CompanySlugContext.Provider value={{ slug: company.slug, companyId: company.id, companyName: company.name, companyLogoUrl: company.logo_url ?? null }}>
       {children}
     </CompanySlugContext.Provider>
   );
