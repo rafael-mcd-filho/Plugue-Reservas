@@ -56,6 +56,7 @@ import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
+import { ScheduleOverridesCard } from '@/components/company/ScheduleOverridesCard';
 
 interface OpeningHour {
   day: string;
@@ -1061,6 +1062,8 @@ export default function CompanySettings() {
               </div>
             </CardContent>
           </Card>
+
+          {companyId && <ScheduleOverridesCard companyId={companyId} />}
 
           {featureFlags?.features.flow_protection !== false && <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">

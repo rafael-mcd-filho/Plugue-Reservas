@@ -327,6 +327,27 @@ export default function ReservationModal({
     enabled: !!companyId,
   });
 
+  const { data: scheduleOverrides = [] } = useQuery({
+    queryKey: ['public-schedule-overrides', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_public_schedule_overrides' as any, {
+        _company_id: companyId,
+      });
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        date: string;
+        start_time: string;
+        end_time: string;
+        slot_interval_minutes: number;
+        label: string | null;
+      }>;
+    },
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+  });
+
   const next7Days = useMemo(() => {
     const days: Date[] = [];
     for (let i = 0; i < 7; i++) days.push(addDays(new Date(), i));
@@ -344,11 +365,25 @@ export default function ReservationModal({
     return findOpeningHoursForDayIndex(openingHours, selectedDate.getDay());
   }, [selectedDate, openingHours]);
 
+  const activeScheduleOverride = useMemo(() => {
+    if (!selectedDate) return null;
+    const key = format(selectedDate, 'yyyy-MM-dd');
+    return scheduleOverrides.find((o) => o.date === key) ?? null;
+  }, [selectedDate, scheduleOverrides]);
+
   const timeSlots = useMemo(() => {
+    if (activeScheduleOverride) {
+      const slots = generateTimeSlots(
+        activeScheduleOverride.start_time.slice(0, 5),
+        activeScheduleOverride.end_time.slice(0, 5),
+        activeScheduleOverride.slot_interval_minutes,
+      );
+      return filterPastTimeSlotsForDate(slots, selectedDate);
+    }
     if (!selectedDayHours || selectedDayHours.closed) return [];
     const slots = generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
     return filterPastTimeSlotsForDate(slots, selectedDate);
-  }, [selectedDate, selectedDayHours, reservationDuration]);
+  }, [selectedDate, selectedDayHours, reservationDuration, activeScheduleOverride]);
 
   const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const slotLookupKey = useMemo(() => {
@@ -920,13 +955,15 @@ export default function ReservationModal({
   };
 
   const isDayClosed = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    // Override has precedence over normal closed status (but not blocked_dates)
+    const hasOverride = scheduleOverrides.some((o) => o.date === dateStr);
+    const blocked = blockedDates.find((bd: any) => bd.date === dateStr && bd.all_day);
+    if (blocked) return true;
+    if (hasOverride) return false;
     const hours = findOpeningHoursForDayIndex(openingHours, date.getDay());
     if (!hours) return true;
-    if (hours.closed === true) return true;
-    // Check blocked dates (all_day only for calendar disable)
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const blocked = blockedDates.find((bd: any) => bd.date === dateStr && bd.all_day);
-    return !!blocked;
+    return hours.closed === true;
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
