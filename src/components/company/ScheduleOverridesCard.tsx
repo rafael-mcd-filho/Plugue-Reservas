@@ -178,7 +178,7 @@ function OverrideDialog({ companyId, override, open, onOpenChange }: OverrideDia
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rso-end">Término</Label>
+              <Label htmlFor="rso-end">Último horário</Label>
               <Input
                 id="rso-end"
                 type="time"
@@ -281,7 +281,7 @@ export function ScheduleOverridesCard({ companyId }: ScheduleOverridesCardProps)
                       {format(parseISO(ov.date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {ov.start_time.slice(0, 5)} – {ov.end_time.slice(0, 5)}, a cada {formatIntervalLabel(ov.slot_interval_minutes)}
+                      {ov.start_time.slice(0, 5)} até {ov.end_time.slice(0, 5)}, a cada {formatIntervalLabel(ov.slot_interval_minutes)}
                       {ov.label ? ` · ${ov.label}` : ''}
                     </p>
                   </div>

@@ -76,13 +76,13 @@ const DAY_MAP: Record<string, number> = {
   'Dom': 0, 'Seg': 1, 'Ter': 2, 'Qua': 3, 'Qui': 4, 'Sex': 5, 'Sáb': 6,
 };
 
-function generateTimeSlots(open: string, close: string, interval: number = 30): string[] {
+function generateTimeSlots(open: string, close: string, interval: number = 30, inclusive = false): string[] {
   const slots: string[] = [];
   const [openH, openM] = open.split(':').map(Number);
   const [closeH, closeM] = close.split(':').map(Number);
   let current = openH * 60 + openM;
   const end = closeH * 60 + closeM;
-  while (current < end) {
+  while (inclusive ? current <= end : current < end) {
     const h = Math.floor(current / 60);
     const m = current % 60;
     slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
@@ -377,6 +377,7 @@ export default function ReservationModal({
         activeScheduleOverride.start_time.slice(0, 5),
         activeScheduleOverride.end_time.slice(0, 5),
         activeScheduleOverride.slot_interval_minutes,
+        true,
       );
       return filterPastTimeSlotsForDate(slots, selectedDate);
     }
