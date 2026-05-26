@@ -17,6 +17,13 @@ import {
   sendWhatsAppText,
   serializeWhatsAppFailure,
 } from "../_shared/whatsapp.ts";
+import {
+  buildReservationParameters,
+  buildWaitlistParameters,
+  enqueuePlugueChatMessage,
+  getCompanyChannel,
+  normalizePhone,
+} from "../_shared/pluguechat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -317,6 +324,86 @@ async function recordQueuedFailure(
   });
 
   await enqueueWhatsAppMessage(supabaseAdmin, payload);
+}
+
+async function enqueuePlugueChatReservation(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  event: string,
+  reservation: ReservationData,
+  trackingUrl: string | null,
+  results: { whatsapp?: string },
+) {
+  const automationType = event === "reservation_created" ? "confirmation_message" : "cancellation_message";
+
+  const { data: template } = await supabaseAdmin
+    .from("pluguechat_automation_templates")
+    .select("template_id, template_name")
+    .eq("company_id", reservation.company_id)
+    .eq("type", automationType)
+    .eq("enabled", true)
+    .maybeSingle();
+
+  if (!template?.template_id || !reservation.guest_phone) {
+    results.whatsapp = "pluguechat_template_not_configured";
+    return;
+  }
+
+  const phone = normalizePhone(reservation.guest_phone);
+  const idempotencyKey = `pluguechat:reservation:${reservation.id}:${automationType}`;
+  const parameters = buildReservationParameters(automationType, reservation as any, trackingUrl);
+
+  const result = await enqueuePlugueChatMessage(supabaseAdmin, {
+    company_id: reservation.company_id,
+    reservation_id: reservation.id,
+    phone,
+    type: automationType,
+    template_id: template.template_id,
+    template_name: template.template_name ?? null,
+    parameters,
+    idempotency_key: idempotencyKey,
+  });
+
+  results.whatsapp = result === "inserted" ? "pluguechat_queued" : "skipped_duplicate";
+}
+
+async function enqueuePlugueChatWaitlist(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  event: string,
+  waitlist: WaitlistData,
+  trackingUrl: string | null,
+  results: { whatsapp?: string },
+) {
+  const automationType = event === "waitlist_added" ? "waitlist_entry" : "waitlist_called";
+
+  const { data: template } = await supabaseAdmin
+    .from("pluguechat_automation_templates")
+    .select("template_id, template_name")
+    .eq("company_id", waitlist.company_id)
+    .eq("type", automationType)
+    .eq("enabled", true)
+    .maybeSingle();
+
+  if (!template?.template_id || !waitlist.guest_phone) {
+    results.whatsapp = "pluguechat_template_not_configured";
+    return;
+  }
+
+  const phone = normalizePhone(waitlist.guest_phone);
+  const idempotencyKey = `pluguechat:waitlist:${waitlist.id}:${automationType}`;
+  const parameters = buildWaitlistParameters(automationType, waitlist as any, trackingUrl);
+
+  const result = await enqueuePlugueChatMessage(supabaseAdmin, {
+    company_id: waitlist.company_id,
+    waitlist_id: waitlist.id,
+    phone,
+    type: automationType,
+    template_id: template.template_id,
+    template_name: template.template_name ?? null,
+    parameters,
+    idempotency_key: idempotencyKey,
+  });
+
+  results.whatsapp = result === "inserted" ? "pluguechat_queued" : "skipped_duplicate";
 }
 
 async function sendReservationAutomation(
@@ -749,13 +836,23 @@ Deno.serve(async (req) => {
     );
 
     const results: { whatsapp?: string } = {};
+    const companyId = reservation?.company_id ?? waitlist?.company_id ?? null;
+    const activeChannel = companyId ? await getCompanyChannel(supabaseAdmin, companyId) : "evolution";
 
     if (reservation) {
-      await sendReservationAutomation(supabaseAdmin, event, reservation, reservationTrackingUrl, results);
+      if (activeChannel === "pluguechat_official") {
+        await enqueuePlugueChatReservation(supabaseAdmin, event, reservation, reservationTrackingUrl, results);
+      } else {
+        await sendReservationAutomation(supabaseAdmin, event, reservation, reservationTrackingUrl, results);
+      }
     }
 
     if (waitlist) {
-      await sendWaitlistAutomation(supabaseAdmin, event, waitlist, waitlistTrackingUrl, results);
+      if (activeChannel === "pluguechat_official") {
+        await enqueuePlugueChatWaitlist(supabaseAdmin, event, waitlist, waitlistTrackingUrl, results);
+      } else {
+        await sendWaitlistAutomation(supabaseAdmin, event, waitlist, waitlistTrackingUrl, results);
+      }
     }
 
     return new Response(JSON.stringify({ success: true, results }), {

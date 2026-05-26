@@ -7,6 +7,12 @@ import {
   formatPhoneForWhatsApp,
   WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
+import {
+  buildBirthdayParameters,
+  enqueuePlugueChatMessage,
+  getCompanyChannels,
+  normalizePhone,
+} from "../_shared/pluguechat.ts";
 import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
@@ -148,60 +154,76 @@ Deno.serve(async (req) => {
     const uniqueBirthdays = Array.from(uniqueMap.values());
     const companyIds = [...new Set(uniqueBirthdays.map((contact: any) => contact.company_id))];
 
-    const { data: automations } = await supabaseAdmin
-      .from("automation_settings")
-      .select("*")
-      .in("company_id", companyIds)
-      .eq("type", "birthday_message")
-      .eq("enabled", true);
+    const channelMap = await getCompanyChannels(supabaseAdmin, companyIds);
 
-    const { data: alreadySent } = await supabaseAdmin
-      .from("whatsapp_message_logs")
-      .select("phone, company_id")
-      .eq("type", "birthday")
-      .gte("created_at", `${todayStr}T00:00:00`)
-      .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]);
-
-    const { data: alreadyQueued } = await supabaseAdmin
-      .from("whatsapp_message_queue")
-      .select("phone, company_id")
-      .eq("type", "birthday")
-      .gte("created_at", `${todayStr}T00:00:00`);
+    const [
+      { data: automations },
+      { data: alreadySent },
+      { data: alreadyQueued },
+      { data: plugueChatTemplates },
+      { data: pcAlreadySent },
+      { data: pcAlreadyQueued },
+    ] = await Promise.all([
+      supabaseAdmin.from("automation_settings").select("*").in("company_id", companyIds).eq("type", "birthday_message").eq("enabled", true),
+      supabaseAdmin.from("whatsapp_message_logs").select("phone, company_id").eq("type", "birthday").gte("created_at", `${todayStr}T00:00:00`).in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]),
+      supabaseAdmin.from("whatsapp_message_queue").select("phone, company_id").eq("type", "birthday").gte("created_at", `${todayStr}T00:00:00`),
+      supabaseAdmin.from("pluguechat_automation_templates").select("company_id, template_id, template_name").in("company_id", companyIds).eq("type", "birthday_message").eq("enabled", true),
+      supabaseAdmin.from("pluguechat_message_logs").select("phone, company_id").eq("type", "birthday_message").gte("created_at", `${todayStr}T00:00:00`),
+      supabaseAdmin.from("pluguechat_message_queue").select("phone, company_id").eq("type", "birthday_message").gte("created_at", `${todayStr}T00:00:00`).neq("status", "cancelled"),
+    ]);
 
     const processedSet = new Set([
       ...(alreadySent || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
       ...(alreadyQueued || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
+    ]);
+    const pcProcessedSet = new Set([
+      ...(pcAlreadySent || []).map((item: any) => `${normalizePhone(item.phone)}:${item.company_id}`),
+      ...(pcAlreadyQueued || []).map((item: any) => `${normalizePhone(item.phone)}:${item.company_id}`),
     ]);
 
     let queued = 0;
     let skipped = 0;
 
     for (const contact of uniqueBirthdays) {
-      const automation = (automations || []).find((item: any) => item.company_id === contact.company_id);
-      if (!automation?.message_template) {
-        skipped++;
+      const channel = channelMap.get(contact.company_id) ?? "evolution";
+
+      if (channel === "pluguechat_official") {
+        const phone = normalizePhone(contact.guest_phone);
+        const sentKey = `${phone}:${contact.company_id}`;
+        if (pcProcessedSet.has(sentKey)) { skipped++; continue; }
+
+        const template = (plugueChatTemplates || []).find((t: any) => t.company_id === contact.company_id);
+        if (!template?.template_id) { skipped++; continue; }
+
+        const result = await enqueuePlugueChatMessage(supabaseAdmin, {
+          company_id: contact.company_id,
+          phone,
+          type: "birthday_message",
+          template_id: template.template_id,
+          template_name: template.template_name ?? null,
+          parameters: buildBirthdayParameters(contact.guest_name || "", BIRTHDAY_ADVANCE_DAYS),
+          scheduled_for: scheduledFor.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          idempotency_key: `pluguechat:birthday:${contact.company_id}:${targetDateKey}:${phone}`,
+        });
+
+        pcProcessedSet.add(sentKey);
+        result === "inserted" ? queued++ : skipped++;
         continue;
       }
 
+      // Canal Evolution
       const phone = contact.guest_phone;
       const sentKey = `${phone}:${contact.company_id}`;
-      if (processedSet.has(sentKey)) {
-        skipped++;
-        continue;
-      }
+      if (processedSet.has(sentKey)) { skipped++; continue; }
+
+      const automation = (automations || []).find((item: any) => item.company_id === contact.company_id);
+      if (!automation?.message_template) { skipped++; continue; }
 
       const deliveryKey = buildBirthdayDispatchKey(contact.company_id, targetDateKey, phone);
-      const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
-        deliveryKey,
-        companyId: contact.company_id,
-        automationType: "birthday",
-        phone,
-      });
+      const claimed = await claimWhatsAppDispatch(supabaseAdmin, { deliveryKey, companyId: contact.company_id, automationType: "birthday", phone });
 
-      if (!claimed) {
-        skipped++;
-        continue;
-      }
+      if (!claimed) { skipped++; continue; }
 
       const message = automation.message_template.replace(/\{nome\}/g, contact.guest_name || "");
       const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
@@ -214,17 +236,9 @@ Deno.serve(async (req) => {
         priority: PRIORITY_BIRTHDAY,
       });
 
-      await finalizeWhatsAppDispatch(supabaseAdmin, {
-        deliveryKey,
-        status: "queued",
-      });
-
+      await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "queued" });
       processedSet.add(sentKey);
-      if (enqueueResult === "inserted") {
-        queued++;
-      } else {
-        skipped++;
-      }
+      enqueueResult === "inserted" ? queued++ : skipped++;
     }
 
     return new Response(JSON.stringify({ queued, skipped, total: uniqueBirthdays.length }), {

@@ -7,6 +7,12 @@ import {
   formatPhoneForWhatsApp,
   WHATSAPP_ACCEPTED_LOG_STATUSES,
 } from "../_shared/whatsapp.ts";
+import {
+  buildReservationParameters,
+  enqueuePlugueChatMessage,
+  getCompanyChannels,
+  normalizePhone,
+} from "../_shared/pluguechat.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
@@ -160,7 +166,16 @@ Deno.serve(async (req) => {
     const companyIds = [...new Set(allReservations.map((reservation: any) => reservation.company_id))];
     const reservationIds = allReservations.map((reservation: any) => reservation.id);
 
-    const [{ data: automations }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
+    const channelMap = await getCompanyChannels(supabaseAdmin, companyIds);
+
+    const [
+      { data: automations },
+      { data: alreadySent },
+      { data: alreadyQueued },
+      { data: plugueChatTemplates },
+      { data: plugueChatLogs },
+      { data: plugueChatQueue },
+    ] = await Promise.all([
       supabaseAdmin
         .from("automation_settings")
         .select("*")
@@ -178,10 +193,29 @@ Deno.serve(async (req) => {
         .select("reservation_id, type")
         .in("reservation_id", reservationIds)
         .in("type", REMINDER_TYPES),
+      supabaseAdmin
+        .from("pluguechat_automation_templates")
+        .select("company_id, type, template_id, template_name")
+        .in("company_id", companyIds)
+        .in("type", REMINDER_TYPES)
+        .eq("enabled", true),
+      supabaseAdmin
+        .from("pluguechat_message_logs")
+        .select("reservation_id, type")
+        .in("reservation_id", reservationIds)
+        .in("type", REMINDER_TYPES),
+      supabaseAdmin
+        .from("pluguechat_message_queue")
+        .select("reservation_id, type")
+        .in("reservation_id", reservationIds)
+        .in("type", REMINDER_TYPES)
+        .neq("status", "cancelled"),
     ]);
 
     const sentSet = new Set((alreadySent || []).map((log: any) => `${log.reservation_id}:${log.type}`));
     const queuedSet = new Set((alreadyQueued || []).map((item: any) => `${item.reservation_id}:${item.type}`));
+    const pcLogSet = new Set((plugueChatLogs || []).map((l: any) => `${l.reservation_id}:${l.type}`));
+    const pcQueueSet = new Set((plugueChatQueue || []).map((i: any) => `${i.reservation_id}:${i.type}`));
 
     let queued = 0;
     let skipped = 0;
@@ -190,20 +224,45 @@ Deno.serve(async (req) => {
       const reminderType = reservation._reminderType;
       const schedule = reservation._schedule;
       const key = `${reservation.id}:${reminderType}`;
+      const channel = channelMap.get(reservation.company_id) ?? "evolution";
 
-      if (sentSet.has(key) || queuedSet.has(key)) {
-        skipped++;
+      if (channel === "pluguechat_official") {
+        if (pcLogSet.has(key) || pcQueueSet.has(key)) { skipped++; continue; }
+
+        const template = (plugueChatTemplates || []).find(
+          (t: any) => t.company_id === reservation.company_id && t.type === reminderType,
+        );
+        if (!template?.template_id) { skipped++; continue; }
+
+        const phone = normalizePhone(reservation.guest_phone);
+        const parameters = buildReservationParameters(reminderType, reservation);
+        const idempotencyKey = `pluguechat:reservation:${reservation.id}:${reminderType}`;
+
+        const result = await enqueuePlugueChatMessage(supabaseAdmin, {
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          type: reminderType,
+          template_id: template.template_id,
+          template_name: template.template_name ?? null,
+          parameters,
+          scheduled_for: schedule.scheduledFor.toISOString(),
+          expires_at: schedule.expiresAt.toISOString(),
+          idempotency_key: idempotencyKey,
+        });
+
+        pcQueueSet.add(key);
+        result === "inserted" ? queued++ : skipped++;
         continue;
       }
+
+      // Canal Evolution
+      if (sentSet.has(key) || queuedSet.has(key)) { skipped++; continue; }
 
       const automation = (automations || []).find(
         (item: any) => item.company_id === reservation.company_id && item.type === reminderType,
       );
-
-      if (!automation?.message_template) {
-        skipped++;
-        continue;
-      }
+      if (!automation?.message_template) { skipped++; continue; }
 
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
       const message = replaceTemplateVars(automation.message_template, reservation);
@@ -216,10 +275,7 @@ Deno.serve(async (req) => {
         phone,
       });
 
-      if (!claimed) {
-        skipped++;
-        continue;
-      }
+      if (!claimed) { skipped++; continue; }
 
       const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: reservation.company_id,
@@ -232,17 +288,9 @@ Deno.serve(async (req) => {
         priority: schedule.priority,
       });
 
-      await finalizeWhatsAppDispatch(supabaseAdmin, {
-        deliveryKey,
-        status: "queued",
-      });
-
+      await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "queued" });
       queuedSet.add(key);
-      if (enqueueResult === "inserted") {
-        queued++;
-      } else {
-        skipped++;
-      }
+      enqueueResult === "inserted" ? queued++ : skipped++;
     }
 
     return new Response(JSON.stringify({ queued, skipped, total: allReservations.length }), {

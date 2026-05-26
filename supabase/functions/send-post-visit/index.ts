@@ -6,6 +6,12 @@ import {
   finalizeWhatsAppDispatch,
   formatPhoneForWhatsApp,
 } from "../_shared/whatsapp.ts";
+import {
+  buildReservationParameters,
+  enqueuePlugueChatMessage,
+  getCompanyChannels,
+  normalizePhone,
+} from "../_shared/pluguechat.ts";
 import { formatDateKeyInTimeZone, getZonedParts } from "../_shared/timezone.ts";
 
 const corsHeaders = {
@@ -82,58 +88,73 @@ Deno.serve(async (req) => {
     const companyIds = [...new Set(reservations.map((r: any) => r.company_id))];
     const reservationIds = reservations.map((r: any) => r.id);
 
-    const [{ data: automations }, { data: alreadySent }, { data: alreadyQueued }] = await Promise.all([
-      supabaseAdmin
-        .from("automation_settings")
-        .select("*")
-        .in("company_id", companyIds)
-        .eq("type", "post_visit")
-        .eq("enabled", true),
-      supabaseAdmin
-        .from("whatsapp_message_logs")
-        .select("reservation_id")
-        .in("reservation_id", reservationIds)
-        .eq("type", "post_visit"),
-      supabaseAdmin
-        .from("whatsapp_message_queue")
-        .select("reservation_id")
-        .in("reservation_id", reservationIds)
-        .eq("type", "post_visit"),
+    const channelMap = await getCompanyChannels(supabaseAdmin, companyIds);
+
+    const [
+      { data: automations },
+      { data: alreadySent },
+      { data: alreadyQueued },
+      { data: plugueChatTemplates },
+      { data: plugueChatLogs },
+      { data: plugueChatQueue },
+    ] = await Promise.all([
+      supabaseAdmin.from("automation_settings").select("*").in("company_id", companyIds).eq("type", "post_visit").eq("enabled", true),
+      supabaseAdmin.from("whatsapp_message_logs").select("reservation_id").in("reservation_id", reservationIds).eq("type", "post_visit"),
+      supabaseAdmin.from("whatsapp_message_queue").select("reservation_id").in("reservation_id", reservationIds).eq("type", "post_visit"),
+      supabaseAdmin.from("pluguechat_automation_templates").select("company_id, template_id, template_name").in("company_id", companyIds).eq("type", "post_visit").eq("enabled", true),
+      supabaseAdmin.from("pluguechat_message_logs").select("reservation_id").in("reservation_id", reservationIds).eq("type", "post_visit"),
+      supabaseAdmin.from("pluguechat_message_queue").select("reservation_id").in("reservation_id", reservationIds).eq("type", "post_visit").neq("status", "cancelled"),
     ]);
 
     const sentIds = new Set((alreadySent || []).map((l: any) => l.reservation_id));
     const queuedIds = new Set((alreadyQueued || []).map((l: any) => l.reservation_id));
+    const pcLogIds = new Set((plugueChatLogs || []).map((l: any) => l.reservation_id));
+    const pcQueueIds = new Set((plugueChatQueue || []).map((i: any) => i.reservation_id));
 
     let queued = 0;
     let skipped = 0;
 
     for (const reservation of reservations) {
-      if (sentIds.has(reservation.id) || queuedIds.has(reservation.id)) {
-        skipped++;
+      const channel = channelMap.get(reservation.company_id) ?? "evolution";
+
+      if (channel === "pluguechat_official") {
+        if (pcLogIds.has(reservation.id) || pcQueueIds.has(reservation.id)) { skipped++; continue; }
+
+        const template = (plugueChatTemplates || []).find((t: any) => t.company_id === reservation.company_id);
+        if (!template?.template_id) { skipped++; continue; }
+
+        const phone = normalizePhone(reservation.guest_phone);
+        const parameters = buildReservationParameters("post_visit", reservation);
+        const result = await enqueuePlugueChatMessage(supabaseAdmin, {
+          company_id: reservation.company_id,
+          reservation_id: reservation.id,
+          phone,
+          type: "post_visit",
+          template_id: template.template_id,
+          template_name: template.template_name ?? null,
+          parameters,
+          scheduled_for: now.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          idempotency_key: `pluguechat:reservation:${reservation.id}:post_visit`,
+        });
+
+        pcQueueIds.add(reservation.id);
+        result === "inserted" ? queued++ : skipped++;
         continue;
       }
 
+      // Canal Evolution
+      if (sentIds.has(reservation.id) || queuedIds.has(reservation.id)) { skipped++; continue; }
+
       const automation = (automations || []).find((a: any) => a.company_id === reservation.company_id);
-      if (!automation?.message_template) {
-        skipped++;
-        continue;
-      }
+      if (!automation?.message_template) { skipped++; continue; }
 
       const phone = formatPhoneForWhatsApp(reservation.guest_phone);
       const message = replaceTemplateVars(automation.message_template, reservation);
       const deliveryKey = buildReservationDispatchKey("post_visit", reservation.id);
-      const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
-        deliveryKey,
-        companyId: reservation.company_id,
-        automationType: "post_visit",
-        reservationId: reservation.id,
-        phone,
-      });
+      const claimed = await claimWhatsAppDispatch(supabaseAdmin, { deliveryKey, companyId: reservation.company_id, automationType: "post_visit", reservationId: reservation.id, phone });
 
-      if (!claimed) {
-        skipped++;
-        continue;
-      }
+      if (!claimed) { skipped++; continue; }
 
       const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: reservation.company_id,
@@ -146,17 +167,9 @@ Deno.serve(async (req) => {
         priority: PRIORITY_POST_VISIT,
       });
 
-      await finalizeWhatsAppDispatch(supabaseAdmin, {
-        deliveryKey,
-        status: "queued",
-      });
-
+      await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "queued" });
       queuedIds.add(reservation.id);
-      if (enqueueResult === "inserted") {
-        queued++;
-      } else {
-        skipped++;
-      }
+      enqueueResult === "inserted" ? queued++ : skipped++;
     }
 
     return new Response(JSON.stringify({ queued, skipped, total: reservations.length }), {

@@ -2,10 +2,13 @@ import AutomationsTab from '@/components/company/AutomationsTab';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { useWhatsAppChannel } from '@/hooks/useWhatsAppChannel';
 
 export default function CompanyAutomations() {
   const { companyId, companyName } = useCompanySlug();
   const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(companyId);
+  // Prefetch em paralelo com feature flags — quando AutomationsTab montar, o cache já estará quente
+  useWhatsAppChannel(companyId);
   const whatsappEnabled = featureFlags?.features.whatsapp_integration ?? false;
 
   if (featureFlagsLoading) {
@@ -21,7 +24,7 @@ export default function CompanyAutomations() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Automações</h1>
-        <p className="mt-1 text-muted-foreground">Envios automáticos via WhatsApp da unidade {companyName}</p>
+        <p className="mt-1 text-muted-foreground">Canal WhatsApp, automações e histórico de mensagens da unidade {companyName}</p>
       </div>
 
       {whatsappEnabled ? (
