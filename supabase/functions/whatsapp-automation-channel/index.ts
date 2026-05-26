@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,81 +10,47 @@ type WhatsAppChannel = "evolution" | "pluguechat_official";
 
 const VALID_CHANNELS: WhatsAppChannel[] = ["evolution", "pluguechat_official"];
 
+function json(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function authErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Nao autorizado") return 401;
+  if (message.startsWith("Sem permissao")) return 403;
+  return 500;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const body = await req.json() as Record<string, unknown>;
     const action = body.action as string;
     const companyId = body.company_id as string;
 
     if (!companyId) {
-      return new Response(JSON.stringify({ error: "company_id required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "company_id required" }, 400);
     }
 
-    // Verifica se o usuário tem acesso à empresa (admin ou operator)
-    const { data: roleData } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("company_id", companyId)
-      .in("role", ["admin", "operator"])
-      .maybeSingle();
+    const { supabaseAdmin } = await assertUserCanAccessCompany(req, companyId, [
+      "superadmin",
+      "admin",
+    ]);
 
-    const { data: isSuperAdmin } = await supabaseAdmin.rpc("has_role", {
-      _user_id: user.id,
-      _role: "superadmin",
-    });
-
-    if (!roleData && !isSuperAdmin) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // ----------------------------------------------------------------
-    // action: switch — troca o canal ativo e cancela filas do canal anterior
-    // ----------------------------------------------------------------
     if (action === "switch") {
       const targetChannel = body.channel as WhatsAppChannel;
       const expectedChannel = body.expected_channel as WhatsAppChannel;
 
       if (!VALID_CHANNELS.includes(targetChannel)) {
-        return new Response(JSON.stringify({ error: "Canal inválido." }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: "Canal invalido." }, 400);
       }
 
-      // Lê canal atual para validar expected_channel (proteção contra aba antiga)
       const { data: company } = await supabaseAdmin
         .from("companies")
         .select("whatsapp_automation_channel")
@@ -94,22 +60,34 @@ Deno.serve(async (req) => {
       const currentChannel = company?.whatsapp_automation_channel as WhatsAppChannel ?? "evolution";
 
       if (currentChannel !== expectedChannel) {
-        return new Response(
-          JSON.stringify({ error: "channel_mismatch", current: currentChannel }),
-          {
-            status: 409,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
+        return json({ error: "channel_mismatch", current: currentChannel }, 409);
       }
 
       if (currentChannel === targetChannel) {
-        return new Response(JSON.stringify({ ok: true, channel: currentChannel }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ ok: true, channel: currentChannel });
       }
 
-      // Atualiza canal ativo
+      if (targetChannel === "pluguechat_official") {
+        if (!Deno.env.get("PLUGUECHAT_API_URL")) {
+          return json({ error: "PLUGUECHAT_API_URL not configured" }, 500);
+        }
+
+        const { data: config, error: configError } = await supabaseAdmin
+          .from("pluguechat_official_configs")
+          .select("from_number, api_token_encrypted, status")
+          .eq("company_id", companyId)
+          .maybeSingle();
+
+        if (configError) {
+          console.error("whatsapp-automation-channel config load error", configError);
+          return json({ error: "Erro ao carregar configuracao PlugueChat." }, 500);
+        }
+
+        if (!config?.from_number || !config?.api_token_encrypted || config.status !== "configured") {
+          return json({ error: "pluguechat_not_configured" }, 400);
+        }
+      }
+
       const { error: updateError } = await supabaseAdmin
         .from("companies")
         .update({ whatsapp_automation_channel: targetChannel })
@@ -117,24 +95,18 @@ Deno.serve(async (req) => {
 
       if (updateError) {
         console.error("whatsapp-automation-channel switch update error", updateError);
-        return new Response(JSON.stringify({ error: "Erro ao trocar canal." }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: "Erro ao trocar canal." }, 500);
       }
 
-      // Cancela fila do canal anterior
       const now = new Date().toISOString();
 
       if (currentChannel === "evolution") {
-        // Cancela fila do WhatsApp conectado
         await supabaseAdmin
           .from("whatsapp_message_queue" as any)
           .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
           .eq("company_id", companyId)
           .in("status", ["pending"]);
 
-        // Cancela disparos do WhatsApp conectado
         await supabaseAdmin
           .from("whatsapp_broadcasts" as any)
           .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
@@ -143,14 +115,12 @@ Deno.serve(async (req) => {
       }
 
       if (currentChannel === "pluguechat_official") {
-        // Cancela fila do PlugueChat
         await supabaseAdmin
           .from("pluguechat_message_queue")
           .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
           .eq("company_id", companyId)
           .in("status", ["pending"]);
 
-        // Cancela disparos do PlugueChat
         await supabaseAdmin
           .from("pluguechat_broadcasts")
           .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
@@ -158,20 +128,18 @@ Deno.serve(async (req) => {
           .in("status", ["draft", "scheduled", "processing"]);
       }
 
-      return new Response(JSON.stringify({ ok: true, channel: targetChannel }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: true, channel: targetChannel });
     }
 
-    return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    console.error("whatsapp-automation-channel unexpected error", err);
-    return new Response(JSON.stringify({ error: "Erro interno." }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: `Unknown action: ${action}` }, 400);
+  } catch (error) {
+    const status = authErrorStatus(error);
+    if (status === 500) {
+      console.error("whatsapp-automation-channel unexpected error", error);
+    }
+    return json(
+      { error: status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : "Erro interno." },
+      status,
+    );
   }
 });

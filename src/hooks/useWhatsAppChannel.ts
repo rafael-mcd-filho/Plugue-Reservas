@@ -122,7 +122,21 @@ export function useSwitchWhatsAppChannel() {
       const { data, error } = await supabase.functions.invoke('whatsapp-automation-channel', {
         body: { action: 'switch', ...payload },
       });
-      if (error) throw error;
+      if (error) {
+        const context = (error as { context?: Response }).context;
+        if (context) {
+          let detailMessage: string | null = null;
+          try {
+            const detail = await context.clone().json();
+            if (detail?.error) detailMessage = String(detail.error);
+          } catch {
+            detailMessage = null;
+          }
+          if (detailMessage) throw new Error(detailMessage);
+        }
+        throw error;
+      }
+      if (data?.error) throw new Error(String(data.error));
       return data as { channel: WhatsAppChannel };
     },
     onSuccess: (result, vars) => {
@@ -136,6 +150,8 @@ export function useSwitchWhatsAppChannel() {
       const message: string = err?.message ?? '';
       if (message.includes('channel_mismatch')) {
         toast.error('O canal mudou em outra aba. Atualize a página e tente novamente.');
+      } else if (message.includes('pluguechat_not_configured')) {
+        toast.error('Configure token e número do PlugueChat antes de ativar este canal.');
       } else {
         toast.error('Erro ao trocar canal. Tente novamente.');
       }

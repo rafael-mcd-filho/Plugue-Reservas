@@ -26,6 +26,21 @@ export interface PlugueChatTemplate {
   updated_at: string;
 }
 
+async function throwFunctionError(error: unknown): Promise<never> {
+  const context = (error as { context?: Response }).context;
+  if (context) {
+    let detailMessage: string | null = null;
+    try {
+      const detail = await context.clone().json();
+      if (detail?.error) detailMessage = String(detail.error);
+    } catch {
+      detailMessage = null;
+    }
+    if (detailMessage) throw new Error(detailMessage);
+  }
+  throw error;
+}
+
 export function usePlugueChatConfig(companyId?: string) {
   return useQuery({
     queryKey: ['pluguechat-config', companyId],
@@ -50,14 +65,15 @@ export function useSavePlugueChatConfig() {
       const { data, error } = await supabase.functions.invoke('pluguechat-api', {
         body: { action: 'save_config', ...payload },
       });
-      if (error) throw error;
+      if (error) await throwFunctionError(error);
+      if (data?.error) throw new Error(String(data.error));
       return data;
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['pluguechat-config', vars.company_id] });
       toast.success('Configuração salva.');
     },
-    onError: () => toast.error('Erro ao salvar configuração. Tente novamente.'),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Erro ao salvar configuração. Tente novamente.'),
   });
 }
 

@@ -32,6 +32,7 @@ export default function ChannelTab({ companyId, activeChannel }: Props) {
 
   const evolutionConnected = instance?.status === 'connected';
   const plugueChatConfigured = !!(plugueChatConfig?.from_number && plugueChatConfig.status === 'configured');
+  const canActivatePlugueChat = plugueChatConfigured && !switchChannel.isPending;
 
   const handleConfirmSwitch = () => {
     if (!pendingChannel) return;
@@ -142,9 +143,9 @@ export default function ChannelTab({ companyId, activeChannel }: Props) {
                 size="sm"
                 variant="outline"
                 onClick={() => setPendingChannel('pluguechat_official')}
-                disabled={switchChannel.isPending}
+                disabled={!canActivatePlugueChat}
               >
-                Ativar este canal
+                {plugueChatConfigured ? 'Ativar este canal' : 'Configure antes de ativar'}
               </Button>
             )}
           </CardContent>

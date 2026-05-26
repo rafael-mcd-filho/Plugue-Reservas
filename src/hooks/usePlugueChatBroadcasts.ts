@@ -19,6 +19,21 @@ export interface PlugueChatBroadcast {
   updated_at: string;
 }
 
+async function throwFunctionError(error: unknown): Promise<never> {
+  const context = (error as { context?: Response }).context;
+  if (context) {
+    let detailMessage: string | null = null;
+    try {
+      const detail = await context.clone().json();
+      if (detail?.error) detailMessage = String(detail.error);
+    } catch {
+      detailMessage = null;
+    }
+    if (detailMessage) throw new Error(detailMessage);
+  }
+  throw error;
+}
+
 export function usePlugueChatBroadcasts(companyId?: string) {
   return useQuery({
     queryKey: ['pluguechat-broadcasts', companyId],
@@ -47,27 +62,25 @@ export function useCreatePlugueChatBroadcast() {
       audience_filter?: Record<string, unknown>;
       scheduled_for?: string | null;
     }) => {
-      const { data, error } = await supabase
-        .from('pluguechat_broadcasts' as any)
-        .insert({
+      const { data, error } = await supabase.functions.invoke('pluguechat-api', {
+        body: {
+          action: 'create_broadcast',
           company_id: payload.company_id,
           template_id: payload.template_id,
           template_name: payload.template_name ?? null,
           audience_filter: payload.audience_filter ?? {},
-          status: payload.scheduled_for ? 'scheduled' : 'draft',
           scheduled_for: payload.scheduled_for ?? null,
-        } as any)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as unknown as PlugueChatBroadcast;
+        },
+      });
+      if (error) await throwFunctionError(error);
+      if (data?.error) throw new Error(String(data.error));
+      return data.broadcast as PlugueChatBroadcast;
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['pluguechat-broadcasts', vars.company_id] });
       toast.success('Disparo criado.');
     },
-    onError: () => toast.error('Erro ao criar disparo. Tente novamente.'),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Erro ao criar disparo. Tente novamente.'),
   });
 }
 
@@ -76,23 +89,20 @@ export function useCancelPlugueChatBroadcast() {
 
   return useMutation({
     mutationFn: async ({ id, companyId }: { id: string; companyId: string }) => {
-      const { error } = await supabase
-        .from('pluguechat_broadcasts' as any)
-        .update({
-          status: 'cancelled',
-          cancel_reason: 'manual',
-          cancelled_at: new Date().toISOString(),
-        } as any)
-        .eq('id', id)
-        .eq('company_id', companyId)
-        .in('status' as any, ['draft', 'scheduled']);
-
-      if (error) throw error;
+      const { data, error } = await supabase.functions.invoke('pluguechat-api', {
+        body: {
+          action: 'cancel_broadcast',
+          company_id: companyId,
+          broadcast_id: id,
+        },
+      });
+      if (error) await throwFunctionError(error);
+      if (data?.error) throw new Error(String(data.error));
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['pluguechat-broadcasts', vars.companyId] });
       toast.success('Disparo cancelado.');
     },
-    onError: () => toast.error('Erro ao cancelar disparo.'),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Erro ao cancelar disparo.'),
   });
 }

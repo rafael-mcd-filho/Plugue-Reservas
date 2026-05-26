@@ -25,6 +25,78 @@ export function normalizePhone(value: string): string {
   return digits;
 }
 
+const TOKEN_CIPHER_PREFIX = "v1";
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function getTokenEncryptionKey(): Promise<CryptoKey> {
+  const rawKey = Deno.env.get("PLUGUECHAT_TOKEN_ENCRYPTION_KEY");
+  if (!rawKey) {
+    throw new Error("PLUGUECHAT_TOKEN_ENCRYPTION_KEY not configured");
+  }
+
+  let keyBytes: Uint8Array;
+  try {
+    keyBytes = base64ToBytes(rawKey);
+  } catch {
+    keyBytes = new TextEncoder().encode(rawKey);
+  }
+
+  if (keyBytes.length !== 32) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawKey));
+    keyBytes = new Uint8Array(digest);
+  }
+
+  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+export async function encryptPlugueChatToken(token: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await getTokenEncryptionKey();
+  const cipherText = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      new TextEncoder().encode(token),
+    ),
+  );
+
+  return `${TOKEN_CIPHER_PREFIX}:${bytesToBase64(iv)}:${bytesToBase64(cipherText)}`;
+}
+
+export async function decryptPlugueChatToken(storedToken: string): Promise<string> {
+  if (!storedToken.startsWith(`${TOKEN_CIPHER_PREFIX}:`)) {
+    return storedToken;
+  }
+
+  const [, ivValue, cipherTextValue] = storedToken.split(":");
+  if (!ivValue || !cipherTextValue) {
+    throw new Error("Invalid PlugueChat encrypted token");
+  }
+
+  const key = await getTokenEncryptionKey();
+  const plainText = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(ivValue) },
+    key,
+    base64ToBytes(cipherTextValue),
+  );
+
+  return new TextDecoder().decode(plainText);
+}
+
 export function buildPlugueChatPayload(
   fromNumber: string,
   toPhone: string,
@@ -265,9 +337,17 @@ export async function getPlugueChatCompanyConfig(
   const apiUrl = Deno.env.get("PLUGUECHAT_API_URL") ?? "";
   if (!apiUrl) return null;
 
+  let apiToken: string;
+  try {
+    apiToken = await decryptPlugueChatToken(data.api_token_encrypted);
+  } catch (error) {
+    console.error("Failed to decrypt PlugueChat token", error);
+    return null;
+  }
+
   return {
     fromNumber: data.from_number,
-    apiToken: data.api_token_encrypted,
+    apiToken,
     apiUrl,
   };
 }
