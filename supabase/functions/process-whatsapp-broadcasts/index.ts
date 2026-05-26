@@ -426,10 +426,43 @@ Deno.serve(async (req) => {
 
     const companyIds = Array.from(new Set(runningBroadcasts.map((b: BroadcastRow) => b.company_id)));
 
+    const { data: evolutionCompanies } = await supabaseAdmin
+      .from("companies")
+      .select("id")
+      .in("id", companyIds)
+      .eq("whatsapp_automation_channel", "evolution");
+
+    const activeEvolutionCompanyIds = new Set((evolutionCompanies ?? []).map((company) => company.id));
+    const activeRunningBroadcasts = (runningBroadcasts as BroadcastRow[]).filter((broadcast) =>
+      activeEvolutionCompanyIds.has(broadcast.company_id)
+    );
+    const inactiveBroadcastIds = (runningBroadcasts as BroadcastRow[])
+      .filter((broadcast) => !activeEvolutionCompanyIds.has(broadcast.company_id))
+      .map((broadcast) => broadcast.id);
+
+    if (inactiveBroadcastIds.length > 0) {
+      await supabaseAdmin
+        .from("whatsapp_broadcasts")
+        .update({
+          status: "cancelled",
+          cancel_reason: "channel_changed",
+          cancelled_at: new Date().toISOString(),
+        })
+        .in("id", inactiveBroadcastIds)
+        .eq("status", "running");
+    }
+
+    if (activeRunningBroadcasts.length === 0) {
+      return new Response(JSON.stringify({ processed: 0, reason: "no_active_evolution_channel" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: instances } = await supabaseAdmin
       .from("company_whatsapp_instances")
       .select("company_id, instance_name, status")
-      .in("company_id", companyIds)
+      .in("company_id", Array.from(activeEvolutionCompanyIds))
       .eq("status", "connected");
 
     const instanceMap = new Map<string, string>();
@@ -439,7 +472,7 @@ Deno.serve(async (req) => {
 
     const results: Array<{ broadcast_id: string; sent: number; failed: number; skipped: number; circuit_tripped: boolean }> = [];
 
-    for (const broadcast of runningBroadcasts as BroadcastRow[]) {
+    for (const broadcast of activeRunningBroadcasts) {
       if (Date.now() >= invocationDeadline) break;
 
       const instanceName = instanceMap.get(broadcast.company_id);

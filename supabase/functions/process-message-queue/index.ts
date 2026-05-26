@@ -162,12 +162,29 @@ Deno.serve(async (req) => {
     }
 
     const connectedCompanyIds = instances.map((instance) => instance.company_id);
-    const instanceMap = new Map(instances.map((instance) => [instance.company_id, instance.instance_name]));
+
+    const { data: evolutionCompanies } = await supabaseAdmin
+      .from("companies")
+      .select("id")
+      .in("id", connectedCompanyIds)
+      .eq("whatsapp_automation_channel", "evolution");
+
+    const activeEvolutionCompanyIds = new Set((evolutionCompanies ?? []).map((company) => company.id));
+    const activeEvolutionInstances = instances.filter((instance) => activeEvolutionCompanyIds.has(instance.company_id));
+
+    if (activeEvolutionInstances.length === 0) {
+      return new Response(JSON.stringify({ processed: 0, reason: "no_active_evolution_channel" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const instanceMap = new Map(activeEvolutionInstances.map((instance) => [instance.company_id, instance.instance_name]));
 
     const pausedCompanyIds: string[] = [];
     const eligibleCompanyIds: string[] = [];
 
-    for (const companyId of connectedCompanyIds) {
+    for (const companyId of activeEvolutionCompanyIds) {
       const circuit = await checkWhatsAppCircuit(supabaseAdmin, companyId);
       if (circuit.open) {
         pausedCompanyIds.push(companyId);

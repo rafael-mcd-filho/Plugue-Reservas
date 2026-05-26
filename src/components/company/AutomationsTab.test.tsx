@@ -5,6 +5,7 @@ import { WHATSAPP_AUTOMATIONS } from '@/lib/whatsapp-automations';
 
 const useAutomationSettingsMock = vi.fn();
 const mutateAsyncMock = vi.fn();
+const useWhatsAppChannelMock = vi.fn();
 
 vi.mock('./WhatsAppConnection', () => ({
   default: () => <div data-testid="whatsapp-connection" />,
@@ -12,6 +13,10 @@ vi.mock('./WhatsAppConnection', () => ({
 
 vi.mock('./WhatsAppMessageHistory', () => ({
   default: () => <div data-testid="whatsapp-history" />,
+}));
+
+vi.mock('./ChannelTab', () => ({
+  default: () => <div data-testid="channel-tab" />,
 }));
 
 vi.mock('@/hooks/useAutomations', () => ({
@@ -22,9 +27,19 @@ vi.mock('@/hooks/useAutomations', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useWhatsAppChannel', () => ({
+  useWhatsAppChannel: (...args: unknown[]) => useWhatsAppChannelMock(...args),
+  useSwitchWhatsAppChannel: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 describe('AutomationsTab', () => {
   beforeEach(() => {
     useAutomationSettingsMock.mockReset();
+    useWhatsAppChannelMock.mockReset();
+    useWhatsAppChannelMock.mockReturnValue({ data: 'evolution', isLoading: false });
     mutateAsyncMock.mockReset();
     mutateAsyncMock.mockResolvedValue(undefined);
   });

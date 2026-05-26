@@ -40,7 +40,7 @@ function buildAutomationState(automations: AutomationSetting[] | undefined): Aut
 }
 
 export default function AutomationsTab({ companyId }: Props) {
-  const { data: channel } = useWhatsAppChannel(companyId);
+  const { data: channel, isLoading: channelLoading } = useWhatsAppChannel(companyId);
   const isPlugueChat = channel === 'pluguechat_official';
 
   const { data: automations, isLoading: automationsLoading } = useAutomationSettings(companyId);
@@ -83,6 +83,15 @@ export default function AutomationsTab({ companyId }: Props) {
     }
   };
 
+  if (channelLoading || !channel) {
+    return (
+      <div className="space-y-6" aria-busy="true" aria-label="Carregando canal de WhatsApp">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
   return (
     <Tabs defaultValue="channel" className="space-y-6">
       <TabsList className="w-full grid grid-cols-5">
@@ -104,12 +113,12 @@ export default function AutomationsTab({ companyId }: Props) {
       </TabsList>
 
       <TabsContent value="channel">
-        <ChannelTab companyId={companyId} activeChannel={channel ?? 'evolution'} />
+        <ChannelTab companyId={companyId} activeChannel={channel} />
       </TabsContent>
 
       <TabsContent value="connection">
         {isPlugueChat ? (
-          <PlugueChatConnection companyId={companyId} activeChannel={channel!} />
+          <PlugueChatConnection companyId={companyId} activeChannel={channel} />
         ) : (
           <WhatsAppConnection companyId={companyId} />
         )}
@@ -117,7 +126,7 @@ export default function AutomationsTab({ companyId }: Props) {
 
       <TabsContent value="messages" className="space-y-4">
         {isPlugueChat ? (
-          <PlugueChatMessages companyId={companyId} activeChannel={channel!} />
+          <PlugueChatMessages companyId={companyId} activeChannel={channel} />
         ) : (
           <>
             <div>
@@ -204,7 +213,7 @@ export default function AutomationsTab({ companyId }: Props) {
 
       <TabsContent value="broadcast">
         {isPlugueChat ? (
-          <PlugueChatBroadcastsTab companyId={companyId} activeChannel={channel!} />
+          <PlugueChatBroadcastsTab companyId={companyId} activeChannel={channel} />
         ) : (
           <BroadcastsTab companyId={companyId} />
         )}

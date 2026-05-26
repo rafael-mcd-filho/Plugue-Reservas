@@ -80,7 +80,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, profile, roles, loading, signOut } = useAuth();
   const { data: systemBranding } = useSystemBranding();
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
-  const { data: companyFeatureFlags } = useCompanyFeatureFlags(companyContext?.companyId);
+  const { data: companyFeatureFlags, isLoading: companyFeatureFlagsLoading } = useCompanyFeatureFlags(companyContext?.companyId);
   const systemLogo = systemBranding?.system_logo_url || '';
   const userId = user?.id;
 
@@ -161,6 +161,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           path: `/${slug}/admin/automacoes`,
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'automations_view',
+          requiredFeature: 'whatsapp_integration',
         },
         {
           label: 'Pagamentos',
@@ -260,6 +261,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
     if (permissionsLoading && item.requiredPermission) return false;
     if (!hasCompanyPermission(item.requiredPermission)) return false;
+    if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
       if (item.label === 'Dashboard' && f.advanced_reports === false) return false;
@@ -273,9 +275,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
     if (permissionsLoading && item.requiredPermission) return false;
     if (!hasCompanyPermission(item.requiredPermission)) return false;
+    if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
-      if (item.path?.includes('/automacoes') && f.whatsapp_integration === false) return false;
       if (item.requiredFeature && f[item.requiredFeature] === false) return false;
     }
     return true;

@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
           .from("whatsapp_broadcasts" as any)
           .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
           .eq("company_id", companyId)
-          .in("status", ["draft", "scheduled", "processing"]);
+          .in("status", ["draft", "scheduled", "processing", "running"]);
       }
 
       if (currentChannel === "pluguechat_official") {
