@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Clock3, MapPin, MessageSquare, Phone, Users } from 'lucide-react';
+import { CalendarDays, Clock3, Loader2, Mail, MapPin, MessageSquare, Phone, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,14 +14,40 @@ import { getVisitorId } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import {
   formatBrazilPhone,
+  getEmailValidationMessage,
   isValidBrazilWhatsApp,
   isValidCompanySlug,
   MAX_WAITLIST_NAME_LENGTH,
   MAX_WAITLIST_NOTES_LENGTH,
   normalizeBrazilPhoneDigits,
+  normalizeEmail,
 } from '@/lib/validation';
 
 const DISABLED_MESSAGE = 'A entrada online na fila de espera está indisponível no momento. Dirija-se à unidade para entrar na fila de espera.';
+
+function parseDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+
+  if (
+    parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function getTodayDateInputValue() {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}
 
 export default function PublicWaitlistPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -31,6 +57,8 @@ export default function PublicWaitlistPage() {
   const [form, setForm] = useState({
     guestName: '',
     guestPhone: '',
+    guestEmail: '',
+    guestBirthdate: '',
     partySize: 2,
     notes: '',
   });
@@ -69,6 +97,7 @@ export default function PublicWaitlistPage() {
 
   const queueEnabled = company?.public_waitlist_enabled ?? false;
   const companyTitle = company?.name || slug || 'Fila de espera';
+  const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
   const helperText = useMemo(
     () => queueEnabled
       ? 'Preencha seus dados para entrar na fila. Depois você será redirecionado para a página de acompanhamento.'
@@ -87,6 +116,8 @@ export default function PublicWaitlistPage() {
 
     const guestName = form.guestName.trim();
     const guestPhone = normalizeBrazilPhoneDigits(form.guestPhone);
+    const guestEmail = normalizeEmail(form.guestEmail);
+    const guestBirthdate = form.guestBirthdate;
     const notes = form.notes.trim();
 
     if (!guestName) {
@@ -101,6 +132,30 @@ export default function PublicWaitlistPage() {
 
     if (!isValidBrazilWhatsApp(guestPhone)) {
       toast.error('Informe um WhatsApp válido com DDD.');
+      return;
+    }
+
+    const emailError = getEmailValidationMessage(guestEmail, 'seu e-mail', true);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
+    if (!guestBirthdate) {
+      toast.error('Informe sua data de nascimento.');
+      return;
+    }
+
+    const parsedBirthdate = parseDateInput(guestBirthdate);
+    if (!parsedBirthdate) {
+      toast.error('Informe uma data de nascimento válida.');
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (parsedBirthdate > today) {
+      toast.error('A data de nascimento não pode ser futura.');
       return;
     }
 
@@ -119,6 +174,8 @@ export default function PublicWaitlistPage() {
         _party_size: form.partySize,
         _notes: notes || null,
         _visitor_id: getVisitorId(),
+        _guest_email: guestEmail,
+        _guest_birthdate: guestBirthdate,
       });
 
       if (error) throw error;
@@ -201,7 +258,7 @@ export default function PublicWaitlistPage() {
             {queueEnabled ? (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="waitlist-guest-name">Nome</Label>
+                  <Label htmlFor="waitlist-guest-name">Nome *</Label>
                   <Input
                     id="waitlist-guest-name"
                     name="guest_name"
@@ -217,7 +274,7 @@ export default function PublicWaitlistPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="waitlist-guest-phone" className="flex items-center gap-1.5">
                     <Phone className="h-4 w-4" />
-                    WhatsApp
+                    WhatsApp *
                   </Label>
                   <Input
                     id="waitlist-guest-phone"
@@ -230,6 +287,42 @@ export default function PublicWaitlistPage() {
                     inputMode="tel"
                     spellCheck={false}
                     maxLength={15}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="waitlist-guest-email" className="flex items-center gap-1.5">
+                    <Mail className="h-4 w-4" />
+                    Email *
+                  </Label>
+                  <Input
+                    id="waitlist-guest-email"
+                    name="guest_email"
+                    type="email"
+                    value={form.guestEmail}
+                    onChange={(event) => setForm((current) => ({ ...current, guestEmail: event.target.value }))}
+                    placeholder="cliente@email.com"
+                    autoComplete="email"
+                    inputMode="email"
+                    spellCheck={false}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="waitlist-guest-birthdate" className="flex items-center gap-1.5">
+                    <CalendarDays className="h-4 w-4" />
+                    Data de nascimento *
+                  </Label>
+                  <Input
+                    id="waitlist-guest-birthdate"
+                    name="guest_birthdate"
+                    type="date"
+                    value={form.guestBirthdate}
+                    onChange={(event) => setForm((current) => ({ ...current, guestBirthdate: event.target.value }))}
+                    autoComplete="bday"
+                    max={todayDateInputValue}
                     required
                   />
                 </div>
