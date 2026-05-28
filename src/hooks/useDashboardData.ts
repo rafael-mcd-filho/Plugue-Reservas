@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { getAttributionString, hasMetaClickAttribution, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
+import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { differenceInCalendarDays, differenceInDays, eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -22,6 +23,7 @@ export interface DailyStats {
 }
 
 interface RawReservation {
+  id: string;
   date: string;
   time: string | null;
   status: string | null;
@@ -42,6 +44,7 @@ interface RawReservation {
 }
 
 interface RawWaitlistEntry {
+  id: string;
   status: string;
   created_at: string;
   seated_at: string | null;
@@ -51,6 +54,8 @@ interface RawWaitlistEntry {
 
 const EMPTY_RESERVATIONS: RawReservation[] = [];
 const EMPTY_WAITLIST: RawWaitlistEntry[] = [];
+const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)';
+const DASHBOARD_WAITLIST_SELECT = 'id, status, created_at, seated_at, expired_at, removed_at';
 
 export interface CreatedReservationDailyStat {
   date: string;
@@ -199,17 +204,20 @@ export function useDashboardData(
   const reservationsQuery = useQuery({
     queryKey: ['dashboard-reservations', companyId, startStr, endStr],
     queryFn: async () => {
-      let query = supabase
-        .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
-        .gte('date', startStr)
-        .lte('date', endStr);
+      return fetchAllSupabasePages<RawReservation>((from, to) => {
+        let query = supabase
+          .from('reservations' as any)
+          .select(DASHBOARD_RESERVATION_SELECT)
+          .gte('date', startStr)
+          .lte('date', endStr)
+          .order('date', { ascending: true })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawReservation[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -218,17 +226,19 @@ export function useDashboardData(
   const waitlistQuery = useQuery({
     queryKey: ['dashboard-waitlist', companyId, startStr, endStr],
     queryFn: async () => {
-      let query = supabase
-        .from('waitlist' as any)
-        .select('status, created_at, seated_at, expired_at, removed_at')
-        .gte('created_at', rangeStartIso)
-        .lte('created_at', rangeEndIso);
+      return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
+        let query = supabase
+          .from('waitlist' as any)
+          .select(DASHBOARD_WAITLIST_SELECT)
+          .gte('created_at', rangeStartIso)
+          .lte('created_at', rangeEndIso)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawWaitlistEntry[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -237,18 +247,20 @@ export function useDashboardData(
   const waitlistSeatedQuery = useQuery({
     queryKey: ['dashboard-waitlist-seated', companyId, startStr, endStr],
     queryFn: async () => {
-      let query = supabase
-        .from('waitlist' as any)
-        .select('status, created_at, seated_at, expired_at, removed_at')
-        .eq('status', 'seated')
-        .gte('seated_at', rangeStartIso)
-        .lte('seated_at', rangeEndIso);
+      return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
+        let query = supabase
+          .from('waitlist' as any)
+          .select(DASHBOARD_WAITLIST_SELECT)
+          .eq('status', 'seated')
+          .gte('seated_at', rangeStartIso)
+          .lte('seated_at', rangeEndIso)
+          .order('seated_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawWaitlistEntry[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -257,17 +269,19 @@ export function useDashboardData(
   const waitlistDroppedQuery = useQuery({
     queryKey: ['dashboard-waitlist-dropped', companyId, startStr, endStr],
     queryFn: async () => {
-      let query = supabase
-        .from('waitlist' as any)
-        .select('status, created_at, seated_at, expired_at, removed_at')
-        .in('status', ['expired', 'removed'])
-        .or(`and(status.eq.expired,expired_at.gte.${rangeStartIso},expired_at.lte.${rangeEndIso}),and(status.eq.removed,removed_at.gte.${rangeStartIso},removed_at.lte.${rangeEndIso})`);
+      return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
+        let query = supabase
+          .from('waitlist' as any)
+          .select(DASHBOARD_WAITLIST_SELECT)
+          .in('status', ['expired', 'removed'])
+          .or(`and(status.eq.expired,expired_at.gte.${rangeStartIso},expired_at.lte.${rangeEndIso}),and(status.eq.removed,removed_at.gte.${rangeStartIso},removed_at.lte.${rangeEndIso})`)
+          .order('updated_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawWaitlistEntry[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -276,17 +290,20 @@ export function useDashboardData(
   const previousReservationsQuery = useQuery({
     queryKey: ['dashboard-reservations-prev', companyId, prevStartStr, prevEndStr],
     queryFn: async () => {
-      let query = supabase
-        .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
-        .gte('date', prevStartStr)
-        .lte('date', prevEndStr);
+      return fetchAllSupabasePages<RawReservation>((from, to) => {
+        let query = supabase
+          .from('reservations' as any)
+          .select(DASHBOARD_RESERVATION_SELECT)
+          .gte('date', prevStartStr)
+          .lte('date', prevEndStr)
+          .order('date', { ascending: true })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawReservation[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -295,17 +312,19 @@ export function useDashboardData(
   const createdReservationsQuery = useQuery({
     queryKey: ['dashboard-reservations-created', companyId, startStr, endStr],
     queryFn: async () => {
-      let query = supabase
-        .from('reservations' as any)
-        .select('date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
-        .gte('created_at', rangeStartIso)
-        .lte('created_at', rangeEndIso);
+      return fetchAllSupabasePages<RawReservation>((from, to) => {
+        let query = supabase
+          .from('reservations' as any)
+          .select(DASHBOARD_RESERVATION_SELECT)
+          .gte('created_at', rangeStartIso)
+          .lte('created_at', rangeEndIso)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
 
-      if (companyId) query = query.eq('company_id', companyId);
+        if (companyId) query = query.eq('company_id', companyId);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data as any[]) as RawReservation[];
+        return query.range(from, to);
+      });
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
