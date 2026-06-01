@@ -104,6 +104,10 @@ function createSlotFormValue(time: string): SlotFormValue {
   };
 }
 
+function formatOptionalNumberInput(value: number | null | undefined) {
+  return value == null ? '' : String(value);
+}
+
 function mergeSlots(current: SlotFormValue[], times: string[]) {
   return sortReservationScheduleSlotSettings([
     ...current,
@@ -142,17 +146,11 @@ function getInitialForm(rule?: ReservationScheduleRule): FormState {
     end_date: rule.end_date ?? '',
     enabled: rule.enabled,
     priority: String(rule.priority),
-    max_party_size_per_reservation: rule.max_party_size_per_reservation === null
-      ? ''
-      : String(rule.max_party_size_per_reservation),
+    max_party_size_per_reservation: formatOptionalNumberInput(rule.max_party_size_per_reservation),
     slots: sortReservationScheduleSlotSettings(rule.reservation_schedule_rule_slots.map((slot) => ({
       time: slot.time,
-      max_party_size_per_reservation: slot.max_party_size_per_reservation === null
-        ? ''
-        : String(slot.max_party_size_per_reservation),
-      max_reservations_per_slot: slot.max_reservations_per_slot === null
-        ? ''
-        : String(slot.max_reservations_per_slot),
+      max_party_size_per_reservation: formatOptionalNumberInput(slot.max_party_size_per_reservation),
+      max_reservations_per_slot: formatOptionalNumberInput(slot.max_reservations_per_slot),
     }))),
     slotToAdd: '',
     generatorStart: '18:00',
@@ -597,7 +595,7 @@ function RuleList({ title, description, rules, onEdit, onArchive }: {
                       {rule.enabled ? 'Ativa' : 'Desativada'}
                     </Badge>
                     <span className="text-[11px] text-muted-foreground">Prioridade {rule.priority}</span>
-                    {rule.max_party_size_per_reservation !== null && (
+                    {rule.max_party_size_per_reservation != null && (
                       <span className="text-[11px] text-muted-foreground">
                         Máx. {rule.max_party_size_per_reservation} pessoas por reserva
                       </span>
@@ -611,8 +609,8 @@ function RuleList({ title, description, rules, onEdit, onArchive }: {
                     {rule.reservation_schedule_rule_slots.map((slot) => (
                       <span key={slot.id} className="rounded-full border border-primary/10 bg-white px-2 py-1 text-[11px] font-semibold text-primary">
                         {slot.time.slice(0, 5)}
-                        {slot.max_party_size_per_reservation !== null && ` · até ${slot.max_party_size_per_reservation} pessoas`}
-                        {slot.max_reservations_per_slot !== null && ` · ${slot.max_reservations_per_slot} reservas`}
+                        {slot.max_party_size_per_reservation != null && ` · até ${slot.max_party_size_per_reservation} pessoas`}
+                        {slot.max_reservations_per_slot != null && ` · ${slot.max_reservations_per_slot} reservas`}
                       </span>
                     ))}
                   </div>
