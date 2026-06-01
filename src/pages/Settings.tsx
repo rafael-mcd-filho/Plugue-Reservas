@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload, ChevronRight, X } from 'lucide-react';
+import { Settings as SettingsIcon, Bell, ScrollText, Save, Send, Trash2, Building2, CheckCircle2, Clock, Plug, Eye, EyeOff, Loader2, Wifi, Upload, ChevronRight, X, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,10 +16,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
 import {
   useSystemSettings, useUpdateSetting,
   useAuditLogs,
   useNotifications, useCreateNotification, useDeleteNotification,
+  useNotificationRecipientStatuses,
+  type Notification,
 } from '@/hooks/useSettings';
 import { useCompanies } from '@/hooks/useCompanies';
 import RichTextEditor from '@/components/RichTextEditor';
@@ -53,6 +56,93 @@ const actionLabels: Record<string, string> = {
   delete_notification: 'Removeu notificação',
   update_settings: 'Atualizou configurações',
 };
+
+function getNotificationDeliveryLabel(notification: Notification) {
+  const total = notification.recipient_count ?? 0;
+  const read = notification.read_count ?? 0;
+
+  if (total === 0) return 'Sem destinatários';
+  if (read === 0) return 'Não lida';
+  if (read === total) return 'Lida por todos';
+  return `${read} de ${total} leram`;
+}
+
+function NotificationDeliveryDialog({
+  notification,
+  companyName,
+  onOpenChange,
+}: {
+  notification: Notification | null;
+  companyName: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: recipients = [], isLoading } = useNotificationRecipientStatuses(notification?.id ?? null);
+  const total = notification?.recipient_count ?? 0;
+  const read = notification?.read_count ?? 0;
+  const progress = total > 0 ? Math.round((read / total) * 100) : 0;
+
+  return (
+    <Dialog open={!!notification} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] max-w-lg flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-5 py-4 pr-14">
+          <DialogTitle>Leituras da notificação</DialogTitle>
+          <DialogDescription>{companyName}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 border-b border-border bg-muted/30 px-5 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="truncate text-sm font-medium">{notification?.title}</p>
+            <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+              {read}/{total}
+            </span>
+          </div>
+          <Progress value={progress} className="h-2" />
+          <p className="text-xs text-muted-foreground">
+            {total === 0
+              ? 'Nenhum usuário ativo recebeu este aviso.'
+              : `${read} de ${total} usuários confirmaram a leitura.`}
+          </p>
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1">
+          {isLoading ? (
+            <div className="flex items-center justify-center px-5 py-10 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Carregando destinatários...
+            </div>
+          ) : recipients.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+              Nenhum destinatário registrado.
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {recipients.map((recipient, index) => (
+                <div key={`${recipient.user_id ?? 'removed'}-${index}`} className="flex items-center gap-3 px-5 py-3">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                    recipient.read_at ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {recipient.read_at ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{recipient.full_name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {recipient.email || recipient.roles.join(' / ')}
+                    </p>
+                  </div>
+                  <p className={`shrink-0 text-xs ${recipient.read_at ? 'text-primary' : 'text-muted-foreground'}`}>
+                    {recipient.read_at
+                      ? format(new Date(recipient.read_at), "dd/MM HH:mm", { locale: ptBR })
+                      : 'Pendente'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function formatLogSummary(details: Record<string, any> | null | undefined) {
   if (!details || Object.keys(details).length === 0) return 'Sem detalhes adicionais';
@@ -229,6 +319,8 @@ function NotificationsTab() {
   const [form, setForm] = useState({ company_ids: [] as string[], title: '', message: '', image_url: '', type: 'info' });
   const [sendToAll, setSendToAll] = useState(true);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const selectedNotificationCompany = companies.find((company) => company.id === selectedNotification?.company_id);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -451,20 +543,23 @@ function NotificationsTab() {
                       ) : 'Todas'}
                     </TableCell>
                     <TableCell>
-                      {n.is_read ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Lida
-                          {n.read_at && (
-                            <span className="text-muted-foreground ml-1">
-                              {format(new Date(n.read_at), "dd/MM HH:mm", { locale: ptBR })}
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-warning">
-                          <Clock className="h-3.5 w-3.5" /> Não lida
-                        </span>
-                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto gap-1.5 px-1 py-1 text-xs"
+                        onClick={() => setSelectedNotification(n)}
+                      >
+                        {(n.read_count ?? 0) === (n.recipient_count ?? 0) && (n.recipient_count ?? 0) > 0 ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                        ) : (n.read_count ?? 0) > 0 ? (
+                          <Users className="h-3.5 w-3.5 text-warning" />
+                        ) : (
+                          <Clock className="h-3.5 w-3.5 text-warning" />
+                        )}
+                        <span>{getNotificationDeliveryLabel(n)}</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(n.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
@@ -497,6 +592,13 @@ function NotificationsTab() {
           </Table>
         </Card>
       )}
+      <NotificationDeliveryDialog
+        notification={selectedNotification}
+        companyName={selectedNotificationCompany?.name ?? 'Empresa não encontrada'}
+        onOpenChange={(open) => {
+          if (!open) setSelectedNotification(null);
+        }}
+      />
     </div>
   );
 }

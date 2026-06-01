@@ -275,6 +275,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          image_url: string | null
           is_read: boolean
           message: string
           read_at: string | null
@@ -286,6 +287,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          image_url?: string | null
           is_read?: boolean
           message: string
           read_at?: string | null
@@ -297,6 +299,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          image_url?: string | null
           is_read?: boolean
           message?: string
           read_at?: string | null
@@ -320,6 +323,64 @@ export type Database = {
           },
         ]
       }
+      notification_recipients: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          notification_id: string
+          read_at: string | null
+          recipient_email: string | null
+          recipient_name: string
+          recipient_roles: string[]
+          user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          notification_id: string
+          read_at?: string | null
+          recipient_email?: string | null
+          recipient_name: string
+          recipient_roles?: string[]
+          user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          notification_id?: string
+          read_at?: string | null
+          recipient_email?: string | null
+          recipient_name?: string
+          recipient_roles?: string[]
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_recipients_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_recipients_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "notifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_recipients_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           company_id: string | null
@@ -327,6 +388,7 @@ export type Database = {
           email: string | null
           full_name: string
           id: string
+          is_active: boolean
           phone: string | null
           updated_at: string
         }
@@ -336,6 +398,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id: string
+          is_active?: boolean
           phone?: string | null
           updated_at?: string
         }
@@ -345,6 +408,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id?: string
+          is_active?: boolean
           phone?: string | null
           updated_at?: string
         }
@@ -1012,6 +1076,21 @@ export type Database = {
         Args: { _reservation: Json; _status?: string }
         Returns: Database["public"]["Tables"]["reservations"]["Row"]
       }
+      get_company_notifications: {
+        Args: { _company_id: string; _limit?: number }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          image_url: string | null
+          is_read: boolean
+          message: string
+          read_at: string | null
+          title: string
+          type: string
+        }[]
+      }
       get_company_status_by_slug: {
         Args: { _slug: string }
         Returns: {
@@ -1034,6 +1113,25 @@ export type Database = {
       get_occupied_table_ids: {
         Args: { _company_id: string; _date: string; _time: string }
         Returns: string[]
+      }
+      get_notification_delivery_summaries: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          last_read_at: string | null
+          notification_id: string
+          read_count: number
+          recipient_count: number
+        }[]
+      }
+      get_notification_recipient_statuses: {
+        Args: { _notification_id: string }
+        Returns: {
+          email: string | null
+          full_name: string
+          read_at: string | null
+          roles: string[]
+          user_id: string | null
+        }[]
       }
       get_public_reservation_availability: {
         Args: { _company_id: string; _date: string; _party_size: number }
@@ -1106,6 +1204,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      mark_notifications_read: {
+        Args: { _notification_ids: string[] }
+        Returns: number
       }
       upsert_reservation_schedule_rule: {
         Args: {

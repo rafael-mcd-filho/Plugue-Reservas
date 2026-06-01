@@ -35,6 +35,17 @@ export interface Notification {
   read_at: string | null;
   created_by: string | null;
   created_at: string;
+  recipient_count?: number;
+  read_count?: number;
+  last_read_at?: string | null;
+}
+
+export interface NotificationRecipientStatus {
+  user_id: string | null;
+  full_name: string;
+  email: string | null;
+  roles: string[];
+  read_at: string | null;
 }
 
 export interface SystemBranding {
@@ -147,12 +158,30 @@ export function useNotifications() {
   return useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('notifications' as any)
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as Notification[];
+      const [{ data: notifications, error: notificationsError }, { data: summaries, error: summariesError }] = await Promise.all([
+        supabase
+          .from('notifications' as any)
+          .select('*')
+          .order('created_at', { ascending: false }),
+        (supabase.rpc as any)('get_notification_delivery_summaries'),
+      ]);
+
+      if (notificationsError) throw notificationsError;
+      if (summariesError) throw summariesError;
+
+      const summariesByNotification = new Map(
+        ((summaries ?? []) as any[]).map((summary) => [summary.notification_id, summary]),
+      );
+
+      return ((notifications ?? []) as any[]).map((notification) => {
+        const summary = summariesByNotification.get(notification.id);
+        return {
+          ...notification,
+          recipient_count: summary?.recipient_count ?? 0,
+          read_count: summary?.read_count ?? 0,
+          last_read_at: summary?.last_read_at ?? null,
+        };
+      }) as Notification[];
     },
   });
 }
@@ -246,12 +275,10 @@ export function useCompanyNotifications(companyId: string, limit = 10) {
   return useQuery({
     queryKey: ['company-notifications', companyId, limit],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('notifications' as any)
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
+      const { data, error } = await (supabase.rpc as any)('get_company_notifications', {
+        _company_id: companyId,
+        _limit: limit,
+      });
       if (error) throw error;
       return (data ?? []) as unknown as Notification[];
     },
@@ -273,5 +300,19 @@ export function useMarkNotificationsRead() {
       qc.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+}
+
+export function useNotificationRecipientStatuses(notificationId: string | null) {
+  return useQuery({
+    queryKey: ['notification-recipient-statuses', notificationId],
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as any)('get_notification_recipient_statuses', {
+        _notification_id: notificationId,
+      });
+      if (error) throw error;
+      return (data ?? []) as NotificationRecipientStatus[];
+    },
+    enabled: !!notificationId,
   });
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, CheckCheck, ChevronLeft, ChevronRight, Info, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCheck, ChevronLeft, ChevronRight, Info, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCompanyNotifications, useMarkNotificationsRead } from '@/hooks/useSettings';
 
@@ -40,17 +40,13 @@ export default function NotificationBanner({ companyId }: NotificationBannerProp
   return (
     <>
       {/* Backdrop blur */}
-      <div
-        className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm"
-        onClick={() => handleRead(current.id)}
-        aria-hidden
-      />
+      <div className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm" aria-hidden />
 
       {/* Card */}
       <div className="fixed inset-x-4 top-1/2 z-50 mx-auto max-w-lg -translate-y-1/2 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2">
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
           {/* Header colorido pelo tipo */}
-          <div className={`flex items-center justify-between gap-3 border-b px-4 py-3 ${headerClass}`}>
+          <div className={`flex items-center gap-3 border-b px-4 py-3 ${headerClass}`}>
             <div className="flex min-w-0 items-center gap-2">
               <TypeIcon className={`h-4 w-4 shrink-0 ${iconClass}`} />
               <span className="truncate text-sm font-semibold text-foreground">{current.title}</span>
@@ -60,14 +56,6 @@ export default function NotificationBanner({ companyId }: NotificationBannerProp
                 </span>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => handleRead(current.id)}
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground"
-              aria-label="Fechar"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
 
           {/* Imagem */}
