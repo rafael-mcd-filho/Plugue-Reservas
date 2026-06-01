@@ -505,7 +505,13 @@ export default function ReservationDetailsDialog({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
-                  <PhoneWhatsAppLink phone={reservation.guest_phone} phoneClassName="text-sm text-muted-foreground" />
+                  <PhoneWhatsAppLink
+                    phone={reservation.guest_phone}
+                    companyId={companyId}
+                    slug={slug}
+                    reservation={reservation}
+                    phoneClassName="text-sm text-muted-foreground"
+                  />
                   {reservation.guest_email && (
                     <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
                   )}

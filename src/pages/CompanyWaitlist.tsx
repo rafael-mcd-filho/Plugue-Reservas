@@ -1695,6 +1695,7 @@ export default function CompanyWaitlist() {
         }}
         reservation={historyReservationDetails}
         slug={slug}
+        companyId={companyId}
         onBackToList={() => setHistoryReservationDetails(null)}
         backLabel="Voltar para o histórico do contato"
       />

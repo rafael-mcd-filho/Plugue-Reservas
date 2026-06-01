@@ -1,6 +1,13 @@
-import { type MouseEvent, type SVGProps } from 'react';
+import { type MouseEvent, type SVGProps, useMemo, useState } from 'react';
+import { ExternalLink, Loader2, MessageCircle } from 'lucide-react';
+import { useAutomationSettings } from '@/hooks/useAutomations';
+import {
+  RESERVATION_WHATSAPP_AUTOMATIONS,
+  renderReservationWhatsAppTemplate,
+} from '@/lib/whatsapp-automations';
 import { cn } from '@/lib/utils';
 import { formatBrazilPhone, normalizeBrazilPhoneDigits, toBrazilWhatsAppNumber } from '@/lib/validation';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -19,6 +26,16 @@ function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
 
 interface PhoneWhatsAppLinkProps {
   phone: string | null | undefined;
+  companyId?: string | null;
+  slug?: string | null;
+  reservation?: {
+    guest_name?: string | null;
+    guest_phone?: string | null;
+    date?: string | null;
+    time?: string | null;
+    party_size?: number | null;
+    public_tracking_code?: string | null;
+  } | null;
   className?: string;
   phoneClassName?: string;
   iconClassName?: string;
@@ -29,6 +46,9 @@ interface PhoneWhatsAppLinkProps {
 
 export default function PhoneWhatsAppLink({
   phone,
+  companyId,
+  slug,
+  reservation,
   className,
   phoneClassName,
   iconClassName,
@@ -36,10 +56,40 @@ export default function PhoneWhatsAppLink({
   stopPropagation = true,
   linkMode = 'anchor',
 }: PhoneWhatsAppLinkProps) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { data: automationSettings, isLoading, isError } = useAutomationSettings(companyId ?? undefined, pickerOpen);
   const formattedPhone = formatBrazilPhone(phone);
   const digits = normalizeBrazilPhoneDigits(phone);
   const whatsappNumber = digits.length >= 10 ? toBrazilWhatsAppNumber(digits) : '';
   const whatsappUrl = whatsappNumber ? `https://wa.me/${whatsappNumber}` : '';
+  const hasMessagePicker = Boolean(companyId && reservation);
+  const trackingUrl =
+    typeof window !== 'undefined' && slug && reservation?.public_tracking_code
+      ? `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`
+      : '';
+  const messageOptions = useMemo(() => {
+    const settingsByType = new Map(automationSettings?.map((setting) => [setting.type, setting]));
+
+    return RESERVATION_WHATSAPP_AUTOMATIONS.map((automation) => {
+      const setting = settingsByType.get(automation.type);
+      const savedTemplate = setting?.message_template?.trim();
+      const template = savedTemplate || automation.defaultTemplate;
+
+      return {
+        ...automation,
+        enabled: setting?.enabled ?? false,
+        isDefault: !savedTemplate,
+        message: renderReservationWhatsAppTemplate(template, {
+          guestName: reservation?.guest_name,
+          guestPhone: reservation?.guest_phone ?? phone,
+          date: reservation?.date,
+          time: reservation?.time,
+          partySize: reservation?.party_size,
+          trackingUrl,
+        }),
+      };
+    });
+  }, [automationSettings, phone, reservation, trackingUrl]);
 
   if (!formattedPhone) return null;
 
@@ -49,10 +99,21 @@ export default function PhoneWhatsAppLink({
     }
   };
 
+  const openWhatsApp = (message?: string) => {
+    if (!whatsappUrl || typeof window === 'undefined') return;
+    const text = message?.trim();
+    const targetUrl = text ? `${whatsappUrl}?text=${encodeURIComponent(text)}` : whatsappUrl;
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    setPickerOpen(false);
+  };
+
   const handleButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     handleInteraction(event);
-    if (!whatsappUrl || typeof window === 'undefined') return;
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    if (hasMessagePicker) {
+      setPickerOpen(true);
+      return;
+    }
+    openWhatsApp();
   };
 
   const icon = (
@@ -65,39 +126,124 @@ export default function PhoneWhatsAppLink({
   );
 
   return (
-    <span className={cn('inline-flex items-center gap-1.5', className)}>
-      <span className={cn('tabular-nums leading-none', phoneClassName)}>{formattedPhone}</span>
-      {whatsappUrl ? (
-        linkMode === 'button' ? (
-          <button
-            type="button"
-            onClick={handleButtonClick}
-            aria-label={`Abrir WhatsApp de ${formattedPhone}`}
-            title="Abrir WhatsApp"
-            className={cn(
-              'group/wa inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[#25D366] opacity-90 transition hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-              linkClassName,
-            )}
-          >
-            {icon}
-          </button>
-        ) : (
-          <a
-            href={whatsappUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={handleInteraction}
-            aria-label={`Abrir WhatsApp de ${formattedPhone}`}
-            title="Abrir WhatsApp"
-            className={cn(
-              'group/wa inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[#25D366] opacity-90 transition hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-              linkClassName,
-            )}
-          >
-            {icon}
-          </a>
-        )
-      ) : null}
-    </span>
+    <>
+      <span className={cn('inline-flex items-center gap-1.5', className)}>
+        <span className={cn('tabular-nums leading-none', phoneClassName)}>{formattedPhone}</span>
+        {whatsappUrl ? (
+          hasMessagePicker || linkMode === 'button' ? (
+            <button
+              type="button"
+              onClick={handleButtonClick}
+              aria-label={`Abrir WhatsApp de ${formattedPhone}`}
+              title="Abrir WhatsApp"
+              className={cn(
+                'group/wa inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[#25D366] opacity-90 transition hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                linkClassName,
+              )}
+            >
+              {icon}
+            </button>
+          ) : (
+            <a
+              href={whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleInteraction}
+              aria-label={`Abrir WhatsApp de ${formattedPhone}`}
+              title="Abrir WhatsApp"
+              className={cn(
+                'group/wa inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-[#25D366] opacity-90 transition hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                linkClassName,
+              )}
+            >
+              {icon}
+            </a>
+          )
+        ) : null}
+      </span>
+
+      {hasMessagePicker && (
+        <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+          <DialogContent className="max-h-[calc(100vh-1.5rem)] overflow-hidden p-0 sm:max-w-xl">
+            <DialogHeader className="border-b border-border/70 px-5 pb-4 pt-5 pr-14 text-left">
+              <DialogTitle>Abrir conversa no WhatsApp</DialogTitle>
+              <DialogDescription>
+                Escolha uma mensagem cadastrada para preencher a conversa com {reservation?.guest_name || formattedPhone}.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[min(62vh,34rem)] space-y-2 overflow-y-auto px-5 py-4">
+              {isLoading ? (
+                <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando mensagens...
+                </div>
+              ) : isError ? (
+                <div className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  Não foi possível carregar as mensagens cadastradas. Você ainda pode abrir uma conversa sem texto.
+                </div>
+              ) : (
+                messageOptions.map((option) => {
+                  const Icon = option.icon;
+
+                  return (
+                    <button
+                      key={option.type}
+                      type="button"
+                      onClick={() => openWhatsApp(option.message)}
+                      className="group flex w-full items-start gap-3 rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left transition hover:border-[#25D366]/45 hover:bg-[#25D366]/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366]/60 focus-visible:ring-offset-2"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#25D366]/10 text-[#168a42]">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                          <span
+                            className={cn(
+                              'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                              option.enabled
+                                ? 'bg-[#25D366]/10 text-[#168a42]'
+                                : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {option.enabled ? 'Ativa' : option.isDefault ? 'Texto padrão' : 'Inativa'}
+                          </span>
+                        </span>
+                        <span
+                          className="mt-1 block overflow-hidden whitespace-pre-line text-xs leading-relaxed text-muted-foreground"
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: 'vertical',
+                          }}
+                        >
+                          {option.message}
+                        </span>
+                      </span>
+                      <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-[#168a42]" />
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="border-t border-border/70 bg-muted/20 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => openWhatsApp()}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <MessageCircle className="h-4 w-4 text-[#168a42]" />
+                Abrir conversa sem mensagem
+              </button>
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-muted-foreground">
+                A conversa será aberta para revisão. Nenhuma mensagem é enviada automaticamente por esta ação.
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

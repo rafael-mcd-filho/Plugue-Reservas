@@ -445,6 +445,9 @@ export default function OperatorTodayReservations() {
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:text-sm">
             <PhoneWhatsAppLink
               phone={reservation.guest_phone}
+              companyId={reservation.company_id}
+              slug={slug}
+              reservation={reservation}
               phoneClassName="text-xs text-muted-foreground sm:text-sm"
             />
             <span
@@ -546,6 +549,9 @@ export default function OperatorTodayReservations() {
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:text-sm">
             <PhoneWhatsAppLink
               phone={reservation.guest_phone}
+              companyId={reservation.company_id}
+              slug={slug}
+              reservation={reservation}
               phoneClassName="text-xs text-muted-foreground sm:text-sm"
             />
 

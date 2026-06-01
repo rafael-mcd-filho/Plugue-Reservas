@@ -93,6 +93,52 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
   },
 ];
 
+const RESERVATION_WHATSAPP_AUTOMATION_TYPES = new Set([
+  'confirmation_message',
+  'reminder_24h',
+  'reminder_1h',
+  'cancellation_message',
+  'post_visit',
+  'birthday_message',
+  'no_show_message',
+]);
+
+export const RESERVATION_WHATSAPP_AUTOMATIONS = WHATSAPP_AUTOMATIONS.filter((automation) =>
+  RESERVATION_WHATSAPP_AUTOMATION_TYPES.has(automation.type),
+);
+
+export interface ReservationWhatsAppTemplateContext {
+  guestName?: string | null;
+  guestPhone?: string | null;
+  date?: string | null;
+  time?: string | null;
+  partySize?: number | null;
+  trackingUrl?: string | null;
+}
+
+function formatReservationDate(value: string | null | undefined) {
+  const [year, month, day] = (value ?? '').split('-');
+  return day && month && year ? `${day}/${month}/${year}` : value ?? '';
+}
+
+function formatReservationTime(value: string | null | undefined) {
+  const [hours, minutes] = (value ?? '').split(':');
+  return hours && minutes ? `${hours}:${minutes}` : value ?? '';
+}
+
+export function renderReservationWhatsAppTemplate(
+  template: string,
+  context: ReservationWhatsAppTemplateContext,
+) {
+  return template
+    .replace(/\{nome\}/g, context.guestName ?? '')
+    .replace(/\{pessoas\}/g, String(context.partySize ?? 1))
+    .replace(/\{data\}/g, formatReservationDate(context.date))
+    .replace(/\{hora\}/g, formatReservationTime(context.time))
+    .replace(/\{link_acompanhamento\}/g, context.trackingUrl ?? '')
+    .replace(/\{telefone\}/g, context.guestPhone ?? '');
+}
+
 export const WHATSAPP_MESSAGE_TYPE_LABELS: Record<string, string> = {
   confirmation: 'Confirmação',
   cancellation: 'Cancelamento',

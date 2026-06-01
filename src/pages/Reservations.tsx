@@ -1256,6 +1256,9 @@ export default function Reservations() {
                           <div className="text-sm font-medium text-foreground">{reservation.guest_name}</div>
                           <PhoneWhatsAppLink
                             phone={reservation.guest_phone}
+                            companyId={reservation.company_id}
+                            slug={slug}
+                            reservation={reservation}
                             className="mt-0.5"
                             phoneClassName="text-xs text-muted-foreground"
                           />
@@ -1505,6 +1508,7 @@ export default function Reservations() {
         backLabel={detailsReturnDay ? 'Voltar para as reservas do dia' : undefined}
         reservation={detailsReservation}
         slug={slug}
+        companyId={companyId}
         onEdit={(r) => openDataEdit(r as Reservation)}
         onCheckIn={detailsReturnDay ? undefined : (r) => openCheckIn(r as Reservation)}
         onStatusChange={(r) => openEdit(r as Reservation)}
@@ -2155,6 +2159,9 @@ export default function Reservations() {
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                                 <PhoneWhatsAppLink
                                   phone={reservation.guest_phone}
+                                  companyId={reservation.company_id}
+                                  slug={slug}
+                                  reservation={reservation}
                                   phoneClassName="text-xs text-muted-foreground"
                                 />
                                 <span className="inline-flex items-center gap-1">
@@ -2224,6 +2231,9 @@ export default function Reservations() {
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                           <PhoneWhatsAppLink
                             phone={reservation.guest_phone}
+                            companyId={reservation.company_id}
+                            slug={slug}
+                            reservation={reservation}
                             phoneClassName="text-xs text-muted-foreground"
                           />
                           <span className="inline-flex items-center gap-1">

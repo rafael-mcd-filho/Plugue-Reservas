@@ -447,6 +447,9 @@ export default function CalendarView() {
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                               <PhoneWhatsAppLink
                                 phone={reservation.guest_phone}
+                                companyId={reservation.company_id}
+                                slug={slug}
+                                reservation={reservation}
                                 phoneClassName="text-xs text-muted-foreground"
                                 linkMode="button"
                               />
@@ -470,6 +473,7 @@ export default function CalendarView() {
         onOpenChange={setDetailsDialogOpen}
         reservation={detailsReservation}
         slug={slug}
+        companyId={companyId}
         onEdit={(r) => openEditDialog(r as Reservation)}
         onStatusChange={(r) => openStatusDialog(r as Reservation)}
         onCancel={(r) => setCancelReservation(r as Reservation)}

@@ -2057,6 +2057,7 @@ export default function Leads() {
         }}
         reservation={selectedReservation ?? null}
         slug={slug}
+        companyId={companyId}
         loading={selectedReservationLoading}
         onBackToList={() => setSelectedReservationId(null)}
         backLabel="Voltar para o lead"

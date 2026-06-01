@@ -35,7 +35,7 @@ export interface EvolutionApiPayload {
   refresh_profile?: boolean;
 }
 
-export function useAutomationSettings(companyId?: string) {
+export function useAutomationSettings(companyId?: string, enabled = true) {
   return useQuery({
     queryKey: ['automation-settings', companyId],
     queryFn: async () => {
@@ -47,7 +47,7 @@ export function useAutomationSettings(companyId?: string) {
       if (error) throw error;
       return (data ?? []) as unknown as AutomationSetting[];
     },
-    enabled: !!companyId,
+    enabled: !!companyId && enabled,
   });
 }
 
