@@ -164,17 +164,17 @@ export default function PhoneWhatsAppLink({
 
       {hasMessagePicker && (
         <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-          <DialogContent className="max-h-[calc(100vh-1.5rem)] overflow-hidden p-0 sm:max-w-xl">
-            <DialogHeader className="border-b border-border/70 px-5 pb-4 pt-5 pr-14 text-left">
-              <DialogTitle>Abrir conversa no WhatsApp</DialogTitle>
+          <DialogContent className="max-h-[calc(100vh-1.5rem)] overflow-hidden p-0 sm:max-w-md">
+            <DialogHeader className="border-b border-border/70 px-4 pb-3 pt-4 pr-14 text-left">
+              <DialogTitle className="text-base">Abrir conversa no WhatsApp</DialogTitle>
               <DialogDescription>
                 Escolha uma mensagem cadastrada para preencher a conversa com {reservation?.guest_name || formattedPhone}.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="max-h-[min(62vh,34rem)] space-y-2 overflow-y-auto px-5 py-4">
+            <div className="max-h-[min(58vh,26rem)] space-y-1.5 overflow-y-auto px-4 py-3">
               {isLoading ? (
-                <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <div className="flex min-h-24 items-center justify-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Carregando mensagens...
                 </div>
@@ -191,9 +191,9 @@ export default function PhoneWhatsAppLink({
                       key={option.type}
                       type="button"
                       onClick={() => openWhatsApp(option.message)}
-                      className="group flex w-full items-start gap-3 rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left transition hover:border-[#25D366]/45 hover:bg-[#25D366]/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366]/60 focus-visible:ring-offset-2"
+                      className="group flex w-full items-center gap-2.5 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition hover:border-[#25D366]/45 hover:bg-[#25D366]/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366]/60 focus-visible:ring-offset-2"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#25D366]/10 text-[#168a42]">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#25D366]/10 text-[#168a42]">
                         <Icon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -210,25 +210,15 @@ export default function PhoneWhatsAppLink({
                             {option.enabled ? 'Ativa' : option.isDefault ? 'Texto padrão' : 'Inativa'}
                           </span>
                         </span>
-                        <span
-                          className="mt-1 block overflow-hidden whitespace-pre-line text-xs leading-relaxed text-muted-foreground"
-                          style={{
-                            display: '-webkit-box',
-                            WebkitLineClamp: 3,
-                            WebkitBoxOrient: 'vertical',
-                          }}
-                        >
-                          {option.message}
-                        </span>
                       </span>
-                      <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-[#168a42]" />
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-[#168a42]" />
                     </button>
                   );
                 })
               )}
             </div>
 
-            <div className="border-t border-border/70 bg-muted/20 px-5 py-4">
+            <div className="border-t border-border/70 bg-muted/20 px-4 py-3">
               <button
                 type="button"
                 onClick={() => openWhatsApp()}
@@ -237,7 +227,7 @@ export default function PhoneWhatsAppLink({
                 <MessageCircle className="h-4 w-4 text-[#168a42]" />
                 Abrir conversa sem mensagem
               </button>
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-center text-[10px] leading-relaxed text-muted-foreground">
                 A conversa será aberta para revisão. Nenhuma mensagem é enviada automaticamente por esta ação.
               </p>
             </div>
