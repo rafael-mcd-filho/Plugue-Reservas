@@ -20,39 +20,6 @@ function calculateRuleAmount(rule: any, partySize: number, key: "base_amount" | 
   return amount;
 }
 
-async function hasBlockingReservation(supabaseAdmin: any, reservation: any) {
-  if (!reservation.table_id) return false;
-
-  const { data, error } = await supabaseAdmin
-    .from("reservations")
-    .select("id, status")
-    .eq("company_id", reservation.company_id)
-    .eq("date", reservation.date)
-    .eq("time", reservation.time)
-    .eq("table_id", reservation.table_id)
-    .not("status", "in", '("cancelled","no-show","no_show","payment_expired","payment_cancelled")')
-    .limit(20);
-
-  if (error) throw new Error(error.message);
-
-  for (const candidate of data ?? []) {
-    if (candidate.status !== "pending_payment") return true;
-
-    const { data: candidatePayment } = await supabaseAdmin
-      .from("reservation_payments")
-      .select("id")
-      .eq("reservation_id", candidate.id)
-      .in("status", ["awaiting_method", "pending"])
-      .gt("expires_at", new Date().toISOString())
-      .limit(1)
-      .maybeSingle();
-
-    if (candidatePayment) return true;
-  }
-
-  return false;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -160,17 +127,17 @@ Deno.serve(async (req) => {
       status: "pending_payment",
     };
 
-    if (await hasBlockingReservation(supabaseAdmin, reservationData)) {
-      return jsonResponse({ error: "Mesa indisponivel para este horario" }, 409);
-    }
-
     const { data: insertedReservation, error: reservationError } = await supabaseAdmin
-      .from("reservations")
-      .insert(reservationData)
-      .select("*")
-      .single();
+      .rpc("create_public_reservation", {
+        _reservation: reservationData,
+        _status: "pending_payment",
+      });
 
     if (reservationError) throw new Error(reservationError.message);
+    const createdReservation = Array.isArray(insertedReservation)
+      ? insertedReservation[0]
+      : insertedReservation;
+    if (!createdReservation?.id) throw new Error("Reserva nao criada");
 
     const now = new Date();
     const deadlineMinutes = Number(rule.payment_deadline_minutes || 10);
@@ -190,7 +157,7 @@ Deno.serve(async (req) => {
       .from("reservation_payments")
       .insert({
         company_id: companyId,
-        reservation_id: insertedReservation.id,
+        reservation_id: createdReservation.id,
         rule_id: rule.id,
         rule_snapshot: ruleSnapshot,
         payment_token: paymentToken,
@@ -208,14 +175,14 @@ Deno.serve(async (req) => {
     if (paymentError) throw new Error(paymentError.message);
 
     await recordPaymentEvent(supabaseAdmin, payment, "payment_created_awaiting_method", {
-      reservation_id: insertedReservation.id,
+      reservation_id: createdReservation.id,
       rule_id: rule.id,
       expires_at: expiresAt,
     });
 
     return jsonResponse({
       requires_payment: true,
-      reservation_id: insertedReservation.id,
+      reservation_id: createdReservation.id,
       payment_token: payment.payment_token,
       payment_url: buildPaymentUrl(payment.payment_token),
       expires_at: payment.expires_at,

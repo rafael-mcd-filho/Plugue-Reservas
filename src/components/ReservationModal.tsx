@@ -28,7 +28,7 @@ import {
 } from '@/lib/publicReservationExitPrompt';
 import { buildLargePartyWhatsappUrl, isLargePartyReservation, normalizeLargePartyThreshold } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
-import { findOpeningHoursForDayIndex } from '@/lib/openingHours';
+import { sortReservationScheduleSlots } from '@/lib/reservation-schedule';
 import { createReservationPayment } from '@/lib/asaas-prepayment-api';
 import {
   formatBrazilPhone,
@@ -71,25 +71,6 @@ interface ReservationModalProps {
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
 
 const MIN_PREFILL_PHONE_DIGITS = 10;
-
-const DAY_MAP: Record<string, number> = {
-  'Dom': 0, 'Seg': 1, 'Ter': 2, 'Qua': 3, 'Qui': 4, 'Sex': 5, 'Sáb': 6,
-};
-
-function generateTimeSlots(open: string, close: string, interval: number = 30, inclusive = false): string[] {
-  const slots: string[] = [];
-  const [openH, openM] = open.split(':').map(Number);
-  const [closeH, closeM] = close.split(':').map(Number);
-  let current = openH * 60 + openM;
-  const end = closeH * 60 + closeM;
-  while (inclusive ? current <= end : current < end) {
-    const h = Math.floor(current / 60);
-    const m = current % 60;
-    slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    current += interval;
-  }
-  return slots;
-}
 
 function normalizePhone(phone: string): string {
   return normalizeBrazilPhoneDigits(phone);
@@ -144,6 +125,39 @@ interface SlotAvailability {
   total: number;
   occupied: number;
   available: number;
+  isAvailable: boolean;
+  unavailableReason: string | null;
+  reservationCount: number;
+  maxPartySizePerReservation: number | null;
+  maxReservationsPerSlot: number | null;
+}
+
+interface PublicReservationSchedule {
+  source: 'blocked' | 'date_specific' | 'date_range' | 'weekly' | 'default';
+  rule_id: string | null;
+  rule_name: string | null;
+  slots: string[];
+  max_party_size_per_reservation: number | null;
+}
+
+async function getPublicReservationSchedule(companyId: string, date: string): Promise<PublicReservationSchedule> {
+  const { data, error } = await (supabase.rpc as any)('get_public_reservation_schedule', {
+    _company_id: companyId,
+    _date: date,
+  });
+
+  if (error) throw error;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    source: row?.source ?? 'default',
+    rule_id: row?.rule_id ?? null,
+    rule_name: row?.rule_name ?? null,
+    slots: sortReservationScheduleSlots(Array.isArray(row?.slots) ? row.slots : []),
+    max_party_size_per_reservation: row?.max_party_size_per_reservation == null
+      ? null
+      : Number(row.max_party_size_per_reservation),
+  };
 }
 
 interface UrgencySlot extends SlotAvailability {
@@ -170,9 +184,7 @@ export default function ReservationModal({
   companyId,
   companyName,
   companyWhatsapp,
-  openingHours,
   reservationDuration = 30,
-  maxGuestsPerSlot = 0,
   largePartyThreshold,
   initialDate,
   initialPartySize = 2,
@@ -327,32 +339,30 @@ export default function ReservationModal({
     enabled: !!companyId,
   });
 
-  const { data: scheduleOverrides = [] } = useQuery({
-    queryKey: ['public-schedule-overrides', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_public_schedule_overrides' as any, {
-        _company_id: companyId,
-      });
-      if (error) throw error;
-      return (data ?? []) as Array<{
-        date: string;
-        start_time: string;
-        end_time: string;
-        slot_interval_minutes: number;
-        label: string | null;
-      }>;
-    },
-    enabled: !!companyId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-    refetchOnMount: false,
-  });
-
   const next7Days = useMemo(() => {
     const days: Date[] = [];
     for (let i = 0; i < 7; i++) days.push(addDays(new Date(), i));
     return days;
   }, []);
+
+  const quickDateKeys = useMemo(
+    () => next7Days.map((date) => format(date, 'yyyy-MM-dd')),
+    [next7Days],
+  );
+
+  const { data: quickSchedules = [] } = useQuery({
+    queryKey: ['public-reservation-schedules-preview', companyId, quickDateKeys.join(',')],
+    queryFn: () => Promise.all(
+      quickDateKeys.map(async (date) => ({
+        date,
+        schedule: await getPublicReservationSchedule(companyId, date),
+      })),
+    ),
+    enabled: open && !!companyId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+  });
 
   // Check if the selected date is within the next7Days range or from calendar
   const isDateInQuickSelect = useMemo(() => {
@@ -360,37 +370,30 @@ export default function ReservationModal({
     return next7Days.some(d => d.toDateString() === selectedDate.toDateString());
   }, [selectedDate, next7Days]);
 
-  const selectedDayHours = useMemo(() => {
-    if (!selectedDate) return null;
-    return findOpeningHoursForDayIndex(openingHours, selectedDate.getDay());
-  }, [selectedDate, openingHours]);
-
-  const activeScheduleOverride = useMemo(() => {
-    if (!selectedDate) return null;
-    const key = format(selectedDate, 'yyyy-MM-dd');
-    return scheduleOverrides.find((o) => o.date === key) ?? null;
-  }, [selectedDate, scheduleOverrides]);
+  const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const {
+    data: publicSchedule,
+    error: publicScheduleError,
+    isFetching: scheduleLoading,
+    refetch: refetchPublicSchedule,
+  } = useQuery({
+    queryKey: ['public-reservation-schedule', companyId, selectedDateKey],
+    queryFn: () => getPublicReservationSchedule(companyId, selectedDateKey),
+    enabled: open && !!companyId && !!selectedDateKey,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+  });
 
   const timeSlots = useMemo(() => {
-    if (activeScheduleOverride) {
-      const slots = generateTimeSlots(
-        activeScheduleOverride.start_time.slice(0, 5),
-        activeScheduleOverride.end_time.slice(0, 5),
-        activeScheduleOverride.slot_interval_minutes,
-        true,
-      );
-      return filterPastTimeSlotsForDate(slots, selectedDate);
-    }
-    if (!selectedDayHours || selectedDayHours.closed) return [];
-    const slots = generateTimeSlots(selectedDayHours.open, selectedDayHours.close, reservationDuration);
-    return filterPastTimeSlotsForDate(slots, selectedDate);
-  }, [selectedDate, selectedDayHours, reservationDuration, activeScheduleOverride]);
+    return filterPastTimeSlotsForDate(publicSchedule?.slots ?? [], selectedDate);
+  }, [publicSchedule?.slots, selectedDate]);
+  const schedulePartySizeLimit = publicSchedule?.max_party_size_per_reservation ?? null;
 
-  const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const slotLookupKey = useMemo(() => {
     if (!selectedDateKey || timeSlots.length === 0) return '';
-    return [companyId, selectedDateKey, selectedPartySize, maxGuestsPerSlot, timeSlots.join(',')].join('|');
-  }, [companyId, maxGuestsPerSlot, selectedDateKey, selectedPartySize, timeSlots]);
+    return [companyId, selectedDateKey, selectedPartySize, timeSlots.join(',')].join('|');
+  }, [companyId, selectedDateKey, selectedPartySize, timeSlots]);
   const tableLookupKey = useMemo(() => {
     if (!selectedDateKey || !selectedTime) return '';
     return [companyId, selectedDateKey, selectedTime, selectedPartySize].join('|');
@@ -453,7 +456,6 @@ export default function ReservationModal({
       setLoadingSlots(false);
       return;
     }
-    if (tablesLoading || tableMapsLoading) return;
     
     const fetchSlotAvailability = async () => {
       const requestId = ++slotAvailabilityRequestIdRef.current;
@@ -461,48 +463,31 @@ export default function ReservationModal({
       setSlotAvailabilityError(null);
       try {
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const { data: slotOccupancy, error: slotOccupancyError } = await supabase.rpc('get_slot_occupancy', {
+        const { data: slotRows, error: slotAvailabilityRpcError } = await (supabase.rpc as any)('get_public_reservation_availability', {
           _company_id: companyId,
           _date: dateStr,
+          _party_size: selectedPartySize,
         });
-        if (slotOccupancyError) throw slotOccupancyError;
-
-        // Count occupied tables and total guests per time slot from RPC
-        const occupiedBySlot: Record<string, number> = {};
-        const guestsBySlot: Record<string, number> = {};
-        ((slotOccupancy as any[]) || []).forEach((r: any) => {
-          const timeKey = r.time_slot?.substring(0, 5) || '';
-          occupiedBySlot[timeKey] = Number(r.occupied_tables) || 0;
-          guestsBySlot[timeKey] = Number(r.total_guests) || 0;
-        });
-
-        // Check blocked time ranges for this date
-        const dateBlocks = blockedDates.filter((bd: any) => bd.date === dateStr && !bd.all_day);
+        if (slotAvailabilityRpcError) throw slotAvailabilityRpcError;
 
         const availability: Record<string, SlotAvailability> = {};
-        timeSlots.forEach(slot => {
-          const { tables: eligibleTables } = getEligibleTables(selectedDate, slot, selectedPartySize);
-          const totalTables = eligibleTables.length;
-          const occupied = occupiedBySlot[slot] || 0;
-          let available = Math.max(0, totalTables - occupied);
-
-          // Check if slot is within a blocked time range
-          const isTimeBlocked = dateBlocks.some((bd: any) => {
-            const start = bd.start_time?.substring(0, 5) || '00:00';
-            const end = bd.end_time?.substring(0, 5) || '23:59';
-            return slot >= start && slot < end;
-          });
-          if (isTimeBlocked) available = 0;
-
-          // Check max guests per slot
-          if (maxGuestsPerSlot > 0) {
-            const currentGuests = guestsBySlot[slot] || 0;
-            if (currentGuests + selectedPartySize > maxGuestsPerSlot) {
-              available = 0;
-            }
-          }
-
-          availability[slot] = { total: totalTables, occupied, available };
+        ((slotRows as any[]) || []).forEach((row: any) => {
+          const timeKey = row.time_slot?.substring(0, 5) || '';
+          if (!timeKey) return;
+          availability[timeKey] = {
+            total: Number(row.total_tables) || 0,
+            occupied: Number(row.occupied_tables) || 0,
+            available: Number(row.available_tables) || 0,
+            isAvailable: Boolean(row.available),
+            unavailableReason: row.unavailable_reason ?? null,
+            reservationCount: Number(row.reservation_count) || 0,
+            maxPartySizePerReservation: row.max_party_size_per_reservation == null
+              ? null
+              : Number(row.max_party_size_per_reservation),
+            maxReservationsPerSlot: row.max_reservations_per_slot == null
+              ? null
+              : Number(row.max_reservations_per_slot),
+          };
         });
         if (slotAvailabilityRequestIdRef.current !== requestId) return;
         setSlotAvailability(availability);
@@ -520,13 +505,22 @@ export default function ReservationModal({
     };
 
     fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, blockedDates, maxGuestsPerSlot, tablesLoading, tableMapsLoading, getEligibleTables, slotLookupKey, availabilityRetryToken]);
+  }, [selectedDate, companyId, selectedPartySize, timeSlots, slotLookupKey, availabilityRetryToken]);
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime || step !== 2) {
       tableAvailabilityRequestIdRef.current += 1;
       setResolvedTableLookupKey('');
+      setTableAvailabilityError(null);
+      setLoadingTables(false);
+      return;
+    }
+    if (slotAvailability[selectedTime]?.isAvailable === false) {
+      setAvailableTables([]);
+      setSelectedTableId('');
+      setSelectedTableMapId('');
+      setResolvedTableLookupKey(tableLookupKey);
       setTableAvailabilityError(null);
       setLoadingTables(false);
       return;
@@ -588,7 +582,7 @@ export default function ReservationModal({
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken, slotAvailability]);
 
   const handleReset = () => {
     setStep(1);
@@ -906,9 +900,10 @@ export default function ReservationModal({
         return;
       }
 
-      const { error } = await supabase
-        .from('reservations' as any)
-        .insert(reservationData as any)
+      const { error } = await (supabase.rpc as any)('create_public_reservation', {
+        _reservation: reservationData,
+        _status: 'confirmed',
+      });
       
       if (error) throw error;
 
@@ -957,14 +952,16 @@ export default function ReservationModal({
 
   const isDayClosed = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    // Override has precedence over normal closed status (but not blocked_dates)
-    const hasOverride = scheduleOverrides.some((o) => o.date === dateStr);
     const blocked = blockedDates.find((bd: any) => bd.date === dateStr && bd.all_day);
     if (blocked) return true;
-    if (hasOverride) return false;
-    const hours = findOpeningHoursForDayIndex(openingHours, date.getDay());
-    if (!hours) return true;
-    return hours.closed === true;
+
+    const schedule = dateStr === selectedDateKey
+      ? publicSchedule
+      : quickSchedules.find((entry) => entry.date === dateStr)?.schedule;
+
+    // Datas fora da prévia continuam selecionáveis: uma regra pontual pode abrir
+    // um dia normalmente fechado e a RPC resolve o resultado ao selecionar.
+    return schedule ? schedule.source === 'blocked' || schedule.slots.length === 0 : false;
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
@@ -996,15 +993,25 @@ export default function ReservationModal({
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Reserva - ${companyName}`)}&dates=${fmt(startDate)}/${fmt(endDate)}&details=${encodeURIComponent(`Reserva para ${confirmedReservation.partySize} pessoas${confirmedReservation.tableName ? ` · ${confirmedReservation.tableName}` : ''}`)}`;
   };
 
+  const getSlotRemainingCapacity = useCallback((slot: SlotAvailability) => {
+    const reservationsRemaining = slot.maxReservationsPerSlot === null
+      ? slot.available
+      : Math.max(0, slot.maxReservationsPerSlot - slot.reservationCount);
+    return Math.min(slot.available, reservationsRemaining);
+  }, []);
+
   const urgencySlots = useMemo<UrgencySlot[]>(() => {
     return timeSlots
       .map((time) => {
         const slot = slotAvailability[time];
-        if (!slot || slot.total <= 0 || slot.available <= 0) return null;
+        if (!slot || !slot.isAvailable || slot.total <= 0) return null;
+        const remainingCapacity = getSlotRemainingCapacity(slot);
+        if (remainingCapacity <= 0) return null;
 
         return {
           time,
           ...slot,
+          available: remainingCapacity,
           fillRate: slot.occupied / slot.total,
         };
       })
@@ -1015,12 +1022,16 @@ export default function ReservationModal({
         return a.time.localeCompare(b.time);
       })
       .slice(0, 3);
-  }, [slotAvailability, timeSlots]);
+  }, [getSlotRemainingCapacity, slotAvailability, timeSlots]);
 
   const selectedSlotAvailability = selectedTime ? slotAvailability[selectedTime] : null;
+  const selectedSlotRemainingCapacity = selectedSlotAvailability
+    ? getSlotRemainingCapacity(selectedSlotAvailability)
+    : 0;
   const selectedSlotIsLow = !!selectedSlotAvailability
-    && selectedSlotAvailability.available > 0
-    && selectedSlotAvailability.available <= 2;
+    && selectedSlotAvailability.isAvailable
+    && selectedSlotRemainingCapacity > 0
+    && selectedSlotRemainingCapacity <= 2;
   const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
   const resolvedLargePartyThreshold = normalizeLargePartyThreshold(largePartyThreshold);
   const isLargeParty = isLargePartyReservation(selectedPartySize, resolvedLargePartyThreshold);
@@ -1047,15 +1058,15 @@ export default function ReservationModal({
 
   const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
     const avail = slotAvailability[slot];
-    if (!avail || avail.total === 0) return 'available';
-    if (avail.available === 0) return 'full';
-    if (avail.available <= 2) return 'low';
+    if (!avail) return 'available';
+    if (!avail.isAvailable || getSlotRemainingCapacity(avail) === 0) return 'full';
+    if (getSlotRemainingCapacity(avail) <= 2) return 'low';
     return 'available';
   };
 
   const getSlotSignalLabel = (slot: SlotAvailability | undefined) => {
-    if (!slot || slot.available <= 0) return null;
-    if (slot.available <= 2) return 'Limitado';
+    if (!slot || !slot.isAvailable) return null;
+    if (getSlotRemainingCapacity(slot) <= 2) return 'Limitado';
     return null;
   };
 
@@ -1064,7 +1075,7 @@ export default function ReservationModal({
     && resolvedSlotLookupKey !== slotLookupKey;
   const isPreparingDateAvailability = !!selectedDate
     && !isLargeParty
-    && (tablesLoading || tableMapsLoading || isFetchingInitialSlotAvailability);
+    && (scheduleLoading || tablesLoading || tableMapsLoading || isFetchingInitialSlotAvailability);
   const isCheckingSelectedTable = !!selectedTime
     && (tablesLoading || tableMapsLoading || loadingTables || resolvedTableLookupKey !== tableLookupKey);
   const showNoTableAvailability = !!selectedTime
@@ -1073,6 +1084,7 @@ export default function ReservationModal({
     && availableTables.length === 0;
   const canContinueToForm = !!selectedTime
     && !!selectedTableId
+    && selectedSlotAvailability?.isAvailable === true
     && !isCheckingSelectedTable
     && !tableAvailabilityError;
 
@@ -1173,13 +1185,22 @@ export default function ReservationModal({
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Diminuir número de pessoas"
+                  disabled={selectedPartySize <= 1}
                   onClick={() => handlePartySizeChange(selectedPartySize - 1)}>-</Button>
                 <span id="reservation-party-size-value" className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
                 <Button variant="outline" size="icon" className="h-8 w-8" type="button"
                   aria-label="Aumentar número de pessoas"
+                  disabled={selectedPartySize >= 20}
                   onClick={() => handlePartySizeChange(selectedPartySize + 1)}>+</Button>
               </div>
             </div>
+
+            {schedulePartySizeLimit !== null && selectedDate && (
+              <p className="rounded-lg border border-primary/15 bg-primary/5 px-3 py-2 text-center text-xs text-muted-foreground">
+                Nesta data, o limite padrão é de {schedulePartySizeLimit}{' '}
+                {schedulePartySizeLimit === 1 ? 'pessoa' : 'pessoas'} por reserva. Alguns horários podem ter ajustes próprios.
+              </p>
+            )}
 
             {isLargeParty && (
               <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
@@ -1288,7 +1309,23 @@ export default function ReservationModal({
               {' '}· {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
             </p>
 
-            {timeSlots.length === 0 ? (
+            {scheduleLoading ? (
+              <p className="flex items-center justify-center gap-1.5 text-center text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando horários...
+              </p>
+            ) : publicScheduleError ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-center text-xs text-amber-900" role="status">
+                <p>Não foi possível carregar os horários desta data.</p>
+                <button
+                  type="button"
+                  className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
+                  onClick={() => refetchPublicSchedule()}
+                >
+                  Tentar novamente
+                </button>
+              </div>
+            ) : timeSlots.length === 0 ? (
               <p className="text-center text-sm text-destructive">Nenhum horário disponível para esta data.</p>
             ) : (
               <>

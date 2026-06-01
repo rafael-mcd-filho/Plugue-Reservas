@@ -407,6 +407,107 @@ export type Database = {
           },
         ]
       }
+      reservation_schedule_rule_slots: {
+        Row: {
+          created_at: string
+          id: string
+          max_party_size_per_reservation: number | null
+          max_reservations_per_slot: number | null
+          rule_id: string
+          sort_order: number
+          time: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          max_party_size_per_reservation?: number | null
+          max_reservations_per_slot?: number | null
+          rule_id: string
+          sort_order?: number
+          time: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          max_party_size_per_reservation?: number | null
+          max_reservations_per_slot?: number | null
+          rule_id?: string
+          sort_order?: number
+          time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_schedule_rule_slots_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "reservation_schedule_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reservation_schedule_rules: {
+        Row: {
+          archived_at: string | null
+          company_id: string
+          created_at: string
+          enabled: boolean
+          end_date: string | null
+          id: string
+          max_party_size_per_reservation: number | null
+          name: string
+          priority: number
+          scope: string
+          start_date: string | null
+          updated_at: string
+          weekdays: number[] | null
+        }
+        Insert: {
+          archived_at?: string | null
+          company_id: string
+          created_at?: string
+          enabled?: boolean
+          end_date?: string | null
+          id?: string
+          max_party_size_per_reservation?: number | null
+          name: string
+          priority?: number
+          scope: string
+          start_date?: string | null
+          updated_at?: string
+          weekdays?: number[] | null
+        }
+        Update: {
+          archived_at?: string | null
+          company_id?: string
+          created_at?: string
+          enabled?: boolean
+          end_date?: string | null
+          id?: string
+          max_party_size_per_reservation?: number | null
+          name?: string
+          priority?: number
+          scope?: string
+          start_date?: string | null
+          updated_at?: string
+          weekdays?: number[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_schedule_rules_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservation_schedule_rules_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservations: {
         Row: {
           company_id: string
@@ -903,6 +1004,14 @@ export type Database = {
       }
     }
     Functions: {
+      archive_reservation_schedule_rule: {
+        Args: { _rule_id: string }
+        Returns: undefined
+      }
+      create_public_reservation: {
+        Args: { _reservation: Json; _status?: string }
+        Returns: Database["public"]["Tables"]["reservations"]["Row"]
+      }
       get_company_status_by_slug: {
         Args: { _slug: string }
         Returns: {
@@ -912,9 +1021,34 @@ export type Database = {
           whatsapp: string
         }[]
       }
+      get_public_reservation_schedule: {
+        Args: { _company_id: string; _date: string }
+        Returns: {
+          rule_id: string | null
+          rule_name: string | null
+          max_party_size_per_reservation: number | null
+          slots: Json
+          source: string
+        }[]
+      }
       get_occupied_table_ids: {
         Args: { _company_id: string; _date: string; _time: string }
         Returns: string[]
+      }
+      get_public_reservation_availability: {
+        Args: { _company_id: string; _date: string; _party_size: number }
+        Returns: {
+          available: boolean
+          available_tables: number
+          max_party_size_per_reservation: number | null
+          max_reservations_per_slot: number | null
+          occupied_tables: number
+          reservation_count: number
+          time_slot: string
+          total_guests: number
+          total_tables: number
+          unavailable_reason: string | null
+        }[]
       }
       get_reservation_count_by_slot: {
         Args: { _company_id: string; _date: string; _time: string }
@@ -972,6 +1106,23 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      upsert_reservation_schedule_rule: {
+        Args: {
+          _company_id: string
+          _enabled?: boolean
+          _end_date?: string
+          _name: string
+          _max_party_size_per_reservation?: number | null
+          _priority?: number
+          _rule_id?: string
+          _scope: string
+          _slot_settings?: Json
+          _slots: string[]
+          _start_date?: string
+          _weekdays?: number[]
+        }
+        Returns: string
       }
     }
     Enums: {
