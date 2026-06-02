@@ -79,12 +79,25 @@ Deno.serve(async (req) => {
             last_checked_at: nowIso,
           })
           .eq("id", payment.id)
+          .eq("status", "awaiting_method")
           .select("*")
-          .single();
+          .maybeSingle();
 
         if (expireError) throw new Error(expireError.message);
 
-        await supabaseAdmin.from("reservations").update({ status: "payment_expired" }).eq("id", reservation.id);
+        if (!expiredPayment) {
+          const { payment: refreshedPayment, reservation: refreshedReservation, company: refreshedCompany } =
+            await loadContext(supabaseAdmin, paymentToken);
+          return jsonResponse(toPublicPaymentSummary(refreshedPayment, refreshedReservation, refreshedCompany));
+        }
+
+        const { error: reservationExpireError } = await supabaseAdmin
+          .from("reservations")
+          .update({ status: "payment_expired" })
+          .eq("id", reservation.id)
+          .eq("status", "pending_payment");
+        if (reservationExpireError) throw new Error(reservationExpireError.message);
+
         await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
           source: "manual_check",
           reason: "awaiting_method",
@@ -122,9 +135,49 @@ Deno.serve(async (req) => {
         }
       }
 
+      const deletedAt = new Date().toISOString();
+      const { data: expiredPayment, error: updateError } = await supabaseAdmin
+        .from("reservation_payments")
+        .update({
+          status: "expired",
+          asaas_status: asaasStatus,
+          cancelled_at: deletedAt,
+          last_checked_at: deletedAt,
+          error_details: null,
+        })
+        .eq("id", payment.id)
+        .eq("status", "pending")
+        .select("*")
+        .maybeSingle();
+      if (updateError) throw new Error(updateError.message);
+
+      if (!expiredPayment) {
+        const { payment: refreshedPayment, reservation: refreshedReservation, company: refreshedCompany } =
+          await loadContext(supabaseAdmin, paymentToken);
+        return jsonResponse(toPublicPaymentSummary(refreshedPayment, refreshedReservation, refreshedCompany));
+      }
+
+      const { error: reservationExpireError } = await supabaseAdmin
+        .from("reservations")
+        .update({ status: "payment_expired" })
+        .eq("id", reservation.id)
+        .eq("status", "pending_payment");
+      if (reservationExpireError) throw new Error(reservationExpireError.message);
+
+      await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
+        source: "manual_check",
+        asaas_status: asaasStatus,
+      });
+
       if (payment.asaas_payment_link_id) {
         try {
           await deleteAsaasPaymentLink(apiToken, payment.asaas_payment_link_id);
+          const { error: deletedLinkError } = await supabaseAdmin
+            .from("reservation_payments")
+            .update({ payment_link_deleted_at: deletedAt })
+            .eq("id", payment.id)
+            .eq("status", "expired");
+          if (deletedLinkError) throw new Error(deletedLinkError.message);
         } catch (error) {
           console.warn("Failed to delete expired Asaas payment link during manual check", error);
         }
@@ -137,25 +190,6 @@ Deno.serve(async (req) => {
           console.warn("Failed to delete expired Asaas payment during manual check", error);
         }
       }
-
-      const deletedAt = new Date().toISOString();
-      const { data: expiredPayment, error: updateError } = await supabaseAdmin
-        .from("reservation_payments")
-        .update({
-          status: "expired",
-          asaas_status: asaasStatus,
-          cancelled_at: deletedAt,
-          payment_link_deleted_at: payment.asaas_payment_link_id ? deletedAt : payment.payment_link_deleted_at,
-          last_checked_at: deletedAt,
-          error_details: null,
-        })
-        .eq("id", payment.id)
-        .select("*")
-        .single();
-      if (updateError) throw new Error(updateError.message);
-
-      await supabaseAdmin.from("reservations").update({ status: "payment_expired" }).eq("id", reservation.id);
-      await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", { source: "manual_check", asaas_status: asaasStatus });
 
       return jsonResponse(toPublicPaymentSummary(expiredPayment, { ...reservation, status: "payment_expired" }, company));
     }

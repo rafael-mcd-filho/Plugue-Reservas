@@ -12,7 +12,7 @@ interface AppErrorBoundaryState {
 }
 
 const DEV_HOOK_RECOVERY_KEY = 'dev-hook-recovery';
-const DEV_HOOK_ERROR_PATTERN = /Cannot read properties of null \(reading 'use(?:Context|Memo|Ref|State)'\)|Invalid hook call/i;
+const DEV_HOOK_ERROR_PATTERN = /Cannot read properties of null \(reading 'use(?:Context|Memo|Ref|State)'\)|Invalid hook call|use[A-Za-z]+ must be used within/i;
 
 function shouldShowLoginAction(pathname: string) {
   if (!pathname) return true;
@@ -33,7 +33,9 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
   };
 
   componentDidMount() {
-    this.clearDevRecoveryMarker();
+    if (!this.state.hasError) {
+      this.clearDevRecoveryMarker();
+    }
   }
 
   componentDidUpdate() {

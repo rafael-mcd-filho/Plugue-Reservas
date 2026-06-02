@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatInstagramHandleLabel,
   normalizePasswordValidationMessage,
   PASSWORD_POLICY_REJECTED_TEXT,
   PASSWORD_REQUIREMENTS_TEXT,
 } from '@/lib/validation';
+
+describe('formatInstagramHandleLabel', () => {
+  it('formats the public Instagram label without the at sign', () => {
+    expect(formatInstagramHandleLabel('@becomamagicojoaopessoa')).toBe('becomamagicojoaopessoa');
+  });
+});
 
 describe('normalizePasswordValidationMessage', () => {
   it('normalizes stricter password policy messages to the local 8-character rule', () => {

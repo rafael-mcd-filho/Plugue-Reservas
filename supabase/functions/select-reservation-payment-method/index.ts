@@ -393,12 +393,40 @@ Deno.serve(async (req) => {
     const supabaseAdmin = createSupabaseAdminClient();
     const { payment, reservation, company } = await resolvePaymentContext(supabaseAdmin, paymentToken);
 
-    if (paymentIsExpired(payment)) {
-      await supabaseAdmin.from("reservation_payments").update({
-        status: "expired",
-        error_details: "Prazo local expirado antes da escolha do metodo",
-      }).eq("id", payment.id);
-      await supabaseAdmin.from("reservations").update({ status: "payment_expired" }).eq("id", reservation.id);
+    if (payment.status === "awaiting_method" && paymentIsExpired(payment)) {
+      const nowIso = new Date().toISOString();
+      const { data: expiredPayment, error: expireError } = await supabaseAdmin
+        .from("reservation_payments")
+        .update({
+          status: "expired",
+          error_details: "Prazo local expirado antes da escolha do metodo",
+          cancelled_at: nowIso,
+          last_checked_at: nowIso,
+        })
+        .eq("id", payment.id)
+        .eq("status", "awaiting_method")
+        .select("id")
+        .maybeSingle();
+      if (expireError) throw new Error(expireError.message);
+
+      if (!expiredPayment) {
+        const { payment: currentPayment, reservation: currentReservation, company: currentCompany } =
+          await resolvePaymentContext(supabaseAdmin, payment.payment_token);
+        return jsonResponse(toPublicPaymentSummary(currentPayment, currentReservation, currentCompany));
+      }
+
+      const { error: reservationExpireError } = await supabaseAdmin
+        .from("reservations")
+        .update({ status: "payment_expired", updated_at: nowIso })
+        .eq("id", reservation.id)
+        .eq("status", "pending_payment");
+      if (reservationExpireError) throw new Error(reservationExpireError.message);
+
+      await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
+        source: "select_method",
+        reason: "awaiting_method",
+      });
+
       return jsonResponse({ error: "Prazo de pagamento expirado" }, 410);
     }
 

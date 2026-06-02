@@ -73,12 +73,31 @@ Deno.serve(async (req) => {
     if (payment.status === "awaiting_method" && paymentIsExpired(payment)) {
       const { data: updatedPayment, error: updateError } = await supabaseAdmin
         .from("reservation_payments")
-        .update({ status: "expired", error_details: "Prazo local expirado sem escolha de metodo" })
+        .update({
+          status: "expired",
+          error_details: "Prazo local expirado sem escolha de metodo",
+          cancelled_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        })
         .eq("id", payment.id)
+        .eq("status", "awaiting_method")
         .select("*")
-        .single();
+        .maybeSingle();
       if (updateError) throw new Error(updateError.message);
-      await supabaseAdmin.from("reservations").update({ status: "payment_expired" }).eq("id", reservation.id);
+
+      if (!updatedPayment) {
+        const refreshedPayment = await loadPaymentByTokenOrTrackingCode(supabaseAdmin, body, url);
+        if (!refreshedPayment) return jsonResponse({ error: "Pagamento nao encontrado" }, 404);
+        return jsonResponse(toPublicPaymentSummary(refreshedPayment, reservation, company));
+      }
+
+      const { error: reservationExpireError } = await supabaseAdmin
+        .from("reservations")
+        .update({ status: "payment_expired" })
+        .eq("id", reservation.id)
+        .eq("status", "pending_payment");
+      if (reservationExpireError) throw new Error(reservationExpireError.message);
+
       return jsonResponse(toPublicPaymentSummary(updatedPayment, { ...reservation, status: "payment_expired" }, company));
     }
 

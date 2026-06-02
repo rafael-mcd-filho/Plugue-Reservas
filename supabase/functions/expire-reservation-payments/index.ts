@@ -19,6 +19,64 @@ async function getApiToken(supabaseAdmin: any, companyId: string) {
   return data.api_token as string;
 }
 
+async function recordRetryableFailure(
+  supabaseAdmin: any,
+  paymentId: string,
+  now: string,
+  message: string,
+) {
+  const { error } = await supabaseAdmin
+    .from("reservation_payments")
+    .update({
+      error_details: message,
+      last_checked_at: now,
+    })
+    .eq("id", paymentId)
+    .in("status", ["awaiting_method", "pending"]);
+
+  if (error) {
+    console.error("Failed to record retryable reservation payment expiration error", paymentId, error);
+  }
+}
+
+async function expirePaymentLocally(
+  supabaseAdmin: any,
+  payment: any,
+  now: string,
+  changes: Record<string, unknown>,
+  eventPayload: Record<string, unknown>,
+) {
+  const { data: expiredPayment, error: paymentError } = await supabaseAdmin
+    .from("reservation_payments")
+    .update({
+      status: "expired",
+      cancelled_at: now,
+      last_checked_at: now,
+      ...changes,
+    })
+    .eq("id", payment.id)
+    .eq("status", payment.status)
+    .select("id")
+    .maybeSingle();
+
+  if (paymentError) throw new Error(paymentError.message);
+  if (!expiredPayment) return false;
+
+  const { error: reservationError } = await supabaseAdmin
+    .from("reservations")
+    .update({
+      status: "payment_expired",
+      updated_at: now,
+    })
+    .eq("id", payment.reservation_id)
+    .eq("status", "pending_payment");
+
+  if (reservationError) throw new Error(reservationError.message);
+
+  await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", eventPayload);
+  return true;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -52,32 +110,28 @@ Deno.serve(async (req) => {
     for (const payment of payments ?? []) {
       try {
         if (payment.status === "awaiting_method") {
-          await supabaseAdmin.from("reservation_payments").update({
-            status: "expired",
-            error_details: "Prazo expirado sem link Asaas ativo",
-            cancelled_at: now,
-          }).eq("id", payment.id);
-
-          await supabaseAdmin.from("reservations").update({
-            status: "payment_expired",
-            updated_at: now,
-          }).eq("id", payment.reservation_id);
-
-          await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
-            source: "expire_job",
-            reason: "awaiting_method",
-          });
-          summary.expired_without_charge += 1;
+          const expired = await expirePaymentLocally(
+            supabaseAdmin,
+            payment,
+            now,
+            { error_details: "Prazo expirado sem link Asaas ativo" },
+            {
+              source: "expire_job",
+              reason: "awaiting_method",
+            },
+          );
+          if (expired) summary.expired_without_charge += 1;
           continue;
         }
 
         const apiToken = await getApiToken(supabaseAdmin, payment.company_id);
         if (!apiToken) {
-          await supabaseAdmin.from("reservation_payments").update({
-            status: "failed",
-            error_details: "Integracao Asaas nao configurada ao expirar pagamento",
-            last_checked_at: now,
-          }).eq("id", payment.id);
+          await recordRetryableFailure(
+            supabaseAdmin,
+            payment.id,
+            now,
+            "Integracao Asaas nao configurada ao expirar pagamento",
+          );
           summary.failed += 1;
           continue;
         }
@@ -92,9 +146,30 @@ Deno.serve(async (req) => {
           }
         }
 
+        const expired = await expirePaymentLocally(
+          supabaseAdmin,
+          payment,
+          now,
+          {
+            asaas_status: asaasStatus,
+            error_details: null,
+          },
+          {
+            source: "expire_job",
+            asaas_status: asaasStatus,
+          },
+        );
+        if (!expired) continue;
+
         if (payment.asaas_payment_link_id) {
           try {
             await deleteAsaasPaymentLink(apiToken, payment.asaas_payment_link_id);
+            const { error: deletedLinkError } = await supabaseAdmin
+              .from("reservation_payments")
+              .update({ payment_link_deleted_at: now })
+              .eq("id", payment.id)
+              .eq("status", "expired");
+            if (deletedLinkError) throw new Error(deletedLinkError.message);
           } catch (deleteLinkError) {
             console.warn("Failed to delete Asaas payment link during expiration", deleteLinkError);
           }
@@ -108,33 +183,15 @@ Deno.serve(async (req) => {
           }
         }
 
-        await supabaseAdmin.from("reservation_payments").update({
-          status: "expired",
-          asaas_status: asaasStatus,
-          cancelled_at: now,
-          payment_link_deleted_at: payment.asaas_payment_link_id ? now : payment.payment_link_deleted_at,
-          last_checked_at: now,
-          error_details: null,
-        }).eq("id", payment.id);
-
-        await supabaseAdmin.from("reservations").update({
-          status: "payment_expired",
-          updated_at: now,
-        }).eq("id", payment.reservation_id);
-
-        await recordPaymentEvent(supabaseAdmin, payment, "payment_expired", {
-          source: "expire_job",
-          asaas_status: asaasStatus,
-        });
-
         summary.expired_cancelled_in_asaas += 1;
       } catch (paymentError: any) {
         console.error("Failed to expire reservation payment", payment.id, paymentError);
-        await supabaseAdmin.from("reservation_payments").update({
-          status: "failed",
-          error_details: paymentError?.message || "Erro ao expirar pagamento",
-          last_checked_at: now,
-        }).eq("id", payment.id);
+        await recordRetryableFailure(
+          supabaseAdmin,
+          payment.id,
+          now,
+          paymentError?.message || "Erro ao expirar pagamento",
+        );
         summary.failed += 1;
       }
     }

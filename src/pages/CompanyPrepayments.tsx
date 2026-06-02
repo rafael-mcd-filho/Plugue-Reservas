@@ -120,6 +120,7 @@ interface FinancialDailyPoint {
 
 const today = new Date();
 const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
+const PAYMENT_AUTO_REFRESH_INTERVAL_MS = 30_000;
 
 const SUMMARY_PERIOD_OPTIONS: Array<{ value: SummaryPeriodPreset; label: string }> = [
   { value: 'today', label: 'Hoje' },
@@ -609,6 +610,7 @@ export default function CompanyPrepayments() {
   const summaryPaymentsQuery = useQuery({
     queryKey: summaryQueryKey,
     enabled: Boolean(companyId && summaryRange?.from),
+    refetchInterval: PAYMENT_AUTO_REFRESH_INTERVAL_MS,
     queryFn: async () => {
       const from = summaryRange!.from!;
       const to = summaryRange?.to ?? from;
@@ -663,6 +665,7 @@ export default function CompanyPrepayments() {
   const paymentsListQuery = useQuery({
     queryKey: paymentsListQueryKey,
     enabled: Boolean(companyId && paymentRange?.from),
+    refetchInterval: PAYMENT_AUTO_REFRESH_INTERVAL_MS,
     queryFn: async () => {
       const from = paymentRange!.from!;
       const to = paymentRange?.to ?? from;
@@ -1417,7 +1420,7 @@ export default function CompanyPrepayments() {
               <div>
                 <CardTitle>Pagamentos de reservas</CardTitle>
                 <CardDescription>
-                  Visão operacional compacta para consultar se o pagamento já constou no Asaas.
+                  Atualiza automaticamente a cada 30 segundos. Use Consultar para verificar imediatamente no Asaas.
                 </CardDescription>
               </div>
               <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[760px] xl:grid-cols-[180px_220px_minmax(220px,1fr)]">

@@ -118,7 +118,7 @@ export function buildInstagramProfileUrl(value: string | null | undefined) {
 
 export function formatInstagramHandleLabel(value: string | null | undefined) {
   const handle = normalizeInstagramHandle(value);
-  return handle ? `@${handle}` : null;
+  return handle || null;
 }
 
 export function isValidEmail(value: string | null | undefined) {

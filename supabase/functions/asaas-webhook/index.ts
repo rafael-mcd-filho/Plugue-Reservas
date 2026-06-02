@@ -166,7 +166,11 @@ Deno.serve(async (req) => {
           ?? body.payment?.confirmedDate
           ?? null;
         await confirmReservationPayment(supabaseAdmin, payment, asaasStatus ?? eventType, "asaas_webhook", paidAt);
-      } else if (isAsaasPaymentCancelledEvent(eventType) && payment.status !== "paid") {
+      } else if (
+        isAsaasPaymentCancelledEvent(eventType)
+        && payment.status !== "paid"
+        && payment.status !== "expired"
+      ) {
         await supabaseAdmin
           .from("reservation_payments")
           .update({

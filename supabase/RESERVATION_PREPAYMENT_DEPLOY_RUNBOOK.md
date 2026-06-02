@@ -79,7 +79,8 @@ O endpoint Asaas padrao usado pelas functions e `https://api.asaas.com/v3`. Sand
 
 ## 5. Job de expiracao
 
-Agendar `expire-reservation-payments` a cada 1 ou 2 minutos, enviando o header:
+A migration `20260601160000_schedule_reservation_payment_expiration_job.sql` agenda
+`expire-reservation-payments` a cada minuto, enviando o header:
 
 ```http
 x-job-secret: <INTERNAL_JOB_SECRET>
@@ -90,6 +91,9 @@ Endpoint:
 ```text
 https://hdpxqqiudiotanrybvcf.supabase.co/functions/v1/expire-reservation-payments
 ```
+
+Confirmar que `public.system_settings.internal_job_secret` e a secret
+`INTERNAL_JOB_SECRET` da Edge Function possuem o mesmo valor nao vazio.
 
 ## 6. Webhook Asaas
 

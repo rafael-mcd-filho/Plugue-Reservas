@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -173,14 +173,36 @@ function CompanyAdminRoute({
   );
 
   return (
-    <ProtectedRoute allowedRoles={allowedRoles} requiredCompanyPermission={requiredCompanyPermission}>
+    <ProtectedRoute allowedRoles={allowedRoles}>
       <CompanySlugProvider>
-        <CompanyFeatureRouteGate requiredCompanyFeature={requiredCompanyFeature}>
-          {content}
-        </CompanyFeatureRouteGate>
+        <CompanyPermissionRouteGate requiredCompanyPermission={requiredCompanyPermission}>
+          <CompanyFeatureRouteGate requiredCompanyFeature={requiredCompanyFeature}>
+            {content}
+          </CompanyFeatureRouteGate>
+        </CompanyPermissionRouteGate>
       </CompanySlugProvider>
     </ProtectedRoute>
   );
+}
+
+function CompanyPermissionRouteGate({
+  requiredCompanyPermission,
+  children,
+}: {
+  requiredCompanyPermission?: CompanyPanelPermission;
+  children: ReactNode;
+}) {
+  const location = useLocation();
+  const { hasPermission, permissionsLoading } = useCompanyPermissions();
+  const locationState = location.state as { fromLogin?: boolean } | null;
+
+  if (!requiredCompanyPermission) return <>{children}</>;
+  if (permissionsLoading) return <PanelPageSkeleton />;
+  if (!hasPermission(requiredCompanyPermission)) {
+    return <Navigate to={locationState?.fromLogin ? "/" : "/acesso-negado"} replace />;
+  }
+
+  return <>{children}</>;
 }
 
 function CompanyFeatureRouteGate({
