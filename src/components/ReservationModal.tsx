@@ -1,6 +1,16 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { format, addDays, isToday, isTomorrow } from 'date-fns';
+import {
+  addDays,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isToday,
+  isTomorrow,
+  startOfMonth,
+  startOfWeek,
+} from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -229,6 +239,7 @@ export default function ReservationModal({
   const [selectedTableId, setSelectedTableId] = useState('');
   const [selectedTableMapId, setSelectedTableMapId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
   const [dateWindowOffset, setDateWindowOffset] = useState(() => getDateWindowOffsetForDate(initialDate));
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
   const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
@@ -284,6 +295,7 @@ export default function ReservationModal({
     setSelectedTableId('');
     setSelectedTableMapId('');
     setShowCalendar(false);
+    setCalendarMonth(initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
     setDateWindowOffset(getDateWindowOffsetForDate(initialDate));
     setAvailableTables([]);
     setSlotAvailability({});
@@ -393,6 +405,40 @@ export default function ReservationModal({
     refetchOnMount: false,
   });
 
+  const calendarPreviewDateKeys = useMemo(() => {
+    if (!showCalendar) return [];
+
+    const visibleStart = startOfWeek(startOfMonth(calendarMonth), { weekStartsOn: 0 });
+    const visibleEnd = endOfWeek(endOfMonth(calendarMonth), { weekStartsOn: 0 });
+    const todayStart = startOfLocalDay(new Date());
+
+    return eachDayOfInterval({ start: visibleStart, end: visibleEnd })
+      .filter((date) => date >= todayStart)
+      .map((date) => format(date, 'yyyy-MM-dd'));
+  }, [calendarMonth, showCalendar]);
+
+  const calendarPreviewDateKeySet = useMemo(
+    () => new Set(calendarPreviewDateKeys),
+    [calendarPreviewDateKeys],
+  );
+
+  const {
+    data: calendarSchedules = [],
+    isFetching: calendarSchedulesLoading,
+  } = useQuery({
+    queryKey: ['public-reservation-schedules-calendar-preview', companyId, calendarPreviewDateKeys.join(',')],
+    queryFn: () => Promise.all(
+      calendarPreviewDateKeys.map(async (date) => ({
+        date,
+        schedule: await getPublicReservationSchedule(companyId, date),
+      })),
+    ),
+    enabled: open && showCalendar && !!companyId && calendarPreviewDateKeys.length > 0,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+  });
+
   // Check if the selected date is within the current quick-select window or from calendar.
   const isDateInQuickSelect = useMemo(() => {
     if (!selectedDate) return false;
@@ -418,6 +464,18 @@ export default function ReservationModal({
     return filterPastTimeSlotsForDate(publicSchedule?.slots ?? [], selectedDate);
   }, [publicSchedule?.slots, selectedDate]);
   const schedulePartySizeLimit = publicSchedule?.max_party_size_per_reservation ?? null;
+
+  const schedulePreviewByDate = useMemo(() => {
+    const previews = new Map<string, PublicReservationSchedule>();
+    quickSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
+    calendarSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
+
+    if (selectedDateKey && publicSchedule) {
+      previews.set(selectedDateKey, publicSchedule);
+    }
+
+    return previews;
+  }, [calendarSchedules, publicSchedule, quickSchedules, selectedDateKey]);
 
   const slotLookupKey = useMemo(() => {
     if (!selectedDateKey || timeSlots.length === 0) return '';
@@ -1004,13 +1062,22 @@ export default function ReservationModal({
     const blocked = blockedDates.find((bd: any) => bd.date === dateStr && bd.all_day);
     if (blocked) return true;
 
-    const schedule = dateStr === selectedDateKey
-      ? publicSchedule
-      : quickSchedules.find((entry) => entry.date === dateStr)?.schedule;
+    const schedule = schedulePreviewByDate.get(dateStr);
 
-    // Datas fora da prévia continuam selecionáveis: uma regra pontual pode abrir
-    // um dia normalmente fechado e a RPC resolve o resultado ao selecionar.
     return schedule ? schedule.source === 'blocked' || schedule.slots.length === 0 : false;
+  };
+
+  const isCalendarDayPending = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return showCalendar
+      && calendarSchedulesLoading
+      && calendarPreviewDateKeySet.has(dateStr)
+      && !schedulePreviewByDate.has(dateStr);
+  };
+
+  const handleOpenCalendar = () => {
+    setCalendarMonth(selectedDate ?? new Date());
+    setShowCalendar(true);
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
@@ -1357,15 +1424,17 @@ export default function ReservationModal({
                   </div>
                 )}
 
-                <Button variant="ghost" className="w-full text-primary" onClick={() => setShowCalendar(true)}>
+                <Button variant="ghost" className="w-full text-primary" onClick={handleOpenCalendar}>
                   <CalendarIcon className="h-4 w-4 mr-2" /> Escolher outra data
                 </Button>
               </>
             ) : (
               <div className="flex flex-col items-center gap-3">
                 <Calendar mode="single" selected={selectedDate}
+                  month={calendarMonth}
+                  onMonthChange={setCalendarMonth}
                   onSelect={handleCalendarSelect}
-                  disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0)) || isDayClosed(date)}
+                  disabled={(date) => date < startOfLocalDay(new Date()) || isCalendarDayPending(date) || isDayClosed(date)}
                   locale={ptBR} className="p-3 pointer-events-auto" />
                 <Button variant="ghost" size="sm" onClick={() => setShowCalendar(false)}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
