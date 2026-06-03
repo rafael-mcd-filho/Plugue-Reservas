@@ -1308,30 +1308,32 @@ export default function ReservationModal({
                     })}
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 px-2 py-2">
+                  <div className="grid grid-cols-[2.5rem_minmax(5.25rem,1fr)_2.5rem] items-center gap-1 rounded-lg border border-border/70 bg-muted/20 px-2 py-2 min-[360px]:grid-cols-[minmax(5.75rem,6.75rem)_minmax(5.25rem,1fr)_minmax(5.75rem,6.75rem)]">
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 px-2 text-xs"
+                      className="h-8 min-w-0 justify-center px-1 text-xs"
+                      aria-label="Mostrar 7 dias anteriores"
                       disabled={dateWindowOffset === 0}
                       onClick={() => handleDateWindowChange('previous')}
                     >
-                      <ArrowLeft className="mr-1 h-3.5 w-3.5" />
-                      Anteriores
+                      <ArrowLeft className="h-3.5 w-3.5 shrink-0 min-[360px]:mr-1" />
+                      <span className="hidden min-[360px]:inline">Anteriores</span>
                     </Button>
-                    <span className="min-w-0 truncate px-1 text-center text-xs font-medium text-muted-foreground">
+                    <span className="flex h-8 min-w-0 items-center justify-center truncate px-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
                       {dateWindowLabel}
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 px-2 text-xs"
+                      className="h-8 min-w-0 justify-center px-1 text-xs"
+                      aria-label="Mostrar próximos 7 dias"
                       onClick={() => handleDateWindowChange('next')}
                     >
-                      Próximos
-                      <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                      <span className="hidden min-[360px]:inline">Próximos</span>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 min-[360px]:ml-1" />
                     </Button>
                   </div>
                 </div>
