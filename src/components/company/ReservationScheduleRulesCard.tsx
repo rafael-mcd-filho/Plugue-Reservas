@@ -334,7 +334,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="schedule-rule-max-party-size">Máx. padrão</Label>
+              <Label htmlFor="schedule-rule-max-party-size">Máx. pessoas padrão</Label>
               <Input
                 id="schedule-rule-max-party-size"
                 type="number"
@@ -345,7 +345,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                 placeholder="Sem limite"
                 className={FIELD_CLASS}
               />
-              <p className="text-[11px] leading-tight text-muted-foreground">Valor padrão herdado pelos horários sem ajuste próprio.</p>
+              <p className="text-[11px] leading-tight text-muted-foreground">Usado nos horários sem limite próprio.</p>
             </div>
           </div>
 
