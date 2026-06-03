@@ -10,6 +10,7 @@ import {
   CreditCard,
   KeyRound,
   Loader2,
+  MessageCircle,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -74,6 +75,7 @@ import {
   type ReservationPaymentRuleDraft,
   type ReservationPrepaymentAmountType,
 } from '@/lib/asaas-prepayment-contracts';
+import { toBrazilWhatsAppNumber } from '@/lib/validation';
 
 interface RuleFormState {
   name: string;
@@ -114,6 +116,7 @@ interface ReservationPaymentRow {
   id: string;
   payment_token: string | null;
   customer_name: string;
+  customer_phone: string | null;
   reservation_status: string | null;
   reservation_date: string;
   reservation_time: string;
@@ -196,6 +199,7 @@ function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
     id: row?.id ?? '',
     payment_token: row?.payment_token ?? null,
     customer_name: reservation?.guest_name ?? 'Cliente',
+    customer_phone: reservation?.guest_phone ?? null,
     reservation_status: reservation?.status ?? null,
     reservation_date: reservation?.date ?? '',
     reservation_time: typeof reservation?.time === 'string' ? reservation.time.slice(0, 5) : '',
@@ -531,6 +535,30 @@ function canRefundPayment(payment: ReservationPaymentRow) {
   return Boolean(payment.payment_token) && (payment.status === 'paid' || payment.status === 'late_paid');
 }
 
+function buildCompanyPublicReservationUrl(companySlug: string) {
+  if (typeof window === 'undefined') return `/${companySlug}`;
+  return new URL(`/${companySlug}`, window.location.origin).toString();
+}
+
+function buildExpiredReservationWhatsappUrl(payment: ReservationPaymentRow, companySlug: string) {
+  if (payment.status !== 'expired') return null;
+
+  const whatsappNumber = toBrazilWhatsAppNumber(payment.customer_phone);
+  if (whatsappNumber.length < 12) return null;
+
+  const dateLabel = payment.reservation_date
+    ? `o dia ${formatShortDate(payment.reservation_date)}`
+    : 'a data escolhida';
+  const timeLabel = payment.reservation_time ? ` às ${payment.reservation_time}` : '';
+  const reservationUrl = buildCompanyPublicReservationUrl(companySlug);
+  const message =
+    `Olá, sua reserva para ${dateLabel}${timeLabel} expirou. ` +
+    `Mas não perca tempo: os horários estão se esgotando. ` +
+    `Faça uma nova reserva pelo link: ${reservationUrl}`;
+
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+}
+
 function getAsaasStatusLabel(status: string) {
   if (status === 'configured') return 'Configurado';
   if (status === 'error') return 'Erro';
@@ -578,7 +606,7 @@ function mapReservationPaymentRule(row: any, usageCount = 0): ReservationPayment
 }
 
 export default function CompanyPrepayments() {
-  const { companyId } = useCompanySlug();
+  const { companyId, slug } = useCompanySlug();
   const queryClient = useQueryClient();
   const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(companyId);
   const [asaasConfig, setAsaasConfig] = useState(DEFAULT_ASAAS_CONFIG_PREVIEW);
@@ -822,7 +850,7 @@ export default function CompanyPrepayments() {
       const { data, error } = await (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, status, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, guest_phone, status, date, time, party_size)'
         )
         .eq('company_id', companyId)
         .or(rangeFilter)
@@ -905,7 +933,7 @@ export default function CompanyPrepayments() {
       let query = (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, status, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, guest_phone, status, date, time, party_size)'
         )
         .eq('company_id', companyId)
         .or(rangeFilter)
@@ -1915,6 +1943,7 @@ export default function CompanyPrepayments() {
                       <PaymentListItem
                         key={payment.id}
                         payment={payment}
+                        companySlug={slug}
                         onCheck={(token) => checkPaymentMutation.mutate(token)}
                         onRefund={setPendingRefundPayment}
                         isChecking={
@@ -2448,12 +2477,14 @@ function RuleListItem({
 
 function PaymentListItem({
   payment,
+  companySlug,
   onCheck,
   onRefund,
   isChecking,
   isRefunding,
 }: {
   payment: ReservationPaymentRow;
+  companySlug: string;
   onCheck: (paymentToken: string) => void;
   onRefund: (payment: ReservationPaymentRow) => void;
   isChecking: boolean;
@@ -2467,6 +2498,7 @@ function PaymentListItem({
   const reservationWasCancelled = isReservationCancelledStatus(payment.reservation_status);
   const receivedAndCancelled = reservationWasCancelled && isReceivedPaymentStatus(payment.status);
   const requiresManualAction = isLatePaidPayment(payment);
+  const expiredWhatsappUrl = buildExpiredReservationWhatsappUrl(payment, companySlug);
   const containerClassName = requiresManualAction
     ? 'rounded-md border border-warning/60 bg-warning-soft/30 px-3 py-2.5 shadow-sm'
     : receivedAndCancelled
@@ -2528,6 +2560,19 @@ function PaymentListItem({
             >
               {isRefunding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               Estornar
+            </Button>
+          )}
+          {expiredWhatsappUrl && (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+            >
+              <a href={expiredWhatsappUrl} target="_blank" rel="noopener noreferrer">
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp
+              </a>
             </Button>
           )}
           <Button
