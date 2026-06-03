@@ -177,6 +177,31 @@ interface ConfirmedReservation {
   companyName: string;
 }
 
+const DATE_WINDOW_SIZE = 7;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+function startOfLocalDay(date: Date) {
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+}
+
+function getDateWindowOffsetForDate(value: string | null | undefined) {
+  if (!value) return 0;
+
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return 0;
+
+  const diffDays = Math.floor((startOfLocalDay(date).getTime() - startOfLocalDay(new Date()).getTime()) / DAY_IN_MS);
+  return Math.max(0, Math.floor(diffDays / DATE_WINDOW_SIZE) * DATE_WINDOW_SIZE);
+}
+
+function buildDateWindow(offset: number) {
+  const baseDate = new Date();
+  baseDate.setHours(12, 0, 0, 0);
+  return Array.from({ length: DATE_WINDOW_SIZE }, (_, index) => addDays(baseDate, offset + index));
+}
+
 export default function ReservationModal({
   open,
   onOpenChange,
@@ -204,6 +229,7 @@ export default function ReservationModal({
   const [selectedTableId, setSelectedTableId] = useState('');
   const [selectedTableMapId, setSelectedTableMapId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
+  const [dateWindowOffset, setDateWindowOffset] = useState(() => getDateWindowOffsetForDate(initialDate));
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
   const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -258,6 +284,7 @@ export default function ReservationModal({
     setSelectedTableId('');
     setSelectedTableMapId('');
     setShowCalendar(false);
+    setDateWindowOffset(getDateWindowOffsetForDate(initialDate));
     setAvailableTables([]);
     setSlotAvailability({});
     setLoadingSlots(false);
@@ -339,15 +366,17 @@ export default function ReservationModal({
     enabled: !!companyId,
   });
 
-  const next7Days = useMemo(() => {
-    const days: Date[] = [];
-    for (let i = 0; i < 7; i++) days.push(addDays(new Date(), i));
-    return days;
-  }, []);
+  const dateWindowDays = useMemo(() => buildDateWindow(dateWindowOffset), [dateWindowOffset]);
+  const dateWindowLabel = useMemo(() => {
+    const [firstDay] = dateWindowDays;
+    const lastDay = dateWindowDays[dateWindowDays.length - 1];
+    if (!firstDay || !lastDay) return '';
+    return `${format(firstDay, 'dd MMM', { locale: ptBR })} - ${format(lastDay, 'dd MMM', { locale: ptBR })}`;
+  }, [dateWindowDays]);
 
   const quickDateKeys = useMemo(
-    () => next7Days.map((date) => format(date, 'yyyy-MM-dd')),
-    [next7Days],
+    () => dateWindowDays.map((date) => format(date, 'yyyy-MM-dd')),
+    [dateWindowDays],
   );
 
   const { data: quickSchedules = [] } = useQuery({
@@ -364,11 +393,11 @@ export default function ReservationModal({
     refetchOnMount: false,
   });
 
-  // Check if the selected date is within the next7Days range or from calendar
+  // Check if the selected date is within the current quick-select window or from calendar.
   const isDateInQuickSelect = useMemo(() => {
     if (!selectedDate) return false;
-    return next7Days.some(d => d.toDateString() === selectedDate.toDateString());
-  }, [selectedDate, next7Days]);
+    return dateWindowDays.some(d => d.toDateString() === selectedDate.toDateString());
+  }, [selectedDate, dateWindowDays]);
 
   const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const {
@@ -625,6 +654,26 @@ export default function ReservationModal({
     setTableAvailabilityError(null);
     slotAvailabilityRequestIdRef.current += 1;
     tableAvailabilityRequestIdRef.current += 1;
+  };
+
+  const handleDateWindowChange = (direction: 'previous' | 'next') => {
+    const nextOffset = Math.max(
+      0,
+      dateWindowOffset + (direction === 'next' ? DATE_WINDOW_SIZE : -DATE_WINDOW_SIZE),
+    );
+    if (nextOffset === dateWindowOffset) return;
+
+    const nextWindow = buildDateWindow(nextOffset);
+    const selectedDateIsVisible = selectedDate
+      ? nextWindow.some((date) => date.toDateString() === selectedDate.toDateString())
+      : false;
+
+    setDateWindowOffset(nextOffset);
+    setShowCalendar(false);
+    if (!selectedDateIsVisible) {
+      setSelectedDate(undefined);
+    }
+    resetAvailabilitySelection();
   };
 
   const handleDateSelect = (date: Date | undefined) => {
@@ -965,6 +1014,9 @@ export default function ReservationModal({
   };
 
   const handleCalendarSelect = (d: Date | undefined) => {
+    if (d) {
+      setDateWindowOffset(getDateWindowOffsetForDate(format(d, 'yyyy-MM-dd')));
+    }
     handleDateSelect(d);
     setShowCalendar(false);
   };
@@ -1229,8 +1281,9 @@ export default function ReservationModal({
 
             {!isLargeParty && (!showCalendar ? (
               <>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {next7Days.map(date => {
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                    {dateWindowDays.map(date => {
                     const closed = isDayClosed(date);
                     const isSelected = selectedDate?.toDateString() === date.toDateString();
                     const todayLabel = isToday(date) ? 'Hoje' : isTomorrow(date) ? 'Amanhã' : null;
@@ -1250,10 +1303,38 @@ export default function ReservationModal({
                         <span className="text-xs text-muted-foreground">{format(date, 'MMM', { locale: ptBR })}</span>
                       </button>
                     );
-                  })}
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 px-2 py-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      disabled={dateWindowOffset === 0}
+                      onClick={() => handleDateWindowChange('previous')}
+                    >
+                      <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                      Anteriores
+                    </Button>
+                    <span className="min-w-0 truncate px-1 text-center text-xs font-medium text-muted-foreground">
+                      {dateWindowLabel}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => handleDateWindowChange('next')}
+                    >
+                      Próximos
+                      <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
 
-                {/* Show selected calendar date if outside next 7 days */}
+                {/* Show selected calendar date if outside the current 7-day window */}
                 {selectedDate && !isDateInQuickSelect && (
                   <div className="flex items-center justify-center gap-2 p-3 rounded-md border border-primary bg-primary/10">
                     <CalendarIcon className="h-4 w-4 text-primary" />
