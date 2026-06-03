@@ -70,6 +70,15 @@ type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
 type ReservationOriginFilterValue = 'all' | ReservationOriginKey;
 
+interface ReservationPaymentInfo {
+  id: string;
+  status: string;
+  paid_at: string | null;
+  billing_type: string | null;
+  charged_amount: number | null;
+  base_amount: number | null;
+}
+
 interface Reservation {
   id: string;
   company_id: string;
@@ -100,6 +109,7 @@ interface Reservation {
   checked_in_party_size: number | null;
   created_at: string;
   updated_at: string;
+  reservation_payments?: ReservationPaymentInfo[] | null;
 }
 
 interface ReservationRemovalFlow {
@@ -149,6 +159,33 @@ const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: strin
   { value: 'payment_cancelled', label: 'Pagamento cancelado' },
   { value: 'paid_after_expiration', label: 'Pago apos expirar' },
 ];
+
+const CALENDAR_VISIBLE_STATUSES = new Set<ReservationStatus>(['confirmed', 'checked_in', 'no-show']);
+
+function isCalendarVisibleReservation(reservation: Pick<Reservation, 'status'>) {
+  return CALENDAR_VISIBLE_STATUSES.has(reservation.status);
+}
+
+function getPaidReservationPayment(reservation: Reservation) {
+  return reservation.reservation_payments?.find((payment) => payment.status === 'paid') ?? null;
+}
+
+function ReservationPaymentPaidBadge({ payment }: { payment: ReservationPaymentInfo }) {
+  const method = payment.billing_type === 'PIX'
+    ? 'Pix'
+    : payment.billing_type === 'CREDIT_CARD'
+      ? 'Cartão'
+      : null;
+
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-success/20 bg-success-soft px-2.5 py-0.5 text-xs font-medium text-success"
+      title={method ? `Pagamento confirmado via ${method}` : 'Pagamento confirmado'}
+    >
+      Pago
+    </span>
+  );
+}
 
 function normalizePhone(phone: string | null | undefined) {
   return (phone ?? '').replace(/\D/g, '');
@@ -244,7 +281,7 @@ export default function Reservations() {
       const data = await fetchAllSupabasePages<Reservation>((from, to) =>
         supabase
           .from('reservations' as any)
-          .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)')
+          .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc), reservation_payments(id,status,paid_at,billing_type,charged_amount,base_amount)')
           .eq('company_id', companyId)
           .order('date', { ascending: true })
           .order('time', { ascending: true })
@@ -336,9 +373,9 @@ export default function Reservations() {
     enabled: !!companyId && exportDialogOpen,
   });
 
-  const reservationsByDate = useMemo(() => {
+  const calendarReservationsByDate = useMemo(() => {
     const map = new Map<string, Reservation[]>();
-    for (const reservation of reservations) {
+    for (const reservation of reservations.filter(isCalendarVisibleReservation)) {
       const current = map.get(reservation.date) ?? [];
       current.push(reservation);
       map.set(reservation.date, current);
@@ -679,7 +716,7 @@ export default function Reservations() {
 
     return days.map((day) => {
       const dateString = format(day, 'yyyy-MM-dd');
-      const dayReservations = reservationsByDate.get(dateString) ?? [];
+      const dayReservations = calendarReservationsByDate.get(dateString) ?? [];
 
       return {
         date: day,
@@ -688,12 +725,12 @@ export default function Reservations() {
         totalGuests: dayReservations.reduce((sum, reservation) => sum + reservation.party_size, 0),
       };
     });
-  }, [calendarRangeMode, reservationsByDate]);
+  }, [calendarRangeMode, calendarReservationsByDate]);
 
   const dayModalReservations = useMemo(() => {
     if (!dayModal) return [];
-    return (reservationsByDate.get(dayModal) ?? []).sort((left, right) => left.time.localeCompare(right.time));
-  }, [dayModal, reservationsByDate]);
+    return (calendarReservationsByDate.get(dayModal) ?? []).sort((left, right) => left.time.localeCompare(right.time));
+  }, [calendarReservationsByDate, dayModal]);
   const reservationPendingRemoval = useMemo(
     () => reservations.find((reservation) => reservation.id === reservationRemovalFlow?.reservationId) ?? null,
     [reservationRemovalFlow?.reservationId, reservations],
@@ -1225,6 +1262,7 @@ export default function Reservations() {
                   paginatedReservations.map((reservation) => {
                     const todayString = format(new Date(), 'yyyy-MM-dd');
                     const isPastReservation = reservation.date < todayString;
+                    const paidPayment = getPaidReservationPayment(reservation);
 
                     return (
                       <TableRow
@@ -1273,8 +1311,9 @@ export default function Reservations() {
                         </TableCell>
 
                         <TableCell className="px-4 py-3">
-                          <div className="flex justify-center">
+                          <div className="flex flex-wrap justify-center gap-1.5">
                             <ReservationStatusBadge status={reservation.status} />
+                            {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                           </div>
                         </TableCell>
 
@@ -2118,18 +2157,21 @@ export default function Reservations() {
           <div className="pt-1">
             {dayModalReservations.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Nenhuma reserva para este dia.
+                Nenhuma reserva confirmada para este dia.
               </p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border">
-                {dayModalReservations.map((reservation, index) => (
-                  <div
-                    key={reservation.id}
-                    className={cn(
-                      'bg-card px-4 py-3 transition hover:bg-accent/20',
-                      index !== dayModalReservations.length - 1 && 'border-b border-border/60',
-                    )}
-                  >
+                {dayModalReservations.map((reservation, index) => {
+                  const paidPayment = getPaidReservationPayment(reservation);
+
+                  return (
+                    <div
+                      key={reservation.id}
+                      className={cn(
+                        'bg-card px-4 py-3 transition hover:bg-accent/20',
+                        index !== dayModalReservations.length - 1 && 'border-b border-border/60',
+                      )}
+                    >
                     <div className="sm:hidden">
                       <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3">
                         <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
@@ -2150,8 +2192,9 @@ export default function Reservations() {
                             {reservation.guest_name}
                           </span>
 
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-wrap gap-1.5">
                             <ReservationStatusBadge status={reservation.status} />
+                            {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                           </div>
 
                           <div className="mt-2 flex items-start justify-between gap-3">
@@ -2227,6 +2270,7 @@ export default function Reservations() {
                             {reservation.guest_name}
                           </span>
                           <ReservationStatusBadge status={reservation.status} />
+                          {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                           <PhoneWhatsAppLink
@@ -2281,8 +2325,9 @@ export default function Reservations() {
                         )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

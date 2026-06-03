@@ -96,6 +96,133 @@ export function dateOnlyInTimeZone(date = new Date(), timeZone = "America/Fortal
   }).format(date);
 }
 
+const PROVIDER_LOCAL_TIMEZONE = "America/Fortaleza";
+const PROVIDER_UTC_OFFSET_MINUTES = -180;
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const LOCAL_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+
+function hasTimezoneSuffix(value: string) {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+}
+
+function parseProviderLocalDateTime(value: string) {
+  const match = value.match(LOCAL_DATE_TIME_PATTERN);
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second = "0", millisecond = "0"] = match;
+  const parsed = new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute) - PROVIDER_UTC_OFFSET_MINUTES,
+    Number(second),
+    Number(millisecond.padEnd(3, "0").slice(0, 3)),
+  ));
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function providerTimestampHasExplicitTime(value: unknown) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(value.trim());
+}
+
+function resolveProviderPaidAt(paidAt: string | null, fallbackDate = new Date()) {
+  const fallbackIso = fallbackDate.toISOString();
+  const raw = typeof paidAt === "string" ? paidAt.trim() : "";
+
+  if (!raw) {
+    return {
+      iso: fallbackIso,
+      providerPaidAt: {
+        precision: "system",
+        stored_at: fallbackIso,
+      },
+    };
+  }
+
+  const dateOnlyMatch = raw.match(DATE_ONLY_PATTERN);
+  if (dateOnlyMatch) {
+    return {
+      iso: fallbackIso,
+      providerPaidAt: {
+        raw,
+        date: raw,
+        precision: "date",
+        stored_at: fallbackIso,
+      },
+    };
+  }
+
+  let parsedDate: Date | null = null;
+  let timezoneAssumed = false;
+
+  if (providerTimestampHasExplicitTime(raw) && !hasTimezoneSuffix(raw)) {
+    parsedDate = parseProviderLocalDateTime(raw);
+    timezoneAssumed = Boolean(parsedDate);
+  }
+
+  if (!parsedDate) {
+    parsedDate = new Date(raw);
+  }
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return {
+      iso: fallbackIso,
+      providerPaidAt: {
+        raw,
+        precision: "invalid",
+        stored_at: fallbackIso,
+      },
+    };
+  }
+
+  const providerPaidAt: Record<string, unknown> = {
+    raw,
+    precision: "timestamp",
+    iso: parsedDate.toISOString(),
+  };
+
+  if (timezoneAssumed) {
+    providerPaidAt.timezone = PROVIDER_LOCAL_TIMEZONE;
+  }
+
+  return {
+    iso: parsedDate.toISOString(),
+    providerPaidAt,
+  };
+}
+
+function getPaymentMetadata(payment: Pick<ReservationPaymentRecord, "metadata">) {
+  return (payment.metadata && typeof payment.metadata === "object" && !Array.isArray(payment.metadata))
+    ? payment.metadata
+    : {};
+}
+
+function buildPaymentConfirmationMetadata(
+  payment: Pick<ReservationPaymentRecord, "metadata">,
+  source: string,
+  asaasStatus: string | null,
+  paidAtResolution: ReturnType<typeof resolveProviderPaidAt>,
+  confirmedAtIso: string,
+) {
+  const metadata = { ...getPaymentMetadata(payment) };
+  const existingConfirmation = metadata.payment_confirmation && typeof metadata.payment_confirmation === "object"
+    ? metadata.payment_confirmation as Record<string, unknown>
+    : {};
+
+  return {
+    ...metadata,
+    payment_confirmation: {
+      ...existingConfirmation,
+      source,
+      asaas_status: asaasStatus,
+      confirmed_at: confirmedAtIso,
+      provider_paid_at: paidAtResolution.providerPaidAt,
+    },
+  };
+}
+
 export function buildPaymentUrl(paymentToken: string) {
   const appUrl = (Deno.env.get("APP_URL") || Deno.env.get("SITE_URL") || "").replace(/\/+$/, "");
   return appUrl ? `${appUrl}/pagamento/${paymentToken}` : `/pagamento/${paymentToken}`;
@@ -123,11 +250,13 @@ export function buildPaymentLinkName(
 export function buildPaymentLinkDescription(
   payment: Pick<ReservationPaymentRecord, "payment_token" | "rule_snapshot">,
   reservation: Pick<ReservationRecord, "guest_name" | "party_size" | "public_tracking_code" | "date" | "time">,
+  company: Pick<CompanyRecord, "name">,
 ) {
   const snapshot = getRuleSnapshot(payment);
   const reference = reservation.public_tracking_code || payment.payment_token.slice(0, 10);
-  const ruleName = snapshot.name ? ` | ${snapshot.name}` : "";
-  return `Sinal de reserva${ruleName} | ${reservation.party_size} pessoas | ${reservation.guest_name} | ${formatReservationDateTime(reservation)} | Ref ${reference}`;
+  const ruleName = String(snapshot.name || "Regra de reserva").trim();
+  const companyName = String(company.name || "Empresa").trim();
+  return `Sinal de reserva | ${ruleName} | ${reservation.party_size} pessoas | ${reservation.guest_name} | ${formatReservationDateTime(reservation)} | Ref ${reference} | ${companyName}`;
 }
 
 export function paymentIsExpired(payment: Pick<ReservationPaymentRecord, "expires_at">) {
@@ -279,11 +408,20 @@ export async function confirmReservationPayment(
 
   const typedReservation = reservation as ReservationRecord;
 
-  const paidAtDate = paidAt ? new Date(paidAt) : new Date();
-  const paidAtIso = Number.isNaN(paidAtDate.getTime()) ? new Date().toISOString() : paidAtDate.toISOString();
-  const paidAfterLocalExpiration = new Date(payment.expires_at).getTime() <= new Date(paidAtIso).getTime();
+  const checkedAt = new Date();
+  const checkedAtIso = checkedAt.toISOString();
+  const paidAtResolution = resolveProviderPaidAt(paidAt, checkedAt);
+  const paidAtIso = paidAtResolution.iso;
+  const confirmationMetadata = buildPaymentConfirmationMetadata(
+    payment,
+    source,
+    asaasStatus,
+    paidAtResolution,
+    checkedAtIso,
+  );
+  const paidAfterExpiration = new Date(payment.expires_at).getTime() <= new Date(paidAtIso).getTime();
 
-  if (paidAfterLocalExpiration) {
+  if (paidAfterExpiration) {
     const hasConflict = await reservationHasBlockingConflict(supabaseAdmin, typedReservation);
     if (hasConflict) {
       await supabaseAdmin
@@ -292,17 +430,22 @@ export async function confirmReservationPayment(
           status: "late_paid",
           asaas_status: asaasStatus,
           paid_at: paidAtIso,
-          last_checked_at: new Date().toISOString(),
+          last_checked_at: checkedAtIso,
           error_details: "Pagamento detectado apos expiracao e mesa indisponivel",
+          metadata: confirmationMetadata,
         })
         .eq("id", payment.id);
 
       await supabaseAdmin
         .from("reservations")
-        .update({ status: "paid_after_expiration", updated_at: new Date().toISOString() })
+        .update({ status: "paid_after_expiration", updated_at: checkedAtIso })
         .eq("id", payment.reservation_id);
 
-      await recordPaymentEvent(supabaseAdmin, payment, "payment_late_paid", { source, asaas_status: asaasStatus });
+      await recordPaymentEvent(supabaseAdmin, payment, "payment_late_paid", {
+        source,
+        asaas_status: asaasStatus,
+        provider_paid_at: paidAtResolution.providerPaidAt,
+      });
       return { status: "late_paid" as const };
     }
   }
@@ -313,17 +456,22 @@ export async function confirmReservationPayment(
       status: "paid",
       asaas_status: asaasStatus,
       paid_at: paidAtIso,
-      last_checked_at: new Date().toISOString(),
+      last_checked_at: checkedAtIso,
       error_details: null,
+      metadata: confirmationMetadata,
     })
     .eq("id", payment.id);
 
   await supabaseAdmin
     .from("reservations")
-    .update({ status: "confirmed", updated_at: new Date().toISOString() })
+    .update({ status: "confirmed", updated_at: checkedAtIso })
     .eq("id", payment.reservation_id);
 
-  await recordPaymentEvent(supabaseAdmin, payment, "payment_paid", { source, asaas_status: asaasStatus });
+  await recordPaymentEvent(supabaseAdmin, payment, "payment_paid", {
+    source,
+    asaas_status: asaasStatus,
+    provider_paid_at: paidAtResolution.providerPaidAt,
+  });
   await triggerReservationConfirmationEvent(typedReservation);
   return { status: "paid" as const };
 }

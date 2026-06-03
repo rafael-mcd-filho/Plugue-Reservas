@@ -5,15 +5,12 @@ import {
   AlertTriangle,
   Archive,
   Banknote,
-  CalendarRange,
   CheckCircle2,
-  Clock3,
   Copy,
   CreditCard,
   KeyRound,
   Loader2,
   Plus,
-  QrCode,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -107,6 +104,7 @@ interface ReservationPaymentRow {
   status: ReservationPaymentStatus;
   expires_at: string | null;
   paid_at: string | null;
+  metadata: Record<string, any> | null;
   created_at: string;
 }
 
@@ -116,6 +114,9 @@ interface FinancialDailyPoint {
   paid: number;
   expired: number;
   pending: number;
+  paidCount: number;
+  expiredCount: number;
+  pendingCount: number;
 }
 
 const today = new Date();
@@ -163,6 +164,7 @@ function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
     status: row?.status as ReservationPaymentStatus,
     expires_at: row?.expires_at ?? null,
     paid_at: row?.paid_at ?? null,
+    metadata: row?.metadata && typeof row.metadata === 'object' ? row.metadata : null,
     created_at: row?.created_at ?? new Date().toISOString(),
   };
 }
@@ -175,7 +177,16 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
   while (cursor.getTime() <= end.getTime()) {
     const key = format(cursor, 'yyyy-MM-dd');
     const day = format(cursor, 'dd/MM');
-    buckets.set(key, { date: key, day, paid: 0, expired: 0, pending: 0 });
+    buckets.set(key, {
+      date: key,
+      day,
+      paid: 0,
+      expired: 0,
+      pending: 0,
+      paidCount: 0,
+      expiredCount: 0,
+      pendingCount: 0,
+    });
     cursor.setDate(cursor.getDate() + 1);
   }
 
@@ -184,11 +195,14 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
     const bucket = buckets.get(key);
     if (!bucket) continue;
     if (payment.status === 'paid' || payment.status === 'late_paid') {
-      bucket.paid += 1;
+      bucket.paid += payment.amount;
+      bucket.paidCount += 1;
     } else if (payment.status === 'expired') {
-      bucket.expired += 1;
+      bucket.expired += payment.amount;
+      bucket.expiredCount += 1;
     } else if (payment.status === 'pending' || payment.status === 'awaiting_method') {
-      bucket.pending += 1;
+      bucket.pending += payment.amount;
+      bucket.pendingCount += 1;
     }
   }
 
@@ -252,6 +266,57 @@ function formatDateTime(value: string | null) {
   return format(new Date(value), "dd/MM/yyyy 'às' HH:mm");
 }
 
+function isDateOnlyValue(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function formatDateOnly(value: string) {
+  return value.split('-').reverse().join('/');
+}
+
+function isUtcMidnightTimestamp(value: string | null) {
+  if (!value) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime())
+    && date.getUTCHours() === 0
+    && date.getUTCMinutes() === 0
+    && date.getUTCSeconds() === 0
+    && date.getUTCMilliseconds() === 0;
+}
+
+function formatUtcDateOnly(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'NÃ£o registrado';
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const year = date.getUTCFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function formatPaymentPaidAt(payment: ReservationPaymentRow) {
+  const confirmation = payment.metadata?.payment_confirmation;
+  const providerPaidAt = confirmation && typeof confirmation === 'object'
+    ? (confirmation as Record<string, any>).provider_paid_at
+    : null;
+  const providerPaidAtRecord = providerPaidAt && typeof providerPaidAt === 'object'
+    ? providerPaidAt as Record<string, any>
+    : null;
+
+  if (
+    providerPaidAtRecord
+    && providerPaidAtRecord.precision === 'date'
+    && isDateOnlyValue(providerPaidAtRecord.date)
+  ) {
+    return formatDateOnly(providerPaidAtRecord.date);
+  }
+
+  if (isUtcMidnightTimestamp(payment.paid_at)) {
+    return formatUtcDateOnly(payment.paid_at!);
+  }
+
+  return formatDateTime(payment.paid_at);
+}
+
 function formatShortDate(value: string) {
   return value.split('-').reverse().join('/');
 }
@@ -264,6 +329,27 @@ function formatDateRangePickerLabel(range: DateRange | undefined) {
   if (!range?.from) return 'Período não definido';
   const to = range.to ?? range.from;
   return formatDateRange(toDateKey(range.from), toDateKey(to));
+}
+
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function formatCurrencyAxisTick(value: number) {
+  if (Math.abs(value) >= 1000) {
+    return `R$ ${(value / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  }
+
+  return `R$ ${Math.round(value).toLocaleString('pt-BR')}`;
+}
+
+function formatTooltipCurrency(value: unknown) {
+  const amount = Number(value);
+  return formatPrepaymentAmount(Number.isFinite(amount) ? amount : 0);
 }
 
 function getSummaryPresetRange(preset: SummaryPeriodPreset): DateRange {
@@ -391,6 +477,7 @@ export default function CompanyPrepayments() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all');
   const [paymentPeriodPreset, setPaymentPeriodPreset] = useState<SummaryPeriodPreset>('last_7_days');
   const [paymentRange, setPaymentRange] = useState<DateRange>(() => getSummaryPresetRange('last_7_days'));
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState('');
   const [paymentPage, setPaymentPage] = useState(1);
   const [pendingRuleAction, setPendingRuleAction] = useState<PendingRuleAction | null>(null);
   const [summaryPeriodPreset, setSummaryPeriodPreset] = useState<SummaryPeriodPreset>('last_7_days');
@@ -468,7 +555,7 @@ export default function CompanyPrepayments() {
     },
     enabled: Boolean(companyId),
   });
-  const rules = rulesQuery.data ?? [];
+  const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
 
   const invalidateRules = () => {
     if (!companyId) return;
@@ -585,18 +672,9 @@ export default function CompanyPrepayments() {
     });
   }, []);
 
-  const visibleRules = useMemo(() => rules.filter((rule) => !rule.archived_at), [rules]);
   const activeRules = useMemo(() => rules.filter((rule) => rule.enabled && !rule.archived_at), [rules]);
   const inactiveRules = useMemo(() => rules.filter((rule) => !rule.enabled && !rule.archived_at), [rules]);
   const archivedRules = useMemo(() => rules.filter((rule) => Boolean(rule.archived_at)), [rules]);
-  const totalPotentialSignal = useMemo(
-    () => activeRules.reduce((sum, rule) => sum + calculateReservationPaymentAmount(rule, 2), 0),
-    [activeRules],
-  );
-  const averageDeadline = useMemo(() => {
-    if (activeRules.length === 0) return 10;
-    return Math.round(activeRules.reduce((sum, rule) => sum + rule.payment_deadline_minutes, 0) / activeRules.length);
-  }, [activeRules]);
   const summaryQueryKey = useMemo(
     () => [
       'reservation-payments-summary',
@@ -620,7 +698,7 @@ export default function CompanyPrepayments() {
       const { data, error } = await (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
         )
         .eq('company_id', companyId)
         .gte('created_at', startIso)
@@ -631,7 +709,7 @@ export default function CompanyPrepayments() {
       return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
     },
   });
-  const summaryPayments = summaryPaymentsQuery.data ?? [];
+  const summaryPayments = useMemo(() => summaryPaymentsQuery.data ?? [], [summaryPaymentsQuery.data]);
 
   const filteredFinancialDaily = useMemo<FinancialDailyPoint[]>(() => {
     const from = summaryRange?.from;
@@ -645,8 +723,11 @@ export default function CompanyPrepayments() {
         paid: acc.paid + item.paid,
         expired: acc.expired + item.expired,
         pending: acc.pending + item.pending,
+        paidCount: acc.paidCount + item.paidCount,
+        expiredCount: acc.expiredCount + item.expiredCount,
+        pendingCount: acc.pendingCount + item.pendingCount,
       }),
-      { paid: 0, expired: 0, pending: 0 },
+      { paid: 0, expired: 0, pending: 0, paidCount: 0, expiredCount: 0, pendingCount: 0 },
     ),
     [filteredFinancialDaily],
   );
@@ -675,7 +756,7 @@ export default function CompanyPrepayments() {
       let query = (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
         )
         .eq('company_id', companyId)
         .gte('created_at', startIso)
@@ -693,7 +774,17 @@ export default function CompanyPrepayments() {
       return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
     },
   });
-  const filteredPayments = paymentsListQuery.data ?? [];
+  const payments = useMemo(() => paymentsListQuery.data ?? [], [paymentsListQuery.data]);
+  const normalizedPaymentSearch = useMemo(() => normalizeSearchValue(paymentSearchTerm), [paymentSearchTerm]);
+  const filteredPayments = useMemo(
+    () => {
+      if (!normalizedPaymentSearch) return payments;
+      return payments.filter((payment) =>
+        normalizeSearchValue(payment.customer_name).includes(normalizedPaymentSearch),
+      );
+    },
+    [normalizedPaymentSearch, payments],
+  );
   const paymentPageCount = Math.max(1, Math.ceil(filteredPayments.length / PAYMENT_PAGE_SIZE));
   const currentPaymentPage = Math.min(paymentPage, paymentPageCount);
   const paginatedPayments = useMemo(
@@ -702,18 +793,6 @@ export default function CompanyPrepayments() {
       currentPaymentPage * PAYMENT_PAGE_SIZE,
     ),
     [currentPaymentPage, filteredPayments],
-  );
-  const paymentTotals = useMemo(
-    () => filteredPayments.reduce(
-      (acc, payment) => ({
-        paid: acc.paid + (payment.status === 'paid' || payment.status === 'late_paid' ? 1 : 0),
-        pending: acc.pending + (payment.status === 'pending' || payment.status === 'awaiting_method' ? 1 : 0),
-        expired: acc.expired + (payment.status === 'expired' ? 1 : 0),
-        paidAmount: acc.paidAmount + ((payment.status === 'paid' || payment.status === 'late_paid') ? payment.amount : 0),
-      }),
-      { paid: 0, pending: 0, expired: 0, paidAmount: 0 },
-    ),
-    [filteredPayments],
   );
 
   const refreshPaymentsData = () => {
@@ -781,6 +860,11 @@ export default function CompanyPrepayments() {
 
   const handlePaymentStatusFilterChange = (filter: PaymentStatusFilter) => {
     setPaymentStatusFilter(filter);
+    setPaymentPage(1);
+  };
+
+  const handlePaymentSearchChange = (value: string) => {
+    setPaymentSearchTerm(value);
     setPaymentPage(1);
   };
 
@@ -984,11 +1068,11 @@ export default function CompanyPrepayments() {
       )}
 
       <Tabs defaultValue="config" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:w-[760px]">
-          <TabsTrigger value="config">Configurações</TabsTrigger>
-          <TabsTrigger value="rules">Regras</TabsTrigger>
-          <TabsTrigger value="payments">Pagamentos</TabsTrigger>
-          <TabsTrigger value="summary">Resumo financeiro</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:w-[760px]">
+          <TabsTrigger value="config" className="min-h-9 px-2 text-xs sm:text-sm">Configurações</TabsTrigger>
+          <TabsTrigger value="rules" className="min-h-9 px-2 text-xs sm:text-sm">Regras</TabsTrigger>
+          <TabsTrigger value="payments" className="min-h-9 px-2 text-xs sm:text-sm">Pagamentos</TabsTrigger>
+          <TabsTrigger value="summary" className="min-h-9 px-2 text-xs sm:text-sm">Resumo financeiro</TabsTrigger>
         </TabsList>
 
         <TabsContent value="config" className="space-y-4">
@@ -1185,11 +1269,11 @@ export default function CompanyPrepayments() {
           </Alert>
 
           <Tabs value={ruleTab} onValueChange={(value) => setRuleTab(value as RuleTab)} className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4 lg:w-[680px]">
-              <TabsTrigger value="active">Ativas</TabsTrigger>
-              <TabsTrigger value="inactive">Desativadas</TabsTrigger>
-              <TabsTrigger value="archived">Arquivadas</TabsTrigger>
-              <TabsTrigger value="new">Nova regra</TabsTrigger>
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:w-[680px]">
+              <TabsTrigger value="active" className="min-h-9 px-2 text-xs sm:text-sm">Ativas</TabsTrigger>
+              <TabsTrigger value="inactive" className="min-h-9 px-2 text-xs sm:text-sm">Desativadas</TabsTrigger>
+              <TabsTrigger value="archived" className="min-h-9 px-2 text-xs sm:text-sm">Arquivadas</TabsTrigger>
+              <TabsTrigger value="new" className="min-h-9 px-2 text-xs sm:text-sm">Nova regra</TabsTrigger>
             </TabsList>
 
             <TabsContent value="active">
@@ -1408,22 +1492,24 @@ export default function CompanyPrepayments() {
         </TabsContent>
 
         <TabsContent value="payments" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={Clock3} label="Pendentes" value={String(paymentTotals.pending)} detail="Aguardando pagamento" />
-            <MetricCard icon={CheckCircle2} label="Pagos" value={String(paymentTotals.paid)} detail={formatPrepaymentAmount(paymentTotals.paidAmount)} />
-            <MetricCard icon={AlertTriangle} label="Expirados" value={String(paymentTotals.expired)} detail="Mesa liberada" />
-            <MetricCard icon={RefreshCw} label="Consulta manual" value={String(paymentTotals.pending)} detail="Atualizar status no Asaas" />
-          </div>
-
           <Card className="border-border shadow-card">
-            <CardHeader className="gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <CardHeader className="gap-4">
               <div>
                 <CardTitle>Pagamentos de reservas</CardTitle>
                 <CardDescription>
                   Atualiza automaticamente a cada 30 segundos. Use Consultar para verificar imediatamente no Asaas.
                 </CardDescription>
               </div>
-              <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[760px] xl:grid-cols-[180px_220px_minmax(220px,1fr)]">
+              <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_180px_220px_minmax(220px,1fr)]">
+                <div className="space-y-2">
+                  <Label htmlFor="payment-search">Nome</Label>
+                  <Input
+                    id="payment-search"
+                    value={paymentSearchTerm}
+                    onChange={(event) => handlePaymentSearchChange(event.target.value)}
+                    placeholder="Pesquisar por nome"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label>Status</Label>
                   <Select value={paymentStatusFilter} onValueChange={(value) => handlePaymentStatusFilterChange(value as PaymentStatusFilter)}>
@@ -1475,7 +1561,7 @@ export default function CompanyPrepayments() {
               {filteredPayments.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border bg-background p-8 text-center">
                   <p className="text-sm font-medium text-foreground">Nenhum pagamento encontrado</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Altere o status ou o período para visualizar outros pagamentos.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Altere o nome, status ou período para visualizar outros pagamentos.</p>
                 </div>
               ) : (
                 <>
@@ -1493,7 +1579,7 @@ export default function CompanyPrepayments() {
                   </div>
                   <div className="flex flex-col gap-3 border-t border-border pt-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                     <span>
-                      {filteredPayments.length} pagamento{filteredPayments.length === 1 ? '' : 's'} no período
+                      {filteredPayments.length} pagamento{filteredPayments.length === 1 ? '' : 's'} encontrado{filteredPayments.length === 1 ? '' : 's'}
                     </span>
                     <div className="flex items-center gap-2">
                       <Button
@@ -1569,19 +1655,27 @@ export default function CompanyPrepayments() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={CalendarRange} label="Regras ativas" value={String(activeRules.length)} detail={`${visibleRules.length} regras visíveis`} />
-            <MetricCard icon={Banknote} label="Sinal estimado" value={formatPrepaymentAmount(totalPotentialSignal)} detail="Amostra por regra ativa" />
-            <MetricCard icon={Clock3} label="Prazo médio" value={`${averageDeadline} min`} detail="Regras ativas" />
-            <MetricCard icon={QrCode} label="Métodos" value="Pix + cartão" detail="Links de pagamento Asaas" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <MetricCard
+              icon={CheckCircle2}
+              label="Pagamentos pagos"
+              value={String(chartTotals.paidCount)}
+              detail="Reservas com pagamento confirmado"
+            />
+            <MetricCard
+              icon={Banknote}
+              label="Valor total pago"
+              value={formatPrepaymentAmount(chartTotals.paid)}
+              detail="Receita confirmada no período"
+            />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
             <Card className="border-border shadow-card">
               <CardHeader>
-                <CardTitle>Reservas com pagamento por dia</CardTitle>
+                <CardTitle>Valores por dia</CardTitle>
                 <CardDescription>
-                  Criadas entre {summaryPeriodLabel}. Separa pagas, expiradas e pendentes.
+                  Valores das reservas criadas entre {summaryPeriodLabel}, separados por pagas, expiradas e pendentes.
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[320px]">
@@ -1594,12 +1688,18 @@ export default function CompanyPrepayments() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={filteredFinancialDaily} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <BarChart data={filteredFinancialDaily} margin={{ top: 10, right: 10, left: 18, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                       <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                      <YAxis
+                        allowDecimals={false}
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={formatCurrencyAxisTick}
+                        stroke="hsl(var(--muted-foreground))"
+                      />
                       <Tooltip
                         cursor={{ fill: 'hsl(var(--muted))' }}
+                        formatter={(value) => formatTooltipCurrency(value)}
                         contentStyle={{
                           border: '1px solid hsl(var(--border))',
                           borderRadius: 8,
@@ -1618,18 +1718,14 @@ export default function CompanyPrepayments() {
 
             <Card className="border-border shadow-card">
               <CardHeader>
-                <CardTitle>Resumo do período</CardTitle>
-                <CardDescription>Reservas criadas entre {summaryPeriodLabel}.</CardDescription>
+                <CardTitle>Totais do período</CardTitle>
+                <CardDescription>Valores das reservas criadas entre {summaryPeriodLabel}.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <SummaryLine label="Pagas" value={String(chartTotals.paid)} tone="success" />
-                <SummaryLine label="Expiradas" value={String(chartTotals.expired)} tone="destructive" />
-                <SummaryLine label="Pendentes" value={String(chartTotals.pending)} tone="warning" />
-                <SummaryLine
-                  label="Conversão"
-                  value={`${Math.round((chartTotals.paid / Math.max(chartTotals.paid + chartTotals.expired, 1)) * 100)}%`}
-                  tone="default"
-                />
+                <SummaryLine label="Pagamentos pagos" value={String(chartTotals.paidCount)} tone="success" />
+                <SummaryLine label="Valor pago" value={formatPrepaymentAmount(chartTotals.paid)} tone="success" />
+                <SummaryLine label="Valor expirado" value={formatPrepaymentAmount(chartTotals.expired)} tone="destructive" />
+                <SummaryLine label="Valor pendente" value={formatPrepaymentAmount(chartTotals.pending)} tone="warning" />
                 <Button
                   variant="outline"
                   className="mt-2 w-full"
@@ -1841,7 +1937,7 @@ function PaymentListItem({
   isChecking: boolean;
 }) {
   const paymentMoment = payment.status === 'paid' || payment.status === 'late_paid'
-    ? `Pago em ${formatDateTime(payment.paid_at)}`
+    ? `Pago em ${formatPaymentPaidAt(payment)}`
     : payment.expires_at
       ? `Expira em ${formatDateTime(payment.expires_at)}`
       : '';
@@ -1870,7 +1966,7 @@ function PaymentListItem({
         <div>
           <p className="text-sm font-medium text-foreground">{formatPrepaymentAmount(payment.amount)}</p>
           <p className="text-xs text-muted-foreground">
-            {payment.billing_type ? getBillingTypeLabel(payment.billing_type) : 'Sem método'}
+            {payment.billing_type ? getBillingTypeLabel(payment.billing_type) : 'Método não escolhido'}
             {payment.installments && payment.installments > 1 ? ` ${payment.installments}x` : ''}
           </p>
         </div>

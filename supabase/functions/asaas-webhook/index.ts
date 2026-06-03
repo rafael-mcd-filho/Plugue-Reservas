@@ -8,6 +8,7 @@ import {
   confirmReservationPayment,
   corsHeaders,
   jsonResponse,
+  providerTimestampHasExplicitTime,
   readJson,
   recordPaymentEvent,
 } from "../_shared/reservation-payments.ts";
@@ -33,6 +34,22 @@ function buildEventId(body: any, eventType: string, asaasPaymentId: string | nul
 
   const eventDate = body.dateCreated ?? body.createdAt ?? body.payment?.dateCreated ?? body.payment?.clientPaymentDate ?? "";
   return `${eventType || "unknown"}:${asaasPaymentId || asaasPaymentLinkId || "unknown"}:${eventDate || "no-date"}`;
+}
+
+function getAsaasPaidAt(body: any) {
+  const candidates = [
+    body.payment?.confirmedDate,
+    body.payment?.clientPaymentDate,
+    body.payment?.paymentDate,
+  ].filter((value) => typeof value === "string" && value.trim());
+
+  const preciseValue = candidates.find(providerTimestampHasExplicitTime);
+  if (preciseValue) return preciseValue;
+
+  return body.payment?.clientPaymentDate
+    ?? body.payment?.paymentDate
+    ?? body.payment?.confirmedDate
+    ?? null;
 }
 
 async function validateWebhookToken(supabaseAdmin: any, providedToken: string | null, companyId: string | null) {
@@ -161,10 +178,7 @@ Deno.serve(async (req) => {
       payment = await attachGeneratedPaymentId(supabaseAdmin, payment, asaasPaymentId, asaasStatus);
 
       if ((isAsaasPaymentApprovalEvent(eventType) || isAsaasPaidStatus(asaasStatus)) && payment.status !== "paid") {
-        const paidAt = body.payment?.clientPaymentDate
-          ?? body.payment?.paymentDate
-          ?? body.payment?.confirmedDate
-          ?? null;
+        const paidAt = getAsaasPaidAt(body);
         await confirmReservationPayment(supabaseAdmin, payment, asaasStatus ?? eventType, "asaas_webhook", paidAt);
       } else if (
         isAsaasPaymentCancelledEvent(eventType)

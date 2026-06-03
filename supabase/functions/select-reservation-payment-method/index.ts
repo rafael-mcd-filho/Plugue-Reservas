@@ -70,6 +70,7 @@ async function getAsaasConfig(supabaseAdmin: any, companyId: string) {
 function getPaymentLinkPayload(
   payment: any,
   reservation: any,
+  company: any,
   billingType: AsaasBillingType,
   chargedAmount: number,
   maxInstallments: number,
@@ -77,7 +78,7 @@ function getPaymentLinkPayload(
   const isInstallmentCard = billingType === "CREDIT_CARD" && maxInstallments > 1;
   const payload: AsaasPaymentLinkPayload = {
     name: buildPaymentLinkName(payment, reservation, billingType),
-    description: buildPaymentLinkDescription(payment, reservation),
+    description: buildPaymentLinkDescription(payment, reservation, company),
     value: chargedAmount,
     billingType,
     chargeType: isInstallmentCard ? "INSTALLMENT" : "DETACHED",
@@ -167,7 +168,7 @@ async function handlePixPayment(
   }
 
   const dueDate = dateOnlyInTimeZone(addDaysToDate(new Date(), 1));
-  const description = buildPaymentLinkDescription(payment, reservation);
+  const description = buildPaymentLinkDescription(payment, reservation, company);
 
   let asaasPayment;
   try {
@@ -271,7 +272,14 @@ async function handleCardPayment(
   maxInstallments: number,
 ) {
   const externalReference = buildPaymentLinkExternalReference(payment.payment_token, "CREDIT_CARD");
-  const paymentLinkPayload = getPaymentLinkPayload(payment, reservation, "CREDIT_CARD", chargedAmount, maxInstallments);
+  const paymentLinkPayload = getPaymentLinkPayload(
+    payment,
+    reservation,
+    company,
+    "CREDIT_CARD",
+    chargedAmount,
+    maxInstallments,
+  );
 
   let asaasPaymentLink;
   try {

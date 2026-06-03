@@ -226,27 +226,50 @@ export default function PublicReservationPayment() {
 
   const [pixCpfDialogOpen, setPixCpfDialogOpen] = useState(false);
   const [pixCpfValue, setPixCpfValue] = useState('');
+  const [selectingBillingType, setSelectingBillingType] =
+    useState<ReservationPrepaymentBillingType | undefined>(undefined);
 
   const selectMethodMutation = useMutation({
     mutationFn: ({ billingType, cpf }: { billingType: ReservationPrepaymentBillingType; cpf?: string }) =>
       selectReservationPaymentMethod(paymentToken, billingType, cpf ? { cpf } : undefined),
-    onSuccess: (updatedPayment) => {
-      queryClient.setQueryData(queryKey, updatedPayment);
-      setPixCpfDialogOpen(false);
-      if (updatedPayment.billing_type === 'PIX' && updatedPayment.pix_qr_code_base64) {
-        toast.success('Pix gerado, escaneie o QR Code ou copie o código abaixo.');
-        return;
-      }
-      if (updatedPayment.payment_link_url) {
-        window.location.assign(updatedPayment.payment_link_url);
-        return;
-      }
-      toast.success('Pagamento preparado.');
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível criar o pagamento.');
-    },
+    retry: false,
   });
+
+  const handlePaymentMethodSuccess = (updatedPayment: PublicReservationPaymentSummary) => {
+    queryClient.setQueryData(queryKey, updatedPayment);
+    setPixCpfDialogOpen(false);
+    if (updatedPayment.billing_type === 'PIX' && updatedPayment.pix_qr_code_base64) {
+      toast.success('Pix gerado, escaneie o QR Code ou copie o código abaixo.');
+      return;
+    }
+    if (updatedPayment.payment_link_url) {
+      window.location.assign(updatedPayment.payment_link_url);
+      return;
+    }
+    toast.success('Pagamento preparado.');
+  };
+
+  const submitPaymentMethod = async ({
+    billingType,
+    cpf,
+  }: {
+    billingType: ReservationPrepaymentBillingType;
+    cpf?: string;
+  }) => {
+    setSelectingBillingType(billingType);
+
+    try {
+      const updatedPayment = await selectMethodMutation.mutateAsync({ billingType, cpf });
+      handlePaymentMethodSuccess(updatedPayment);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível criar o pagamento.');
+    } finally {
+      setSelectingBillingType(undefined);
+      selectMethodMutation.reset();
+    }
+  };
+
+  const activeSelectingBillingType = selectMethodMutation.isPending ? selectingBillingType : undefined;
 
   const checkPaymentMutation = useMutation({
     mutationFn: () => checkReservationPayment(paymentToken),
@@ -309,7 +332,7 @@ export default function PublicReservationPayment() {
       setPixCpfDialogOpen(true);
       return;
     }
-    selectMethodMutation.mutate({ billingType });
+    void submitPaymentMethod({ billingType });
   };
 
   const handleConfirmPixCpf = () => {
@@ -318,7 +341,7 @@ export default function PublicReservationPayment() {
       toast.error('Informe um CPF ou CNPJ válido.');
       return;
     }
-    selectMethodMutation.mutate({ billingType: 'PIX', cpf: digits });
+    void submitPaymentMethod({ billingType: 'PIX', cpf: digits });
   };
 
   if (!paymentToken) {
@@ -397,7 +420,7 @@ export default function PublicReservationPayment() {
                 <PaymentActionArea
                   payment={payment}
                   checking={checkPaymentMutation.isPending}
-                  selectingBillingType={selectMethodMutation.variables?.billingType}
+                  selectingBillingType={activeSelectingBillingType}
                   onSelectMethod={handleSelectMethod}
                   onOpenPaymentLink={() => handleOpenPaymentLink(payment)}
                   onCheckPayment={() => checkPaymentMutation.mutate()}
@@ -433,7 +456,7 @@ export default function PublicReservationPayment() {
       <PixCpfDialog
         open={pixCpfDialogOpen}
         value={pixCpfValue}
-        loading={selectMethodMutation.isPending && selectMethodMutation.variables?.billingType === 'PIX'}
+        loading={activeSelectingBillingType === 'PIX'}
         onChange={setPixCpfValue}
         onCancel={() => setPixCpfDialogOpen(false)}
         onConfirm={handleConfirmPixCpf}

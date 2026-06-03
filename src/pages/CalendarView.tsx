@@ -57,6 +57,14 @@ interface Reservation {
   checked_in_party_size: number | null;
   created_at: string;
   updated_at: string;
+  reservation_payments?: ReservationPaymentInfo[] | null;
+}
+
+interface ReservationPaymentInfo {
+  id: string;
+  status: string;
+  paid_at: string | null;
+  billing_type: string | null;
 }
 
 interface ReservationEditForm {
@@ -68,6 +76,33 @@ interface ReservationEditForm {
   party_size: string;
   occasion: string;
   notes: string;
+}
+
+const CALENDAR_VISIBLE_STATUSES = new Set<ReservationStatus>(['confirmed', 'checked_in', 'no-show']);
+
+function isCalendarVisibleReservation(reservation: Pick<Reservation, 'status'>) {
+  return CALENDAR_VISIBLE_STATUSES.has(reservation.status);
+}
+
+function getPaidReservationPayment(reservation: Reservation) {
+  return reservation.reservation_payments?.find((payment) => payment.status === 'paid') ?? null;
+}
+
+function ReservationPaymentPaidBadge({ payment }: { payment: ReservationPaymentInfo }) {
+  const method = payment.billing_type === 'PIX'
+    ? 'Pix'
+    : payment.billing_type === 'CREDIT_CARD'
+      ? 'Cartão'
+      : null;
+
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-success/20 bg-success-soft px-2.5 py-0.5 text-xs font-medium text-success"
+      title={method ? `Pagamento confirmado via ${method}` : 'Pagamento confirmado'}
+    >
+      Pago
+    </span>
+  );
 }
 
 function normalizeReservationRecord(reservation: Reservation) {
@@ -124,7 +159,7 @@ export default function CalendarView() {
         supabase
           .from('reservations' as any)
           .select(
-            'id, company_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at',
+            'id, company_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, reservation_payments(id,status,paid_at,billing_type)',
           )
           .eq('company_id', companyId)
           .order('date', { ascending: true })
@@ -218,15 +253,19 @@ export default function CalendarView() {
   });
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
-  const reservationDates = useMemo(
-    () => new Set(reservations.map((reservation) => reservation.date)),
+  const operationalReservations = useMemo(
+    () => reservations.filter(isCalendarVisibleReservation),
     [reservations],
   );
+  const reservationDates = useMemo(
+    () => new Set(operationalReservations.map((reservation) => reservation.date)),
+    [operationalReservations],
+  );
   const dayReservations = useMemo(
-    () => reservations
+    () => operationalReservations
       .filter((reservation) => reservation.date === selectedDateStr)
       .sort((left, right) => left.time.localeCompare(right.time)),
-    [reservations, selectedDateStr],
+    [operationalReservations, selectedDateStr],
   );
   const daySummary = useMemo(
     () => ({
@@ -411,11 +450,12 @@ export default function CalendarView() {
             </CardHeader>
             <CardContent>
               {dayReservations.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma reserva nesta data</p>
+                <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma reserva confirmada nesta data</p>
               ) : (
                 <div className="overflow-hidden rounded-xl border border-border">
                   {dayReservations.map((reservation, index) => {
                     const detail = reservation.occasion || reservation.notes;
+                    const paidPayment = getPaidReservationPayment(reservation);
 
                     return (
                       <div
@@ -443,6 +483,7 @@ export default function CalendarView() {
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
                               <ReservationStatusBadge status={reservation.status} />
+                              {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                             </div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                               <PhoneWhatsAppLink
