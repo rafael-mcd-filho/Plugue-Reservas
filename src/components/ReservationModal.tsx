@@ -1290,17 +1290,19 @@ export default function ReservationModal({
                     return (
                       <button key={date.toISOString()} disabled={closed} onClick={() => handleDateSelect(date)}
                         className={cn(
-                          'relative flex flex-col items-center p-3 rounded-md border text-sm transition-[border-color,background-color,color] duration-150',
+                          'relative flex h-[5.625rem] min-w-0 flex-col items-center justify-center overflow-hidden rounded-md border p-3 text-sm transition-[border-color,background-color,color] duration-150',
                           closed && 'opacity-40 cursor-not-allowed',
                           isSelected ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-border hover:border-primary/50 text-foreground'
                         )}>
-                        {todayLabel ? (
-                          <span className={cn('text-[10px] font-semibold uppercase tracking-wide', isSelected ? 'text-primary' : 'text-primary/70')}>{todayLabel}</span>
-                        ) : (
-                          <span className="text-xs uppercase text-muted-foreground">{format(date, 'EEE', { locale: ptBR })}</span>
-                        )}
-                        <span className="text-lg font-bold">{format(date, 'dd')}</span>
-                        <span className="text-xs text-muted-foreground">{format(date, 'MMM', { locale: ptBR })}</span>
+                        <span className={cn(
+                          'block h-4 w-full truncate text-center text-[11px] font-semibold uppercase leading-4',
+                          todayLabel && !closed ? 'text-primary/70' : 'text-muted-foreground',
+                          isSelected && 'text-primary'
+                        )}>
+                          {todayLabel || format(date, 'EEE', { locale: ptBR })}
+                        </span>
+                        <span className="block h-7 w-8 text-center text-lg font-bold leading-7 tabular-nums">{format(date, 'dd')}</span>
+                        <span className="block h-4 text-xs leading-4 text-muted-foreground">{format(date, 'MMM', { locale: ptBR })}</span>
                       </button>
                     );
                     })}
