@@ -1,13 +1,16 @@
 import { createSupabaseAdminClient } from "../_shared/internal-auth.ts";
 import {
+  getAsaasActiveChargebackStatus,
+  getAsaasExternalPaymentOutcome,
+  getAsaasRefundedValue,
   isAsaasPaidStatus,
   isAsaasPaymentApprovalEvent,
-  isAsaasPaymentCancelledEvent,
 } from "../_shared/asaas.ts";
 import {
   confirmReservationPayment,
   corsHeaders,
   jsonResponse,
+  markReservationPaymentProviderOutcome,
   providerTimestampHasExplicitTime,
   readJson,
   recordPaymentEvent,
@@ -177,36 +180,34 @@ Deno.serve(async (req) => {
     try {
       payment = await attachGeneratedPaymentId(supabaseAdmin, payment, asaasPaymentId, asaasStatus);
 
-      if ((isAsaasPaymentApprovalEvent(eventType) || isAsaasPaidStatus(asaasStatus)) && payment.status !== "paid") {
+      const providerOutcome = getAsaasExternalPaymentOutcome(eventType, asaasStatus, body.payment);
+      if (providerOutcome) {
+        await markReservationPaymentProviderOutcome(supabaseAdmin, payment, providerOutcome, {
+          source: "asaas_webhook",
+          asaasStatus: asaasStatus ?? eventType,
+          eventType,
+          metadata: {
+            asaas_payment_id: asaasPaymentId,
+            asaas_payment_link_id: asaasPaymentLinkId,
+            chargeback_status: getAsaasActiveChargebackStatus(body.payment),
+            refunded_value: getAsaasRefundedValue(body.payment),
+          },
+        });
+      } else if (
+        (isAsaasPaymentApprovalEvent(eventType) || isAsaasPaidStatus(asaasStatus))
+        && ![
+          "paid",
+          "late_paid",
+          "refunded",
+          "partial_refunded",
+          "refund_pending",
+          "refund_denied",
+          "chargeback",
+          "cancelled",
+        ].includes(payment.status)
+      ) {
         const paidAt = getAsaasPaidAt(body);
         await confirmReservationPayment(supabaseAdmin, payment, asaasStatus ?? eventType, "asaas_webhook", paidAt);
-      } else if (
-        isAsaasPaymentCancelledEvent(eventType)
-        && payment.status !== "paid"
-        && payment.status !== "expired"
-      ) {
-        await supabaseAdmin
-          .from("reservation_payments")
-          .update({
-            status: eventType === "PAYMENT_REFUNDED" ? "refunded" : "cancelled",
-            asaas_status: asaasStatus ?? eventType,
-            cancelled_at: new Date().toISOString(),
-            last_checked_at: new Date().toISOString(),
-          })
-          .eq("id", payment.id);
-
-        await supabaseAdmin
-          .from("reservations")
-          .update({ status: "payment_cancelled", updated_at: new Date().toISOString() })
-          .eq("id", payment.reservation_id);
-
-        await recordPaymentEvent(supabaseAdmin, payment, "payment_cancelled", {
-          source: "asaas_webhook",
-          event_type: eventType,
-          asaas_status: asaasStatus,
-          asaas_payment_id: asaasPaymentId,
-          asaas_payment_link_id: asaasPaymentLinkId,
-        });
       } else if (asaasPaymentId && payment.asaas_payment_id !== asaasPaymentId) {
         await recordPaymentEvent(supabaseAdmin, payment, "asaas_payment_id_attached", {
           source: "asaas_webhook",

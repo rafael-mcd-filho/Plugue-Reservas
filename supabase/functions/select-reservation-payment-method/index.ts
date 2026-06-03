@@ -153,6 +153,7 @@ async function handlePixPayment(
     mobilePhone: cleanDigits(reservation.guest_phone) || undefined,
     email: reservation.guest_email?.trim() || undefined,
     externalReference,
+    notificationDisabled: true,
   };
 
   let customer;

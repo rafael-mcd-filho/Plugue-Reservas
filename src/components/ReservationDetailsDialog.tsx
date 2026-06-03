@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -520,6 +520,20 @@ export default function ReservationDetailsDialog({
                   <ReservationStatusBadge status={reservation.status} />
                 </div>
               </div>
+
+              {reservation.status === 'paid_after_expiration' && (
+                <div className="rounded-lg border border-warning/40 bg-warning-soft/40 p-3 text-sm">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                    <div className="space-y-1">
+                      <p className="font-medium text-foreground">Pagamento recebido após expiração</p>
+                      <p className="text-muted-foreground">
+                        A reserva não foi confirmada automaticamente porque houve conflito de disponibilidade. Avalie reagendamento ou estorno.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <div className="rounded-lg border border-border bg-muted/30 p-3">

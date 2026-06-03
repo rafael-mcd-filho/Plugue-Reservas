@@ -42,8 +42,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -52,7 +61,7 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { supabase } from '@/integrations/supabase/client';
 import type { DateRange } from 'react-day-picker';
-import { checkReservationPayment, getAsaasConfig, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
+import { checkReservationPayment, getAsaasConfig, refundReservationPayment, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
 import {
   DEFAULT_ASAAS_CONFIG_PREVIEW,
   calculateReservationPaymentAmount,
@@ -90,20 +99,34 @@ interface PendingRuleAction {
   ruleId: string;
 }
 
+interface BulkCheckResult {
+  paymentId: string;
+  paymentToken: string;
+  customerName: string;
+  previousStatus: ReservationPaymentStatus;
+  currentStatus: ReservationPaymentStatus | null;
+  changed: boolean;
+  message: string | null;
+  error: string | null;
+}
+
 interface ReservationPaymentRow {
   id: string;
   payment_token: string | null;
   customer_name: string;
+  reservation_status: string | null;
   reservation_date: string;
   reservation_time: string;
   party_size: number;
   rule_name: string;
   amount: number;
+  refunded_amount: number;
   billing_type: ReservationPrepaymentBillingType | null;
   installments: number | null;
   status: ReservationPaymentStatus;
   expires_at: string | null;
   paid_at: string | null;
+  cancelled_at: string | null;
   metadata: Record<string, any> | null;
   created_at: string;
 }
@@ -114,9 +137,15 @@ interface FinancialDailyPoint {
   paid: number;
   expired: number;
   pending: number;
+  refunded: number;
+  chargeback: number;
+  refundPending: number;
   paidCount: number;
   expiredCount: number;
   pendingCount: number;
+  refundedCount: number;
+  chargebackCount: number;
+  refundPendingCount: number;
 }
 
 const today = new Date();
@@ -139,6 +168,11 @@ const PAYMENT_STATUS_OPTIONS: Array<{ value: PaymentStatusFilter; label: string 
   { value: 'expired', label: 'Expirados' },
   { value: 'cancelled', label: 'Cancelados' },
   { value: 'late_paid', label: 'Pagos após expirar' },
+  { value: 'refunded', label: 'Estornados' },
+  { value: 'partial_refunded', label: 'Estornos parciais' },
+  { value: 'refund_pending', label: 'Estornos pendentes' },
+  { value: 'refund_denied', label: 'Estornos negados' },
+  { value: 'chargeback', label: 'Chargebacks' },
 ];
 
 const PAYMENT_PAGE_SIZE = 8;
@@ -146,25 +180,36 @@ const PAYMENT_PAGE_SIZE = 8;
 function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
   const reservation = row?.reservation ?? {};
   const snapshot = (row?.rule_snapshot && typeof row.rule_snapshot === 'object') ? row.rule_snapshot : {};
+  const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : null;
+  const providerStatusCheck = metadata?.provider_status_check && typeof metadata.provider_status_check === 'object'
+    ? metadata.provider_status_check
+    : null;
   const amount = typeof row?.charged_amount === 'number' && row.charged_amount > 0
     ? row.charged_amount
     : Number(row?.base_amount ?? 0);
+  const providerRefundedAmount = Number(providerStatusCheck?.refunded_value ?? 0);
+  const refundedAmount = Number.isFinite(providerRefundedAmount) && providerRefundedAmount > 0
+    ? providerRefundedAmount
+    : amount;
 
   return {
     id: row?.id ?? '',
     payment_token: row?.payment_token ?? null,
     customer_name: reservation?.guest_name ?? 'Cliente',
+    reservation_status: reservation?.status ?? null,
     reservation_date: reservation?.date ?? '',
     reservation_time: typeof reservation?.time === 'string' ? reservation.time.slice(0, 5) : '',
     party_size: Number(reservation?.party_size ?? 0),
     rule_name: typeof snapshot?.name === 'string' && snapshot.name ? snapshot.name : 'Pagamento antecipado',
     amount,
+    refunded_amount: refundedAmount,
     billing_type: (row?.billing_type ?? null) as ReservationPrepaymentBillingType | null,
     installments: typeof row?.max_installments === 'number' ? row.max_installments : null,
     status: row?.status as ReservationPaymentStatus,
     expires_at: row?.expires_at ?? null,
     paid_at: row?.paid_at ?? null,
-    metadata: row?.metadata && typeof row.metadata === 'object' ? row.metadata : null,
+    cancelled_at: row?.cancelled_at ?? null,
+    metadata,
     created_at: row?.created_at ?? new Date().toISOString(),
   };
 }
@@ -183,26 +228,51 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
       paid: 0,
       expired: 0,
       pending: 0,
+      refunded: 0,
+      chargeback: 0,
+      refundPending: 0,
       paidCount: 0,
       expiredCount: 0,
       pendingCount: 0,
+      refundedCount: 0,
+      chargebackCount: 0,
+      refundPendingCount: 0,
     });
     cursor.setDate(cursor.getDate() + 1);
   }
 
   for (const payment of payments) {
-    const key = payment.created_at.slice(0, 10);
+    const financialEventDate = new Date(getFinancialEventDate(payment));
+    if (Number.isNaN(financialEventDate.getTime())) continue;
+
+    const key = toDateKey(financialEventDate);
     const bucket = buckets.get(key);
     if (!bucket) continue;
-    if (payment.status === 'paid' || payment.status === 'late_paid') {
+    if (
+      payment.status === 'paid'
+      || payment.status === 'late_paid'
+      || payment.status === 'refund_pending'
+      || payment.status === 'refund_denied'
+    ) {
       bucket.paid += payment.amount;
       bucket.paidCount += 1;
+
+      if (payment.status === 'refund_pending') {
+        bucket.refundPending += payment.refunded_amount;
+        bucket.refundPendingCount += 1;
+      }
     } else if (payment.status === 'expired') {
       bucket.expired += payment.amount;
       bucket.expiredCount += 1;
     } else if (payment.status === 'pending' || payment.status === 'awaiting_method') {
       bucket.pending += payment.amount;
       bucket.pendingCount += 1;
+    } else if (payment.status === 'refunded' || payment.status === 'partial_refunded') {
+      bucket.refunded += payment.status === 'partial_refunded' ? payment.refunded_amount : payment.amount;
+      bucket.refundedCount += 1;
+    } else if (payment.status === 'chargeback') {
+      bucket.chargeback += payment.amount;
+      bucket.chargebackCount += 1;
     }
   }
 
@@ -317,6 +387,29 @@ function formatPaymentPaidAt(payment: ReservationPaymentRow) {
   return formatDateTime(payment.paid_at);
 }
 
+function getFinancialEventDate(payment: ReservationPaymentRow) {
+  if (payment.status === 'paid' || payment.status === 'late_paid') {
+    return payment.paid_at ?? payment.created_at;
+  }
+
+  if (
+    payment.status === 'refunded'
+    || payment.status === 'partial_refunded'
+    || payment.status === 'refund_pending'
+    || payment.status === 'refund_denied'
+    || payment.status === 'chargeback'
+    || payment.status === 'cancelled'
+  ) {
+    return payment.cancelled_at ?? payment.paid_at ?? payment.created_at;
+  }
+
+  if (payment.status === 'expired') {
+    return payment.cancelled_at ?? payment.expires_at ?? payment.created_at;
+  }
+
+  return payment.created_at;
+}
+
 function formatShortDate(value: string) {
   return value.split('-').reverse().join('/');
 }
@@ -412,9 +505,30 @@ function getPaymentStatusClass(status: ReservationPaymentStatus) {
     failed: 'border-destructive/30 bg-destructive/10 text-destructive',
     late_paid: 'border-warning/30 bg-warning/10 text-warning',
     refunded: 'border-muted bg-muted text-muted-foreground',
+    partial_refunded: 'border-muted bg-muted text-muted-foreground',
+    refund_pending: 'border-warning/30 bg-warning/10 text-warning',
+    refund_denied: 'border-destructive/30 bg-destructive/10 text-destructive',
+    chargeback: 'border-destructive/30 bg-destructive/10 text-destructive',
   };
 
   return classes[status];
+}
+
+function isReservationCancelledStatus(status: string | null | undefined) {
+  const normalizedStatus = String(status ?? '').trim().toLowerCase();
+  return normalizedStatus === 'cancelled' || normalizedStatus === 'payment_cancelled';
+}
+
+function isReceivedPaymentStatus(status: ReservationPaymentStatus) {
+  return status === 'paid' || status === 'late_paid';
+}
+
+function isLatePaidPayment(payment: Pick<ReservationPaymentRow, 'status' | 'reservation_status'>) {
+  return payment.status === 'late_paid' || payment.reservation_status === 'paid_after_expiration';
+}
+
+function canRefundPayment(payment: ReservationPaymentRow) {
+  return Boolean(payment.payment_token) && (payment.status === 'paid' || payment.status === 'late_paid');
 }
 
 function getAsaasStatusLabel(status: string) {
@@ -480,6 +594,10 @@ export default function CompanyPrepayments() {
   const [paymentSearchTerm, setPaymentSearchTerm] = useState('');
   const [paymentPage, setPaymentPage] = useState(1);
   const [pendingRuleAction, setPendingRuleAction] = useState<PendingRuleAction | null>(null);
+  const [pendingRefundPayment, setPendingRefundPayment] = useState<ReservationPaymentRow | null>(null);
+  const [bulkCheckModalOpen, setBulkCheckModalOpen] = useState(false);
+  const [bulkCheckProgress, setBulkCheckProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkCheckResults, setBulkCheckResults] = useState<BulkCheckResult[]>([]);
   const [summaryPeriodPreset, setSummaryPeriodPreset] = useState<SummaryPeriodPreset>('last_7_days');
   const [summaryRange, setSummaryRange] = useState<DateRange>(() => getSummaryPresetRange('last_7_days'));
 
@@ -523,7 +641,7 @@ export default function CompanyPrepayments() {
   const rulesQuery = useQuery({
     queryKey: ['reservation-payment-rules', companyId],
     queryFn: async () => {
-      if (!companyId) throw new Error('Empresa nao identificada.');
+      if (!companyId) throw new Error('Empresa não identificada.');
 
       const { data, error } = await supabase
         .from('reservation_payment_rules' as any)
@@ -576,7 +694,7 @@ export default function CompanyPrepayments() {
       toast.success('Regra adicionada em Desativadas.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Nao foi possivel salvar a regra.');
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a regra.');
     },
   });
 
@@ -597,7 +715,7 @@ export default function CompanyPrepayments() {
       toast.success(variables.enabled ? 'Regra ativada.' : 'Regra desativada.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Nao foi possivel atualizar a regra.');
+      toast.error(error instanceof Error ? error.message : 'Não foi possível atualizar a regra.');
     },
   });
 
@@ -633,7 +751,7 @@ export default function CompanyPrepayments() {
       }
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Nao foi possivel remover a regra.');
+      toast.error(error instanceof Error ? error.message : 'Não foi possível remover a regra.');
     },
   });
 
@@ -694,15 +812,20 @@ export default function CompanyPrepayments() {
       const to = summaryRange?.to ?? from;
       const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
       const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
+      const rangeFilter = [
+        `and(created_at.gte.${startIso},created_at.lte.${endIso})`,
+        `and(paid_at.gte.${startIso},paid_at.lte.${endIso})`,
+        `and(cancelled_at.gte.${startIso},cancelled_at.lte.${endIso})`,
+        `and(expires_at.gte.${startIso},expires_at.lte.${endIso})`,
+      ].join(',');
 
       const { data, error } = await (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, status, date, time, party_size)'
         )
         .eq('company_id', companyId)
-        .gte('created_at', startIso)
-        .lte('created_at', endIso)
+        .or(rangeFilter)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -723,14 +846,34 @@ export default function CompanyPrepayments() {
         paid: acc.paid + item.paid,
         expired: acc.expired + item.expired,
         pending: acc.pending + item.pending,
+        refunded: acc.refunded + item.refunded,
+        chargeback: acc.chargeback + item.chargeback,
+        refundPending: acc.refundPending + item.refundPending,
         paidCount: acc.paidCount + item.paidCount,
         expiredCount: acc.expiredCount + item.expiredCount,
         pendingCount: acc.pendingCount + item.pendingCount,
+        refundedCount: acc.refundedCount + item.refundedCount,
+        chargebackCount: acc.chargebackCount + item.chargebackCount,
+        refundPendingCount: acc.refundPendingCount + item.refundPendingCount,
       }),
-      { paid: 0, expired: 0, pending: 0, paidCount: 0, expiredCount: 0, pendingCount: 0 },
+      {
+        paid: 0,
+        expired: 0,
+        pending: 0,
+        refunded: 0,
+        chargeback: 0,
+        refundPending: 0,
+        paidCount: 0,
+        expiredCount: 0,
+        pendingCount: 0,
+        refundedCount: 0,
+        chargebackCount: 0,
+        refundPendingCount: 0,
+      },
     ),
     [filteredFinancialDaily],
   );
+  const netRevenue = chartTotals.paid - chartTotals.refunded - chartTotals.chargeback;
 
   const paymentsListQueryKey = useMemo(
     () => [
@@ -752,15 +895,20 @@ export default function CompanyPrepayments() {
       const to = paymentRange?.to ?? from;
       const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
       const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
+      const rangeFilter = [
+        `and(created_at.gte.${startIso},created_at.lte.${endIso})`,
+        `and(paid_at.gte.${startIso},paid_at.lte.${endIso})`,
+        `and(cancelled_at.gte.${startIso},cancelled_at.lte.${endIso})`,
+        `and(expires_at.gte.${startIso},expires_at.lte.${endIso})`,
+      ].join(',');
 
       let query = (supabase as any)
         .from('reservation_payments')
         .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, date, time, party_size)'
+          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, status, date, time, party_size)'
         )
         .eq('company_id', companyId)
-        .gte('created_at', startIso)
-        .lte('created_at', endIso)
+        .or(rangeFilter)
         .order('created_at', { ascending: false });
 
       if (paymentStatusFilter === 'pending') {
@@ -771,7 +919,9 @@ export default function CompanyPrepayments() {
 
       const { data, error } = await query;
       if (error) throw error;
-      return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
+      return ((data ?? []) as any[])
+        .map(mapPaymentRowFromDb)
+        .sort((a, b) => new Date(getFinancialEventDate(b)).getTime() - new Date(getFinancialEventDate(a)).getTime());
     },
   });
   const payments = useMemo(() => paymentsListQuery.data ?? [], [paymentsListQuery.data]);
@@ -784,6 +934,20 @@ export default function CompanyPrepayments() {
       );
     },
     [normalizedPaymentSearch, payments],
+  );
+  const cancelledReceivedPayments = useMemo(
+    () => filteredPayments.filter((payment) =>
+      isReceivedPaymentStatus(payment.status) && isReservationCancelledStatus(payment.reservation_status),
+    ),
+    [filteredPayments],
+  );
+  const latePaidPayments = useMemo(
+    () => filteredPayments.filter(isLatePaidPayment),
+    [filteredPayments],
+  );
+  const filteredCheckablePayments = useMemo(
+    () => filteredPayments.filter((payment) => Boolean(payment.payment_token)),
+    [filteredPayments],
   );
   const paymentPageCount = Math.max(1, Math.ceil(filteredPayments.length / PAYMENT_PAGE_SIZE));
   const currentPaymentPage = Math.min(paymentPage, paymentPageCount);
@@ -813,6 +977,30 @@ export default function CompanyPrepayments() {
         toast.info('Esse pagamento já está expirado.');
         return;
       }
+      if (data.status === 'refunded') {
+        toast.warning('Pagamento estornado no Asaas.');
+        return;
+      }
+      if (data.status === 'partial_refunded') {
+        toast.warning('Pagamento parcialmente estornado no Asaas.');
+        return;
+      }
+      if (data.status === 'refund_pending') {
+        toast.warning('Estorno em processamento no Asaas.');
+        return;
+      }
+      if (data.status === 'refund_denied') {
+        toast.error('Estorno negado no Asaas.');
+        return;
+      }
+      if (data.status === 'chargeback') {
+        toast.warning('Pagamento com chargeback no Asaas.');
+        return;
+      }
+      if (data.status === 'cancelled') {
+        toast.warning('Pagamento cancelado no Asaas.');
+        return;
+      }
       if (data.message) {
         toast.info(data.message);
         return;
@@ -823,6 +1011,108 @@ export default function CompanyPrepayments() {
       toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
     },
   });
+  const bulkCheckPaymentsMutation = useMutation({
+    mutationFn: async (selectedPayments: ReservationPaymentRow[]) => {
+      const uniquePayments = Array.from(
+        selectedPayments
+          .filter((payment): payment is ReservationPaymentRow & { payment_token: string } => Boolean(payment.payment_token))
+          .reduce((map, payment) => map.set(payment.payment_token, payment), new Map<string, ReservationPaymentRow & { payment_token: string }>())
+          .values(),
+      );
+
+      if (uniquePayments.length === 0) {
+        throw new Error('Nenhum pagamento com token para consultar.');
+      }
+
+      let failed = 0;
+      let changed = 0;
+      setBulkCheckResults([]);
+      setBulkCheckProgress({ done: 0, total: uniquePayments.length });
+
+      for (const [index, payment] of uniquePayments.entries()) {
+        try {
+          const data = await checkReservationPayment(payment.payment_token);
+          const currentStatus = data.status;
+          const statusChanged = payment.status !== currentStatus;
+          if (statusChanged) changed += 1;
+
+          setBulkCheckResults((current) => [
+            ...current,
+            {
+              paymentId: payment.id,
+              paymentToken: payment.payment_token,
+              customerName: payment.customer_name,
+              previousStatus: payment.status,
+              currentStatus,
+              changed: statusChanged,
+              message: data.message ?? null,
+              error: null,
+            },
+          ]);
+        } catch (error) {
+          failed += 1;
+          console.warn('Bulk reservation payment check failed', payment.payment_token, error);
+          setBulkCheckResults((current) => [
+            ...current,
+            {
+              paymentId: payment.id,
+              paymentToken: payment.payment_token,
+              customerName: payment.customer_name,
+              previousStatus: payment.status,
+              currentStatus: null,
+              changed: false,
+              message: null,
+              error: error instanceof Error ? error.message : 'Falha ao consultar pagamento.',
+            },
+          ]);
+        } finally {
+          setBulkCheckProgress({ done: index + 1, total: uniquePayments.length });
+        }
+      }
+
+      return { checked: uniquePayments.length, failed, changed };
+    },
+    onSuccess: ({ checked, failed, changed }) => {
+      refreshPaymentsData();
+      if (failed > 0) {
+        toast.warning(`${checked - failed} pagamentos atualizados. ${failed} falharam.`);
+        return;
+      }
+      toast.success(changed > 0
+        ? `${checked} pagamentos consultados. ${changed} mudaram de status.`
+        : `${checked} pagamentos consultados sem mudança de status.`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível consultar os pagamentos.');
+    },
+  });
+  const refundPaymentMutation = useMutation({
+    mutationFn: async (payment: ReservationPaymentRow) => {
+      if (!companyId) throw new Error('Empresa não identificada.');
+      if (!payment.payment_token) throw new Error('Pagamento sem token.');
+      return refundReservationPayment(companyId, payment.payment_token, {
+        description: `Estorno solicitado no painel para ${payment.customer_name}`,
+      });
+    },
+    onSuccess: (data) => {
+      setPendingRefundPayment(null);
+      refreshPaymentsData();
+      if (data.status === 'refunded') {
+        toast.success('Pagamento estornado no Asaas.');
+        return;
+      }
+      toast.success('Estorno solicitado no Asaas.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível solicitar o estorno.');
+    },
+  });
+  const bulkCheckDone = bulkCheckProgress?.done ?? bulkCheckResults.length;
+  const bulkCheckTotal = bulkCheckProgress?.total ?? bulkCheckResults.length;
+  const bulkCheckProgressValue = bulkCheckTotal > 0 ? Math.round((bulkCheckDone / bulkCheckTotal) * 100) : 0;
+  const bulkCheckChangedResults = bulkCheckResults.filter((result) => result.changed);
+  const bulkCheckFailedResults = bulkCheckResults.filter((result) => Boolean(result.error));
+  const bulkCheckUnchangedCount = bulkCheckResults.length - bulkCheckChangedResults.length - bulkCheckFailedResults.length;
   const summaryPeriodLabel = formatDateRangePickerLabel(summaryRange);
   const paymentPeriodLabel = formatDateRangePickerLabel(paymentRange);
   const pendingRule = pendingRuleAction ? rules.find((rule) => rule.id === pendingRuleAction.ruleId) : null;
@@ -929,7 +1219,7 @@ export default function CompanyPrepayments() {
     const deadline = Number.parseInt(ruleForm.payment_deadline_minutes, 10);
 
     if (!companyId) {
-      toast.error('Empresa nao identificada.');
+      toast.error('Empresa não identificada.');
       return;
     }
     if (!name) {
@@ -1494,11 +1784,33 @@ export default function CompanyPrepayments() {
         <TabsContent value="payments" className="space-y-4">
           <Card className="border-border shadow-card">
             <CardHeader className="gap-4">
-              <div>
-                <CardTitle>Pagamentos de reservas</CardTitle>
-                <CardDescription>
-                  Atualiza automaticamente a cada 30 segundos. Use Consultar para verificar imediatamente no Asaas.
-                </CardDescription>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Pagamentos de reservas</CardTitle>
+                  <CardDescription>
+                    Atualiza automaticamente a cada 30 segundos. O período considera criação, pagamento, estorno ou expiração.
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  className="shrink-0 border border-primary/20 bg-primary px-4 text-primary-foreground shadow-sm hover:bg-primary/90"
+                  disabled={bulkCheckPaymentsMutation.isPending || filteredCheckablePayments.length === 0}
+                  onClick={() => {
+                    setBulkCheckResults([]);
+                    setBulkCheckProgress({ done: 0, total: filteredCheckablePayments.length });
+                    setBulkCheckModalOpen(true);
+                    bulkCheckPaymentsMutation.mutate(filteredCheckablePayments);
+                  }}
+                >
+                  {bulkCheckPaymentsMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  {bulkCheckPaymentsMutation.isPending && bulkCheckProgress
+                    ? `Consultando ${bulkCheckProgress.done}/${bulkCheckProgress.total}`
+                    : 'Consultar período'}
+                </Button>
               </div>
               <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_180px_220px_minmax(220px,1fr)]">
                 <div className="space-y-2">
@@ -1558,6 +1870,39 @@ export default function CompanyPrepayments() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {latePaidPayments.length > 0 && (
+                <Alert className="border-warning/40 bg-warning-soft/50">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <AlertTitle>Pagamentos recebidos após expiração</AlertTitle>
+                  <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>
+                      {latePaidPayments.length} pagamento{latePaidPayments.length === 1 ? '' : 's'} neste filtro {latePaidPayments.length === 1 ? 'foi recebido' : 'foram recebidos'} após o prazo. {latePaidPayments.length === 1 ? 'A reserva não foi confirmada automaticamente e precisa' : 'As reservas não foram confirmadas automaticamente e precisam'} de ação manual.
+                    </span>
+                    {paymentStatusFilter !== 'late_paid' && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 border-warning/40 bg-background text-warning hover:bg-warning-soft"
+                        onClick={() => handlePaymentStatusFilterChange('late_paid')}
+                      >
+                        Ver casos
+                      </Button>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {cancelledReceivedPayments.length > 0 && (
+                <Alert className="border-warning/30 bg-warning-soft/40">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <AlertTitle>Pagamento recebido em reserva cancelada</AlertTitle>
+                  <AlertDescription>
+                    {cancelledReceivedPayments.length} pagamento{cancelledReceivedPayments.length === 1 ? '' : 's'} pago{cancelledReceivedPayments.length === 1 ? '' : 's'} neste filtro pertence{cancelledReceivedPayments.length === 1 ? '' : 'm'} a reserva cancelada. Cancelar a reserva não estorna automaticamente no Asaas.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {filteredPayments.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border bg-background p-8 text-center">
                   <p className="text-sm font-medium text-foreground">Nenhum pagamento encontrado</p>
@@ -1571,8 +1916,12 @@ export default function CompanyPrepayments() {
                         key={payment.id}
                         payment={payment}
                         onCheck={(token) => checkPaymentMutation.mutate(token)}
+                        onRefund={setPendingRefundPayment}
                         isChecking={
                           checkPaymentMutation.isPending && checkPaymentMutation.variables === payment.payment_token
+                        }
+                        isRefunding={
+                          refundPaymentMutation.isPending && refundPaymentMutation.variables?.id === payment.id
                         }
                       />
                     ))}
@@ -1617,7 +1966,7 @@ export default function CompanyPrepayments() {
               <div>
                 <p className="text-sm font-medium text-foreground">Período do resumo</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Filtra pela data em que a reserva entrou no sistema.
+                  Filtra pela data do evento financeiro: pagamento, estorno, chargeback ou expiração.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-[220px_minmax(240px,1fr)] lg:w-[560px]">
@@ -1655,7 +2004,7 @@ export default function CompanyPrepayments() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={CheckCircle2}
               label="Pagamentos pagos"
@@ -1664,9 +2013,21 @@ export default function CompanyPrepayments() {
             />
             <MetricCard
               icon={Banknote}
-              label="Valor total pago"
-              value={formatPrepaymentAmount(chartTotals.paid)}
-              detail="Receita confirmada no período"
+              label="Receita liquida"
+              value={formatPrepaymentAmount(netRevenue)}
+              detail="Pagos menos estornos e chargebacks"
+            />
+            <MetricCard
+              icon={RefreshCw}
+              label="Estornos"
+              value={formatPrepaymentAmount(chartTotals.refunded)}
+              detail={`${chartTotals.refundedCount} pagamento${chartTotals.refundedCount === 1 ? '' : 's'} estornado${chartTotals.refundedCount === 1 ? '' : 's'}`}
+            />
+            <MetricCard
+              icon={AlertTriangle}
+              label="Chargebacks"
+              value={formatPrepaymentAmount(chartTotals.chargeback)}
+              detail={`${chartTotals.chargebackCount} ocorrencia${chartTotals.chargebackCount === 1 ? '' : 's'}`}
             />
           </div>
 
@@ -1675,7 +2036,7 @@ export default function CompanyPrepayments() {
               <CardHeader>
                 <CardTitle>Valores por dia</CardTitle>
                 <CardDescription>
-                  Valores das reservas criadas entre {summaryPeriodLabel}, separados por pagas, expiradas e pendentes.
+                  Valores por evento financeiro entre {summaryPeriodLabel}, separados por status financeiro.
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[320px]">
@@ -1708,6 +2069,9 @@ export default function CompanyPrepayments() {
                       />
                       <Legend />
                       <Bar dataKey="paid" name="Pagas" stackId="payments" fill="hsl(var(--success))" radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="refunded" name="Estornadas" stackId="payments" fill="hsl(var(--muted-foreground))" />
+                      <Bar dataKey="chargeback" name="Chargeback" stackId="payments" fill="hsl(var(--destructive))" />
+                      <Bar dataKey="refundPending" name="Estorno pendente" stackId="payments" fill="hsl(var(--warning))" />
                       <Bar dataKey="expired" name="Expiradas" stackId="payments" fill="hsl(var(--destructive))" />
                       <Bar dataKey="pending" name="Pendentes" stackId="payments" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
                     </BarChart>
@@ -1719,11 +2083,15 @@ export default function CompanyPrepayments() {
             <Card className="border-border shadow-card">
               <CardHeader>
                 <CardTitle>Totais do período</CardTitle>
-                <CardDescription>Valores das reservas criadas entre {summaryPeriodLabel}.</CardDescription>
+                <CardDescription>Eventos financeiros entre {summaryPeriodLabel}.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <SummaryLine label="Pagamentos pagos" value={String(chartTotals.paidCount)} tone="success" />
                 <SummaryLine label="Valor pago" value={formatPrepaymentAmount(chartTotals.paid)} tone="success" />
+                <SummaryLine label="Receita liquida" value={formatPrepaymentAmount(netRevenue)} tone="success" />
+                <SummaryLine label="Valor estornado" value={formatPrepaymentAmount(chartTotals.refunded)} tone="default" />
+                <SummaryLine label="Chargeback" value={formatPrepaymentAmount(chartTotals.chargeback)} tone="destructive" />
+                <SummaryLine label="Estorno pendente" value={formatPrepaymentAmount(chartTotals.refundPending)} tone="warning" />
                 <SummaryLine label="Valor expirado" value={formatPrepaymentAmount(chartTotals.expired)} tone="destructive" />
                 <SummaryLine label="Valor pendente" value={formatPrepaymentAmount(chartTotals.pending)} tone="warning" />
                 <Button
@@ -1744,6 +2112,157 @@ export default function CompanyPrepayments() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={bulkCheckModalOpen}
+        onOpenChange={(open) => {
+          if (!open && bulkCheckPaymentsMutation.isPending) return;
+          setBulkCheckModalOpen(open);
+          if (!open) {
+            setBulkCheckProgress(null);
+            setBulkCheckResults([]);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl" hideCloseButton={bulkCheckPaymentsMutation.isPending}>
+          <DialogHeader>
+            <DialogTitle>
+              {bulkCheckPaymentsMutation.isPending ? 'Consultando pagamentos no Asaas' : 'Consulta de pagamentos concluída'}
+            </DialogTitle>
+            <DialogDescription>
+              {bulkCheckTotal > 0
+                ? `Período atual: ${paymentPeriodLabel}. ${bulkCheckDone} de ${bulkCheckTotal} pagamentos consultados.`
+                : `Período atual: ${paymentPeriodLabel}.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-background p-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                <div className="flex items-center gap-2 font-medium text-foreground">
+                  {bulkCheckPaymentsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4 text-success" />
+                  )}
+                  <span>{bulkCheckPaymentsMutation.isPending ? 'Processando consultas' : 'Processamento finalizado'}</span>
+                </div>
+                <span className="text-muted-foreground">{bulkCheckProgressValue}%</span>
+              </div>
+              <Progress value={bulkCheckProgressValue} className="h-2" />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-lg border border-border bg-background px-3 py-2">
+                <p className="text-xs text-muted-foreground">Consultados</p>
+                <p className="text-lg font-semibold text-foreground">{bulkCheckResults.length}</p>
+              </div>
+              <div className="rounded-lg border border-success/20 bg-success/5 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Mudanças</p>
+                <p className="text-lg font-semibold text-success">{bulkCheckChangedResults.length}</p>
+              </div>
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Falhas</p>
+                <p className="text-lg font-semibold text-destructive">{bulkCheckFailedResults.length}</p>
+              </div>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-background">
+              {bulkCheckResults.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  Aguardando a primeira resposta do Asaas.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {bulkCheckResults.map((result) => (
+                    <div key={`${result.paymentId}-${result.paymentToken}`} className="space-y-2 p-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm font-medium text-foreground">{result.customerName}</p>
+                        {result.error ? (
+                          <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">
+                            Falhou
+                          </Badge>
+                        ) : result.changed && result.currentStatus ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className={getPaymentStatusClass(result.previousStatus)}>
+                              {getPaymentStatusLabel(result.previousStatus)}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">-&gt;</span>
+                            <Badge variant="outline" className={getPaymentStatusClass(result.currentStatus)}>
+                              {getPaymentStatusLabel(result.currentStatus)}
+                            </Badge>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="border-border bg-muted/40 text-muted-foreground">
+                            Sem mudança
+                          </Badge>
+                        )}
+                      </div>
+                      {result.error && (
+                        <p className="text-xs text-destructive">{result.error}</p>
+                      )}
+                      {!result.error && result.message && (
+                        <p className="text-xs text-muted-foreground">{result.message}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!bulkCheckPaymentsMutation.isPending && bulkCheckResults.length > 0 && bulkCheckChangedResults.length === 0 && bulkCheckFailedResults.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma cobrança mudou de status. {bulkCheckUnchangedCount} pagamento{bulkCheckUnchangedCount === 1 ? '' : 's'} permaneceram iguais.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              disabled={bulkCheckPaymentsMutation.isPending}
+              onClick={() => {
+                setBulkCheckModalOpen(false);
+                setBulkCheckProgress(null);
+                setBulkCheckResults([]);
+              }}
+            >
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={Boolean(pendingRefundPayment)} onOpenChange={(open) => !open && setPendingRefundPayment(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Estornar pagamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRefundPayment
+                ? `O estorno de ${formatPrepaymentAmount(pendingRefundPayment.amount)} para ${pendingRefundPayment.customer_name} será solicitado no Asaas. A confirmação final depende do retorno do provedor.`
+                : 'O estorno será solicitado no Asaas.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={refundPaymentMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={refundPaymentMutation.isPending || !pendingRefundPayment}
+              onClick={(event) => {
+                event.preventDefault();
+                if (pendingRefundPayment) {
+                  refundPaymentMutation.mutate(pendingRefundPayment);
+                }
+              }}
+            >
+              {refundPaymentMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Solicitar estorno
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={Boolean(pendingRule)} onOpenChange={(open) => !open && setPendingRuleAction(null)}>
         <AlertDialogContent>
@@ -1930,20 +2449,32 @@ function RuleListItem({
 function PaymentListItem({
   payment,
   onCheck,
+  onRefund,
   isChecking,
+  isRefunding,
 }: {
   payment: ReservationPaymentRow;
   onCheck: (paymentToken: string) => void;
+  onRefund: (payment: ReservationPaymentRow) => void;
   isChecking: boolean;
+  isRefunding: boolean;
 }) {
   const paymentMoment = payment.status === 'paid' || payment.status === 'late_paid'
     ? `Pago em ${formatPaymentPaidAt(payment)}`
     : payment.expires_at
       ? `Expira em ${formatDateTime(payment.expires_at)}`
       : '';
+  const reservationWasCancelled = isReservationCancelledStatus(payment.reservation_status);
+  const receivedAndCancelled = reservationWasCancelled && isReceivedPaymentStatus(payment.status);
+  const requiresManualAction = isLatePaidPayment(payment);
+  const containerClassName = requiresManualAction
+    ? 'rounded-md border border-warning/60 bg-warning-soft/30 px-3 py-2.5 shadow-sm'
+    : receivedAndCancelled
+      ? 'rounded-md border border-warning/40 bg-warning-soft/20 px-3 py-2.5'
+      : 'rounded-md border border-border bg-background px-3 py-2.5';
 
   return (
-    <div className="rounded-md border border-border bg-background px-3 py-2.5">
+    <div className={containerClassName}>
       <div className="grid gap-2 lg:grid-cols-[minmax(180px,1.2fr)_120px_120px_180px_auto] lg:items-center">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -1951,6 +2482,16 @@ function PaymentListItem({
             <Badge variant="outline" className={getPaymentStatusClass(payment.status)}>
               {getPaymentStatusLabel(payment.status)}
             </Badge>
+            {requiresManualAction && (
+              <Badge variant="outline" className="border-warning/50 bg-warning/10 text-warning">
+                Ação manual
+              </Badge>
+            )}
+            {reservationWasCancelled && (
+              <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">
+                Reserva cancelada
+              </Badge>
+            )}
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {payment.rule_name}
@@ -1976,16 +2517,40 @@ function PaymentListItem({
           {paymentMoment && <p>{paymentMoment}</p>}
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!payment.payment_token || isChecking}
-          onClick={() => payment.payment_token && onCheck(payment.payment_token)}
-        >
-          {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-          Consultar
-        </Button>
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          {canRefundPayment(payment) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={isRefunding}
+              onClick={() => onRefund(payment)}
+            >
+              {isRefunding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Estornar
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!payment.payment_token || isChecking}
+            onClick={() => payment.payment_token && onCheck(payment.payment_token)}
+          >
+            {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Consultar
+          </Button>
+        </div>
       </div>
+      {requiresManualAction && (
+        <div className="mt-2 rounded-md border border-warning/40 bg-background/80 px-3 py-2 text-xs font-medium text-warning">
+          Pagamento recebido após expiração. A reserva não foi confirmada porque houve conflito de disponibilidade. Avalie reagendamento ou estorno.
+        </div>
+      )}
+      {receivedAndCancelled && (
+        <div className="mt-2 rounded-md border border-warning/30 bg-background/70 px-3 py-2 text-xs font-medium text-warning">
+          Pagamento recebido em reserva cancelada. O cancelamento da reserva não gera reembolso automático.
+        </div>
+      )}
     </div>
   );
 }

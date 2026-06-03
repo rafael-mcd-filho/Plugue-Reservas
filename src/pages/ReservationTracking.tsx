@@ -122,8 +122,8 @@ const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon
   },
   paid_after_expiration: {
     icon: AlertCircle,
-    title: 'Pagamento em analise',
-    description: 'O pagamento foi detectado depois do prazo e precisa de validacao da equipe.',
+    title: 'Pagamento em análise',
+    description: 'O pagamento foi detectado depois do prazo e precisa de validação da equipe.',
     color: 'text-warning',
   },
   no_show: {
@@ -452,11 +452,6 @@ export default function ReservationTracking() {
               )}
               {normalizedStatus === 'cancelled' && (
                 <div className="space-y-3 border-t border-border pt-4">
-                  {false && (
-                    <p className="text-sm text-muted-foreground">
-                    Se quiser voltar, vocÃª pode fazer uma nova reserva na pÃ¡gina pÃºblica da unidade.
-                    </p>
-                  )}
                   <Button asChild className="h-11 w-full rounded-lg shadow-sm">
                     <Link to={`/${slug}`}>
                       Fazer nova reserva

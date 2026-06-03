@@ -147,6 +147,56 @@ function getStatusView(status: ReservationPaymentStatus) {
     };
   }
 
+  if (status === 'refunded') {
+    return {
+      icon: XCircle,
+      title: 'Pagamento estornado',
+      description: 'O pagamento desta reserva foi estornado pelo provedor.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
+  if (status === 'partial_refunded') {
+    return {
+      icon: XCircle,
+      title: 'Pagamento parcialmente estornado',
+      description: 'Parte do pagamento desta reserva foi estornada pelo provedor.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
+  if (status === 'refund_pending') {
+    return {
+      icon: RefreshCw,
+      title: 'Estorno em processamento',
+      description: 'O estorno foi solicitado e aguarda confirmação do provedor.',
+      color: 'text-warning',
+      barClassName: 'bg-warning',
+    };
+  }
+
+  if (status === 'refund_denied') {
+    return {
+      icon: AlertCircle,
+      title: 'Estorno negado',
+      description: 'O provedor negou o estorno deste pagamento.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
+  if (status === 'chargeback') {
+    return {
+      icon: AlertCircle,
+      title: 'Pagamento em chargeback',
+      description: 'O pagamento desta reserva entrou em disputa no provedor.',
+      color: 'text-destructive',
+      barClassName: 'bg-destructive',
+    };
+  }
+
   if (status === 'late_paid') {
     return {
       icon: AlertCircle,

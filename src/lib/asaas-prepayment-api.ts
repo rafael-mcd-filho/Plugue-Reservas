@@ -95,11 +95,27 @@ export async function checkReservationPayment(paymentToken: string) {
   );
 }
 
+export async function refundReservationPayment(
+  companyId: string,
+  paymentToken: string,
+  options: { value?: number; description?: string } = {},
+) {
+  return invokeReservationPaymentFunction<ReservationPaymentFunctionResponse>(
+    'refund-reservation-payment',
+    {
+      company_id: companyId,
+      payment_token: paymentToken,
+      ...options,
+    },
+    'Não foi possível solicitar o estorno.',
+  );
+}
+
 export async function createReservationPayment(body: CreateReservationPaymentRequest) {
   return invokeReservationPaymentFunction<CreateReservationPaymentResponse>(
     'create-reservation-payment',
     body,
-    'Nao foi possivel preparar o pagamento da reserva.',
+    'Não foi possível preparar o pagamento da reserva.',
   );
 }
 

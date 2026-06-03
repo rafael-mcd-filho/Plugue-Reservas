@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.expire-reservation-payments]
 verify_jwt = false
+
+[functions.reconcile-reservation-payments]
+verify_jwt = false

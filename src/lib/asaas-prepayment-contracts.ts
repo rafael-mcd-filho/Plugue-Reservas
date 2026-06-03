@@ -12,7 +12,11 @@ export type ReservationPaymentStatus =
   | 'cancelled'
   | 'failed'
   | 'late_paid'
-  | 'refunded';
+  | 'refunded'
+  | 'partial_refunded'
+  | 'refund_pending'
+  | 'refund_denied'
+  | 'chargeback';
 
 export interface AsaasCompanyConfigPreview {
   status: AsaasConfigStatus;
@@ -166,6 +170,10 @@ export function getPaymentStatusLabel(status: ReservationPaymentStatus) {
     failed: 'Falhou',
     late_paid: 'Pago após expirar',
     refunded: 'Estornado',
+    partial_refunded: 'Estorno parcial',
+    refund_pending: 'Estorno pendente',
+    refund_denied: 'Estorno negado',
+    chargeback: 'Chargeback',
   };
 
   return labels[status];

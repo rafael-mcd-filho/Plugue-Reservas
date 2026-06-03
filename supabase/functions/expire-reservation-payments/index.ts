@@ -1,9 +1,21 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
-import { deleteAsaasPayment, deleteAsaasPaymentLink, getAsaasPaymentStatus, isAsaasPaidStatus } from "../_shared/asaas.ts";
 import {
+  deleteAsaasPayment,
+  deleteAsaasPaymentLink,
+  getAsaasActiveChargebackStatus,
+  getAsaasExternalPaymentOutcome,
+  getAsaasPayment,
+  getAsaasPaymentStatus,
+  getAsaasRefundedValue,
+  isAsaasPaidStatus,
+  listAsaasPayments,
+} from "../_shared/asaas.ts";
+import {
+  buildPaymentLinkExternalReference,
   confirmReservationPayment,
   corsHeaders,
   jsonResponse,
+  markReservationPaymentProviderOutcome,
   recordPaymentEvent,
 } from "../_shared/reservation-payments.ts";
 
@@ -77,6 +89,54 @@ async function expirePaymentLocally(
   return true;
 }
 
+async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: string) {
+  if (payment.asaas_payment_id) return payment;
+
+  const externalReference = payment.payment_link_external_reference
+    ?? (payment.billing_type ? buildPaymentLinkExternalReference(payment.payment_token, payment.billing_type) : null);
+  if (!externalReference) return payment;
+
+  try {
+    const response = await listAsaasPayments(apiToken, { externalReference, limit: 10 });
+    const asaasPayment = Array.isArray(response?.data) ? response.data.find((item) => item?.id) : null;
+    if (!asaasPayment?.id) return payment;
+
+    const { data: updatedPayment, error } = await supabaseAdmin
+      .from("reservation_payments")
+      .update({
+        asaas_payment_id: asaasPayment.id,
+        asaas_status: asaasPayment.status ?? payment.asaas_status,
+        last_checked_at: new Date().toISOString(),
+      })
+      .eq("id", payment.id)
+      .select("*")
+      .single();
+
+    if (error) throw new Error(error.message);
+    return updatedPayment;
+  } catch (error) {
+    console.warn("Failed to attach Asaas payment by external reference during expiration", error);
+    return payment;
+  }
+}
+
+async function getAsaasPaymentSnapshot(apiToken: string, paymentId: string) {
+  const asaasStatus = await getAsaasPaymentStatus(apiToken, paymentId);
+  let asaasPayment = null;
+
+  try {
+    asaasPayment = await getAsaasPayment(apiToken, paymentId);
+  } catch (error) {
+    console.warn("Failed to retrieve full Asaas payment during expiration", error);
+  }
+
+  return {
+    asaasStatus: asaasPayment?.status ?? asaasStatus,
+    asaasPayment,
+    chargebackStatus: getAsaasActiveChargebackStatus(asaasPayment),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -104,6 +164,7 @@ Deno.serve(async (req) => {
       expired_without_charge: 0,
       expired_cancelled_in_asaas: 0,
       confirmed: 0,
+      provider_outcomes: 0,
       failed: 0,
     };
 
@@ -136,11 +197,30 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        const providerLinkedPayment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
+
         let asaasStatus: string | null = null;
-        if (payment.asaas_payment_id) {
-          asaasStatus = await getAsaasPaymentStatus(apiToken, payment.asaas_payment_id);
+        if (providerLinkedPayment.asaas_payment_id) {
+          const snapshot = await getAsaasPaymentSnapshot(apiToken, providerLinkedPayment.asaas_payment_id);
+          asaasStatus = snapshot.asaasStatus;
+
+          const providerOutcome = getAsaasExternalPaymentOutcome(null, asaasStatus, snapshot.asaasPayment);
+          if (providerOutcome) {
+            await markReservationPaymentProviderOutcome(supabaseAdmin, providerLinkedPayment, providerOutcome, {
+              source: "expire_job",
+              asaasStatus,
+              metadata: {
+                provider_payment_status: snapshot.asaasPayment?.status ?? null,
+                chargeback_status: snapshot.chargebackStatus,
+                refunded_value: getAsaasRefundedValue(snapshot.asaasPayment),
+              },
+            });
+            summary.provider_outcomes += 1;
+            continue;
+          }
+
           if (isAsaasPaidStatus(asaasStatus)) {
-            await confirmReservationPayment(supabaseAdmin, payment, asaasStatus, "expire_job");
+            await confirmReservationPayment(supabaseAdmin, providerLinkedPayment, asaasStatus, "expire_job");
             summary.confirmed += 1;
             continue;
           }
@@ -148,7 +228,7 @@ Deno.serve(async (req) => {
 
         const expired = await expirePaymentLocally(
           supabaseAdmin,
-          payment,
+          providerLinkedPayment,
           now,
           {
             asaas_status: asaasStatus,
@@ -161,13 +241,13 @@ Deno.serve(async (req) => {
         );
         if (!expired) continue;
 
-        if (payment.asaas_payment_link_id) {
+        if (providerLinkedPayment.asaas_payment_link_id) {
           try {
-            await deleteAsaasPaymentLink(apiToken, payment.asaas_payment_link_id);
+            await deleteAsaasPaymentLink(apiToken, providerLinkedPayment.asaas_payment_link_id);
             const { error: deletedLinkError } = await supabaseAdmin
               .from("reservation_payments")
               .update({ payment_link_deleted_at: now })
-              .eq("id", payment.id)
+              .eq("id", providerLinkedPayment.id)
               .eq("status", "expired");
             if (deletedLinkError) throw new Error(deletedLinkError.message);
           } catch (deleteLinkError) {
@@ -175,9 +255,9 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (payment.asaas_payment_id) {
+        if (providerLinkedPayment.asaas_payment_id) {
           try {
-            await deleteAsaasPayment(apiToken, payment.asaas_payment_id);
+            await deleteAsaasPayment(apiToken, providerLinkedPayment.asaas_payment_id);
           } catch (deleteError) {
             console.warn("Failed to delete Asaas payment during expiration", deleteError);
           }

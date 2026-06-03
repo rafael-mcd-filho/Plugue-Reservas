@@ -157,7 +157,7 @@ const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: strin
   { value: 'no-show', label: 'No Show' },
   { value: 'payment_expired', label: 'Pagamento expirado' },
   { value: 'payment_cancelled', label: 'Pagamento cancelado' },
-  { value: 'paid_after_expiration', label: 'Pago apos expirar' },
+  { value: 'paid_after_expiration', label: 'Pago após expirar' },
 ];
 
 const CALENDAR_VISIBLE_STATUSES = new Set<ReservationStatus>(['confirmed', 'checked_in', 'no-show']);

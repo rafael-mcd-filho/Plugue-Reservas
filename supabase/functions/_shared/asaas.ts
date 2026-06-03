@@ -217,6 +217,7 @@ export interface AsaasCustomerPayload {
   email?: string;
   mobilePhone?: string;
   externalReference?: string;
+  notificationDisabled?: boolean;
 }
 
 export interface AsaasCustomerResponse {
@@ -248,10 +249,24 @@ export interface AsaasPaymentResponse {
   id: string;
   status?: string;
   invoiceUrl?: string;
+  confirmedDate?: string;
+  clientPaymentDate?: string;
+  paymentDate?: string;
+  dateCreated?: string;
   dueDate?: string;
   value?: number;
   netValue?: number;
   billingType?: string;
+  chargeback?: {
+    status?: string;
+    reason?: string;
+  } | null;
+  refunds?: Array<{
+    status?: string;
+    value?: number;
+    description?: string;
+    dateCreated?: string;
+  }>;
 }
 
 export async function createAsaasPayment(apiToken: string, payload: AsaasPaymentPayload) {
@@ -259,6 +274,29 @@ export async function createAsaasPayment(apiToken: string, payload: AsaasPayment
     method: "POST",
     json: payload,
   });
+}
+
+export async function getAsaasPayment(apiToken: string, paymentId: string) {
+  return await asaasRequest<AsaasPaymentResponse>(
+    apiToken,
+    `/payments/${encodeURIComponent(paymentId)}`,
+    { method: "GET" },
+  );
+}
+
+export async function listAsaasPayments(
+  apiToken: string,
+  params: { externalReference?: string; limit?: number } = {},
+) {
+  const query = new URLSearchParams();
+  if (params.externalReference) query.set("externalReference", params.externalReference);
+  if (typeof params.limit === "number") query.set("limit", String(params.limit));
+
+  return await asaasRequest<{ data?: AsaasPaymentResponse[] }>(
+    apiToken,
+    `/payments${query.toString() ? `?${query.toString()}` : ""}`,
+    { method: "GET" },
+  );
 }
 
 export interface AsaasPixQrCodeResponse {
@@ -292,9 +330,32 @@ export async function deleteAsaasPayment(apiToken: string, paymentId: string) {
   });
 }
 
+export interface AsaasRefundPaymentPayload {
+  value?: number;
+  description?: string;
+}
+
+export async function refundAsaasPayment(
+  apiToken: string,
+  paymentId: string,
+  payload: AsaasRefundPaymentPayload = {},
+) {
+  return await asaasRequest<AsaasPaymentResponse>(
+    apiToken,
+    `/payments/${encodeURIComponent(paymentId)}/refund`,
+    {
+      method: "POST",
+      json: payload,
+    },
+  );
+}
+
 export function isAsaasPaidStatus(status: string | null | undefined) {
   const normalized = String(status || "").toUpperCase();
-  return normalized === "RECEIVED" || normalized === "CONFIRMED" || normalized === "RECEIVED_IN_CASH";
+  return normalized === "PAID"
+    || normalized === "RECEIVED"
+    || normalized === "CONFIRMED"
+    || normalized === "RECEIVED_IN_CASH";
 }
 
 export function isAsaasPaymentApprovalEvent(eventType: string | null | undefined) {
@@ -304,5 +365,120 @@ export function isAsaasPaymentApprovalEvent(eventType: string | null | undefined
 
 export function isAsaasPaymentCancelledEvent(eventType: string | null | undefined) {
   const normalized = String(eventType || "").toUpperCase();
-  return normalized === "PAYMENT_DELETED" || normalized === "PAYMENT_REFUNDED" || normalized === "PAYMENT_CHARGEBACK_REQUESTED";
+  return normalized === "PAYMENT_DELETED"
+    || normalized === "PAYMENT_REFUNDED"
+    || normalized === "PAYMENT_CHARGEBACK_REQUESTED"
+    || normalized === "CHARGEBACK_REQUESTED"
+    || normalized === "PAYMENT_CHARGEBACK_DISPUTE"
+    || normalized === "CHARGEBACK_DISPUTE"
+    || normalized === "PAYMENT_AWAITING_CHARGEBACK_REVERSAL"
+    || normalized === "AWAITING_CHARGEBACK_REVERSAL";
+}
+
+export function isAsaasRefundedStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "REFUNDED" || normalized === "PAYMENT_REFUNDED";
+}
+
+export function isAsaasPartialRefundedStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "PARTIALLY_REFUNDED" || normalized === "PAYMENT_PARTIALLY_REFUNDED";
+}
+
+export function isAsaasRefundPendingStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "REFUND_IN_PROGRESS" || normalized === "PAYMENT_REFUND_IN_PROGRESS";
+}
+
+export function isAsaasRefundDeniedStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "REFUND_DENIED" || normalized === "PAYMENT_REFUND_DENIED";
+}
+
+export function isAsaasCancelledStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "CANCELLED" || normalized === "DELETED" || normalized === "PAYMENT_DELETED";
+}
+
+export function isAsaasChargebackStatus(status: string | null | undefined) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "PAYMENT_CHARGEBACK_REQUESTED"
+    || normalized === "CHARGEBACK_REQUESTED"
+    || normalized === "PAYMENT_CHARGEBACK_DISPUTE"
+    || normalized === "CHARGEBACK_DISPUTE"
+    || normalized === "PAYMENT_AWAITING_CHARGEBACK_REVERSAL"
+    || normalized === "AWAITING_CHARGEBACK_REVERSAL";
+}
+
+export function getAsaasActiveChargebackStatus(payment: AsaasPaymentResponse | null | undefined) {
+  const normalized = String(payment?.chargeback?.status || "").toUpperCase();
+  if (!normalized || normalized === "REVERSED") return null;
+  return normalized;
+}
+
+export function getAsaasRefundedValue(payment: AsaasPaymentResponse | null | undefined) {
+  const refunds = Array.isArray(payment?.refunds) ? payment.refunds : [];
+  const total = refunds.reduce((sum, refund) => {
+    const value = Number(refund?.value ?? 0);
+    return Number.isFinite(value) && value > 0 ? sum + value : sum;
+  }, 0);
+
+  return total > 0 ? total : null;
+}
+
+export type AsaasExternalPaymentOutcome =
+  | "refunded"
+  | "partial_refunded"
+  | "refund_pending"
+  | "refund_denied"
+  | "chargeback"
+  | "cancelled";
+
+export function getAsaasExternalPaymentOutcome(
+  eventOrStatus: string | null | undefined,
+  paymentStatus?: string | null,
+  payment?: AsaasPaymentResponse | null,
+): AsaasExternalPaymentOutcome | null {
+  if (isAsaasRefundedStatus(eventOrStatus) || isAsaasRefundedStatus(paymentStatus) || isAsaasRefundedStatus(payment?.status)) {
+    return "refunded";
+  }
+
+  if (
+    isAsaasPartialRefundedStatus(eventOrStatus)
+    || isAsaasPartialRefundedStatus(paymentStatus)
+    || isAsaasPartialRefundedStatus(payment?.status)
+  ) {
+    return "partial_refunded";
+  }
+
+  if (
+    isAsaasRefundPendingStatus(eventOrStatus)
+    || isAsaasRefundPendingStatus(paymentStatus)
+    || isAsaasRefundPendingStatus(payment?.status)
+  ) {
+    return "refund_pending";
+  }
+
+  if (
+    isAsaasRefundDeniedStatus(eventOrStatus)
+    || isAsaasRefundDeniedStatus(paymentStatus)
+    || isAsaasRefundDeniedStatus(payment?.status)
+  ) {
+    return "refund_denied";
+  }
+
+  if (
+    isAsaasChargebackStatus(eventOrStatus)
+    || isAsaasChargebackStatus(paymentStatus)
+    || isAsaasChargebackStatus(payment?.status)
+    || getAsaasActiveChargebackStatus(payment)
+  ) {
+    return "chargeback";
+  }
+
+  if (isAsaasCancelledStatus(eventOrStatus) || isAsaasCancelledStatus(paymentStatus) || isAsaasCancelledStatus(payment?.status)) {
+    return "cancelled";
+  }
+
+  return null;
 }

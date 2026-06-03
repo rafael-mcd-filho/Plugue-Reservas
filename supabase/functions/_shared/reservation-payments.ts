@@ -321,6 +321,94 @@ export async function recordPaymentEvent(
   }
 }
 
+export type ReservationPaymentProviderOutcome =
+  | "refunded"
+  | "partial_refunded"
+  | "refund_pending"
+  | "refund_denied"
+  | "chargeback"
+  | "cancelled";
+
+export async function markReservationPaymentProviderOutcome(
+  supabaseAdmin: any,
+  payment: ReservationPaymentRecord,
+  outcome: ReservationPaymentProviderOutcome,
+  options: {
+    source: string;
+    asaasStatus: string | null;
+    eventType?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const checkedAtIso = new Date().toISOString();
+  const eventTypeByOutcome: Record<ReservationPaymentProviderOutcome, string> = {
+    refunded: "payment_refunded",
+    partial_refunded: "payment_partial_refunded",
+    refund_pending: "payment_refund_pending",
+    refund_denied: "payment_refund_denied",
+    chargeback: "payment_chargeback",
+    cancelled: "payment_cancelled",
+  };
+  const errorDetailsByOutcome: Record<ReservationPaymentProviderOutcome, string | null> = {
+    refunded: "Pagamento estornado no Asaas",
+    partial_refunded: "Pagamento parcialmente estornado no Asaas",
+    refund_pending: "Estorno em processamento no Asaas",
+    refund_denied: "Estorno negado no Asaas",
+    chargeback: "Pagamento com chargeback no Asaas",
+    cancelled: "Pagamento cancelado no Asaas",
+  };
+  const eventType = eventTypeByOutcome[outcome];
+  const errorDetails = errorDetailsByOutcome[outcome];
+
+  const metadata = {
+    ...(payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {}),
+    provider_status_check: {
+      source: options.source,
+      outcome,
+      asaas_status: options.asaasStatus,
+      event_type: options.eventType ?? null,
+      checked_at: checkedAtIso,
+      ...(options.metadata ?? {}),
+    },
+  };
+
+  const { data: updatedPayment, error: updateError } = await supabaseAdmin
+    .from("reservation_payments")
+    .update({
+      status: outcome,
+      asaas_status: options.asaasStatus,
+      cancelled_at: ["refunded", "partial_refunded", "chargeback", "cancelled"].includes(outcome)
+        ? checkedAtIso
+        : payment.cancelled_at,
+      last_checked_at: checkedAtIso,
+      error_details: errorDetails,
+      metadata,
+    })
+    .eq("id", payment.id)
+    .select("*")
+    .single();
+
+  if (updateError) throw new Error(updateError.message);
+
+  if (["refunded", "partial_refunded", "chargeback", "cancelled"].includes(outcome)) {
+    await supabaseAdmin
+      .from("reservations")
+      .update({ status: "payment_cancelled", updated_at: checkedAtIso })
+      .eq("id", payment.reservation_id)
+      .in("status", ["pending_payment", "confirmed"]);
+  }
+
+  await recordPaymentEvent(supabaseAdmin, payment, eventType, {
+    source: options.source,
+    outcome,
+    asaas_status: options.asaasStatus,
+    event_type: options.eventType ?? null,
+    ...(options.metadata ?? {}),
+  });
+
+  return updatedPayment as ReservationPaymentRecord;
+}
+
 async function reservationHasBlockingConflict(
   supabaseAdmin: any,
   reservation: ReservationRecord,
