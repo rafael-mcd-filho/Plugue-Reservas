@@ -249,7 +249,7 @@ function VariationBadge({
         <DialogTrigger asChild>
           <button
             type="button"
-            className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-info-soft px-1.5 py-0.5 text-xs font-semibold text-info transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-info-soft px-1 py-0.5 text-[10px] font-semibold text-info transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:px-1.5 sm:text-xs"
             title={`Ver cálculo de ${metricLabel}`}
           >
             <ArrowUpRight className="h-2.5 w-2.5" />
@@ -303,7 +303,7 @@ function VariationBadge({
         <button
           type="button"
           className={cn(
-            "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-semibold transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-1 py-0.5 text-[10px] font-semibold transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:px-1.5 sm:text-xs",
             isNeutral && "text-muted-foreground bg-muted",
             isGood && "text-success bg-success-soft",
             isBad && "text-destructive bg-destructive-soft",
@@ -769,8 +769,8 @@ export default function Dashboard() {
                   <div className="shrink-0 rounded-md bg-muted p-2 text-primary sm:p-2.5">
                     <CalendarCheck className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <p className="text-lg font-bold leading-none sm:text-xl">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
@@ -794,8 +794,8 @@ export default function Dashboard() {
                   <div className="shrink-0 rounded-md bg-muted p-2 text-success sm:p-2.5">
                     <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <p className="text-lg font-bold leading-none sm:text-xl">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
@@ -819,8 +819,8 @@ export default function Dashboard() {
                   <div className="shrink-0 rounded-md bg-muted p-2 text-info sm:p-2.5">
                     <CalendarIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <p className="text-lg font-bold leading-none sm:text-xl">{totals.reservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
@@ -842,8 +842,8 @@ export default function Dashboard() {
                   <div className="shrink-0 rounded-md bg-muted p-2 text-info sm:p-2.5">
                     <Users className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <p className="text-lg font-bold leading-none sm:text-xl">{totals.totalGuests.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
