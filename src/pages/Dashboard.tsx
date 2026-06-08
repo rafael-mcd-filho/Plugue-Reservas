@@ -249,7 +249,7 @@ function VariationBadge({
         <DialogTrigger asChild>
           <button
             type="button"
-            className="inline-flex items-center gap-0.5 rounded-full bg-info-soft px-1.5 py-0.5 text-xs font-semibold text-info transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full bg-info-soft px-1.5 py-0.5 text-xs font-semibold text-info transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             title={`Ver cálculo de ${metricLabel}`}
           >
             <ArrowUpRight className="h-2.5 w-2.5" />
@@ -303,7 +303,7 @@ function VariationBadge({
         <button
           type="button"
           className={cn(
-            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-semibold transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             isNeutral && "text-muted-foreground bg-muted",
             isGood && "text-success bg-success-soft",
             isBad && "text-destructive bg-destructive-soft",
@@ -765,13 +765,13 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-stretch sm:gap-2">
                 {/* Reservas */}
-                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
-                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
-                    <CalendarCheck className="h-5 w-5" />
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-3 sm:flex-1 sm:gap-3 sm:px-3">
+                  <div className="shrink-0 rounded-md bg-muted p-2 text-primary sm:p-2.5">
+                    <CalendarCheck className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-xl font-bold">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <p className="text-lg font-bold leading-none sm:text-xl">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.scheduledReservations}
@@ -790,13 +790,13 @@ export default function Dashboard() {
                 <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">+</div>
 
                 {/* Fila convertida */}
-                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
-                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
-                    <ClipboardList className="h-5 w-5" />
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-3 sm:flex-1 sm:gap-3 sm:px-3">
+                  <div className="shrink-0 rounded-md bg-muted p-2 text-success sm:p-2.5">
+                    <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-xl font-bold">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <p className="text-lg font-bold leading-none sm:text-xl">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.waitlistReservations}
@@ -815,13 +815,13 @@ export default function Dashboard() {
                 <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">=</div>
 
                 {/* Atendimentos */}
-                <div className="flex min-w-0 items-center gap-3 rounded-lg border-2 border-primary/30 bg-primary/5 px-3 py-3 sm:flex-1">
-                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
-                    <CalendarIcon className="h-5 w-5" />
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border-2 border-primary/30 bg-primary/5 px-2.5 py-3 sm:flex-1 sm:gap-3 sm:px-3">
+                  <div className="shrink-0 rounded-md bg-muted p-2 text-info sm:p-2.5">
+                    <CalendarIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-xl font-bold">{totals.reservations.toLocaleString('pt-BR')}</p>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <p className="text-lg font-bold leading-none sm:text-xl">{totals.reservations.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.reservations}
@@ -838,13 +838,13 @@ export default function Dashboard() {
                 </div>
 
                 {/* Pessoas */}
-                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
-                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
-                    <Users className="h-5 w-5" />
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-3 sm:flex-1 sm:gap-3 sm:px-3">
+                  <div className="shrink-0 rounded-md bg-muted p-2 text-info sm:p-2.5">
+                    <Users className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-xl font-bold">{totals.totalGuests.toLocaleString('pt-BR')}</p>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <p className="text-lg font-bold leading-none sm:text-xl">{totals.totalGuests.toLocaleString('pt-BR')}</p>
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.totalGuests}
