@@ -18,7 +18,7 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts';
 import {
-  CalendarCheck, Users, Clock, TrendingUp, XCircle, UserX, CalendarIcon, CheckCircle,
+  CalendarCheck, Users, TrendingUp, CalendarIcon,
   ArrowUpRight, ArrowDownRight, Minus, ClipboardList, Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,6 +29,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useFunnelData } from '@/hooks/useFunnelData';
@@ -79,6 +80,14 @@ function formatDashboardDateRangeLabel(range: DateRange | undefined) {
   }
 
   return `${format(range.from, 'dd/MM/yyyy')} - ${format(range.to, 'dd/MM/yyyy')}`;
+}
+
+function formatComparisonPeriodRangeLabel(startDate: Date, endDate: Date) {
+  if (differenceInCalendarDays(endDate, startDate) === 0) {
+    return format(startDate, 'dd/MM/yyyy');
+  }
+
+  return `${format(startDate, 'dd/MM/yyyy')} - ${format(endDate, 'dd/MM/yyyy')}`;
 }
 
 function getPreviousEquivalentRange(startDate: Date, endDate: Date) {
@@ -208,20 +217,70 @@ function getDashboardPeriodRange(period: string, customRange?: DateRange) {
 function VariationBadge({
   current,
   previous,
+  metricLabel = 'Métrica',
+  currentPeriodLabel = 'Período atual',
+  comparisonPeriodLabel = 'Período comparado',
+  comparisonLabel = 'período comparado',
+  valueSingular = 'registro',
+  valuePlural = 'registros',
   goodWhenDecreases = false,
 }: {
   current: number;
   previous: number;
+  metricLabel?: string;
+  currentPeriodLabel?: string;
+  comparisonPeriodLabel?: string;
+  comparisonLabel?: string;
+  valueSingular?: string;
+  valuePlural?: string;
   goodWhenDecreases?: boolean;
 }) {
   if (previous === 0 && current === 0) return null;
 
+  const formatValueWithUnit = (value: number) => {
+    const unit = Math.abs(value) === 1 ? valueSingular : valuePlural;
+    return `${value.toLocaleString('pt-BR')} ${unit}`;
+  };
+  const difference = current - previous;
+
   if (previous === 0) {
     return (
-      <span className="inline-flex items-center gap-0.5 rounded-full bg-info-soft px-1.5 py-0.5 text-xs font-semibold text-info">
-        <ArrowUpRight className="h-2.5 w-2.5" />
-        Novo
-      </span>
+      <Dialog>
+        <DialogTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 rounded-full bg-info-soft px-1.5 py-0.5 text-xs font-semibold text-info transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            title={`Ver cálculo de ${metricLabel}`}
+          >
+            <ArrowUpRight className="h-2.5 w-2.5" />
+            Novo
+          </button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Comparativo: {metricLabel}</DialogTitle>
+            <DialogDescription>Comparativo vs. {comparisonLabel}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Período atual</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{currentPeriodLabel}</p>
+                <p className="mt-2 text-lg font-bold text-foreground">{formatValueWithUnit(current)}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Período comparado</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{comparisonPeriodLabel}</p>
+                <p className="mt-2 text-lg font-bold text-foreground">{formatValueWithUnit(previous)}</p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-info/20 bg-info-soft/40 p-3 text-sm text-muted-foreground">
+              O período comparado teve zero registros, então o sistema não divide por zero. O badge mostra
+              {' '}<span className="font-semibold text-info">Novo</span>{' '}para indicar que houve atividade apenas no período atual.
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     );
   }
 
@@ -231,17 +290,105 @@ function VariationBadge({
   const isNeutral = pct === 0;
   const isGood = goodWhenDecreases ? pct < 0 : pct > 0;
   const isBad = !isNeutral && !isGood;
+  const signedPct = `${pct > 0 ? '+' : ''}${pct}%`;
+  const formulaLabel = `((${current.toLocaleString('pt-BR')} - ${previous.toLocaleString('pt-BR')}) / ${previous.toLocaleString('pt-BR')}) × 100 = ${signedPct}`;
+  const maxValue = Math.max(current, previous, 1);
+  const currentBarPct = Math.round((current / maxValue) * 100);
+  const previousBarPct = Math.round((previous / maxValue) * 100);
+  const barColor = isGood ? 'bg-success' : isBad ? 'bg-destructive' : 'bg-muted-foreground/40';
 
   return (
-    <span className={cn(
-      "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold",
-      isNeutral && "text-muted-foreground bg-muted",
-      isGood && "text-success bg-success-soft",
-      isBad && "text-destructive bg-destructive-soft",
-    )}>
-      {isNeutral ? <Minus className="h-2.5 w-2.5" /> : isPositive ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
-      {Math.abs(pct)}%
-    </span>
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            isNeutral && "text-muted-foreground bg-muted",
+            isGood && "text-success bg-success-soft",
+            isBad && "text-destructive bg-destructive-soft",
+          )}
+          title={`Ver cálculo de ${metricLabel}`}
+        >
+          {isNeutral ? <Minus className="h-2.5 w-2.5" /> : isPositive ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
+          {Math.abs(pct)}%
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Comparativo: {metricLabel}</DialogTitle>
+          <DialogDescription>Comparativo vs. {comparisonLabel}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div
+            className={cn(
+              'flex flex-col items-center gap-1 rounded-xl border p-4 text-center',
+              isNeutral && 'border-border bg-muted/20',
+              isGood && 'border-success/20 bg-success-soft/40',
+              isBad && 'border-destructive/20 bg-destructive-soft/40',
+            )}
+          >
+            <div
+              className={cn(
+                'flex items-center gap-1 text-3xl font-bold tabular-nums',
+                isNeutral && 'text-muted-foreground',
+                isGood && 'text-success',
+                isBad && 'text-destructive',
+              )}
+            >
+              {isNeutral ? <Minus className="h-6 w-6" /> : isPositive ? <ArrowUpRight className="h-6 w-6" /> : <ArrowDownRight className="h-6 w-6" />}
+              {Math.abs(pct).toLocaleString('pt-BR')}%
+            </div>
+            <p className="text-sm font-medium text-muted-foreground">
+              {isNeutral
+                ? 'Sem variação no período'
+                : `${formatValueWithUnit(Math.abs(difference))} ${difference > 0 ? 'a mais' : 'a menos'}`}
+            </p>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-border bg-muted/10 p-3">
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="shrink-0 font-medium text-foreground">Atual</span>
+                <span className="truncate text-right text-muted-foreground">{currentPeriodLabel}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${currentBarPct}%` }} />
+                </div>
+                <span className="w-16 shrink-0 text-right text-sm font-bold tabular-nums text-foreground">
+                  {current.toLocaleString('pt-BR')}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="shrink-0 font-medium text-foreground">Anterior</span>
+                <span className="truncate text-right text-muted-foreground">{comparisonPeriodLabel}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-muted-foreground/30 transition-all" style={{ width: `${previousBarPct}%` }} />
+                </div>
+                <span className="w-16 shrink-0 text-right text-sm font-bold tabular-nums text-foreground">
+                  {previous.toLocaleString('pt-BR')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-background px-3 py-2.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Como calculamos</p>
+            <p className="mt-1.5 font-mono text-xs text-muted-foreground">{formulaLabel}</p>
+            {goodWhenDecreases && !isNeutral && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Nesta métrica, queda é considerada melhoria e aumento é considerado piora.
+              </p>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -285,6 +432,7 @@ export default function Dashboard() {
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const [uniqueFunnelOnly, setUniqueFunnelOnly] = useState(false);
   const [adsFunnelOnly, setAdsFunnelOnly] = useState(false);
+  const [expectedVsActualMetric, setExpectedVsActualMetric] = useState<'reservations' | 'people'>('reservations');
 
   const { data: companies = [] } = useQuery({
     queryKey: ['dashboard-companies'],
@@ -375,27 +523,6 @@ export default function Dashboard() {
     };
   }, [queryClient, effectiveCompanyId]);
 
-  const currentPeriodDays = Math.max(differenceInCalendarDays(endDate, startDate) + 1, 1);
-  const comparisonPeriodDays = Math.max(differenceInCalendarDays(comparisonEndDate, comparisonStartDate) + 1, 1);
-  const avgPerDayRaw = totals.reservations / currentPeriodDays;
-  const prevAvgPerDayRaw = prevTotals.reservations / comparisonPeriodDays;
-  const avgPerDay = Math.round(avgPerDayRaw);
-  const prevAvgPerDay = Math.round(prevAvgPerDayRaw);
-  const avgGuestsPerReservation = totals.reservations > 0
-    ? totals.totalGuests / totals.reservations
-    : 0;
-  const avgGuestsPerReservationLabel = avgGuestsPerReservation.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  const mainStats = [
-    { label: 'Total Reservas', tooltip: 'Número de reservas marcadas para acontecer no período selecionado.', value: totals.reservations, prev: prevTotals.reservations, icon: CalendarCheck, color: 'text-primary' },
-    { label: 'Total Pessoas', tooltip: 'Total de pessoas somadas nas reservas do período selecionado.', value: totals.totalGuests, prev: prevTotals.totalGuests, icon: Users, color: 'text-primary' },
-    { label: 'Check-ins realizados', tooltip: 'Reservas do período em que o cliente realmente chegou ao local.', value: totals.completed, prev: prevTotals.completed, icon: CheckCircle, color: 'text-accent' },
-    { label: 'Cancelamentos', tooltip: 'Reservas do período que foram canceladas.', value: totals.cancellations, prev: prevTotals.cancellations, icon: XCircle, color: 'text-destructive', goodWhenDecreases: true },
-    { label: 'Média/Dia', tooltip: 'Média de reservas por dia no período selecionado.', value: avgPerDay, prev: prevAvgPerDay, compareCurrent: avgPerDayRaw, comparePrevious: prevAvgPerDayRaw, icon: TrendingUp, color: 'text-primary' },
-  ];
   const advancedReportsEnabled = !isCompanyContext || !!featureFlags?.features.advanced_reports;
   const visibleReservationOriginItems = useMemo(
     () => reservationOriginBreakdown.items.filter((item) => item.value > 0),
@@ -412,6 +539,110 @@ export default function Dashboard() {
   const freshnessLabel = dataIsSyncing ? 'Sincronizando' : dataIsStale ? 'Dados com atraso' : 'Tempo real';
 
   const periodLabel = comparisonLabel;
+  const currentPeriodRangeLabel = formatComparisonPeriodRangeLabel(startDate, endDate);
+  const comparisonPeriodRangeLabel = formatComparisonPeriodRangeLabel(comparisonStartDate, comparisonEndDate);
+  const comparisonBadgeContext = {
+    comparisonLabel: periodLabel,
+    comparisonPeriodLabel: comparisonPeriodRangeLabel,
+    currentPeriodLabel: currentPeriodRangeLabel,
+  };
+  const waitlistConversionRate = waitlistTotals.total > 0
+    ? Math.round((waitlistTotals.seated / waitlistTotals.total) * 100)
+    : 0;
+  const expectedVsActualDailyStats = useMemo(
+    () => dailyStats.map((day) => {
+      const expected = day.reservations;
+      const accounted = day.completed + day.noShows + day.cancellations;
+      const pending = Math.max(expected - accounted, 0);
+
+      const expectedGuests = day.totalGuests;
+      const accountedGuests = day.completedGuests + day.noShowGuests + day.cancelledGuests;
+      const pendingGuests = Math.max(expectedGuests - accountedGuests, 0);
+
+      return {
+        ...day,
+        expected,
+        pending,
+        realizedRate: expected > 0 ? Math.round((day.completed / expected) * 100) : 0,
+        expectedGuests,
+        pendingGuests,
+        realizedRateGuests: expectedGuests > 0 ? Math.round((day.completedGuests / expectedGuests) * 100) : 0,
+      };
+    }),
+    [dailyStats],
+  );
+  const expectedVsActualTotals = useMemo(
+    () => {
+      const totalsByStatus = expectedVsActualDailyStats.reduce(
+        (acc, day) => ({
+          cancellations: acc.cancellations + day.cancellations,
+          completed: acc.completed + day.completed,
+          expected: acc.expected + day.expected,
+          noShows: acc.noShows + day.noShows,
+          pending: acc.pending + day.pending,
+          cancelledGuests: acc.cancelledGuests + day.cancelledGuests,
+          completedGuests: acc.completedGuests + day.completedGuests,
+          expectedGuests: acc.expectedGuests + day.expectedGuests,
+          noShowGuests: acc.noShowGuests + day.noShowGuests,
+          pendingGuests: acc.pendingGuests + day.pendingGuests,
+        }),
+        {
+          cancellations: 0,
+          completed: 0,
+          expected: 0,
+          noShows: 0,
+          pending: 0,
+          cancelledGuests: 0,
+          completedGuests: 0,
+          expectedGuests: 0,
+          noShowGuests: 0,
+          pendingGuests: 0,
+        },
+      );
+
+      return {
+        ...totalsByStatus,
+        realizedRate: totalsByStatus.expected > 0
+          ? Math.round((totalsByStatus.completed / totalsByStatus.expected) * 100)
+          : 0,
+        realizedRateGuests: totalsByStatus.expectedGuests > 0
+          ? Math.round((totalsByStatus.completedGuests / totalsByStatus.expectedGuests) * 100)
+          : 0,
+      };
+    },
+    [expectedVsActualDailyStats],
+  );
+
+  const expectedVsActualIsPeople = expectedVsActualMetric === 'people';
+  const expectedVsActualConfig = expectedVsActualIsPeople
+    ? {
+        completedLabel: 'Compareceram',
+        completedTotal: expectedVsActualTotals.completedGuests,
+        expectedTotal: expectedVsActualTotals.expectedGuests,
+        lossesTotal: expectedVsActualTotals.noShowGuests + expectedVsActualTotals.cancelledGuests,
+        rateTotal: expectedVsActualTotals.realizedRateGuests,
+      }
+    : {
+        completedLabel: 'Check-ins',
+        completedTotal: expectedVsActualTotals.completed,
+        expectedTotal: expectedVsActualTotals.expected,
+        lossesTotal: expectedVsActualTotals.noShows + expectedVsActualTotals.cancellations,
+        rateTotal: expectedVsActualTotals.realizedRate,
+      };
+  // Chaves estáveis com valores conforme o modo: o Recharts interpola a altura das barras
+  // (morph) ao alternar Reservas ⇄ Pessoas, em vez de redesenhar do zero.
+  const expectedVsActualChartData = useMemo(() => {
+    const isPeople = expectedVsActualMetric === 'people';
+    return expectedVsActualDailyStats.map((day) => ({
+      label: day.label,
+      expected: isPeople ? day.expectedGuests : day.expected,
+      completed: isPeople ? day.completedGuests : day.completed,
+      noShows: isPeople ? day.noShowGuests : day.noShows,
+      cancellations: isPeople ? day.cancelledGuests : day.cancellations,
+      pending: isPeople ? day.pendingGuests : day.pending,
+      realizedRate: isPeople ? day.realizedRateGuests : day.realizedRate,
+    }));
+  }, [expectedVsActualDailyStats, expectedVsActualMetric]);
 
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
@@ -517,175 +748,136 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI — linha 1: equação de atendimentos + pessoas */}
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-stretch sm:gap-2">
-            {/* Reservas agendadas */}
-            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
-                  <CalendarCheck className="h-5 w-5" />
-                </div>
+          <Card className="border border-border shadow-sm">
+            <CardContent className="py-4">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.scheduledReservations} previous={prevTotals.scheduledReservations} />
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium text-foreground">Resumo de Atendimentos</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Reservas agendadas" tooltip="Reservas marcadas previamente para o período. Não inclui quem entrou pela fila. Filtrado pela data da reserva — ou seja, quando o cliente está programado para visitar." />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Baseado na data da reserva/atendimento, não na data de criação.
                   </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
-              </CardContent>
-            </Card>
+                <p className="text-xs text-muted-foreground sm:pt-0.5">Comparativo vs. {periodLabel}</p>
+              </div>
 
-            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">+</div>
-
-            {/* Fila convertida */}
-            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
-                  <ClipboardList className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.waitlistReservations} previous={prevTotals.waitlistReservations} />
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-stretch sm:gap-2">
+                {/* Reservas agendadas */}
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
+                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
+                    <CalendarCheck className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Fila convertida" tooltip="Pessoas ou grupos que entraram na fila e depois viraram registro em reservas. Filtrado pela data da reserva — quando o atendimento aconteceu, não quando entraram na fila." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">=</div>
-
-            {/* Atendimentos totais */}
-            <Card className="min-w-0 sm:flex-1 border-2 border-primary/30 shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
-                  <CalendarIcon className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.reservations.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.reservations} previous={prevTotals.reservations} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xl font-bold">{totals.scheduledReservations.toLocaleString('pt-BR')}</p>
+                      <VariationBadge
+                        {...comparisonBadgeContext}
+                        current={totals.scheduledReservations}
+                        metricLabel="Reservas agendadas"
+                        previous={prevTotals.scheduledReservations}
+                        valuePlural="reservas agendadas"
+                        valueSingular="reserva agendada"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Reservas agendadas
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Atendimentos totais" tooltip="Total registrado em reservas no período: agendadas mais o que veio da fila. Filtrado pela data da reserva — quando o cliente visitou ou estava programado para visitar." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
                 </div>
-              </CardContent>
-            </Card>
 
-            {/* Média de pessoas por reserva */}
-            <Card className="min-w-0 border border-info/20 bg-info-soft/40 shadow-sm sm:w-[174px] sm:flex-none sm:self-center">
-              <CardContent className="flex items-center gap-2.5 px-3 py-2.5">
-                <div className="shrink-0 rounded-md bg-card/80 p-2 text-info">
-                  <TrendingUp className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-[11px] font-medium leading-tight text-muted-foreground">
-                    Média por reserva
-                  </p>
-                  <div className="mt-0.5 flex items-baseline gap-1">
-                    <span className="text-xs font-semibold leading-none text-info">×</span>
-                    <span className="text-lg font-bold leading-none text-foreground">
-                      {avgGuestsPerReservationLabel}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">
-                    pessoas/reserva
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+                <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">+</div>
 
-            {/* Total pessoas */}
-            <Card className="min-w-0 sm:flex-1 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
-                  <Users className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.totalGuests.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.totalGuests} previous={prevTotals.totalGuests} />
+                {/* Fila convertida */}
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
+                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
+                    <ClipboardList className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Total pessoas" tooltip="Soma das pessoas em todos os atendimentos registrados no período. Filtrado pela data da reserva — quando o cliente visitou ou estava programado para visitar." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xl font-bold">{totals.waitlistReservations.toLocaleString('pt-BR')}</p>
+                      <VariationBadge
+                        {...comparisonBadgeContext}
+                        current={totals.waitlistReservations}
+                        metricLabel="Fila convertida"
+                        previous={prevTotals.waitlistReservations}
+                        valuePlural="atendimentos da fila"
+                        valueSingular="atendimento da fila"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Fila convertida
+                    </p>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
 
-          {/* KPI — linha 2: check-ins, cancelamentos, no-show */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 [&>*]:min-w-0">
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-success">
-                  <CheckCircle className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.completed.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.completed} previous={prevTotals.completed} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Check-ins totais" tooltip="Atendimentos do período em que o cliente realmente chegou, incluindo agendadas e fila convertida. Filtrado pela data da reserva — quando o check-in aconteceu." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
-                </div>
-              </CardContent>
-            </Card>
+                <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">=</div>
 
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-destructive">
-                  <XCircle className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.cancellations.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.cancellations} previous={prevTotals.cancellations} goodWhenDecreases />
+                {/* Atendimentos totais */}
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border-2 border-primary/30 bg-primary/5 px-3 py-3 sm:flex-1">
+                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
+                    <CalendarIcon className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="Cancelamentos" tooltip="Reservas agendadas que foram canceladas no período. A fila não entra aqui. Filtrado pela data da reserva — quando o cliente estava programado para visitar, não quando cancelou." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xl font-bold">{totals.reservations.toLocaleString('pt-BR')}</p>
+                      <VariationBadge
+                        {...comparisonBadgeContext}
+                        current={totals.reservations}
+                        metricLabel="Atendimentos totais"
+                        previous={prevTotals.reservations}
+                        valuePlural="atendimentos"
+                        valueSingular="atendimento"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Atendimentos totais
+                    </p>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
 
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="shrink-0 rounded-md bg-muted p-2.5 text-destructive">
-                  <UserX className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xl font-bold">{totals.noShows.toLocaleString('pt-BR')}</p>
-                    <VariationBadge current={totals.noShows} previous={prevTotals.noShows} goodWhenDecreases />
+                {/* Total pessoas */}
+                <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
+                  <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
+                    <Users className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <MetricLabel label="No-shows" tooltip="Reservas agendadas em que o cliente não compareceu e não cancelou. Filtrado pela data da reserva — quando o cliente estava programado para visitar." />
-                  </p>
-                  <p className="text-xs text-muted-foreground/60">vs. {periodLabel}</p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xl font-bold">{totals.totalGuests.toLocaleString('pt-BR')}</p>
+                      <VariationBadge
+                        {...comparisonBadgeContext}
+                        current={totals.totalGuests}
+                        metricLabel="Total pessoas"
+                        previous={prevTotals.totalGuests}
+                        valuePlural="pessoas"
+                        valueSingular="pessoa"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Total pessoas
+                    </p>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Conversion Funnel */}
           {(
             <Card className="border border-border shadow-sm">
               <CardContent className="py-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-primary" />
-                  <p className="text-sm font-medium text-foreground">Funil de Conversão</p>
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium text-foreground">Funil de Conversão</p>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Reservas e pessoas agrupadas pela data em que a visita estava agendada.
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground sm:pt-0.5">Comparativo vs. {periodLabel}</p>
                 </div>
                 <div className="space-y-3">
                   {/* Linha 1: Reservas */}
@@ -710,8 +902,18 @@ export default function Dashboard() {
                             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctCheckIn}%</span>
                             <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                           </div>
-                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                            <span className="text-lg font-bold leading-none text-success">{checkIns.toLocaleString('pt-BR')}</span>
+                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <span className="text-lg font-bold leading-none text-success">{checkIns.toLocaleString('pt-BR')}</span>
+                              <VariationBadge
+                                {...comparisonBadgeContext}
+                                current={checkIns}
+                                metricLabel="Check-ins"
+                                previous={prevTotals.completed}
+                                valuePlural="check-ins"
+                                valueSingular="check-in"
+                              />
+                            </div>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Check-ins</span>
                           </div>
                           {noShows > 0 && (
@@ -721,8 +923,19 @@ export default function Dashboard() {
                                 <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{pctNoShow}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-destructive">{noShows.toLocaleString('pt-BR')}</span>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="text-lg font-bold leading-none text-destructive">{noShows.toLocaleString('pt-BR')}</span>
+                                  <VariationBadge
+                                    {...comparisonBadgeContext}
+                                    current={noShows}
+                                    goodWhenDecreases
+                                    metricLabel="Não compareceram"
+                                    previous={prevTotals.noShows}
+                                    valuePlural="não comparecimentos"
+                                    valueSingular="não comparecimento"
+                                  />
+                                </div>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
                               </div>
                             </>
@@ -734,8 +947,19 @@ export default function Dashboard() {
                                 <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{pctCancelled}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-foreground">{cancelled.toLocaleString('pt-BR')}</span>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="text-lg font-bold leading-none text-foreground">{cancelled.toLocaleString('pt-BR')}</span>
+                                  <VariationBadge
+                                    {...comparisonBadgeContext}
+                                    current={cancelled}
+                                    goodWhenDecreases
+                                    metricLabel="Cancelados"
+                                    previous={prevTotals.cancellations}
+                                    valuePlural="cancelamentos"
+                                    valueSingular="cancelamento"
+                                  />
+                                </div>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Cancelados</span>
                               </div>
                             </>
@@ -766,8 +990,18 @@ export default function Dashboard() {
                             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{pctGuests}%</span>
                             <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                           </div>
-                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                            <span className="text-lg font-bold leading-none text-success">{checkedInGuests.toLocaleString('pt-BR')}</span>
+                          <div className="flex w-full flex-col items-center rounded-lg border border-success/40 bg-success-soft px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <span className="text-lg font-bold leading-none text-success">{checkedInGuests.toLocaleString('pt-BR')}</span>
+                              <VariationBadge
+                                {...comparisonBadgeContext}
+                                current={checkedInGuests}
+                                metricLabel="Pessoas que compareceram"
+                                previous={prevTotals.checkedInGuests}
+                                valuePlural="pessoas"
+                                valueSingular="pessoa"
+                              />
+                            </div>
                             <span className="mt-0.5 text-[11px] text-muted-foreground">Compareceram</span>
                           </div>
                           {noShowGuests > 0 && (
@@ -777,8 +1011,19 @@ export default function Dashboard() {
                                 <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{pctNoShowGuests}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-destructive">{noShowGuests.toLocaleString('pt-BR')}</span>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="text-lg font-bold leading-none text-destructive">{noShowGuests.toLocaleString('pt-BR')}</span>
+                                  <VariationBadge
+                                    {...comparisonBadgeContext}
+                                    current={noShowGuests}
+                                    goodWhenDecreases
+                                    metricLabel="Pessoas que não compareceram"
+                                    previous={prevTotals.noShowGuests}
+                                    valuePlural="pessoas"
+                                    valueSingular="pessoa"
+                                  />
+                                </div>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Não compareceram</span>
                               </div>
                             </>
@@ -790,8 +1035,19 @@ export default function Dashboard() {
                                 <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{pctCancelledGuests}%</span>
                                 <div className="h-px w-4 bg-border sm:h-0.5 sm:flex-1 sm:w-auto" />
                               </div>
-                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[110px]">
-                                <span className="text-lg font-bold leading-none text-foreground">{cancelledGuests.toLocaleString('pt-BR')}</span>
+                              <div className="flex w-full flex-col items-center rounded-lg border border-border bg-muted/40 px-3 py-2 sm:w-auto sm:min-w-[132px]">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="text-lg font-bold leading-none text-foreground">{cancelledGuests.toLocaleString('pt-BR')}</span>
+                                  <VariationBadge
+                                    {...comparisonBadgeContext}
+                                    current={cancelledGuests}
+                                    goodWhenDecreases
+                                    metricLabel="Pessoas canceladas"
+                                    previous={prevTotals.cancelledGuests}
+                                    valuePlural="pessoas"
+                                    valueSingular="pessoa"
+                                  />
+                                </div>
                                 <span className="mt-0.5 text-[11px] text-muted-foreground">Cancelados</span>
                               </div>
                             </>
@@ -904,78 +1160,8 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Waitlist KPIs */}
-          {(
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
-              <Card className="min-w-0 border border-border shadow-sm">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className="rounded-md bg-primary-soft p-2.5 text-primary">
-                    <ClipboardList className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xl font-bold">{waitlistTotals.total}</p>
-                    <p className="text-xs text-muted-foreground">
-                      <MetricLabel
-                        label="Fila — Total"
-                        tooltip="Número de pessoas ou grupos que entraram na fila no período. Filtrado pela data de entrada na fila, não pela data da reserva."
-                      />
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="min-w-0 border border-border shadow-sm">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className="rounded-md bg-success-soft p-2.5 text-success">
-                    <CheckCircle className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xl font-bold">{waitlistTotals.seated}</p>
-                    <p className="text-xs text-muted-foreground">
-                      <MetricLabel
-                        label="Fila — Sentados"
-                        tooltip="Número de pessoas ou grupos da fila que foram atendidos e sentados no período. Filtrado pela data de entrada na fila."
-                      />
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="min-w-0 border border-border shadow-sm">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className="rounded-md bg-destructive-soft p-2.5 text-destructive">
-                    <UserX className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xl font-bold">{waitlistTotals.expired}</p>
-                    <p className="text-xs text-muted-foreground">
-                      <MetricLabel
-                        label="Fila — Desistências"
-                        tooltip="Número de pessoas ou grupos da fila que saíram sem sentar, por desistência ou por tempo esgotado. Filtrado pela data de entrada na fila."
-                      />
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="min-w-0 border border-border shadow-sm">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className="rounded-md bg-info-soft p-2.5 text-info">
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xl font-bold">{waitlistTotals.avgWaitMin}min</p>
-                    <p className="text-xs text-muted-foreground">
-                      <MetricLabel
-                        label="Fila — Espera Média"
-                        tooltip="Tempo médio entre entrar na fila e ser atendido. Considera apenas quem entrou na fila no período selecionado."
-                      />
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
           <Card className="border border-border shadow-sm">
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-3">
               <CardTitle className="text-base">
                 <SectionTitle
                   title="Fila de Espera por Dia"
@@ -986,8 +1172,79 @@ export default function Dashboard() {
                 Cada linha usa o dia em que o evento realmente aconteceu.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="h-[280px]">
+            <CardContent className="space-y-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: 'hsl(28, 85%, 55%)' }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-xs text-muted-foreground">Entradas</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-foreground">
+                    {waitlistTotals.total.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: 'hsl(145, 63%, 42%)' }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-xs text-muted-foreground">Sentados</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-foreground">
+                    {waitlistTotals.seated.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: 'hsl(0, 72%, 51%)' }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-xs text-muted-foreground">Desistências</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-foreground">
+                    {waitlistTotals.expired.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full bg-foreground/45"
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-xs text-muted-foreground">Conversão</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-foreground">
+                    {waitlistConversionRate.toLocaleString('pt-BR')}%
+                  </span>
+                </div>
+
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: 'hsl(202, 89%, 48%)' }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-xs text-muted-foreground">Espera média</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-foreground">
+                    {waitlistTotals.avgWaitMin.toLocaleString('pt-BR')}min
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={waitlistDailyStats}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
@@ -1061,65 +1318,163 @@ export default function Dashboard() {
 
           {advancedReportsEnabled && (
             <Card className="border border-border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Atendimentos por Dia"
-                    tooltip="Mostra por dia o que foi agendado, o que veio da fila, o total de reservas e o total de pessoas. Agrupado pela data da reserva — quando o cliente visitou ou estava programado para visitar."
-                  />
-                </CardTitle>
-                <CardDescription>Separação diária entre agendadas, fila convertida, total e total de pessoas</CardDescription>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base">
+                      <SectionTitle
+                        title="Esperado vs. Realizado"
+                        tooltip="Compara, dia a dia, o total esperado com o que virou check-in, no-show, cancelamento ou ficou pendente/outro status. Agrupado pela data da reserva. Use o botão Reservas/Pessoas para alternar entre contar reservas e contar pessoas — em Pessoas, o esperado soma os lugares reservados (agendadas + fila de espera) e 'Compareceram' usa quem realmente fez check-in."
+                      />
+                    </CardTitle>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs sm:justify-end">
+                    <div className="inline-flex items-center rounded-md border border-border bg-muted/20 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setExpectedVsActualMetric('reservations')}
+                        className={cn(
+                          'rounded px-2 py-0.5 font-medium transition-colors',
+                          !expectedVsActualIsPeople ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Reservas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExpectedVsActualMetric('people')}
+                        className={cn(
+                          'rounded px-2 py-0.5 font-medium transition-colors',
+                          expectedVsActualIsPeople ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Pessoas
+                      </button>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <span className="text-muted-foreground">Esperado</span>
+                      <span className="font-semibold text-foreground">
+                        {expectedVsActualConfig.expectedTotal.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-success/30 bg-success-soft px-2 py-1">
+                      <span className="text-muted-foreground">{expectedVsActualConfig.completedLabel}</span>
+                      <span className="font-semibold text-success">
+                        {expectedVsActualConfig.completedTotal.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <span className="text-muted-foreground">Perdas</span>
+                      <span className="font-semibold text-destructive">
+                        {expectedVsActualConfig.lossesTotal.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-info/20 bg-info-soft/40 px-2 py-1">
+                      <span className="text-muted-foreground">Realização</span>
+                      <span className="font-semibold text-info">
+                        {expectedVsActualConfig.rateTotal.toLocaleString('pt-BR')}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={dailyStats}>
+                    <ComposedChart data={expectedVsActualChartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis yAxisId="reservations" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" allowDecimals={false} />
-                      <YAxis yAxisId="guests" orientation="right" tick={{ fontSize: 12 }} stroke="hsl(262, 60%, 55%)" allowDecimals={false} tickFormatter={(v: number) => `${v}p`} />
+                      <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis
+                        yAxisId="rate"
+                        orientation="right"
+                        domain={[0, 100]}
+                        tick={{ fontSize: 12 }}
+                        stroke="hsl(202, 89%, 48%)"
+                        tickFormatter={(value: number) => `${value}%`}
+                      />
                       <RechartsTooltip
-                        contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                        formatter={(value: number, name: string) => {
-                          if (name === 'Pessoas') return [`${value} pessoa${value === 1 ? '' : 's'}`, name];
-                          return [`${value} atendimento${value === 1 ? '' : 's'}`, name];
+                        content={({ active, payload, label }: any) => {
+                          if (!active || !payload?.length) return null;
+
+                          const point = payload[0]?.payload;
+                          if (!point) return null;
+
+                          return (
+                            <div className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
+                              <p className="font-semibold text-foreground">{label}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {expectedVsActualIsPeople ? 'Pessoas' : 'Reservas'}
+                              </p>
+                              <div className="mt-2 space-y-1 text-muted-foreground">
+                                <p>Esperado: <span className="font-medium text-foreground">{(point.expected ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>{expectedVsActualConfig.completedLabel}: <span className="font-medium text-success">{(point.completed ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>No-shows: <span className="font-medium text-destructive">{(point.noShows ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Canceladas: <span className="font-medium text-foreground">{(point.cancellations ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Pendentes/outros: <span className="font-medium text-foreground">{(point.pending ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Taxa realizada: <span className="font-medium text-info">{(point.realizedRate ?? 0).toLocaleString('pt-BR')}%</span></p>
+                              </div>
+                            </div>
+                          );
                         }}
                       />
                       <Legend />
                       <Bar
-                        yAxisId="reservations"
-                        dataKey="scheduledReservations"
-                        name="Agendadas"
-                        fill="hsl(28, 85%, 55%)"
-                        radius={[4, 4, 0, 0]}
+                        yAxisId="count"
+                        dataKey="completed"
+                        name={expectedVsActualConfig.completedLabel}
+                        stackId="expected"
+                        fill="hsl(145, 63%, 42%)"
+                        maxBarSize={48}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
                       />
                       <Bar
-                        yAxisId="reservations"
-                        dataKey="waitlistReservations"
-                        name="Fila convertida"
-                        fill="hsl(145, 63%, 42%)"
-                        radius={[4, 4, 0, 0]}
+                        yAxisId="count"
+                        dataKey="noShows"
+                        name="No-shows"
+                        stackId="expected"
+                        fill="hsl(0, 72%, 51%)"
+                        maxBarSize={48}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
+                      />
+                      <Bar
+                        yAxisId="count"
+                        dataKey="cancellations"
+                        name="Canceladas"
+                        stackId="expected"
+                        fill="hsl(14, 72%, 58%)"
+                        maxBarSize={48}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
+                      />
+                      <Bar
+                        yAxisId="count"
+                        dataKey="pending"
+                        name="Pendentes/outros"
+                        stackId="expected"
+                        fill="hsl(0, 0%, 72%)"
+                        maxBarSize={48}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
                       />
                       <Line
-                        yAxisId="reservations"
+                        yAxisId="rate"
                         type="monotone"
-                        dataKey="reservations"
-                        name="Total"
+                        dataKey="realizedRate"
+                        name="Taxa realizada"
                         stroke="hsl(202, 89%, 48%)"
                         strokeWidth={2.5}
                         dot={{ r: 3 }}
                         activeDot={{ r: 5 }}
-                      />
-                      <Line
-                        yAxisId="guests"
-                        type="monotone"
-                        dataKey="totalGuests"
-                        name="Pessoas"
-                        stroke="hsl(262, 60%, 55%)"
-                        strokeWidth={2}
-                        strokeDasharray="5 3"
-                        dot={{ r: 2 }}
-                        activeDot={{ r: 4 }}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
                       />
                     </ComposedChart>
                   </ResponsiveContainer>

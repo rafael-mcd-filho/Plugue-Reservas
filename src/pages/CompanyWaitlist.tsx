@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -621,7 +621,7 @@ export default function CompanyWaitlist() {
   const calledCount = entries.filter((entry) => entry.status === 'called').length;
   const seatedTodayStats = useMemo(() => {
     if (seatedTodayEntries.length === 0) {
-      return { seated: 0, avgWaitMin: 0 };
+      return { seated: 0, avgWaitMin: 0, totalPeople: 0 };
     }
 
     const totalWaitMs = seatedTodayEntries.reduce((sum, entry) => {
@@ -632,6 +632,7 @@ export default function CompanyWaitlist() {
     return {
       seated: seatedTodayEntries.length,
       avgWaitMin: Math.round(totalWaitMs / seatedTodayEntries.length / 60000),
+      totalPeople: seatedTodayEntries.reduce((sum, entry) => sum + (entry.seated_party_size ?? entry.party_size), 0),
     };
   }, [seatedTodayEntries]);
 
@@ -866,6 +867,8 @@ export default function CompanyWaitlist() {
           const Icon = card.icon;
           const value = stats[card.key];
           const isSeatedCard = card.key === 'seated';
+          const isWaitingActive = card.key === 'waiting' && stats.waiting > 0;
+          const isCalledActive = card.key === 'called' && stats.called > 0;
 
           return (
             <Card
@@ -874,20 +877,27 @@ export default function CompanyWaitlist() {
               tabIndex={isSeatedCard ? 0 : undefined}
               aria-label={isSeatedCard ? 'Abrir lista de clientes sentados hoje' : undefined}
               className={cn(
-                'rounded-2xl border border-border bg-card shadow-sm',
-                isSeatedCard && 'cursor-pointer transition-colors hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20',
+                'rounded-2xl border border-border bg-card shadow-sm transition-colors',
+                isWaitingActive && 'border-primary/30',
+                isCalledActive && 'border-info/40',
+                isSeatedCard && 'cursor-pointer hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20',
               )}
               onClick={isSeatedCard ? () => setShowSeatedToday(true) : undefined}
               onKeyDown={isSeatedCard ? handleSeatedCardKeyDown : undefined}
             >
               <CardContent className="flex items-center gap-4 p-5">
-                <div className={cn('flex h-10 w-10 items-center justify-center rounded-lg', card.iconClassName)}>
+                <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-xl', card.iconClassName, isCalledActive && 'animate-pulse')}>
                   <Icon className="h-5 w-5" />
                 </div>
-                <div>
-                  <p className="text-xl font-semibold leading-none text-foreground">{value}</p>
+                <div className="min-w-0">
+                  <p className="text-2xl font-bold leading-none text-foreground">{value}</p>
                   <p className="mt-1.5 text-sm text-muted-foreground">{card.label}</p>
                 </div>
+                {isSeatedCard && (
+                  <span className="ml-auto inline-flex shrink-0 items-center gap-1 self-start text-xs font-medium text-muted-foreground">
+                    ver →
+                  </span>
+                )}
               </CardContent>
             </Card>
           );
@@ -896,10 +906,19 @@ export default function CompanyWaitlist() {
 
       <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div>
+          <div className="flex items-baseline gap-2">
             <h3 className="text-base font-semibold text-foreground">Fila atual</h3>
+            {waitingCount > 0 && (
+              <span className="text-sm text-muted-foreground">· {waitingCount} aguardando</span>
+            )}
           </div>
-          <span className="text-sm text-muted-foreground">Atualizado agora</span>
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+            </span>
+            Atualizado agora
+          </span>
         </div>
 
         <CardContent className="p-0">
@@ -930,6 +949,16 @@ export default function CompanyWaitlist() {
                 const calledExpired = entry.status === 'called'
                   ? hasWaitlistCallExpired(entry.called_at, nowMs)
                   : false;
+                const rowAccent = entry.status === 'called'
+                  ? (calledExpired ? 'border-l-destructive' : 'border-l-info')
+                  : entry.status === 'waiting'
+                    ? 'border-l-primary'
+                    : 'border-l-border';
+                const avatarClass = entry.status === 'called'
+                  ? (calledExpired ? 'bg-destructive-soft text-destructive' : 'bg-info-soft text-info')
+                  : entry.status === 'waiting'
+                    ? 'bg-primary-soft text-primary'
+                    : 'bg-muted text-muted-foreground';
 
                 return (
                   <div
@@ -937,12 +966,15 @@ export default function CompanyWaitlist() {
                     role="button"
                     tabIndex={0}
                     aria-label={`Abrir resumo da fila de ${entry.guest_name}`}
-                    className="flex cursor-pointer flex-col gap-4 px-5 py-4 transition-colors hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20 xl:flex-row xl:items-center"
+                    className={cn(
+                      'group flex cursor-pointer flex-col gap-4 border-l-4 px-5 py-4 transition-colors hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20 xl:flex-row xl:items-center',
+                      rowAccent,
+                    )}
                     onClick={() => openDetailsDialog(entry)}
                     onKeyDown={(event) => handleWaitlistRowKeyDown(event, entry)}
                   >
                     <div className="flex min-w-0 flex-1 items-start gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-foreground">
+                      <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold', avatarClass)}>
                         {queueNumber ?? '-'}
                       </div>
 
@@ -996,99 +1028,102 @@ export default function CompanyWaitlist() {
                           <p className="mt-2 text-sm text-muted-foreground">{entry.notes}</p>
                         )}
 
-                        <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80">
+                        <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <PencilLine className="h-3.5 w-3.5" />
                           Clique para conferir e editar os dados
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid w-full gap-2 sm:flex sm:flex-wrap sm:items-center xl:w-auto xl:justify-end">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full gap-2 rounded-lg sm:w-auto"
-                        onClick={(event) => {
-                          stopRowAction(event);
-                          openContactHistory(entry);
-                        }}
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        Histórico
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full gap-2 rounded-lg sm:w-auto"
-                        onClick={(event) => {
-                          stopRowAction(event);
-                          copyTrackingLink(entry.tracking_code);
-                        }}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        Copiar link
-                      </Button>
-
+                    <div className="flex w-full items-center gap-2 xl:w-auto xl:justify-end">
                       {entry.status === 'waiting' && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full gap-2 rounded-lg sm:w-auto"
-                            onClick={(event) => {
-                              stopRowAction(event);
-                              void handleCallEntry(entry);
-                            }}
-                          >
-                            <Bell className="h-3.5 w-3.5" />
-                            Chamar
-                          </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 gap-2 rounded-lg sm:flex-none"
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            void handleCallEntry(entry);
+                          }}
+                        >
+                          <Bell className="h-4 w-4" />
+                          Chamar
+                        </Button>
+                      )}
+
+                      {entry.status === 'called' && (
+                        <Button
+                          size="sm"
+                          className="flex-1 gap-2 rounded-lg sm:flex-none"
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            openSeatDialog(entry);
+                          }}
+                        >
+                          <UserCheck className="h-4 w-4" />
+                          Sentar
+                        </Button>
+                      )}
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground"
+                          title="Histórico do cliente"
+                          aria-label={`Histórico de ${entry.guest_name}`}
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            openContactHistory(entry);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground"
+                          title="Copiar link de acompanhamento"
+                          aria-label={`Copiar link de ${entry.guest_name}`}
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            copyTrackingLink(entry.tracking_code);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+
+                        {entry.status === 'waiting' && (
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="w-full gap-2 rounded-lg text-destructive hover:text-destructive sm:w-auto"
+                            size="icon"
+                            className="h-9 w-9 rounded-lg text-destructive hover:text-destructive"
+                            title="Remover da fila"
+                            aria-label={`Remover ${entry.guest_name} da fila`}
                             onClick={(event) => {
                               stopRowAction(event);
                               setRemoveEntry(entry);
                             }}
                           >
-                            <UserMinus className="h-3.5 w-3.5" />
-                            Remover
+                            <UserMinus className="h-4 w-4" />
                           </Button>
-                        </>
-                      )}
+                        )}
 
-                      {entry.status === 'called' && (
-                        <>
+                        {entry.status === 'called' && (
                           <Button
-                            size="sm"
-                            className="w-full gap-2 rounded-lg sm:w-auto"
-                            onClick={(event) => {
-                              stopRowAction(event);
-                              openSeatDialog(entry);
-                            }}
-                          >
-                            <UserCheck className="h-3.5 w-3.5" />
-                            Sentar
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={cn(
-                              'w-full gap-2 rounded-lg sm:w-auto',
-                              calledExpired && 'border-destructive/30 text-destructive hover:text-destructive',
-                            )}
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9 rounded-lg text-destructive hover:text-destructive"
+                            title={calledExpired ? 'Expirar agora' : 'Expirar'}
+                            aria-label={`Expirar ${entry.guest_name}`}
                             onClick={(event) => {
                               stopRowAction(event);
                               updateStatus.mutate({ id: entry.id, status: 'expired' });
                             }}
                           >
-                            <Clock3 className="h-3.5 w-3.5" />
-                            {calledExpired ? 'Expirar agora' : 'Expirar'}
+                            <Clock3 className="h-4 w-4" />
                           </Button>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1102,80 +1137,110 @@ export default function CompanyWaitlist() {
         <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Sentados hoje</DialogTitle>
+            <DialogDescription>
+              {seatedTodayStats.seated > 0
+                ? `${seatedTodayStats.seated} ${seatedTodayStats.seated === 1 ? 'cliente sentado' : 'clientes sentados'} em ${format(new Date(), 'dd/MM')} · ${seatedTodayStats.totalPeople} ${seatedTodayStats.totalPeople === 1 ? 'pessoa' : 'pessoas'}`
+                : `Nenhum cliente sentado em ${format(new Date(), 'dd/MM')}`}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-border bg-muted/20 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Clientes sentados</p>
-                <p className="mt-2 text-xl font-semibold text-foreground">{seatedTodayStats.seated}</p>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="rounded-xl border border-success/20 bg-success-soft/50 p-3">
+                <div className="flex items-center gap-1.5 text-success">
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Clientes</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">{seatedTodayStats.seated}</p>
               </div>
-              <div className="rounded-xl border border-border bg-muted/20 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Espera media</p>
-                <p className="mt-2 text-xl font-semibold text-foreground">{seatedTodayStats.avgWaitMin}min</p>
+              <div className="rounded-xl border border-info/20 bg-info-soft/40 p-3">
+                <div className="flex items-center gap-1.5 text-info">
+                  <Users className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Pessoas</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">{seatedTodayStats.totalPeople}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Espera média</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">
+                  {seatedTodayStats.avgWaitMin}<span className="text-sm font-semibold text-muted-foreground">min</span>
+                </p>
               </div>
             </div>
 
             {seatedTodayEntries.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-border bg-muted/10 px-5 py-10 text-center">
-                <p className="text-sm font-medium text-foreground">Ninguem foi sentado hoje ainda.</p>
+                <p className="text-sm font-medium text-foreground">Ninguém foi sentado hoje ainda.</p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Assim que uma entrada da fila for concluida, ela aparece aqui.
+                  Assim que uma entrada da fila for concluída, ela aparece aqui.
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {seatedTodayEntries.map((entry) => {
                   const seatedAt = entry.seated_at ? new Date(entry.seated_at) : new Date(entry.created_at);
                   const waitMinutes = Math.max(
                     Math.round((seatedAt.getTime() - new Date(entry.created_at).getTime()) / 60000),
                     0,
                   );
+                  const initial = entry.guest_name.trim().charAt(0).toUpperCase() || '?';
 
                   return (
-                    <div key={entry.id} className="rounded-2xl border border-border bg-card p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-base font-semibold text-foreground">{entry.guest_name}</p>
-                            <span className="inline-flex items-center rounded-full border border-success/20 bg-success-soft px-3 py-1 text-xs font-medium text-success">
-                              Sentado
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                            <span className="inline-flex items-center gap-1.5">
-                              <Phone className="h-3.5 w-3.5" />
-                              {formatBrazilPhone(entry.guest_phone)}
-                            </span>
-                            <span className="inline-flex items-center gap-1.5">
-                              <Users className="h-3.5 w-3.5" />
-                              {entry.seated_party_size ?? entry.party_size} pessoas
-                            </span>
-                            <span className="inline-flex items-center gap-1.5">
-                              <Clock3 className="h-3.5 w-3.5" />
-                              Esperou {waitMinutes}min
-                            </span>
-                          </div>
-                          {entry.notes && (
-                            <p className="text-sm text-muted-foreground">{entry.notes}</p>
-                          )}
-                        </div>
-
-                        <div className="space-y-2 text-sm text-muted-foreground sm:text-right">
-                          <p className="font-medium text-foreground">{format(seatedAt, 'HH:mm')}</p>
-                          <p>{format(seatedAt, 'dd/MM/yyyy')}</p>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="w-full gap-2 rounded-lg sm:w-auto"
-                            onClick={() => copyTrackingLink(entry.tracking_code)}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copiar link
-                          </Button>
-                        </div>
+                    <div
+                      key={entry.id}
+                      className="group flex items-start gap-3 rounded-2xl border border-border bg-card p-3.5 transition-colors hover:border-success/30 hover:bg-success-soft/20"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success-soft text-sm font-bold text-success">
+                        {initial}
                       </div>
+
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="truncate text-base font-semibold text-foreground">{entry.guest_name}</p>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                            {format(seatedAt, 'HH:mm')}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5" />
+                            {formatBrazilPhone(entry.guest_phone)}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5" />
+                            {entry.seated_party_size ?? entry.party_size} pessoas
+                          </span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                              waitMinutes === 0
+                                ? 'bg-success-soft text-success'
+                                : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            <Clock3 className="h-3 w-3" />
+                            {waitMinutes === 0 ? 'Na hora' : `Esperou ${waitMinutes}min`}
+                          </span>
+                        </div>
+                        {entry.notes && (
+                          <p className="text-sm text-muted-foreground">{entry.notes}</p>
+                        )}
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground opacity-60 transition-opacity hover:text-foreground group-hover:opacity-100"
+                        title="Copiar link de acompanhamento"
+                        aria-label={`Copiar link de ${entry.guest_name}`}
+                        onClick={() => copyTrackingLink(entry.tracking_code)}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
                     </div>
                   );
                 })}

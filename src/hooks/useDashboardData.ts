@@ -20,6 +20,9 @@ export interface DailyStats {
   cancellations: number;
   noShows: number;
   totalGuests: number;
+  completedGuests: number;
+  noShowGuests: number;
+  cancelledGuests: number;
 }
 
 interface RawReservation {
@@ -356,12 +359,17 @@ export function useDashboardData(
           cancellations: 0,
           noShows: 0,
           totalGuests: 0,
+          completedGuests: 0,
+          noShowGuests: 0,
+          cancelledGuests: 0,
         };
       }
 
+      const partySize = reservation.party_size || 1;
+      const attendedSize = reservation.checked_in_party_size ?? partySize;
       const dayStats = byDate[reservation.date];
       dayStats.reservations += 1;
-      dayStats.totalGuests += reservation.party_size || 1;
+      dayStats.totalGuests += partySize;
       if (normalizedSource === 'waitlist') {
         dayStats.waitlistReservations += 1;
       } else {
@@ -370,15 +378,20 @@ export function useDashboardData(
 
       if (normalizedStatus === 'checked_in') {
         dayStats.completed += 1;
+        dayStats.completedGuests += attendedSize;
         if (normalizedSource === 'waitlist') {
           dayStats.waitlistCompleted += 1;
         } else {
           dayStats.scheduledCompleted += 1;
         }
+      } else if (normalizedStatus === 'cancelled') {
+        dayStats.cancellations += 1;
+        dayStats.cancelledGuests += partySize;
+      } else if (normalizedStatus === 'no-show') {
+        dayStats.noShows += 1;
+        dayStats.noShowGuests += partySize;
       } else if (normalizedSource === 'reservation') {
         if (normalizedStatus === 'confirmed') dayStats.confirmed += 1;
-        else if (normalizedStatus === 'cancelled') dayStats.cancellations += 1;
-        else if (normalizedStatus === 'no-show') dayStats.noShows += 1;
       }
     }
 
@@ -395,6 +408,9 @@ export function useDashboardData(
         cancellations: 0,
         noShows: 0,
         totalGuests: 0,
+        completedGuests: 0,
+        noShowGuests: 0,
+        cancelledGuests: 0,
       };
 
       return {
@@ -434,7 +450,7 @@ export function useDashboardData(
     const totalGuests = rawReservations.reduce((sum, r) => sum + (r.party_size || 1), 0);
     const checkedInGuests = rawReservations.reduce((sum, r) => {
       if (normalizeReservationStatus(r.status) !== 'checked_in') return sum;
-      return sum + (r.party_size || 1);
+      return sum + (r.checked_in_party_size ?? r.party_size ?? 1);
     }, 0);
     const noShowGuests = rawReservations.reduce((sum, r) => {
       if (normalizeReservationStatus(r.status) !== 'no-show') return sum;
@@ -548,13 +564,18 @@ export function useDashboardData(
       cancellations: 0,
       noShows: 0,
       totalGuests: 0,
+      checkedInGuests: 0,
+      noShowGuests: 0,
+      cancelledGuests: 0,
     };
 
     for (const reservation of prevReservations) {
       const normalizedStatus = normalizeReservationStatus(reservation.status);
       const normalizedSource = normalizeReservationSource(reservation.source);
+      const partySize = reservation.party_size || 1;
+      const attendedSize = reservation.checked_in_party_size ?? partySize;
       acc.reservations++;
-      acc.totalGuests += reservation.party_size || 1;
+      acc.totalGuests += partySize;
       if (normalizedSource === 'waitlist') {
         acc.waitlistReservations++;
       } else {
@@ -563,15 +584,22 @@ export function useDashboardData(
 
       if (normalizedStatus === 'checked_in') {
         acc.completed++;
+        acc.checkedInGuests += attendedSize;
         if (normalizedSource === 'waitlist') {
           acc.waitlistCompleted++;
         } else {
           acc.scheduledCompleted++;
         }
+      } else if (normalizedStatus === 'cancelled') {
+        acc.cancelledGuests += partySize;
+        acc.cancellations++;
+      } else if (normalizedStatus === 'no-show') {
+        acc.noShowGuests += partySize;
+        acc.noShows++;
       } else if (normalizedSource === 'reservation') {
-        if (normalizedStatus === 'confirmed') acc.confirmed++;
-        else if (normalizedStatus === 'cancelled') acc.cancellations++;
-        else if (normalizedStatus === 'no-show') acc.noShows++;
+        if (normalizedStatus === 'confirmed') {
+          acc.confirmed++;
+        }
       }
     }
 

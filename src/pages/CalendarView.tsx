@@ -78,12 +78,6 @@ interface ReservationEditForm {
   notes: string;
 }
 
-const CALENDAR_VISIBLE_STATUSES = new Set<ReservationStatus>(['confirmed', 'checked_in', 'no-show']);
-
-function isCalendarVisibleReservation(reservation: Pick<Reservation, 'status'>) {
-  return CALENDAR_VISIBLE_STATUSES.has(reservation.status);
-}
-
 function getPaidReservationPayment(reservation: Reservation) {
   return reservation.reservation_payments?.find((payment) => payment.status === 'paid') ?? null;
 }
@@ -253,19 +247,15 @@ export default function CalendarView() {
   });
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
-  const operationalReservations = useMemo(
-    () => reservations.filter(isCalendarVisibleReservation),
+  const reservationDates = useMemo(
+    () => new Set(reservations.map((reservation) => reservation.date)),
     [reservations],
   );
-  const reservationDates = useMemo(
-    () => new Set(operationalReservations.map((reservation) => reservation.date)),
-    [operationalReservations],
-  );
   const dayReservations = useMemo(
-    () => operationalReservations
+    () => reservations
       .filter((reservation) => reservation.date === selectedDateStr)
       .sort((left, right) => left.time.localeCompare(right.time)),
-    [operationalReservations, selectedDateStr],
+    [reservations, selectedDateStr],
   );
   const daySummary = useMemo(
     () => ({

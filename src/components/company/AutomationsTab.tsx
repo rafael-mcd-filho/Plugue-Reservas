@@ -116,12 +116,9 @@ export default function AutomationsTab({ companyId }: Props) {
         <ChannelTab companyId={companyId} activeChannel={channel} />
       </TabsContent>
 
-      <TabsContent value="connection">
-        {isPlugueChat ? (
-          <PlugueChatConnection companyId={companyId} activeChannel={channel} />
-        ) : (
-          <WhatsAppConnection companyId={companyId} />
-        )}
+      <TabsContent value="connection" className="grid gap-4 xl:grid-cols-2">
+        <WhatsAppConnection companyId={companyId} />
+        <PlugueChatConnection companyId={companyId} activeChannel={channel} />
       </TabsContent>
 
       <TabsContent value="messages" className="space-y-4">

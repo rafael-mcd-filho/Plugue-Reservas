@@ -160,12 +160,6 @@ const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: strin
   { value: 'paid_after_expiration', label: 'Pago após expirar' },
 ];
 
-const CALENDAR_VISIBLE_STATUSES = new Set<ReservationStatus>(['confirmed', 'checked_in', 'no-show']);
-
-function isCalendarVisibleReservation(reservation: Pick<Reservation, 'status'>) {
-  return CALENDAR_VISIBLE_STATUSES.has(reservation.status);
-}
-
 function getPaidReservationPayment(reservation: Reservation) {
   return reservation.reservation_payments?.find((payment) => payment.status === 'paid') ?? null;
 }
@@ -375,7 +369,7 @@ export default function Reservations() {
 
   const calendarReservationsByDate = useMemo(() => {
     const map = new Map<string, Reservation[]>();
-    for (const reservation of reservations.filter(isCalendarVisibleReservation)) {
+    for (const reservation of reservations) {
       const current = map.get(reservation.date) ?? [];
       current.push(reservation);
       map.set(reservation.date, current);
@@ -646,11 +640,14 @@ export default function Reservations() {
 
   const listSummary = useMemo(() => {
     const STATUS_ORDER = ['confirmed', 'checked_in', 'cancelled', 'no-show'] as const;
+    // Em check-in, contamos quem realmente compareceu (checked_in_party_size); nos demais, o tamanho reservado.
+    const peopleOf = (r: Reservation) =>
+      r.status === 'checked_in' ? (r.checked_in_party_size ?? r.party_size) : r.party_size;
     const byStatus = STATUS_ORDER.map((status) => {
       const rows = filteredReservations.filter((r) => r.status === status);
-      return { status, count: rows.length, people: rows.reduce((s, r) => s + r.party_size, 0) };
+      return { status, count: rows.length, people: rows.reduce((s, r) => s + peopleOf(r), 0) };
     }).filter((s) => s.count > 0);
-    const total = { count: filteredReservations.length, people: filteredReservations.reduce((s, r) => s + r.party_size, 0) };
+    const total = { count: filteredReservations.length, people: filteredReservations.reduce((s, r) => s + peopleOf(r), 0) };
     return { byStatus, total };
   }, [filteredReservations]);
 

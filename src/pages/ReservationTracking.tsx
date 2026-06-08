@@ -320,6 +320,10 @@ export default function ReservationTracking() {
   const status = getStatusMessage(normalizedStatus) || statusMessages.confirmed;
   const StatusIcon = status.icon;
   const canCancel = normalizedStatus === 'confirmed';
+  const canStartNewReservation =
+    normalizedStatus === 'cancelled'
+    || normalizedStatus === 'no-show'
+    || normalizedStatus === 'payment_expired';
   const lateToleranceMinutes = normalizeReservationLateToleranceMinutes(company.reservation_late_tolerance_minutes);
   const showLateToleranceNotice = normalizedStatus === 'confirmed' && lateToleranceMinutes > 0;
   const lateToleranceUnit = lateToleranceMinutes === 1 ? 'minuto' : 'minutos';
@@ -354,6 +358,11 @@ export default function ReservationTracking() {
               <div>
                 <h2 className={`text-lg font-bold ${status.color}`}>{status.title}</h2>
                 <p className="mt-1 text-muted-foreground">{status.description}</p>
+                {(normalizedStatus === 'cancelled' || normalizedStatus === 'no-show') && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {format(new Date(entry.updated_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  </p>
+                )}
               </div>
 
               {showLateToleranceNotice && (
@@ -450,7 +459,7 @@ export default function ReservationTracking() {
                   </Button>
                 </div>
               )}
-              {normalizedStatus === 'cancelled' && (
+              {canStartNewReservation && (
                 <div className="space-y-3 border-t border-border pt-4">
                   <Button asChild className="h-11 w-full rounded-lg shadow-sm">
                     <Link to={`/${slug}`}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceStrict, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import {
@@ -204,6 +204,11 @@ export default function WaitlistTracking() {
   const calledRemainingMs = getWaitlistCallRemainingMs(entry.called_at, nowMs);
   const calledExpired = entry.status === 'called' && hasWaitlistCallExpired(entry.called_at, nowMs);
   const calledCountdown = formatWaitlistCountdown(calledRemainingMs);
+  const waitTimeInfo = entry.status === 'waiting'
+    ? { label: 'Na fila há', value: formatDistanceToNow(new Date(entry.created_at), { locale: ptBR }) }
+    : entry.called_at
+      ? { label: 'Tempo na fila', value: formatDistanceStrict(new Date(entry.called_at), new Date(entry.created_at), { locale: ptBR }) }
+      : null;
   const cardAccentClassName = entry.status === 'called'
     ? (calledExpired ? 'bg-destructive' : 'bg-info animate-pulse')
     : entry.status === 'waiting'
@@ -292,12 +297,12 @@ export default function WaitlistTracking() {
                   <span className="text-muted-foreground">Pessoas</span>
                   <span className="font-medium">{entry.party_size}</span>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Na fila há</span>
-                  <span className="font-medium">
-                    {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
-                  </span>
-                </div>
+                {waitTimeInfo && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">{waitTimeInfo.label}</span>
+                    <span className="font-medium">{waitTimeInfo.value}</span>
+                  </div>
+                )}
               </div>
 
               {canLeaveWaitlist && (
