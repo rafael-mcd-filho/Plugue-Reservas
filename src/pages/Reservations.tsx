@@ -44,7 +44,12 @@ import { Textarea } from '@/components/ui/textarea';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
+import ReservationOperationalFilterControl from '@/components/ReservationOperationalFilterControl';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import {
+  matchesReservationOperationalFilter,
+  type ReservationOperationalFilter,
+} from '@/lib/reservation-operational-filter';
 import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -222,6 +227,7 @@ export default function Reservations() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [operationalFilter, setOperationalFilter] = useState<ReservationOperationalFilter>('active');
   const [originFilter, setOriginFilter] = useState<ReservationOriginFilterValue>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
   const [dateFilterMode, setDateFilterMode] = useState<'reservation' | 'created'>('reservation');
@@ -260,6 +266,11 @@ export default function Reservations() {
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
   const canDeleteReservations = hasPermission('reservations_delete');
+
+  const handleOperationalFilterChange = (value: ReservationOperationalFilter) => {
+    setOperationalFilter(value);
+    setStatusFilter('all');
+  };
 
   const invalidateReservationQueries = () => {
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
@@ -370,12 +381,16 @@ export default function Reservations() {
   const calendarReservationsByDate = useMemo(() => {
     const map = new Map<string, Reservation[]>();
     for (const reservation of reservations) {
+      if (!matchesReservationOperationalFilter(reservation.status, operationalFilter)) {
+        continue;
+      }
+
       const current = map.get(reservation.date) ?? [];
       current.push(reservation);
       map.set(reservation.date, current);
     }
     return map;
-  }, [reservations]);
+  }, [operationalFilter, reservations]);
 
   useEffect(() => {
     if (!editDialog || !editingReservation) return;
@@ -619,6 +634,7 @@ export default function Reservations() {
 
   const filteredReservations = useMemo(() => {
     const result = sortedReservations
+      .filter((reservation) => matchesReservationOperationalFilter(reservation.status, operationalFilter))
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
       .filter((reservation) => originFilter === 'all' || classifyReservationOrigin(reservation) === originFilter)
       .filter((reservation) =>
@@ -636,20 +652,25 @@ export default function Reservations() {
         );
       });
     return result;
-  }, [dateFilterMode, originFilter, reservationListRange, search, sortedReservations, statusFilter]);
+  }, [dateFilterMode, operationalFilter, originFilter, reservationListRange, search, sortedReservations, statusFilter]);
 
   const listSummary = useMemo(() => {
-    const STATUS_ORDER = ['confirmed', 'checked_in', 'cancelled', 'no-show'] as const;
     // Em check-in, contamos quem realmente compareceu (checked_in_party_size); nos demais, o tamanho reservado.
     const peopleOf = (r: Reservation) =>
       r.status === 'checked_in' ? (r.checked_in_party_size ?? r.party_size) : r.party_size;
-    const byStatus = STATUS_ORDER.map((status) => {
-      const rows = filteredReservations.filter((r) => r.status === status);
-      return { status, count: rows.length, people: rows.reduce((s, r) => s + peopleOf(r), 0) };
+    const byStatus = RESERVATION_STATUS_OPTIONS.map((status) => {
+      const rows = filteredReservations.filter((r) => r.status === status.value);
+      return { status: status.value, count: rows.length, people: rows.reduce((s, r) => s + peopleOf(r), 0) };
     }).filter((s) => s.count > 0);
     const total = { count: filteredReservations.length, people: filteredReservations.reduce((s, r) => s + peopleOf(r), 0) };
     return { byStatus, total };
   }, [filteredReservations]);
+  const visibleStatusFilterOptions = useMemo(
+    () => RESERVATION_STATUS_OPTIONS.filter((status) =>
+      matchesReservationOperationalFilter(status.value, operationalFilter),
+    ),
+    [operationalFilter],
+  );
 
   const listTotalPages = Math.max(1, Math.ceil(filteredReservations.length / LIST_PAGE_SIZE));
   const paginatedReservations = useMemo(
@@ -659,7 +680,7 @@ export default function Reservations() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, statusFilter, originFilter, reservationListRange, dateFilterMode]);
+  }, [search, statusFilter, operationalFilter, originFilter, reservationListRange, dateFilterMode]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -728,6 +749,12 @@ export default function Reservations() {
     if (!dayModal) return [];
     return (calendarReservationsByDate.get(dayModal) ?? []).sort((left, right) => left.time.localeCompare(right.time));
   }, [calendarReservationsByDate, dayModal]);
+  const dayModalEmptyMessage =
+    operationalFilter === 'lost'
+      ? 'Nenhuma reserva perdida para este dia.'
+      : operationalFilter === 'all'
+        ? 'Nenhuma reserva para este dia.'
+        : 'Nenhuma reserva ativa para este dia.';
   const reservationPendingRemoval = useMemo(
     () => reservations.find((reservation) => reservation.id === reservationRemovalFlow?.reservationId) ?? null,
     [reservationRemovalFlow?.reservationId, reservations],
@@ -1057,6 +1084,12 @@ export default function Reservations() {
               {calendarRangeMode === 'future' ? 'Próximos 15 dias' : 'Últimos 15 dias'}
             </p>
 
+            <ReservationOperationalFilterControl
+              value={operationalFilter}
+              onChange={handleOperationalFilterChange}
+              className="w-full sm:w-auto"
+            />
+
             <div className="inline-flex w-full rounded-xl border border-border bg-card p-1 sm:w-auto">
               <Button
                 type="button"
@@ -1131,6 +1164,12 @@ export default function Reservations() {
               />
             </div>
 
+            <ReservationOperationalFilterControl
+              value={operationalFilter}
+              onChange={handleOperationalFilterChange}
+              className="w-full sm:w-auto"
+            />
+
             <div className="flex flex-col gap-3 sm:flex-row">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="h-10 w-full rounded-lg bg-card sm:w-[170px]" aria-label="Filtrar reservas por status">
@@ -1138,7 +1177,7 @@ export default function Reservations() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os status</SelectItem>
-                  {RESERVATION_STATUS_OPTIONS.map((status) => (
+                  {visibleStatusFilterOptions.map((status) => (
                     <SelectItem key={status.value} value={status.value}>
                       {status.label}
                     </SelectItem>
@@ -2152,9 +2191,15 @@ export default function Reservations() {
           </DialogHeader>
 
           <div className="pt-1">
+            <ReservationOperationalFilterControl
+              value={operationalFilter}
+              onChange={handleOperationalFilterChange}
+              className="mb-3 w-full sm:w-auto"
+            />
+
             {dayModalReservations.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Nenhuma reserva confirmada para este dia.
+                {dayModalEmptyMessage}
               </p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border">

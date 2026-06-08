@@ -6,6 +6,7 @@ import { CheckCircle2, Clock3, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
+import ReservationOperationalFilterControl from '@/components/ReservationOperationalFilterControl';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import {
   AlertDialog,
@@ -37,6 +38,10 @@ import {
 } from '@/lib/validation';
 import { cn } from '@/lib/utils';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
+import {
+  matchesReservationOperationalFilter,
+  type ReservationOperationalFilter,
+} from '@/lib/reservation-operational-filter';
 import type { ReservationStatus } from '@/types/restaurant';
 
 interface Reservation {
@@ -123,6 +128,7 @@ export default function CalendarView() {
   const { companyId, slug } = useCompanySlug();
   const qc = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [operationalFilter, setOperationalFilter] = useState<ReservationOperationalFilter>('active');
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
   const [statusDialogReservation, setStatusDialogReservation] = useState<Reservation | null>(null);
@@ -247,15 +253,19 @@ export default function CalendarView() {
   });
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const operationalReservations = useMemo(
+    () => reservations.filter((reservation) => matchesReservationOperationalFilter(reservation.status, operationalFilter)),
+    [operationalFilter, reservations],
+  );
   const reservationDates = useMemo(
-    () => new Set(reservations.map((reservation) => reservation.date)),
-    [reservations],
+    () => new Set(operationalReservations.map((reservation) => reservation.date)),
+    [operationalReservations],
   );
   const dayReservations = useMemo(
-    () => reservations
+    () => operationalReservations
       .filter((reservation) => reservation.date === selectedDateStr)
       .sort((left, right) => left.time.localeCompare(right.time)),
-    [reservations, selectedDateStr],
+    [operationalReservations, selectedDateStr],
   );
   const daySummary = useMemo(
     () => ({
@@ -264,6 +274,12 @@ export default function CalendarView() {
     }),
     [dayReservations],
   );
+  const dayEmptyMessage =
+    operationalFilter === 'lost'
+      ? 'Nenhuma reserva perdida nesta data'
+      : operationalFilter === 'all'
+        ? 'Nenhuma reserva nesta data'
+        : 'Nenhuma reserva ativa nesta data';
 
   const openDetails = (reservation: Reservation) => {
     setDetailsReservation(reservation);
@@ -416,31 +432,38 @@ export default function CalendarView() {
           </Card>
 
           <Card className="border-none shadow-sm">
-            <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="text-lg leading-none">
-                {selectedDate
-                  ? `Reservas em ${format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}`
-                  : 'Selecione uma data'}
-              </CardTitle>
-              {selectedDate && (
-                <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm sm:self-center">
-                  <div className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <Clock3 className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="font-medium text-foreground">{daySummary.reservations}</span>
-                    <span>{daySummary.reservations === 1 ? 'reserva' : 'reservas'}</span>
+            <CardHeader className="gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="text-lg leading-none">
+                  {selectedDate
+                    ? `Reservas em ${format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}`
+                    : 'Selecione uma data'}
+                </CardTitle>
+                {selectedDate && (
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm sm:self-center">
+                    <div className="inline-flex items-center gap-1.5 text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5 text-amber-500" />
+                      <span className="font-medium text-foreground">{daySummary.reservations}</span>
+                      <span>{daySummary.reservations === 1 ? 'reserva' : 'reservas'}</span>
+                    </div>
+                    <div className="h-4 w-px bg-border/80" />
+                    <div className="inline-flex items-center gap-1.5 text-muted-foreground">
+                      <Users className="h-3.5 w-3.5 text-sky-500" />
+                      <span className="font-medium text-foreground">{daySummary.guests}</span>
+                      <span>{daySummary.guests === 1 ? 'pessoa' : 'pessoas'}</span>
+                    </div>
                   </div>
-                  <div className="h-4 w-px bg-border/80" />
-                  <div className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <Users className="h-3.5 w-3.5 text-sky-500" />
-                    <span className="font-medium text-foreground">{daySummary.guests}</span>
-                    <span>{daySummary.guests === 1 ? 'pessoa' : 'pessoas'}</span>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
+              <ReservationOperationalFilterControl
+                value={operationalFilter}
+                onChange={setOperationalFilter}
+                className="w-full sm:w-auto"
+              />
             </CardHeader>
             <CardContent>
               {dayReservations.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma reserva confirmada nesta data</p>
+                <p className="py-8 text-center text-sm text-muted-foreground">{dayEmptyMessage}</p>
               ) : (
                 <div className="overflow-hidden rounded-xl border border-border">
                   {dayReservations.map((reservation, index) => {
