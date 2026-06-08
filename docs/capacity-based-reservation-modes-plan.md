@@ -106,6 +106,34 @@ A reserva das `18:00` conta para a capacidade das `18:30`, pois os períodos se 
 
 O limite `max_reservations_per_slot` continua contando somente reservas iniciadas exatamente no horário configurado. Ele controla o volume de chegadas por horário, enquanto `max_guests_per_slot` controla ocupação simultânea.
 
+### Duração da reserva x intervalo da grade
+
+O produto deve separar dois conceitos que hoje estão acoplados em `companies.reservation_duration`:
+
+1. **Duração padrão da reserva**: quanto tempo uma reserva ocupa mesa ou capacidade.
+2. **Intervalo da grade pública**: de quanto em quanto tempo os horários são exibidos quando não há uma lista explícita de horários.
+
+Hoje, `companies.reservation_duration` é usado tanto para gerar horários no fallback quanto como `reservations.duration_minutes` na criação pública. Isso gera risco operacional: se a empresa configura `60` para exibir horários de hora em hora, mas a mesa fica ocupada por `120` minutos, o sistema pode liberar mesa/capacidade cedo demais.
+
+Decisão:
+
+- `companies.reservation_duration` passa a significar somente duração padrão da reserva.
+- criar `companies.reservation_slot_interval_minutes` para controlar o intervalo da grade pública padrão.
+- no backfill, `reservation_slot_interval_minutes` deve receber o valor atual de `reservation_duration` para preservar o comportamento existente.
+- regras com horários explícitos continuam persistindo a lista final de horários; o intervalo do gerador é uma conveniência da UI, não a fonte de verdade.
+- regras podem sobrescrever a duração padrão da empresa, e cada horário pode sobrescrever a duração da regra.
+
+Exemplo seguro:
+
+```text
+Intervalo da grade: 60 minutos
+Duração da reserva: 120 minutos
+Horários exibidos: 18:00, 19:00, 20:00
+
+Reserva 18:00 ocupa mesa/capacidade até 20:00.
+O horário 19:00 só aparece como disponível se ainda houver mesa/capacidade livre considerando essa sobreposição.
+```
+
 ### Estados e publicação
 
 Uma regra possui duas dimensões distintas:
@@ -167,6 +195,7 @@ bloqueio total
 |---|---|---|
 | `availability_mode` | text NOT NULL DEFAULT `'tables'` | CHECK IN (`'tables'`, `'capacity'`). |
 | `publish_at` | timestamptz NULL | `NULL` com `enabled = true` significa publicação imediata. |
+| `default_duration_minutes` | integer NULL | Duração padrão das reservas criadas pela regra. `NULL` herda `companies.reservation_duration`. |
 
 As colunas atuais permanecem:
 
@@ -183,6 +212,7 @@ As colunas atuais permanecem:
 
 | Coluna | Tipo | Regra |
 |---|---|---|
+| `duration_minutes` | integer NULL | Duração das reservas iniciadas neste horário. `NULL` herda `reservation_schedule_rules.default_duration_minutes` e depois `companies.reservation_duration`. |
 | `max_guests_per_slot` | integer NULL | Obrigatório para cada horário quando a regra usa `capacity`. |
 
 As colunas atuais permanecem:
@@ -200,6 +230,24 @@ As colunas atuais permanecem:
 | `created_in_mode` | text NULL | CHECK IN (`'tables'`, `'capacity'`). `NULL` identifica histórico anterior à funcionalidade. |
 
 `reservations.table_id` já aceita `NULL`. Nenhuma alteração estrutural adicional é necessária nessa coluna.
+
+### Alterações em `companies`
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `reservation_slot_interval_minutes` | integer NOT NULL DEFAULT 30 | Intervalo da grade pública padrão quando não há regra aplicável. |
+
+Backfill:
+
+```sql
+UPDATE public.companies
+SET reservation_slot_interval_minutes = COALESCE(reservation_slot_interval_minutes, reservation_duration, 30);
+```
+
+Depois da migration:
+
+- `reservation_duration` controla ocupação;
+- `reservation_slot_interval_minutes` controla geração de horários padrão.
 
 ### Estruturas descartadas do plano anterior
 
@@ -239,10 +287,11 @@ Preservar o comportamento atual:
 2. Resolver o mapa mensal ativo.
 3. Buscar mesas compatíveis com `party_size`.
 4. Remover mesas ocupadas por reservas sobrepostas.
-5. Aplicar `companies.max_guests_per_slot`.
-6. Aplicar `max_party_size_per_reservation`.
-7. Aplicar `max_reservations_per_slot`.
-8. Aplicar bloqueios.
+5. Usar a duração resolvida do horário para calcular sobreposição.
+6. Aplicar `companies.max_guests_per_slot`.
+7. Aplicar `max_party_size_per_reservation`.
+8. Aplicar `max_reservations_per_slot`.
+9. Aplicar bloqueios.
 
 A criação pública continua exigindo `table_id`.
 
@@ -251,12 +300,13 @@ A criação pública continua exigindo `table_id`.
 Para cada horário permitido:
 
 1. Não consultar mesas para decidir disponibilidade.
-2. Somar `party_size` das reservas que ocupam capacidade e cujo intervalo sobrepõe o intervalo da nova reserva.
-3. Contar reservas iniciadas exatamente no horário.
-4. Aplicar `max_guests_per_slot`.
-5. Aplicar `max_reservations_per_slot`, quando preenchido.
-6. Aplicar `max_party_size_per_reservation`, quando preenchido.
-7. Aplicar bloqueios.
+2. Resolver a duração efetiva do horário.
+3. Somar `party_size` das reservas que ocupam capacidade e cujo intervalo sobrepõe o intervalo da nova reserva.
+4. Contar reservas iniciadas exatamente no horário.
+5. Aplicar `max_guests_per_slot`.
+6. Aplicar `max_reservations_per_slot`, quando preenchido.
+7. Aplicar `max_party_size_per_reservation`, quando preenchido.
+8. Aplicar bloqueios.
 
 A criação pública aceita `table_id = NULL`.
 
@@ -314,6 +364,7 @@ Manter:
 - prioridade;
 - horários explícitos;
 - gerador de horários por intervalo;
+- duração padrão da reserva nesta regra;
 - máximo padrão de pessoas por reserva;
 - ativação e arquivamento.
 
@@ -329,17 +380,19 @@ Adicionar:
 
 Modo `tables`:
 
-| Horário | Máx. pessoas por reserva | Máx. reservas |
-|---|---|---|
-| 18:00 | Herda o padrão | Sem limite |
+| Horário | Duração | Máx. pessoas por reserva | Máx. reservas |
+|---|---|---|---|
+| 18:00 | Herda o padrão | Herda o padrão | Sem limite |
 
 Modo `capacity`:
 
-| Horário | Limite total de pessoas | Máx. pessoas por reserva | Máx. reservas |
-|---|---|---|---|
-| 18:00 | 200 | 2 | 100 |
+| Horário | Duração | Limite total de pessoas | Máx. pessoas por reserva | Máx. reservas |
+|---|---|---|---|---|
+| 18:00 | 120 min | 200 | 2 | 100 |
 
 Adicionar ação para replicar os valores de um horário aos demais horários da regra.
+
+O intervalo configurado no gerador cria ou recria a lista de horários. Depois de gerada, a disponibilidade usa os horários explícitos e a duração configurada, não o intervalo do gerador.
 
 ## Modal público
 
@@ -411,9 +464,9 @@ Uma trava obrigatória para operações internas pode ser adicionada depois, com
 | RPC | Alteração |
 |---|---|
 | `get_public_reservation_schedule(company_id, date)` | Ignorar regras não publicadas e retornar `availability_mode`. |
-| `get_public_reservation_availability(company_id, date, party_size)` | Ramificar cálculo entre mesas e quantidade. |
-| `create_public_reservation(reservation, status)` | Exigir mesa somente em `tables`; validar quantidade e aceitar `table_id = NULL` em `capacity`. |
-| `upsert_reservation_schedule_rule(...)` | Persistir `availability_mode`, `publish_at` e `max_guests_per_slot`. |
+| `get_public_reservation_availability(company_id, date, party_size)` | Ramificar cálculo entre mesas e quantidade e usar duração efetiva por horário. |
+| `create_public_reservation(reservation, status)` | Exigir mesa somente em `tables`; validar quantidade; aceitar `table_id = NULL` em `capacity`; gravar `duration_minutes` resolvido. |
+| `upsert_reservation_schedule_rule(...)` | Persistir `availability_mode`, `publish_at`, `default_duration_minutes`, `duration_minutes` por horário e `max_guests_per_slot`. |
 
 ### Preservar
 
@@ -445,6 +498,7 @@ Retornar mensagens específicas:
 ### Fase 1 - Migration e tipos
 
 - Adicionar colunas nas tabelas existentes.
+- Separar `reservation_duration` de `reservation_slot_interval_minutes`.
 - Migrar regras atuais para `availability_mode = 'tables'`.
 - Atualizar tipos gerados do Supabase.
 - Atualizar tipos de hooks e funções puras.
@@ -462,6 +516,7 @@ Retornar mensagens específicas:
 - Mover a tela atual de regras para a aba dedicada.
 - Adicionar seletor de modo.
 - Adicionar publicação imediata, rascunho e agendamento.
+- Adicionar duração padrão por regra e duração opcional por horário.
 - Adicionar limite total de pessoas em horários de `capacity`.
 - Adicionar badges e ação de replicar valores.
 
@@ -495,6 +550,7 @@ Retornar mensagens específicas:
 | Regra `tables` com máximo de reservas | Fecha ao atingir o limite ou ao acabar mesas, o que ocorrer primeiro. |
 | Regra `capacity` com 200 pessoas e 100 reservas | Ignora o mapa e fecha no primeiro limite atingido. |
 | Regra `capacity` com horários sobrepostos | Considera ocupação pela duração. |
+| Duração 120 min com grade 60 min | Reserva das 18:00 ocupa mesa/capacidade também às 19:00. |
 | Regra desativada | Não altera disponibilidade. |
 | Regra agendada para o futuro | Não altera disponibilidade antes de `publish_at`. |
 | Regra publicada para data futura | Altera imediatamente consultas para essa data. |
@@ -508,6 +564,7 @@ Retornar mensagens específicas:
 | Risco | Mitigação |
 |---|---|
 | Regra existente mudar de comportamento | Default e migration explícitos para `tables`. |
+| Campo antigo continuar ambíguo | Separar duração de reserva e intervalo da grade, com backfill preservando o valor atual. |
 | Venda acima da capacidade em horários adjacentes | Contar sobreposição por duração e usar lock por empresa/data. |
 | Modal continuar exigindo mesa em `capacity` | Separar claramente os caminhos e cobrir com teste de integração. |
 | Pré-pagamento segurar vaga após expiração | Reusar expiração existente e testar liberação automática. |
@@ -519,7 +576,6 @@ Retornar mensagens específicas:
 - modo global padrão por quantidade sem regra;
 - ambientes independentes com capacidade própria;
 - capacidade mínima por reserva;
-- duração customizada por regra ou horário;
 - atribuição automática de mesa para reservas por quantidade;
 - bloqueio rígido de operações internas acima da capacidade.
 

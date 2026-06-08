@@ -127,6 +127,40 @@ function fromDateTimeLocalValue(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
+function toDateValue(value: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return adjusted.toISOString().slice(0, 10);
+}
+
+function isLocalMidnight(value: string | null) {
+  if (!value) return false;
+  const date = new Date(value);
+  return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0 && date.getMilliseconds() === 0;
+}
+
+function toInclusiveDateValueFromExclusiveEnd(value: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (isLocalMidnight(value)) {
+    date.setDate(date.getDate() - 1);
+  }
+  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return adjusted.toISOString().slice(0, 10);
+}
+
+function fromDateValueStart(value: string) {
+  return value ? new Date(value + 'T00:00:00').toISOString() : null;
+}
+
+function fromDateValueEnd(value: string) {
+  if (!value) return null;
+  const d = new Date(value + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  return d.toISOString();
+}
+
 function slugifySectionName(value: string) {
   return value
     .normalize('NFD')
@@ -173,6 +207,11 @@ function formatMapPeriod(tableMap: TableMapRow | null) {
   if (tableMap.is_default) return 'Sempre ativo como fallback da unidade';
   if (!tableMap.is_enabled && !tableMap.active_from && !tableMap.active_to) return 'Rascunho sem data';
   if (tableMap.active_from && tableMap.active_to) {
+    if (isLocalMidnight(tableMap.active_from) && isLocalMidnight(tableMap.active_to)) {
+      const inclusiveEnd = new Date(tableMap.active_to);
+      inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+      return `${format(new Date(tableMap.active_from), 'dd/MM/yyyy')} até ${format(inclusiveEnd, 'dd/MM/yyyy')}`;
+    }
     return `${format(new Date(tableMap.active_from), 'dd/MM/yyyy HH:mm')} até ${format(new Date(tableMap.active_to), 'dd/MM/yyyy HH:mm')}`;
   }
   if (tableMap.active_from) {
@@ -291,6 +330,8 @@ export default function TableMap() {
     duplicateCurrentTables: true,
   });
   const [sectionForm, setSectionForm] = useState({ name: '' });
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({ quantity: '5', capacity: '2', section: 'salao' });
 
   const { data: tableMaps = [], isLoading: mapsLoading } = useQuery({
     queryKey: ['table-maps', companyId],
@@ -466,6 +507,52 @@ export default function TableMap() {
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
 
+  const bulkCreateMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedMapId) throw new Error('Selecione um mapa antes de cadastrar mesas.');
+
+      const qty = Number(bulkForm.quantity);
+      const cap = Number(bulkForm.capacity);
+
+      if (!Number.isInteger(qty) || qty < 1 || qty > 100) throw new Error('Informe uma quantidade inteira entre 1 e 100.');
+      if (!Number.isInteger(cap) || cap < 1 || cap > 50) throw new Error('Capacidade deve ser um numero inteiro entre 1 e 50.');
+
+      const existingNumbers = new Set(tables.map((table) => table.number));
+      const numbersToCreate: number[] = [];
+      let candidate = 1;
+      while (numbersToCreate.length < qty) {
+        if (!existingNumbers.has(candidate)) numbersToCreate.push(candidate);
+        candidate++;
+        if (candidate > 9999) break;
+      }
+      if (numbersToCreate.length !== qty) {
+        throw new Error('Nao foi possivel encontrar numeracao livre para todas as mesas solicitadas.');
+      }
+
+      const section = normalizeSection(bulkForm.section, tableSections);
+      const payload = numbersToCreate.map((num) => ({
+        company_id: companyId,
+        table_map_id: selectedMapId,
+        number: num,
+        capacity: cap,
+        section,
+        status: 'available',
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase
+        .from('restaurant_tables' as any)
+        .insert(payload as any);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['restaurant-tables', companyId] });
+      toast.success('Mesas criadas com sucesso!');
+      setBulkDialogOpen(false);
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
   const saveSectionMutation = useMutation({
     mutationFn: async () => {
       const name = sectionForm.name.trim();
@@ -572,11 +659,11 @@ export default function TableMap() {
             activeTo = null;
             break;
           case 'period':
-            activeFrom = fromDateTimeLocalValue(mapForm.activeFrom);
-            activeTo = fromDateTimeLocalValue(mapForm.activeTo);
+            activeFrom = fromDateValueStart(mapForm.activeFrom);
+            activeTo = fromDateValueEnd(mapForm.activeTo);
             if (!activeFrom || !activeTo) throw new Error('Escolha o início e o fim do período.');
-            if (new Date(activeFrom).getTime() >= new Date(activeTo).getTime()) {
-              throw new Error('O período final precisa ser maior que o inicial.');
+            if (new Date(activeTo).getTime() <= new Date(activeFrom).getTime()) {
+              throw new Error('A data final não pode ser anterior à inicial.');
             }
             isEnabled = true;
             break;
@@ -803,6 +890,29 @@ export default function TableMap() {
     setModalOpen(true);
   };
 
+  const openBulkCreate = () => {
+    if (!selectedMapId) {
+      toast.error('Selecione ou crie um mapa antes de cadastrar mesas.');
+      return;
+    }
+    setBulkForm({ quantity: '5', capacity: '2', section: defaultSectionCode });
+    setBulkDialogOpen(true);
+  };
+
+  const bulkPreview = (() => {
+    const qty = Number(bulkForm.quantity);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 100) return [];
+    const existingNumbers = new Set(tables.map((table) => table.number));
+    const result: number[] = [];
+    let candidate = 1;
+    while (result.length < qty) {
+      if (!existingNumbers.has(candidate)) result.push(candidate);
+      candidate++;
+      if (candidate > 9999) break;
+    }
+    return result;
+  })();
+
   const openEdit = (tableId: string) => {
     const table = tables.find((item) => item.id === tableId);
     if (!table) return;
@@ -836,12 +946,17 @@ export default function TableMap() {
   const openEditMap = () => {
     if (!selectedMap) return;
 
+    const activationMode = deriveActivationMode(selectedMap);
     setEditingMap(selectedMap);
     setMapForm({
       name: selectedMap.name,
-      activationMode: deriveActivationMode(selectedMap),
-      activeFrom: toDateTimeLocalValue(selectedMap.active_from),
-      activeTo: toDateTimeLocalValue(selectedMap.active_to),
+      activationMode,
+      activeFrom: activationMode === 'period'
+        ? toDateValue(selectedMap.active_from)
+        : toDateTimeLocalValue(selectedMap.active_from),
+      activeTo: activationMode === 'period'
+        ? toInclusiveDateValueFromExclusiveEnd(selectedMap.active_to)
+        : toDateValue(selectedMap.active_to),
       duplicateCurrentTables: false,
     });
     setMapDialogOpen(true);
@@ -910,6 +1025,10 @@ export default function TableMap() {
           <Button variant="outline" className="gap-2" onClick={openCreateSection}>
             <Layers3 className="h-4 w-4" />
             Nova seção
+          </Button>
+          <Button variant="outline" onClick={openBulkCreate} className="gap-2" disabled={!selectedMapId}>
+            <Layers3 className="h-4 w-4" />
+            Criar mesas em lote
           </Button>
           <Button onClick={openCreate} className="gap-2" disabled={!selectedMapId}>
             <Plus className="h-4 w-4" />
@@ -1366,7 +1485,7 @@ export default function TableMap() {
                     <div>
                       <Label>Inicio</Label>
                       <Input
-                        type="datetime-local"
+                        type={mapForm.activationMode === 'period' ? 'date' : 'datetime-local'}
                         value={mapForm.activeFrom}
                         onChange={(event) => setMapForm((current) => ({ ...current, activeFrom: event.target.value }))}
                       />
@@ -1376,7 +1495,7 @@ export default function TableMap() {
                       <div>
                         <Label>Fim</Label>
                         <Input
-                          type="datetime-local"
+                          type="date"
                           value={mapForm.activeTo}
                           onChange={(event) => setMapForm((current) => ({ ...current, activeTo: event.target.value }))}
                         />
@@ -1444,6 +1563,86 @@ export default function TableMap() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Criar mesas em lote</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              bulkCreateMutation.mutate();
+            }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="bulk-quantity">Quantidade de mesas</Label>
+                <Input
+                  id="bulk-quantity"
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={bulkForm.quantity}
+                  onChange={(e) => setBulkForm((current) => ({ ...current, quantity: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="bulk-capacity">Capacidade de cada mesa</Label>
+                <Input
+                  id="bulk-capacity"
+                  type="number"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={bulkForm.capacity}
+                  onChange={(e) => setBulkForm((current) => ({ ...current, capacity: e.target.value }))}
+                  required
+                />
+              </div>
+            </div>
+
+            {displaySections.length > 0 && (
+              <div className="space-y-1">
+                <Label>Seção</Label>
+                <Select
+                  value={bulkForm.section}
+                  onValueChange={(value) => setBulkForm((current) => ({ ...current, section: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {displaySections.map((section) => (
+                      <SelectItem key={section.code} value={section.code}>
+                        {section.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {bulkPreview.length > 0 && (
+              <div className="rounded-md border border-[rgba(0,0,0,0.08)] bg-muted/15 px-3 py-2 text-sm text-muted-foreground">
+                Serão criadas:{' '}
+                <span className="font-medium text-foreground">
+                  {bulkPreview.length <= 10
+                    ? bulkPreview.map((n) => `Mesa ${n}`).join(', ')
+                    : `Mesa ${bulkPreview[0]} até Mesa ${bulkPreview[bulkPreview.length - 1]}`}
+                </span>
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" disabled={bulkCreateMutation.isPending || bulkPreview.length === 0}>
+              {bulkCreateMutation.isPending ? 'Criando...' : `Criar ${bulkPreview.length} mesa${bulkPreview.length !== 1 ? 's' : ''}`}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleteMapConfirmOpen} onOpenChange={setDeleteMapConfirmOpen}>
         <AlertDialogContent>

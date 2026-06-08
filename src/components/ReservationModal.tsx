@@ -1185,7 +1185,7 @@ export default function ReservationModal({
 
   const getSlotSignalLabel = (slot: SlotAvailability | undefined) => {
     if (!slot || !slot.isAvailable) return null;
-    if (getSlotRemainingCapacity(slot) <= 2) return 'Limitado';
+    if (getSlotRemainingCapacity(slot) <= 2) return 'Esgotando';
     return null;
   };
 
@@ -1595,7 +1595,7 @@ export default function ReservationModal({
 
             {selectedSlotIsLow && (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900">
-                Esse horário está com disponibilidade limitada. Continue para garantir a reserva.
+                Poucas vagas restantes para este horário. Confirme agora para garantir sua mesa.
               </p>
             )}
 
