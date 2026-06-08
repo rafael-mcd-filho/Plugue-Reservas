@@ -764,7 +764,7 @@ export default function Dashboard() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-stretch sm:gap-2">
-                {/* Reservas agendadas */}
+                {/* Reservas */}
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
                   <div className="shrink-0 rounded-md bg-muted p-2.5 text-primary">
                     <CalendarCheck className="h-5 w-5" />
@@ -775,14 +775,14 @@ export default function Dashboard() {
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.scheduledReservations}
-                        metricLabel="Reservas agendadas"
+                        metricLabel="Reservas"
                         previous={prevTotals.scheduledReservations}
                         valuePlural="reservas agendadas"
                         valueSingular="reserva agendada"
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Reservas agendadas
+                      Reservas
                     </p>
                   </div>
                 </div>
@@ -814,7 +814,7 @@ export default function Dashboard() {
 
                 <div className="hidden items-center px-1 text-lg font-semibold text-muted-foreground sm:flex">=</div>
 
-                {/* Atendimentos totais */}
+                {/* Atendimentos */}
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border-2 border-primary/30 bg-primary/5 px-3 py-3 sm:flex-1">
                   <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
                     <CalendarIcon className="h-5 w-5" />
@@ -825,19 +825,19 @@ export default function Dashboard() {
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.reservations}
-                        metricLabel="Atendimentos totais"
+                        metricLabel="Atendimentos"
                         previous={prevTotals.reservations}
                         valuePlural="atendimentos"
                         valueSingular="atendimento"
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Atendimentos totais
+                      Atendimentos
                     </p>
                   </div>
                 </div>
 
-                {/* Total pessoas */}
+                {/* Pessoas */}
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 sm:flex-1">
                   <div className="shrink-0 rounded-md bg-muted p-2.5 text-info">
                     <Users className="h-5 w-5" />
@@ -848,14 +848,14 @@ export default function Dashboard() {
                       <VariationBadge
                         {...comparisonBadgeContext}
                         current={totals.totalGuests}
-                        metricLabel="Total pessoas"
+                        metricLabel="Pessoas"
                         previous={prevTotals.totalGuests}
                         valuePlural="pessoas"
                         valueSingular="pessoa"
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Total pessoas
+                      Pessoas
                     </p>
                   </div>
                 </div>
