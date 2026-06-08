@@ -74,6 +74,11 @@ interface CompanyPublicNoticeSettings {
   active_until: string | null;
 }
 
+interface CompanyNpsConfigSettings {
+  company_id: string;
+  google_review_url: string | null;
+}
+
 const DEFAULT_HOURS: OpeningHour[] = [
   { day: 'Seg', open: '17:30', close: '22:30' },
   { day: 'Ter', open: '17:30', close: '22:30' },
@@ -113,6 +118,9 @@ const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-w
 const settingsFieldClassName = 'h-10 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsTextAreaClassName = 'rounded-xl border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
+const SHOW_LEGACY_RESERVATION_CAPACITY_SETTINGS = false;
+const SHOW_PUBLIC_WAITLIST_DIRECT_LINK_SETTINGS = false;
+const SHOW_PUBLIC_NOTICE_SETTINGS_IN_PUBLIC_TAB = false;
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -175,6 +183,19 @@ function fromDateTimeLocalValue(value: string) {
   if (Number.isNaN(date.getTime())) return null;
 
   return date.toISOString();
+}
+
+function normalizeOptionalHttpUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export default function CompanySettings() {
@@ -252,6 +273,25 @@ export default function CompanySettings() {
     enabled: !!companyId,
   });
 
+  const { data: npsConfig } = useQuery({
+    queryKey: ['company-nps-config', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_nps_configs' as any)
+        .select('company_id, google_review_url')
+        .eq('company_id', companyId!)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('NPS config not available yet:', error);
+        return null;
+      }
+
+      return data as CompanyNpsConfigSettings | null;
+    },
+    enabled: !!companyId,
+  });
+
   const [hours, setHours] = useState<OpeningHour[]>(DEFAULT_HOURS);
   const [payments, setPayments] = useState<Record<string, boolean>>(DEFAULT_PAYMENTS);
   const [description, setDescription] = useState('');
@@ -269,6 +309,7 @@ export default function CompanySettings() {
   const [publicReservationExitPromptSecondaryTextSize, setPublicReservationExitPromptSecondaryTextSize] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE);
   const [publicWaitlistEnabled, setPublicWaitlistEnabled] = useState(false);
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
+  const [googleReviewUrl, setGoogleReviewUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
@@ -285,6 +326,7 @@ export default function CompanySettings() {
 
   useEffect(() => {
     setInitialized(false);
+    setGoogleReviewUrl('');
   }, [companyId]);
 
   useEffect(() => {
@@ -348,6 +390,11 @@ export default function CompanySettings() {
     setNoticeActiveUntil(toDateTimeLocalValue(publicNotice.active_until));
   }, [publicNotice]);
 
+  useEffect(() => {
+    if (npsConfig === undefined) return;
+    setGoogleReviewUrl(npsConfig?.google_review_url || '');
+  }, [npsConfig]);
+
   const publicCustomizationLocked = featureFlags
     ? !featureFlags.features.custom_public_page
     : false;
@@ -357,9 +404,14 @@ export default function CompanySettings() {
       if (!company) throw new Error('Empresa não encontrada');
 
       const normalizedMapsEmbedUrl = normalizeGoogleMapsEmbedInput(googleMapsUrl);
+      const normalizedGoogleReviewUrl = normalizeOptionalHttpUrl(googleReviewUrl);
 
       if (googleMapsUrl.trim() && !normalizedMapsEmbedUrl) {
         throw new Error('Use um link de incorporação válido do Google Maps.');
+      }
+
+      if (googleReviewUrl.trim() && !normalizedGoogleReviewUrl) {
+        throw new Error('Use um link valido para avaliacao no Google.');
       }
 
       const phoneError = getPhoneValidationMessage(phone, 'um telefone');
@@ -509,6 +561,18 @@ export default function CompanySettings() {
       if (error) throw error;
       if (!updatedCompany) throw new Error('Sem permissão para salvar as configurações desta unidade.');
 
+      const { error: npsConfigError } = await supabase
+        .from('company_nps_configs' as any)
+        .upsert({
+          company_id: companyId,
+          google_review_url: normalizedGoogleReviewUrl,
+          updated_at: new Date().toISOString(),
+        } as any, { onConflict: 'company_id' });
+
+      if (npsConfigError) {
+        throw npsConfigError;
+      }
+
       if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
         const { error: noticeError } = await supabase
           .from('company_public_notices' as any)
@@ -529,6 +593,7 @@ export default function CompanySettings() {
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
+      qc.invalidateQueries({ queryKey: ['company-nps-config', companyId] });
       toast.success('Configurações salvas!');
     },
     onError: (error: any) => {
@@ -892,7 +957,7 @@ export default function CompanySettings() {
 
           <BlockedDatesTab companyId={companyId} />
 
-          {false && (
+          {SHOW_LEGACY_RESERVATION_CAPACITY_SETTINGS && (
             <div className="grid gap-4 xl:grid-cols-2">
             <Card className={settingsCardClassName}>
               <CardHeader className="space-y-0 pb-2">
@@ -1471,7 +1536,7 @@ export default function CompanySettings() {
                 )}
               </div>
 
-              {false && (
+              {SHOW_PUBLIC_WAITLIST_DIRECT_LINK_SETTINGS && (
                 <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
                   <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
                     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -1509,7 +1574,7 @@ export default function CompanySettings() {
                 </div>
               )}
 
-              {false && (
+              {SHOW_PUBLIC_NOTICE_SETTINGS_IN_PUBLIC_TAB && (
                 <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
                   <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
                     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -1881,6 +1946,25 @@ export default function CompanySettings() {
                 <p className="text-xs text-muted-foreground">
                   No Google Maps: "Compartilhar" -&gt; "Incorporar mapa" -&gt; copie o valor do atributo{' '}
                   <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">src</span> do iframe gerado.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="company-settings-google-review">Link de avaliacao no Google</Label>
+                <Input
+                  id="company-settings-google-review"
+                  name="google_review_url"
+                  type="url"
+                  value={googleReviewUrl}
+                  onChange={(event) => setGoogleReviewUrl(event.target.value)}
+                  placeholder="https://g.page/r/.../review"
+                  className={settingsFieldClassName}
+                  autoComplete="url"
+                  inputMode="url"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Usado na pesquisa de satisfacao para convidar clientes com nota 9 ou 10 a avaliar a empresa no Google.
                 </p>
               </div>
 

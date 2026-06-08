@@ -21,6 +21,16 @@ export interface CompanyFeatureOverrideRow {
 
 export type CompanyFeatureState = Record<CompanyFeatureKey, boolean>;
 
+async function setCompanyNpsEnabled(companyId: string, enabled: boolean) {
+  const { data, error } = await (supabase as any).rpc('set_company_nps_enabled', {
+    _company_id: companyId,
+    _enabled: enabled,
+  });
+
+  if (error) throw error;
+  return (data?.[0] ?? null) as CompanyFeatureOverrideRow | null;
+}
+
 export function useCompanyFeatureFlags(companyId?: string) {
   return useQuery({
     queryKey: ['company-feature-flags', companyId],
@@ -97,6 +107,12 @@ export function useUpsertCompanyFeatureOverride() {
       featureKey: CompanyFeatureKey;
       enabled: boolean;
     }) => {
+      if (payload.featureKey === 'nps_surveys') {
+        const data = await setCompanyNpsEnabled(payload.companyId, payload.enabled);
+        if (!data) throw new Error('Feature NPS nao retornou confirmacao.');
+        return data;
+      }
+
       const { data, error } = await supabase
         .from('company_feature_overrides' as any)
         .upsert({
@@ -132,6 +148,11 @@ export function useDeleteCompanyFeatureOverride() {
       companyId: string;
       featureKey: CompanyFeatureKey;
     }) => {
+      if (payload.featureKey === 'nps_surveys') {
+        await setCompanyNpsEnabled(payload.companyId, false);
+        return;
+      }
+
       const { error } = await supabase
         .from('company_feature_overrides' as any)
         .delete()
@@ -145,7 +166,7 @@ export function useDeleteCompanyFeatureOverride() {
       queryClient.invalidateQueries({ queryKey: ['company-feature-overrides', variables.companyId] });
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       queryClient.invalidateQueries({ queryKey: ['company-public'] });
-      toast.success('Permissao voltou a seguir o plano.');
+      toast.success(variables.featureKey === 'nps_surveys' ? 'NPS desativado.' : 'Permissao voltou a seguir o plano.');
     },
     onError: (error: any) => {
       toast.error(`Erro ao remover override: ${error.message}`);
@@ -161,18 +182,24 @@ export function useSaveCompanyFeatures() {
       companyId: string;
       features: CompanyFeatureState;
     }) => {
-      const rows = COMPANY_FEATURE_DEFINITIONS.map((definition) => ({
-        company_id: payload.companyId,
-        feature_key: definition.key,
-        enabled: payload.features[definition.key] ?? false,
-        updated_at: new Date().toISOString(),
-      }));
+      const rows = COMPANY_FEATURE_DEFINITIONS
+        .filter((definition) => definition.key !== 'nps_surveys')
+        .map((definition) => ({
+          company_id: payload.companyId,
+          feature_key: definition.key,
+          enabled: payload.features[definition.key] ?? false,
+          updated_at: new Date().toISOString(),
+        }));
 
-      const { error } = await supabase
-        .from('company_feature_overrides' as any)
-        .upsert(rows as any[], { onConflict: 'company_id,feature_key' });
+      if (rows.length > 0) {
+        const { error } = await supabase
+          .from('company_feature_overrides' as any)
+          .upsert(rows as any[], { onConflict: 'company_id,feature_key' });
 
-      if (error) throw error;
+        if (error) throw error;
+      }
+
+      await setCompanyNpsEnabled(payload.companyId, payload.features.nps_surveys ?? false);
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['company-feature-flags', variables.companyId] });
