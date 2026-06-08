@@ -1546,7 +1546,7 @@ export default function ReservationModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2">
+                <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
                   {timeSlots.map(time => {
                     const status = getSlotStatus(time);
                     const avail = slotAvailability[time];
@@ -1573,7 +1573,7 @@ export default function ReservationModal({
                       <button key={time} onClick={() => { if (!isFull) handleTimeSelect(time); }}
                         disabled={isFull}
                         className={cn(
-                          'relative h-10 rounded-md border px-2 py-0.5 text-xs transition-[border-color,background-color,color] duration-150 sm:h-11 sm:text-[13px]',
+                          'relative h-10 w-[calc(33.333%-4px)] rounded-md border px-2 py-0.5 text-xs transition-[border-color,background-color,color] duration-150 sm:h-11 sm:w-[calc(25%-6px)] sm:text-[13px]',
                           isFull && 'opacity-40 cursor-not-allowed bg-muted',
                           selectedTime === time ? 'border-primary bg-primary/10 text-primary font-semibold' : !isFull ? 'border-border hover:border-primary/50 text-foreground' : 'border-border',
                           status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
