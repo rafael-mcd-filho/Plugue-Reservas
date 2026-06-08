@@ -5,7 +5,8 @@ export type CompanyFeatureKey =
   | 'advanced_reports'
   | 'active_communication'
   | 'flow_protection'
-  | 'reservation_prepayment';
+  | 'reservation_prepayment'
+  | 'nps_surveys';
 
 export interface CompanyFeatureDefinition {
   key: CompanyFeatureKey;
@@ -57,6 +58,12 @@ export const COMPANY_FEATURE_DEFINITIONS: CompanyFeatureDefinition[] = [
     shortLabel: 'Pagamentos',
     description: 'Habilita regras de sinal por Pix e cartão via Asaas antes de confirmar reservas.',
   },
+  {
+    key: 'nps_surveys',
+    label: 'Avaliações pós-visita',
+    shortLabel: 'Avaliações',
+    description: 'Habilita coleta de NPS e satisfação após cada check-in.',
+  },
 ];
 
 const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>> = {
@@ -67,6 +74,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     active_communication: false,
     flow_protection: false,
     reservation_prepayment: false,
+    nps_surveys: false,
   },
   pro: {
     whatsapp_integration: true,
@@ -75,6 +83,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     active_communication: true,
     flow_protection: true,
     reservation_prepayment: false,
+    nps_surveys: false,
   },
   enterprise: {
     whatsapp_integration: true,
@@ -83,6 +92,7 @@ const PLAN_DEFAULTS: Record<CompanyPlanTier, Record<CompanyFeatureKey, boolean>>
     active_communication: true,
     flow_protection: true,
     reservation_prepayment: false,
+    nps_surveys: false,
   },
 };
 

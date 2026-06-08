@@ -35,6 +35,8 @@ const WaitlistTracking = lazyWithReload(() => import("@/pages/WaitlistTracking")
 const ReservationTracking = lazyWithReload(() => import("@/pages/ReservationTracking"));
 const PublicReservationPayment = lazyWithReload(() => import("@/pages/PublicReservationPayment"));
 const AffiliateCompanyPublicPage = lazyWithReload(() => import("@/pages/AffiliateCompanyPublicPage"));
+const ReservationReview = lazyWithReload(() => import("@/pages/ReservationReview"));
+const CompanyNpsReports = lazyWithReload(() => import("@/pages/CompanyNpsReports"));
 const Profile = lazyWithReload(() => import("@/pages/Profile"));
 const Leads = lazyWithReload(() => import("@/pages/Leads"));
 const Affiliates = lazyWithReload(() => import("@/pages/Affiliates"));
@@ -439,6 +441,14 @@ const App = () => (
                 }
               />
               <Route
+                path="/:slug/avaliacao/:token"
+                element={
+                  <SuspenseRoute fallback={<PublicPageSkeleton />}>
+                    <ReservationReview />
+                  </SuspenseRoute>
+                }
+              />
+              <Route
                 path="/pagamento/:paymentToken"
                 element={
                   <SuspenseRoute fallback={<PublicPageSkeleton />}>
@@ -571,6 +581,18 @@ const App = () => (
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
                     <Profile />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/avaliacoes"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="nps_view"
+                    requiredCompanyFeature="nps_surveys"
+                  >
+                    <CompanyNpsReports />
                   </CompanyAdminRoute>
                 }
               />

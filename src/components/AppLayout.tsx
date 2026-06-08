@@ -16,6 +16,7 @@ import {
   Link2,
   LogOut,
   Menu,
+  MessageSquareQuote,
   Pin,
   PinOff,
   type LucideIcon,
@@ -171,6 +172,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'superadmin'],
           requiredPermission: 'settings_view',
           requiredFeature: 'reservation_prepayment',
+        },
+        {
+          label: 'Avaliações',
+          description: 'NPS e satisfação pós-visita',
+          icon: MessageSquareQuote,
+          path: `/${slug}/admin/avaliacoes`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'nps_view',
+          requiredFeature: 'nps_surveys',
         },
         {
           label: 'Usu\u00E1rios',

@@ -164,6 +164,7 @@ export function buildReservationParameters(
   type: string,
   reservation: Record<string, unknown>,
   trackingUrl: string | null = null,
+  reviewUrl: string | null = null,
 ): Record<string, string> {
   const nome = String(reservation.guest_name ?? "");
   const pessoas = String(reservation.party_size ?? 1);
@@ -181,7 +182,7 @@ export function buildReservationParameters(
     case "reminder_1h":
       return { nome, hora, pessoas };
     case "post_visit":
-      return { nome, data };
+      return { nome, data, link_avaliacao: reviewUrl ?? "" };
     case "no_show_message":
       return { nome, data, hora };
     default:

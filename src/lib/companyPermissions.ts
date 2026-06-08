@@ -11,6 +11,7 @@ export const COMPANY_PANEL_PERMISSIONS = [
   'tables_view',
   'waitlist_view',
   'automations_view',
+  'nps_view',
   'users_view',
   'leads_view',
   'affiliates_view',
@@ -86,6 +87,11 @@ export const COMPANY_PANEL_PERMISSION_METADATA: Record<
   automations_view: {
     label: 'Automações',
     description: 'Configuração de lembretes, campanhas e fluxos.',
+    operatorAssignable: false,
+  },
+  nps_view: {
+    label: 'Avaliações',
+    description: 'Relatórios de NPS e satisfação pós-visita.',
     operatorAssignable: false,
   },
   users_view: {

@@ -100,7 +100,11 @@ Configuração por empresa (mesmo espírito de `company_asaas_configs`).
 
 ## Geração do link (no check-in)
 
-Trigger `AFTER UPDATE ON reservations` quando o status entra em `checked_in`/`completed`:
+Trigger `AFTER INSERT OR UPDATE ON reservations` quando o status entra em `checked_in`/`completed`.
+
+> **Atenção:** reservas originadas da fila de espera (`source = 'waitlist'`) são criadas pela função
+> `seat_waitlist_entry` via **INSERT já com `status = 'checked_in'`** — não passam por UPDATE.
+> O trigger precisa cobrir INSERT também, caso contrário essas reservas nunca gerarão convite.
 
 ```
 Reserva muda para checked_in

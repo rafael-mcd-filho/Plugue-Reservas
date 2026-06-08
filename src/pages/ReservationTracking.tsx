@@ -1,7 +1,7 @@
 import { useEffect, useState, type SVGProps } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, ArrowRight, CheckCircle2, Clock3, CreditCard, Loader2, MapPin, Pencil, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Clock3, CreditCard, Loader2, MapPin, Pencil, Star, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -62,6 +62,8 @@ interface ReservationEntry {
   created_at: string;
   updated_at: string;
   public_tracking_code: string;
+  review_token: string | null;
+  review_status: 'pending' | 'submitted' | 'expired' | null;
 }
 
 interface CancelReservationResult {
@@ -324,6 +326,10 @@ export default function ReservationTracking() {
     normalizedStatus === 'cancelled'
     || normalizedStatus === 'no-show'
     || normalizedStatus === 'payment_expired';
+  const isCheckedIn = normalizedStatus === 'checked_in';
+  const hasReviewLink = isCheckedIn && !!entry.review_token && entry.review_status !== 'expired';
+  const reviewAlreadySubmitted = entry.review_status === 'submitted';
+  const reviewUrl = hasReviewLink ? `/${slug}/avaliacao/${entry.review_token}` : null;
   const lateToleranceMinutes = normalizeReservationLateToleranceMinutes(company.reservation_late_tolerance_minutes);
   const showLateToleranceNotice = normalizedStatus === 'confirmed' && lateToleranceMinutes > 0;
   const lateToleranceUnit = lateToleranceMinutes === 1 ? 'minuto' : 'minutos';
@@ -457,6 +463,28 @@ export default function ReservationTracking() {
                       Continuar pagamento
                     </Link>
                   </Button>
+                </div>
+              )}
+              {reviewUrl && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  {reviewAlreadySubmitted ? (
+                    <div className="flex items-center justify-center gap-2 text-sm text-success">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Avaliação enviada — obrigado!
+                    </div>
+                  ) : (
+                    <>
+                      <Button asChild className="h-11 w-full rounded-lg shadow-sm">
+                        <Link to={reviewUrl}>
+                          <Star className="mr-2 h-4 w-4" />
+                          Avaliar minha experiência
+                        </Link>
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        Anônimo · Leva menos de 1 minuto
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               {canStartNewReservation && (

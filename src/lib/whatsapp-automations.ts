@@ -56,8 +56,8 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     label: 'Mensagem Pós-Visita',
     description: 'Enfileirada às 08:00 do dia seguinte para reservas com check-in concluído, com cadência controlada',
     icon: Star,
-    defaultTemplate: 'Olá, {nome}! ✨ Obrigado pela visita. Esperamos que você tenha aproveitado a experiência. Volte sempre! 💛',
-    variables: ['nome', 'pessoas', 'data', 'hora', 'telefone'],
+    defaultTemplate: 'Olá, {nome}! ✨ Obrigado pela visita. Esperamos que você tenha aproveitado a experiência. Conta pra gente como foi — leva menos de 1 minuto! 👇\n{link_avaliacao}',
+    variables: ['nome', 'pessoas', 'data', 'hora', 'telefone', 'link_avaliacao'],
   },
   {
     type: 'birthday_message',
@@ -114,6 +114,7 @@ export interface ReservationWhatsAppTemplateContext {
   time?: string | null;
   partySize?: number | null;
   trackingUrl?: string | null;
+  reviewUrl?: string | null;
 }
 
 function formatReservationDate(value: string | null | undefined) {
@@ -136,6 +137,7 @@ export function renderReservationWhatsAppTemplate(
     .replace(/\{data\}/g, formatReservationDate(context.date))
     .replace(/\{hora\}/g, formatReservationTime(context.time))
     .replace(/\{link_acompanhamento\}/g, context.trackingUrl ?? '')
+    .replace(/\{link_avaliacao\}/g, context.reviewUrl ?? '')
     .replace(/\{telefone\}/g, context.guestPhone ?? '');
 }
 

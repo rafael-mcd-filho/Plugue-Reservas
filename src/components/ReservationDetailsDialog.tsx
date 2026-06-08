@@ -42,6 +42,8 @@ export interface ReservationDetails {
   created_at: string;
   updated_at: string;
   public_tracking_code: string;
+  review_token?: string | null;
+  review_status?: 'pending' | 'submitted' | 'expired' | null;
 }
 
 interface ReservationTimelineItem {
@@ -57,6 +59,11 @@ interface ReservationTimelineItem {
   actor_name: string | null;
   actor_role: string | null;
   actor_source: string | null;
+}
+
+interface ReservationReviewLink {
+  review_token: string | null;
+  review_status: 'pending' | 'submitted' | 'expired' | null;
 }
 
 interface ReservationLeadHistoryItem extends ReservationDetails {
@@ -293,6 +300,36 @@ export default function ReservationDetailsDialog({
     enabled: open && !!reservation?.id,
   });
 
+  const { data: reviewLink } = useQuery({
+    queryKey: ['reservation-review-link', reservation?.id, reservation?.status],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from('reservation_reviews')
+        .select('review_token, status, expires_at')
+        .eq('reservation_id', reservation!.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return null;
+
+      const reviewStatus = data.expires_at && new Date(data.expires_at).getTime() < Date.now()
+        ? 'expired'
+        : data.status;
+
+      return {
+        review_token: data.review_token ?? null,
+        review_status: reviewStatus ?? null,
+      } as ReservationReviewLink;
+    },
+    enabled: open && !!reservation?.id,
+  });
+
+  const effectiveReviewToken = reviewLink?.review_token ?? reservation?.review_token ?? null;
+  const effectiveReviewStatus = reviewLink?.review_status ?? reservation?.review_status ?? null;
+  const reviewUrl = effectiveReviewToken && effectiveReviewStatus !== 'expired'
+    ? `${window.location.origin}/${slug}/avaliacao/${effectiveReviewToken}`
+    : null;
+
   const {
     data: timeline = [],
     isLoading: timelineLoading,
@@ -359,6 +396,12 @@ export default function ReservationDetailsDialog({
     if (!trackingUrl) return;
     await navigator.clipboard.writeText(trackingUrl);
     toast.success('Link de acompanhamento copiado!');
+  };
+
+  const copyReviewLink = async () => {
+    if (!reviewUrl) return;
+    await navigator.clipboard.writeText(reviewUrl);
+    toast.success('Link de avaliação copiado!');
   };
 
   const openTrackingLink = () => {
@@ -856,6 +899,25 @@ export default function ReservationDetailsDialog({
                     Abrir acompanhamento
                   </Button>
                 </div>
+
+                {reviewUrl && (
+                  <div className="mt-3 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">Link de avaliação</p>
+                      {effectiveReviewStatus === 'submitted' ? (
+                        <p className="text-xs text-success">Avaliação já respondida pelo cliente.</p>
+                      ) : (
+                        <p className="break-all text-xs text-muted-foreground">{reviewUrl}</p>
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={copyReviewLink}>
+                        <Copy className="h-4 w-4" />
+                        Copiar link de avaliação
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
