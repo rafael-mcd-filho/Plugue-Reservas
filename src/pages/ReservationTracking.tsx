@@ -27,7 +27,11 @@ import {
 } from '@/components/ui/dialog';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
-import { checkReservationPayment, getReservationPaymentByTrackingCode } from '@/lib/asaas-prepayment-api';
+import {
+  checkReservationPayment,
+  getReservationPaymentByTrackingCode,
+  type ReservationPaymentFunctionResponse,
+} from '@/lib/asaas-prepayment-api';
 import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
 import { normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
@@ -140,6 +144,58 @@ function getStatusMessage(status: ReservationStatus | 'completed' | 'no_show') {
   return statusMessages[status === 'no_show' ? 'no-show' : status];
 }
 
+const receivedPaymentStatuses = new Set([
+  'paid',
+  'late_paid',
+  'refund_pending',
+  'refund_denied',
+  'partial_refunded',
+  'refunded',
+  'chargeback',
+]);
+
+function isReceivedReservationPayment(payment: ReservationPaymentFunctionResponse | null | undefined) {
+  return !!payment && (!!payment.paid_at || receivedPaymentStatuses.has(payment.status));
+}
+
+function isMissingReservationPaymentError(error: unknown) {
+  return error instanceof Error && /Pagamento (nao|não) encontrado/i.test(error.message);
+}
+
+function buildReservationCancellationWhatsappUrl({
+  companyName,
+  companyWhatsapp,
+  guestName,
+  date,
+  time,
+  partySize,
+  trackingCode,
+}: {
+  companyName: string;
+  companyWhatsapp: string | null;
+  guestName: string;
+  date: string;
+  time: string;
+  partySize: number;
+  trackingCode: string;
+}) {
+  const whatsappNumber = toBrazilWhatsAppNumber(companyWhatsapp);
+  if (!whatsappNumber) return null;
+
+  const formattedDate = format(new Date(`${date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR });
+  const formattedTime = time.slice(0, 5);
+  const message =
+    `Olá! Gostaria de cancelar minha reserva em ${companyName}.\n` +
+    `A reserva teve pré-pagamento realizado.\n` +
+    `Nome: ${guestName}\n` +
+    `Data: ${formattedDate}\n` +
+    `Horário: ${formattedTime}\n` +
+    `Pessoas: ${partySize}\n` +
+    `Código: ${trackingCode}`;
+
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+}
+
 export default function ReservationTracking() {
   const { slug, code } = useParams<{ slug: string; code: string }>();
   const queryClient = useQueryClient();
@@ -247,15 +303,23 @@ export default function ReservationTracking() {
 
   const isLoading = companyLoading || entryLoading;
   const isPendingPayment = entry?.status === 'pending_payment';
+  const shouldLoadReservationPayment = entry?.status === 'pending_payment' || entry?.status === 'confirmed';
 
   const paymentQuery = useQuery({
     queryKey: ['reservation-tracking-payment', code],
-    queryFn: () => getReservationPaymentByTrackingCode(code!),
-    enabled: Boolean(code) && isPendingPayment,
+    queryFn: async () => {
+      try {
+        return await getReservationPaymentByTrackingCode(code!);
+      } catch (error) {
+        if (isMissingReservationPaymentError(error)) return null;
+        throw error;
+      }
+    },
+    enabled: Boolean(code) && shouldLoadReservationPayment,
     retry: false,
-    refetchInterval: 10000,
+    refetchInterval: isPendingPayment ? 10000 : false,
   });
-  const activePayment = paymentQuery.data;
+  const activePayment = paymentQuery.data ?? null;
   const paymentIsActive =
     !!activePayment &&
     (activePayment.status === 'pending' || activePayment.status === 'awaiting_method') &&
@@ -333,6 +397,19 @@ export default function ReservationTracking() {
   const lateToleranceMinutes = normalizeReservationLateToleranceMinutes(company.reservation_late_tolerance_minutes);
   const showLateToleranceNotice = normalizedStatus === 'confirmed' && lateToleranceMinutes > 0;
   const lateToleranceUnit = lateToleranceMinutes === 1 ? 'minuto' : 'minutos';
+  const hasReceivedPayment = normalizedStatus === 'confirmed' && isReceivedReservationPayment(activePayment);
+  const isCheckingConfirmedPayment = normalizedStatus === 'confirmed' && paymentQuery.isLoading;
+  const paidCancellationWhatsappUrl = hasReceivedPayment
+    ? buildReservationCancellationWhatsappUrl({
+        companyName: company.name,
+        companyWhatsapp: company.whatsapp ?? null,
+        guestName: entry.guest_name,
+        date: entry.date,
+        time: entry.time,
+        partySize: entry.party_size,
+        trackingCode: entry.public_tracking_code,
+      })
+    : null;
 
   return (
     <>
@@ -437,18 +514,37 @@ export default function ReservationTracking() {
                     <Pencil className="mr-2 h-4 w-4" />
                     Alterar reserva
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full border-destructive/30 text-destructive hover:text-destructive"
-                    onClick={() => setCancelDialogOpen(true)}
-                    disabled={cancelReservation.isPending}
-                  >
-                    {cancelReservation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Cancelar reserva
-                  </Button>
+                  {hasReceivedPayment ? (
+                    paidCancellationWhatsappUrl ? (
+                      <Button asChild className="w-full bg-emerald-600 text-white hover:bg-emerald-700">
+                        <a href={paidCancellationWhatsappUrl} target="_blank" rel="noopener noreferrer">
+                          <WhatsAppIcon className="mr-2 h-4 w-4" />
+                          Cancelar pelo WhatsApp
+                        </a>
+                      </Button>
+                    ) : (
+                      <Button type="button" className="w-full" disabled>
+                        WhatsApp indisponível
+                      </Button>
+                    )
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-destructive/30 text-destructive hover:text-destructive"
+                      onClick={() => setCancelDialogOpen(true)}
+                      disabled={cancelReservation.isPending || isCheckingConfirmedPayment}
+                    >
+                      {(cancelReservation.isPending || isCheckingConfirmedPayment) && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      {isCheckingConfirmedPayment ? 'Verificando pagamento...' : 'Cancelar reserva'}
+                    </Button>
+                  )}
                   <p className="text-xs text-muted-foreground">
-                    Se não puder comparecer, você pode cancelar a própria reserva.
+                    {hasReceivedPayment
+                      ? 'Esta reserva tem pré-pagamento recebido. O cancelamento precisa ser tratado com a equipe.'
+                      : 'Se não puder comparecer, você pode cancelar a própria reserva.'}
                   </p>
                 </div>
               )}
