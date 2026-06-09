@@ -87,7 +87,7 @@ const statusMessages: Record<ReservationStatus | 'completed' | 'no_show', { icon
   confirmed: {
     icon: CheckCircle2,
     title: 'Reserva confirmada',
-    description: 'Sua reserva está confirmada. Se precisar, você pode cancelar por esta página.',
+    description: '',
     color: 'text-primary',
   },
   checked_in: {
@@ -440,7 +440,7 @@ export default function ReservationTracking() {
 
               <div>
                 <h2 className={`text-lg font-bold ${status.color}`}>{status.title}</h2>
-                <p className="mt-1 text-muted-foreground">{status.description}</p>
+                {status.description && <p className="mt-1 text-muted-foreground">{status.description}</p>}
                 {(normalizedStatus === 'cancelled' || normalizedStatus === 'no-show') && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     {format(new Date(entry.updated_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
