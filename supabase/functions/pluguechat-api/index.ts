@@ -29,6 +29,127 @@ function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+async function getInternalJobSecret(supabaseAdmin: any): Promise<string | null> {
+  const envSecret = Deno.env.get("INTERNAL_JOB_SECRET");
+  if (envSecret) return envSecret;
+
+  const { data, error } = await supabaseAdmin
+    .from("system_settings")
+    .select("value")
+    .eq("key", "internal_job_secret")
+    .maybeSingle();
+
+  if (error) {
+    console.error("pluguechat-api internal job secret load error", error);
+    return null;
+  }
+
+  return nullableString(data?.value);
+}
+
+async function processPlugueChatQueueNow(supabaseAdmin: any) {
+  const secret = await getInternalJobSecret(supabaseAdmin);
+  if (!secret) {
+    return { ok: false, error: "internal_job_secret_not_configured" };
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.replace(/\/+$/, "");
+  if (!supabaseUrl) {
+    return { ok: false, error: "SUPABASE_URL not configured" };
+  }
+
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/process-pluguechat-message-queue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-job-secret": secret,
+      },
+      body: "{}",
+    });
+
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      try {
+        body = await response.text();
+      } catch {
+        body = null;
+      }
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Erro ao processar fila.",
+    };
+  }
+}
+
+async function resetFailedQueueItems(
+  supabaseAdmin: any,
+  companyId: string,
+  itemId: string | null = null,
+) {
+  const now = new Date();
+  const resetPayload = {
+    status: "pending",
+    attempts: 0,
+    scheduled_for: now.toISOString(),
+    expires_at: addHours(now, 2).toISOString(),
+    last_attempt_at: null,
+    provider_message_id: null,
+    provider_status: null,
+    provider_status_url: null,
+    provider_status_checked_at: null,
+    error_details: null,
+  };
+
+  let query = supabaseAdmin
+    .from("pluguechat_message_queue")
+    .update(resetPayload)
+    .eq("company_id", companyId)
+    .eq("status", "failed");
+
+  if (itemId) {
+    query = query.eq("id", itemId);
+  }
+
+  const { data, error } = await query.select("id");
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const ids = (data ?? []).map((row: { id: string }) => row.id);
+
+  if (ids.length > 0) {
+    const { error: recipientError } = await supabaseAdmin
+      .from("pluguechat_broadcast_recipients")
+      .update({
+        status: "queued",
+        provider_message_id: null,
+        error_details: null,
+      })
+      .in("queue_id", ids);
+
+    if (recipientError) {
+      console.error("pluguechat-api retry recipient update error", recipientError);
+    }
+  }
+
+  return ids.length;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -175,6 +296,38 @@ Deno.serve(async (req) => {
       }
 
       return json({ ok: true });
+    }
+
+    if (action === "retry_queue_item") {
+      const itemId = nullableString(body.item_id) ?? nullableString(body.queue_id);
+      if (!itemId) {
+        return json({ error: "item_id required" }, 400);
+      }
+
+      const retried = await resetFailedQueueItems(supabaseAdmin, companyId, itemId);
+      if (retried === 0) {
+        return json({ error: "queue_item_not_found_or_not_failed" }, 409);
+      }
+
+      const process = body.process_now === false
+        ? null
+        : await processPlugueChatQueueNow(supabaseAdmin);
+
+      return json({ ok: true, retried, process });
+    }
+
+    if (action === "retry_failed_queue") {
+      const retried = await resetFailedQueueItems(supabaseAdmin, companyId);
+      const process = retried > 0 && body.process_now !== false
+        ? await processPlugueChatQueueNow(supabaseAdmin)
+        : null;
+
+      return json({ ok: true, retried, process });
+    }
+
+    if (action === "process_queue") {
+      const process = await processPlugueChatQueueNow(supabaseAdmin);
+      return json({ ok: process.ok, process }, process.ok ? 200 : 502);
     }
 
     return json({ error: `Unknown action: ${action ?? ""}` }, 400);

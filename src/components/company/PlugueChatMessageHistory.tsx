@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { CheckCircle2, Clock, RefreshCw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -139,6 +139,26 @@ function formatDate(iso: string) {
 
 const ALL = '__all__';
 
+type RetryQueueResult = {
+  ok?: boolean;
+  retried?: number;
+  process?: {
+    ok?: boolean;
+    error?: string;
+    status?: number;
+    body?: unknown;
+  } | null;
+  error?: string;
+};
+
+function assertRetryResult(data: unknown): RetryQueueResult {
+  const result = (data ?? {}) as RetryQueueResult;
+  if (result.ok === false || result.error) {
+    throw new Error(result.error || 'Erro ao reprocessar fila.');
+  }
+  return result;
+}
+
 export default function PlugueChatMessageHistory({ companyId }: Props) {
   const qc = useQueryClient();
 
@@ -188,22 +208,74 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
 
   const retryItem = useMutation({
     mutationFn: async (itemId: string) => {
-      const { error } = await (supabase as any)
-        .from('pluguechat_message_queue')
-        .update({ status: 'pending', attempts: 0 })
-        .eq('id', itemId)
-        .eq('company_id', companyId)
-        .eq('status', 'failed');
+      const { data, error } = await supabase.functions.invoke('pluguechat-api', {
+        body: {
+          action: 'retry_queue_item',
+          company_id: companyId,
+          item_id: itemId,
+          process_now: true,
+        },
+      });
       if (error) throw error;
+      return assertRetryResult(data);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pluguechat-queue', companyId] });
-      toast.success('Item reenfileirado.');
+      qc.invalidateQueries({ queryKey: ['pluguechat-logs', companyId] });
+      toast.success('Item reenfileirado e processamento acionado.');
     },
     onError: () => toast.error('Erro ao tentar novamente.'),
   });
 
+  const retryFailedQueue = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('pluguechat-api', {
+        body: {
+          action: 'retry_failed_queue',
+          company_id: companyId,
+          process_now: true,
+        },
+      });
+      if (error) throw error;
+      return assertRetryResult(data);
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['pluguechat-queue', companyId] });
+      qc.invalidateQueries({ queryKey: ['pluguechat-logs', companyId] });
+
+      const retried = result.retried ?? 0;
+      if (retried === 0) {
+        toast.info('Nenhuma falha pendente para reprocessar.');
+        return;
+      }
+
+      toast.success(`${retried} ${retried === 1 ? 'item reenfileirado' : 'itens reenfileirados'} e processamento acionado.`);
+    },
+    onError: () => toast.error('Erro ao reprocessar falhas.'),
+  });
+
+  const processQueue = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('pluguechat-api', {
+        body: {
+          action: 'process_queue',
+          company_id: companyId,
+        },
+      });
+      if (error) throw error;
+      return assertRetryResult(data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pluguechat-queue', companyId] });
+      qc.invalidateQueries({ queryKey: ['pluguechat-logs', companyId] });
+      toast.success('Processamento da fila acionado.');
+    },
+    onError: () => toast.error('Erro ao processar fila.'),
+  });
+
   const hasFilters = filterType !== ALL || filterStatus !== ALL || filterDate;
+  const failedQueueCount = useMemo(() => (queue ?? []).filter((item: any) => item.status === 'failed').length, [queue]);
+  const queueActionPending = retryFailedQueue.isPending || processQueue.isPending;
 
   return (
     <Tabs defaultValue="enviadas">
@@ -304,6 +376,31 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
       </TabsContent>
 
       <TabsContent value="fila" className="space-y-4 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {failedQueueCount > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-2"
+              disabled={queueActionPending}
+              onClick={() => retryFailedQueue.mutate()}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reprocessar falhas ({failedQueueCount})
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-2"
+            disabled={queueActionPending}
+            onClick={() => processQueue.mutate()}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Processar fila
+          </Button>
+        </div>
+
         {queueLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-10 w-full" />
@@ -349,7 +446,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
                             size="sm"
                             variant="outline"
                             className="h-7 gap-1 text-xs"
-                            disabled={retryItem.isPending}
+                            disabled={retryItem.isPending || queueActionPending}
                             onClick={() => retryItem.mutate(item.id)}
                           >
                             <RefreshCw className="h-3 w-3" /> Tentar novamente
