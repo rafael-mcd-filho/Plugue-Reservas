@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { CheckCircle2, Clock, RefreshCw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,77 +8,122 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { PLUGUECHAT_AUTOMATIONS, PLUGUECHAT_TYPE_LABELS } from '@/lib/pluguechat-automations';
+import { cn } from '@/lib/utils';
 
 interface Props {
   companyId: string;
 }
 
-function LogStatusBadge({ status }: { status: string }) {
+function sanitizeProviderMessage(value: string) {
+  return value
+    .replace(/api\.helena\.run/gi, 'API PlugueChat')
+    .replace(/\bhelena\b/gi, 'PlugueChat');
+}
+
+function StatusBadgeShell({
+  children,
+  className,
+  label,
+  details,
+}: {
+  children: ReactNode;
+  className?: string;
+  label: string;
+  details?: string | null;
+}) {
+  const displayDetails = details ? sanitizeProviderMessage(details) : null;
+  const badge = (
+    <Badge
+      variant="outline"
+      tabIndex={displayDetails ? 0 : undefined}
+      aria-label={displayDetails ? `${label}. Motivo: ${displayDetails}` : label}
+      className={cn('gap-1', className, displayDetails && 'cursor-help')}
+    >
+      {children}
+    </Badge>
+  );
+
+  if (!displayDetails) return badge;
+
+  return (
+    <TooltipProvider delayDuration={120}>
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent side="top" align="end" className="max-w-[360px] whitespace-pre-wrap text-xs leading-relaxed">
+          {displayDetails}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function LogStatusBadge({ status, errorDetails }: { status: string; errorDetails?: string | null }) {
   if (status === 'sent') {
     return (
-      <Badge variant="outline" className="gap-1 border-green-200 bg-green-50 text-green-700">
+      <StatusBadgeShell label="Enviado" className="border-green-200 bg-green-50 text-green-700">
         <CheckCircle2 className="h-3 w-3" /> Enviado
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   if (status === 'failed') {
     return (
-      <Badge variant="outline" className="gap-1 border-red-200 bg-red-50 text-red-700">
+      <StatusBadgeShell label="Falhou" details={errorDetails} className="border-red-200 bg-red-50 text-red-700">
         <XCircle className="h-3 w-3" /> Falhou
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   if (status === 'provider_queued' || status === 'processing') {
     return (
-      <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
+      <StatusBadgeShell label="Validando" className="border-yellow-200 bg-yellow-50 text-yellow-700">
         <Clock className="h-3 w-3" /> Validando
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1">
+    <StatusBadgeShell label={status}>
       <Clock className="h-3 w-3" /> {status}
-    </Badge>
+    </StatusBadgeShell>
   );
 }
 
-function QueueStatusBadge({ status }: { status: string }) {
+function QueueStatusBadge({ status, errorDetails }: { status: string; errorDetails?: string | null }) {
   if (status === 'pending') {
     return (
-      <Badge variant="outline" className="gap-1 border-blue-200 bg-blue-50 text-blue-700">
+      <StatusBadgeShell label="Pendente" className="border-blue-200 bg-blue-50 text-blue-700">
         <Clock className="h-3 w-3" /> Pendente
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   if (status === 'processing') {
     return (
-      <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
+      <StatusBadgeShell label="Processando" className="border-yellow-200 bg-yellow-50 text-yellow-700">
         <Clock className="h-3 w-3" /> Processando
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   if (status === 'provider_queued') {
     return (
-      <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
+      <StatusBadgeShell label="Validando" className="border-yellow-200 bg-yellow-50 text-yellow-700">
         <Clock className="h-3 w-3" /> Validando
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   if (status === 'failed') {
     return (
-      <Badge variant="outline" className="gap-1 border-red-200 bg-red-50 text-red-700">
+      <StatusBadgeShell label="Falhou" details={errorDetails} className="border-red-200 bg-red-50 text-red-700">
         <XCircle className="h-3 w-3" /> Falhou
-      </Badge>
+      </StatusBadgeShell>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1">
+    <StatusBadgeShell label={status}>
       <Clock className="h-3 w-3" /> {status}
-    </Badge>
+    </StatusBadgeShell>
   );
 }
 
@@ -90,22 +135,6 @@ function formatPhone(phone: string) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-}
-
-function sanitizeProviderMessage(value: string) {
-  return value
-    .replace(/api\.helena\.run/gi, 'API PlugueChat')
-    .replace(/\bhelena\b/gi, 'PlugueChat');
-}
-
-function ErrorDetails({ value }: { value?: string | null }) {
-  if (!value) return null;
-  const displayValue = sanitizeProviderMessage(value);
-  return (
-    <p className="mt-1 max-w-[360px] truncate text-xs text-red-700" title={displayValue}>
-      {displayValue}
-    </p>
-  );
 }
 
 const ALL = '__all__';
@@ -263,8 +292,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
                         {log.template_name ?? log.template_id}
                       </TableCell>
                       <TableCell>
-                        <LogStatusBadge status={log.status} />
-                        <ErrorDetails value={log.error_details} />
+                        <LogStatusBadge status={log.status} errorDetails={log.error_details} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -313,8 +341,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{item.attempts}/{item.max_attempts}</TableCell>
                       <TableCell>
-                        <QueueStatusBadge status={item.status} />
-                        <ErrorDetails value={item.error_details} />
+                        <QueueStatusBadge status={item.status} errorDetails={item.error_details} />
                       </TableCell>
                       <TableCell>
                         {item.status === 'failed' && (
