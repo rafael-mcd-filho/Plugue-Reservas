@@ -29,6 +29,19 @@ function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function uniqueStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const normalized = item.trim();
+    if (normalized) seen.add(normalized);
+  }
+
+  return [...seen];
+}
+
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
@@ -240,10 +253,49 @@ Deno.serve(async (req) => {
         return json({ error: "scheduled_for invalid" }, 400);
       }
 
+      const recipientReservationIds = uniqueStringArray(body.recipient_reservation_ids);
+      if (recipientReservationIds.length === 0) {
+        return json({ error: "recipient_reservation_ids required" }, 400);
+      }
+
+      if (recipientReservationIds.length > 500) {
+        return json({ error: "recipient_limit_exceeded" }, 400);
+      }
+
+      const { data: reservationRows, error: reservationError } = await supabaseAdmin
+        .from("reservations")
+        .select("id, guest_name, guest_phone")
+        .eq("company_id", companyId)
+        .in("id", recipientReservationIds)
+        .not("guest_phone", "is", null);
+
+      if (reservationError) {
+        console.error("pluguechat-api broadcast recipients load error", reservationError);
+        return json({ error: "Erro ao carregar destinatarios." }, 500);
+      }
+
+      const uniqueRecipients = new Map<string, { name: string; phone: string }>();
+      for (const reservation of reservationRows ?? []) {
+        const phone = normalizePhone(String(reservation.guest_phone ?? ""));
+        if (!phone || uniqueRecipients.has(phone)) continue;
+
+        uniqueRecipients.set(phone, {
+          name: String(reservation.guest_name ?? ""),
+          phone,
+        });
+      }
+
+      if (uniqueRecipients.size === 0) {
+        return json({ error: "Nenhum destinatario valido encontrado." }, 400);
+      }
+
       const audienceFilter =
         body.audience_filter && typeof body.audience_filter === "object"
           ? body.audience_filter as Record<string, unknown>
           : {};
+
+      const now = new Date().toISOString();
+      const effectiveScheduledFor = scheduledFor ?? now;
 
       const { data, error } = await supabaseAdmin
         .from("pluguechat_broadcasts")
@@ -251,9 +303,12 @@ Deno.serve(async (req) => {
           company_id: companyId,
           template_id: templateId,
           template_name: nullableString(body.template_name),
-          audience_filter: audienceFilter,
-          status: scheduledFor ? "scheduled" : "draft",
-          scheduled_for: scheduledFor,
+          audience_filter: {
+            ...audienceFilter,
+            recipient_count: uniqueRecipients.size,
+          },
+          status: "scheduled",
+          scheduled_for: effectiveScheduledFor,
           created_by: user.id,
         })
         .select()
@@ -262,6 +317,30 @@ Deno.serve(async (req) => {
       if (error) {
         console.error("pluguechat-api create_broadcast error", error);
         return json({ error: "Erro ao criar disparo." }, 500);
+      }
+
+      const recipientRows = [...uniqueRecipients.values()].map((recipient) => ({
+        broadcast_id: data.id,
+        company_id: companyId,
+        customer_id: null,
+        phone: recipient.phone,
+        parameters: { nome: recipient.name },
+        status: "pending",
+      }));
+
+      const { error: recipientInsertError } = await supabaseAdmin
+        .from("pluguechat_broadcast_recipients")
+        .insert(recipientRows);
+
+      if (recipientInsertError) {
+        console.error("pluguechat-api broadcast recipients insert error", recipientInsertError);
+        await supabaseAdmin
+          .from("pluguechat_broadcasts")
+          .delete()
+          .eq("id", data.id)
+          .eq("company_id", companyId);
+
+        return json({ error: "Erro ao salvar destinatarios do disparo." }, 500);
       }
 
       return json({ ok: true, broadcast: data as Record<string, unknown> });

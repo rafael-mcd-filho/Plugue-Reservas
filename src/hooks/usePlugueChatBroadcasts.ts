@@ -59,6 +59,7 @@ export function useCreatePlugueChatBroadcast() {
       company_id: string;
       template_id: string;
       template_name?: string | null;
+      recipient_reservation_ids?: string[];
       audience_filter?: Record<string, unknown>;
       scheduled_for?: string | null;
     }) => {
@@ -68,6 +69,7 @@ export function useCreatePlugueChatBroadcast() {
           company_id: payload.company_id,
           template_id: payload.template_id,
           template_name: payload.template_name ?? null,
+          recipient_reservation_ids: payload.recipient_reservation_ids ?? [],
           audience_filter: payload.audience_filter ?? {},
           scheduled_for: payload.scheduled_for ?? null,
         },
