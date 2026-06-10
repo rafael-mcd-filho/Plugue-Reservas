@@ -33,6 +33,12 @@ verify_jwt = false
 [functions.process-message-queue]
 verify_jwt = false
 
+[functions.process-pluguechat-message-queue]
+verify_jwt = false
+
+[functions.process-pluguechat-broadcasts]
+verify_jwt = false
+
 [functions.public-tracking]
 verify_jwt = false
 

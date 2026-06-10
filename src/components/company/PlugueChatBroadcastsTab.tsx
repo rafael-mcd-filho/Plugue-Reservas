@@ -79,7 +79,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
     for (const row of recipientRows ?? []) {
       const entry = map.get(row.broadcast_id) ?? { total: 0, pending: 0, sent: 0, failed: 0 };
       entry.total++;
-      if (row.status === 'pending' || row.status === 'processing') entry.pending++;
+      if (['pending', 'queued', 'processing', 'provider_queued'].includes(row.status)) entry.pending++;
       else if (row.status === 'sent') entry.sent++;
       else if (row.status === 'failed') entry.failed++;
       map.set(row.broadcast_id, entry);

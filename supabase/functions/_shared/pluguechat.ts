@@ -14,8 +14,39 @@ export interface PlugueChatSendPayload {
 }
 
 export type PlugueChatSendResult =
-  | { ok: true; provider_message_id: string | null; raw: unknown }
-  | { ok: false; error: string; raw: unknown };
+  | {
+      ok: true;
+      provider_message_id: string | null;
+      provider_status: string | null;
+      provider_status_url: string | null;
+      raw: unknown;
+    }
+  | {
+      ok: false;
+      error: string;
+      provider_message_id?: string | null;
+      provider_status?: string | null;
+      provider_status_url?: string | null;
+      raw: unknown;
+    };
+
+export type PlugueChatDeliveryState = "pending" | "sent" | "failed" | "unknown";
+
+export type PlugueChatStatusResult =
+  | {
+      ok: true;
+      provider_message_id: string | null;
+      provider_status: string | null;
+      provider_status_url: string | null;
+      delivery_state: PlugueChatDeliveryState;
+      failure_reason: string | null;
+      raw: unknown;
+    }
+  | {
+      ok: false;
+      error: string;
+      raw: unknown;
+    };
 
 export function normalizePhone(value: string): string {
   let digits = value.replace(/\D/g, "");
@@ -111,6 +142,61 @@ export function buildPlugueChatPayload(
   };
 }
 
+function plugueChatAuthHeaders(apiToken: string): Record<string, string> {
+  return {
+    "Accept": "application/json",
+    "Authorization": apiToken.trim(),
+  };
+}
+
+function stringField(data: Record<string, unknown> | null, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = data?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function normalizeProviderStatus(status: unknown): string | null {
+  if (typeof status !== "string") return null;
+  const normalized = status.trim().toUpperCase();
+  return normalized || null;
+}
+
+export function sanitizePlugueChatProviderMessage(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value
+    .replace(/api\.helena\.run/gi, "API PlugueChat")
+    .replace(/\bhelena\b/gi, "PlugueChat");
+}
+
+export function classifyPlugueChatProviderStatus(status: string | null): PlugueChatDeliveryState {
+  if (!status) return "unknown";
+
+  if (["FAILED", "ERROR", "REJECTED", "CANCELED", "CANCELLED", "UNDELIVERED"].includes(status)) {
+    return "failed";
+  }
+
+  if (["SENT", "DELIVERED", "READ", "DELIVERY_ACK", "SERVER_ACK"].includes(status)) {
+    return "sent";
+  }
+
+  if (["QUEUED", "PENDING", "PROCESSING", "SENDING", "ACCEPTED"].includes(status)) {
+    return "pending";
+  }
+
+  return "unknown";
+}
+
+function buildStatusUrl(apiUrl: string, messageId: string, statusUrl: string | null): string {
+  if (statusUrl) {
+    return new URL(statusUrl, apiUrl).toString();
+  }
+
+  const base = new URL(apiUrl);
+  return `${base.origin}/chat/v1/message/${encodeURIComponent(messageId)}/status`;
+}
+
 export async function sendPlugueChatMessage(
   apiUrl: string,
   apiToken: string,
@@ -121,7 +207,7 @@ export async function sendPlugueChatMessage(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiToken}`,
+        ...plugueChatAuthHeaders(apiToken),
       },
       body: JSON.stringify(payload),
     });
@@ -130,7 +216,11 @@ export async function sendPlugueChatMessage(
     try { raw = await response.json(); } catch { /* ignore */ }
 
     if (!response.ok) {
-      return { ok: false, error: `HTTP ${response.status}: ${JSON.stringify(raw)}`, raw };
+      return {
+        ok: false,
+        error: sanitizePlugueChatProviderMessage(`HTTP ${response.status}: ${JSON.stringify(raw)}`) ?? `HTTP ${response.status}`,
+        raw,
+      };
     }
 
     const data = raw as Record<string, unknown> | null;
@@ -138,10 +228,81 @@ export async function sendPlugueChatMessage(
       typeof data?.id === "string" ? data.id
       : typeof data?.messageId === "string" ? data.messageId
       : null;
+    const providerStatus = normalizeProviderStatus(data?.status);
+    const providerStatusUrl = stringField(data, ["statusUrl", "status_url"]);
+    const failureReason = stringField(data, ["failureReason", "failure_reason", "error"]);
+    const deliveryState = classifyPlugueChatProviderStatus(providerStatus);
 
-    return { ok: true, provider_message_id: providerId, raw };
+    if (deliveryState === "failed") {
+      return {
+        ok: false,
+        error: sanitizePlugueChatProviderMessage(failureReason) ?? `PlugueChat retornou status ${providerStatus}.`,
+        provider_message_id: providerId,
+        provider_status: providerStatus,
+        provider_status_url: providerStatusUrl,
+        raw,
+      };
+    }
+
+    return {
+      ok: true,
+      provider_message_id: providerId,
+      provider_status: providerStatus,
+      provider_status_url: providerStatusUrl,
+      raw,
+    };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown error", raw: null };
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: sanitizePlugueChatProviderMessage(message) ?? message, raw: null };
+  }
+}
+
+export async function checkPlugueChatMessageStatus(
+  apiUrl: string,
+  apiToken: string,
+  messageId: string,
+  statusUrl: string | null = null,
+): Promise<PlugueChatStatusResult> {
+  try {
+    const url = buildStatusUrl(apiUrl, messageId, statusUrl);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: plugueChatAuthHeaders(apiToken),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    let raw: unknown = null;
+    try { raw = await response.json(); } catch { /* ignore */ }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: sanitizePlugueChatProviderMessage(`HTTP ${response.status}: ${JSON.stringify(raw)}`) ?? `HTTP ${response.status}`,
+        raw,
+      };
+    }
+
+    const data = raw as Record<string, unknown> | null;
+    const providerStatus = normalizeProviderStatus(data?.status);
+    const providerId =
+      typeof data?.id === "string" ? data.id
+      : typeof data?.messageId === "string" ? data.messageId
+      : messageId;
+    const nextStatusUrl = stringField(data, ["statusUrl", "status_url"]) ?? statusUrl;
+    const failureReason = stringField(data, ["failureReason", "failure_reason", "error"]);
+
+    return {
+      ok: true,
+      provider_message_id: providerId,
+      provider_status: providerStatus,
+      provider_status_url: nextStatusUrl,
+      delivery_state: classifyPlugueChatProviderStatus(providerStatus),
+      failure_reason: sanitizePlugueChatProviderMessage(failureReason),
+      raw,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: sanitizePlugueChatProviderMessage(message) ?? message, raw: null };
   }
 }
 

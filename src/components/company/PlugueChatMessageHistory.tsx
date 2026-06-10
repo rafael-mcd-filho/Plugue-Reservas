@@ -32,6 +32,13 @@ function LogStatusBadge({ status }: { status: string }) {
       </Badge>
     );
   }
+  if (status === 'provider_queued' || status === 'processing') {
+    return (
+      <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
+        <Clock className="h-3 w-3" /> Validando
+      </Badge>
+    );
+  }
   return (
     <Badge variant="outline" className="gap-1">
       <Clock className="h-3 w-3" /> {status}
@@ -51,6 +58,13 @@ function QueueStatusBadge({ status }: { status: string }) {
     return (
       <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
         <Clock className="h-3 w-3" /> Processando
+      </Badge>
+    );
+  }
+  if (status === 'provider_queued') {
+    return (
+      <Badge variant="outline" className="gap-1 border-yellow-200 bg-yellow-50 text-yellow-700">
+        <Clock className="h-3 w-3" /> Validando
       </Badge>
     );
   }
@@ -76,6 +90,22 @@ function formatPhone(phone: string) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function sanitizeProviderMessage(value: string) {
+  return value
+    .replace(/api\.helena\.run/gi, 'API PlugueChat')
+    .replace(/\bhelena\b/gi, 'PlugueChat');
+}
+
+function ErrorDetails({ value }: { value?: string | null }) {
+  if (!value) return null;
+  const displayValue = sanitizeProviderMessage(value);
+  return (
+    <p className="mt-1 max-w-[360px] truncate text-xs text-red-700" title={displayValue}>
+      {displayValue}
+    </p>
+  );
 }
 
 const ALL = '__all__';
@@ -118,7 +148,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
         .from('pluguechat_message_queue')
         .select('*')
         .eq('company_id', companyId)
-        .in('status', ['pending', 'processing', 'failed'])
+        .in('status', ['pending', 'processing', 'provider_queued', 'failed'])
         .order('scheduled_for', { ascending: true })
         .limit(100);
       if (error) throw error;
@@ -234,6 +264,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
                       </TableCell>
                       <TableCell>
                         <LogStatusBadge status={log.status} />
+                        <ErrorDetails value={log.error_details} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -283,6 +314,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
                       <TableCell className="text-sm text-muted-foreground">{item.attempts}/{item.max_attempts}</TableCell>
                       <TableCell>
                         <QueueStatusBadge status={item.status} />
+                        <ErrorDetails value={item.error_details} />
                       </TableCell>
                       <TableCell>
                         {item.status === 'failed' && (
