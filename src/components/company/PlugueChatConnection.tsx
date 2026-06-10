@@ -57,85 +57,88 @@ export default function PlugueChatConnection({ companyId, activeChannel }: Props
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Phone className="h-5 w-5 text-primary" /> Número remetente
-          </CardTitle>
-          <CardDescription>
-            Número configurado na API oficial do WhatsApp. Use o formato internacional sem espaços (ex: 5585999999999).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="from-number">Número remetente</Label>
-            <Input
-              id="from-number"
-              value={fromNumber}
-              onChange={(e) => setFromNumber(e.target.value)}
-              placeholder="5585999999999"
-            />
-          </div>
-
-          {isConfigured && (
-            <p className="text-xs text-muted-foreground">
-              Status: <span className="font-medium text-green-600">Configurado</span>
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <KeyRound className="h-5 w-5 text-primary" /> Token da API
-          </CardTitle>
-          <CardDescription>
-            {isConfigured
-              ? 'Um token já está salvo. Preencha abaixo apenas se quiser substituí-lo.'
-              : 'Informe o token de acesso da API oficial do WhatsApp.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="api-token">{isConfigured ? 'Novo token (opcional)' : 'Token da API'}</Label>
-            <div className="flex gap-2">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Phone className="h-5 w-5 text-primary" /> Número remetente
+            </CardTitle>
+            <CardDescription>
+              Número configurado na API oficial do WhatsApp. Use o formato internacional sem espaços (ex: 5585999999999).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="from-number">Número remetente</Label>
               <Input
-                id="api-token"
-                type={showToken ? 'text' : 'password'}
-                value={apiToken}
-                onChange={(e) => setApiToken(e.target.value)}
-                placeholder={isConfigured ? '••••••••••••••••' : 'Cole o token aqui'}
-                autoComplete="off"
+                id="from-number"
+                value={fromNumber}
+                onChange={(e) => setFromNumber(e.target.value)}
+                placeholder="5585999999999"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => setShowToken((v) => !v)}
-                aria-label={showToken ? 'Ocultar token' : 'Mostrar token'}
-              >
-                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
             </div>
-          </div>
 
-          {config?.last_error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              Última falha registrada. Verifique o número e o token e salve novamente.
+            {isConfigured && (
+              <p className="text-xs text-muted-foreground">
+                Status: <span className="font-medium text-green-600">Configurado</span>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <KeyRound className="h-5 w-5 text-primary" /> Token da API
+            </CardTitle>
+            <CardDescription>
+              {isConfigured
+                ? 'Um token já está salvo. Preencha abaixo apenas se quiser substituí-lo.'
+                : 'Informe o token de acesso da API oficial do WhatsApp.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="api-token">{isConfigured ? 'Novo token (opcional)' : 'Token da API'}</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="api-token"
+                  type={showToken ? 'text' : 'password'}
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  placeholder={isConfigured ? '••••••••••••••••' : 'Cole o token aqui'}
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setShowToken((v) => !v)}
+                  aria-label={showToken ? 'Ocultar token' : 'Mostrar token'}
+                >
+                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
-          )}
 
-          <Button
-            onClick={handleSave}
-            disabled={saveConfig.isPending || !fromNumber.trim()}
-            size="sm"
-            className="gap-2"
-          >
-            <Save className="h-4 w-4" /> Salvar configuração
-          </Button>
-        </CardContent>
-      </Card>
+            {config?.last_error && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                Última falha registrada. Verifique o número e o token e salve novamente.
+              </div>
+            )}
+
+            <Button
+              onClick={handleSave}
+              disabled={saveConfig.isPending || !fromNumber.trim()}
+              size="sm"
+              className="gap-2"
+            >
+              <Save className="h-4 w-4" /> Salvar configuração
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
