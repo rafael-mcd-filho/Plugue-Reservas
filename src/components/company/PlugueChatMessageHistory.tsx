@@ -268,7 +268,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pluguechat-queue', companyId] });
       qc.invalidateQueries({ queryKey: ['pluguechat-logs', companyId] });
-      toast.success('Processamento da fila acionado.');
+      toast.success('Processamento dos pendentes acionado.');
     },
     onError: () => toast.error('Erro ao processar fila.'),
   });
@@ -397,7 +397,7 @@ export default function PlugueChatMessageHistory({ companyId }: Props) {
             onClick={() => processQueue.mutate()}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Processar fila
+            Processar pendentes
           </Button>
         </div>
 
