@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { maybeReloadForLazyImportError } from '@/lib/lazyReload';
 
 interface AppErrorBoundaryProps {
   children: ReactNode;
@@ -57,6 +58,10 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
     this.setState({
       componentStack: errorInfo.componentStack || null,
     });
+
+    if (maybeReloadForLazyImportError(error, 'boundary')) {
+      return;
+    }
 
     if (
       import.meta.env.DEV &&
