@@ -187,7 +187,7 @@ interface ConfirmedReservation {
   companyName: string;
 }
 
-const DATE_WINDOW_SIZE = 7;
+const DATE_WINDOW_SIZE = 6;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 function startOfLocalDay(date: Date) {
@@ -1349,7 +1349,7 @@ export default function ReservationModal({
             {!isLargeParty && (!showCalendar ? (
               <>
                 <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  <div className="grid grid-cols-3 gap-2">
                     {dateWindowDays.map(date => {
                     const closed = isDayClosed(date);
                     const isSelected = selectedDate?.toDateString() === date.toDateString();
@@ -1390,7 +1390,7 @@ export default function ReservationModal({
                       variant="ghost"
                       size="sm"
                       className="h-8 min-w-0 justify-center px-1 text-xs"
-                      aria-label="Mostrar 7 dias anteriores"
+                      aria-label="Mostrar 6 dias anteriores"
                       disabled={dateWindowOffset === 0}
                       onClick={() => handleDateWindowChange('previous')}
                     >
@@ -1405,7 +1405,7 @@ export default function ReservationModal({
                       variant="ghost"
                       size="sm"
                       className="h-8 min-w-0 justify-center px-1 text-xs"
-                      aria-label="Mostrar próximos 7 dias"
+                      aria-label="Mostrar próximos 6 dias"
                       onClick={() => handleDateWindowChange('next')}
                     >
                       <span className="hidden min-[360px]:inline">Próximos</span>
@@ -1414,7 +1414,7 @@ export default function ReservationModal({
                   </div>
                 </div>
 
-                {/* Show selected calendar date if outside the current 7-day window */}
+                {/* Show selected calendar date if outside the current quick-select window */}
                 {selectedDate && !isDateInQuickSelect && (
                   <div className="flex items-center justify-center gap-2 p-3 rounded-md border border-primary bg-primary/10">
                     <CalendarIcon className="h-4 w-4 text-primary" />
