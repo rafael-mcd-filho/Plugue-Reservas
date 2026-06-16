@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS public.company_nps_configs (
 
 ALTER TABLE public.company_nps_configs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "company_nps_configs_select_own"
+  ON public.company_nps_configs;
+
 CREATE POLICY "company_nps_configs_select_own"
   ON public.company_nps_configs
   FOR SELECT
@@ -35,6 +38,9 @@ CREATE POLICY "company_nps_configs_select_own"
     OR public.has_role_in_company(auth.uid(), 'operator', company_id)
   );
 
+DROP POLICY IF EXISTS "company_nps_configs_insert_own"
+  ON public.company_nps_configs;
+
 CREATE POLICY "company_nps_configs_insert_own"
   ON public.company_nps_configs
   FOR INSERT
@@ -42,6 +48,9 @@ CREATE POLICY "company_nps_configs_insert_own"
     public.has_role(auth.uid(), 'superadmin')
     OR public.has_role_in_company(auth.uid(), 'admin', company_id)
   );
+
+DROP POLICY IF EXISTS "company_nps_configs_update_own"
+  ON public.company_nps_configs;
 
 CREATE POLICY "company_nps_configs_update_own"
   ON public.company_nps_configs
@@ -94,6 +103,9 @@ CREATE INDEX IF NOT EXISTS idx_reservation_reviews_company_status
 ALTER TABLE public.reservation_reviews ENABLE ROW LEVEL SECURITY;
 
 -- Acesso interno: membros autenticados da empresa lêem; escrita só via RPCs/trigger (service role)
+DROP POLICY IF EXISTS "reservation_reviews_select_company"
+  ON public.reservation_reviews;
+
 CREATE POLICY "reservation_reviews_select_company"
   ON public.reservation_reviews
   FOR SELECT

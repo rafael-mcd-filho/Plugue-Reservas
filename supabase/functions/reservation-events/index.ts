@@ -71,6 +71,8 @@ interface WhatsAppMessagePayload {
   error_details?: string | null;
 }
 
+const RESERVATION_AUTOMATION_EVENTS = new Set(["reservation_created", "reservation_cancelled"]);
+
 function replaceTemplateVars(
   template: string,
   reservation: ReservationData,
@@ -333,6 +335,13 @@ async function enqueuePlugueChatReservation(
   trackingUrl: string | null,
   results: { whatsapp?: string },
 ) {
+  if (!RESERVATION_AUTOMATION_EVENTS.has(event)) return;
+
+  if (event === "reservation_cancelled" && reservation.status !== "cancelled") {
+    results.whatsapp = "skipped_reservation_not_cancelled";
+    return;
+  }
+
   const automationType = event === "reservation_created" ? "confirmation_message" : "cancellation_message";
 
   const { data: template } = await supabaseAdmin
@@ -413,7 +422,12 @@ async function sendReservationAutomation(
   trackingUrl: string | null,
   results: { whatsapp?: string },
 ) {
-  if (!["reservation_created", "reservation_cancelled"].includes(event)) return;
+  if (!RESERVATION_AUTOMATION_EVENTS.has(event)) return;
+
+  if (event === "reservation_cancelled" && reservation.status !== "cancelled") {
+    results.whatsapp = "skipped_reservation_not_cancelled";
+    return;
+  }
 
   const automationType = event === "reservation_created" ? "confirmation_message" : "cancellation_message";
   const logType = event === "reservation_created" ? "confirmation" : "cancellation";

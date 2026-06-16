@@ -35,6 +35,7 @@ export interface Company {
   opening_hours: any[] | null;
   payment_methods: Record<string, boolean> | null;
   reservation_duration: number | null;
+  reservation_slot_interval_minutes: number | null;
   max_guests_per_slot: number | null;
   large_party_whatsapp_threshold?: number | null;
   reservation_late_tolerance_minutes?: number | null;

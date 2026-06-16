@@ -160,6 +160,7 @@ export type Database = {
           phone: string | null
           razao_social: string | null
           reservation_duration: number
+          reservation_slot_interval_minutes: number
           responsible_email: string | null
           responsible_name: string | null
           responsible_phone: string | null
@@ -187,6 +188,7 @@ export type Database = {
           phone?: string | null
           razao_social?: string | null
           reservation_duration?: number
+          reservation_slot_interval_minutes?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
@@ -214,6 +216,7 @@ export type Database = {
           phone?: string | null
           razao_social?: string | null
           reservation_duration?: number
+          reservation_slot_interval_minutes?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
@@ -471,10 +474,57 @@ export type Database = {
           },
         ]
       }
+      reservation_schedule_rule_blocks: {
+        Row: {
+          availability_mode: string
+          created_at: string
+          default_duration_minutes: number | null
+          id: string
+          name: string
+          rule_id: string
+          sort_order: number
+          updated_at: string
+          weekdays: number[] | null
+        }
+        Insert: {
+          availability_mode?: string
+          created_at?: string
+          default_duration_minutes?: number | null
+          id?: string
+          name?: string
+          rule_id: string
+          sort_order?: number
+          updated_at?: string
+          weekdays?: number[] | null
+        }
+        Update: {
+          availability_mode?: string
+          created_at?: string
+          default_duration_minutes?: number | null
+          id?: string
+          name?: string
+          rule_id?: string
+          sort_order?: number
+          updated_at?: string
+          weekdays?: number[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_schedule_rule_blocks_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "reservation_schedule_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservation_schedule_rule_slots: {
         Row: {
+          block_id: string | null
           created_at: string
+          duration_minutes: number | null
           id: string
+          max_guests_per_slot: number | null
           max_party_size_per_reservation: number | null
           max_reservations_per_slot: number | null
           rule_id: string
@@ -482,8 +532,11 @@ export type Database = {
           time: string
         }
         Insert: {
+          block_id?: string | null
           created_at?: string
+          duration_minutes?: number | null
           id?: string
+          max_guests_per_slot?: number | null
           max_party_size_per_reservation?: number | null
           max_reservations_per_slot?: number | null
           rule_id: string
@@ -491,8 +544,11 @@ export type Database = {
           time: string
         }
         Update: {
+          block_id?: string | null
           created_at?: string
+          duration_minutes?: number | null
           id?: string
+          max_guests_per_slot?: number | null
           max_party_size_per_reservation?: number | null
           max_reservations_per_slot?: number | null
           rule_id?: string
@@ -500,6 +556,13 @@ export type Database = {
           time?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "reservation_schedule_rule_slots_block_id_fkey"
+            columns: ["block_id"]
+            isOneToOne: false
+            referencedRelation: "reservation_schedule_rule_blocks"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "reservation_schedule_rule_slots_rule_id_fkey"
             columns: ["rule_id"]
@@ -512,14 +575,17 @@ export type Database = {
       reservation_schedule_rules: {
         Row: {
           archived_at: string | null
+          availability_mode: string
           company_id: string
           created_at: string
+          default_duration_minutes: number | null
           enabled: boolean
           end_date: string | null
           id: string
           max_party_size_per_reservation: number | null
           name: string
           priority: number
+          publish_at: string | null
           scope: string
           start_date: string | null
           updated_at: string
@@ -527,14 +593,17 @@ export type Database = {
         }
         Insert: {
           archived_at?: string | null
+          availability_mode?: string
           company_id: string
           created_at?: string
+          default_duration_minutes?: number | null
           enabled?: boolean
           end_date?: string | null
           id?: string
           max_party_size_per_reservation?: number | null
           name: string
           priority?: number
+          publish_at?: string | null
           scope: string
           start_date?: string | null
           updated_at?: string
@@ -542,14 +611,17 @@ export type Database = {
         }
         Update: {
           archived_at?: string | null
+          availability_mode?: string
           company_id?: string
           created_at?: string
+          default_duration_minutes?: number | null
           enabled?: boolean
           end_date?: string | null
           id?: string
           max_party_size_per_reservation?: number | null
           name?: string
           priority?: number
+          publish_at?: string | null
           scope?: string
           start_date?: string | null
           updated_at?: string
@@ -574,8 +646,10 @@ export type Database = {
       }
       reservations: {
         Row: {
+          applied_schedule_rule_id: string | null
           company_id: string
           created_at: string
+          created_in_mode: string | null
           date: string
           duration_minutes: number
           guest_birthdate: string | null
@@ -593,8 +667,10 @@ export type Database = {
           visitor_id: string | null
         }
         Insert: {
+          applied_schedule_rule_id?: string | null
           company_id: string
           created_at?: string
+          created_in_mode?: string | null
           date: string
           duration_minutes?: number
           guest_birthdate?: string | null
@@ -612,8 +688,10 @@ export type Database = {
           visitor_id?: string | null
         }
         Update: {
+          applied_schedule_rule_id?: string | null
           company_id?: string
           created_at?: string
+          created_in_mode?: string | null
           date?: string
           duration_minutes?: number
           guest_birthdate?: string | null
@@ -631,6 +709,13 @@ export type Database = {
           visitor_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "reservations_applied_schedule_rule_id_fkey"
+            columns: ["applied_schedule_rule_id"]
+            isOneToOne: false
+            referencedRelation: "reservation_schedule_rules"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "reservations_company_id_fkey"
             columns: ["company_id"]
@@ -1103,6 +1188,11 @@ export type Database = {
       get_public_reservation_schedule: {
         Args: { _company_id: string; _date: string }
         Returns: {
+          availability_mode: string
+          block_id: string | null
+          block_name: string | null
+          default_duration_minutes: number | null
+          publish_at: string | null
           rule_id: string | null
           rule_name: string | null
           max_party_size_per_reservation: number | null
@@ -1136,8 +1226,11 @@ export type Database = {
       get_public_reservation_availability: {
         Args: { _company_id: string; _date: string; _party_size: number }
         Returns: {
+          availability_mode: string
           available: boolean
           available_tables: number
+          duration_minutes: number
+          max_guests_per_slot: number | null
           max_party_size_per_reservation: number | null
           max_reservations_per_slot: number | null
           occupied_tables: number
@@ -1211,18 +1304,16 @@ export type Database = {
       }
       upsert_reservation_schedule_rule: {
         Args: {
+          _blocks?: Json
           _company_id: string
           _enabled?: boolean
           _end_date?: string
           _name: string
-          _max_party_size_per_reservation?: number | null
+          _publish_at?: string | null
           _priority?: number
           _rule_id?: string
           _scope: string
-          _slot_settings?: Json
-          _slots: string[]
           _start_date?: string
-          _weekdays?: number[]
         }
         Returns: string
       }

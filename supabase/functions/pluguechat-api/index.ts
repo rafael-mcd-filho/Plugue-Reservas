@@ -243,6 +243,11 @@ Deno.serve(async (req) => {
         return json({ error: "channel_not_active", current: currentChannel }, 409);
       }
 
+      const broadcastName = nullableString(body.name) ?? nullableString(body.broadcast_name);
+      if (!broadcastName) {
+        return json({ error: "name required" }, 400);
+      }
+
       const templateId = nullableString(body.template_id);
       if (!templateId) {
         return json({ error: "template_id required" }, 400);
@@ -264,7 +269,7 @@ Deno.serve(async (req) => {
 
       const { data: reservationRows, error: reservationError } = await supabaseAdmin
         .from("reservations")
-        .select("id, guest_name, guest_phone")
+        .select("id, guest_phone")
         .eq("company_id", companyId)
         .in("id", recipientReservationIds)
         .not("guest_phone", "is", null);
@@ -274,13 +279,12 @@ Deno.serve(async (req) => {
         return json({ error: "Erro ao carregar destinatarios." }, 500);
       }
 
-      const uniqueRecipients = new Map<string, { name: string; phone: string }>();
+      const uniqueRecipients = new Map<string, { phone: string }>();
       for (const reservation of reservationRows ?? []) {
         const phone = normalizePhone(String(reservation.guest_phone ?? ""));
         if (!phone || uniqueRecipients.has(phone)) continue;
 
         uniqueRecipients.set(phone, {
-          name: String(reservation.guest_name ?? ""),
           phone,
         });
       }
@@ -301,6 +305,7 @@ Deno.serve(async (req) => {
         .from("pluguechat_broadcasts")
         .insert({
           company_id: companyId,
+          name: broadcastName,
           template_id: templateId,
           template_name: nullableString(body.template_name),
           audience_filter: {
@@ -324,7 +329,7 @@ Deno.serve(async (req) => {
         company_id: companyId,
         customer_id: null,
         phone: recipient.phone,
-        parameters: { nome: recipient.name },
+        parameters: {},
         status: "pending",
       }));
 
@@ -407,6 +412,34 @@ Deno.serve(async (req) => {
     if (action === "process_queue") {
       const process = await processPlugueChatQueueNow(supabaseAdmin);
       return json({ ok: process.ok, process }, process.ok ? 200 : 502);
+    }
+
+    if (action === "clear_logs") {
+      const { error } = await supabaseAdmin
+        .from("pluguechat_message_logs")
+        .delete()
+        .eq("company_id", companyId);
+
+      if (error) {
+        console.error("pluguechat-api clear_logs error", error);
+        return json({ error: error.message }, 500);
+      }
+
+      return json({ ok: true });
+    }
+
+    if (action === "clear_queue") {
+      const { error } = await supabaseAdmin
+        .from("pluguechat_message_queue")
+        .delete()
+        .eq("company_id", companyId);
+
+      if (error) {
+        console.error("pluguechat-api clear_queue error", error);
+        return json({ error: error.message }, 500);
+      }
+
+      return json({ ok: true });
     }
 
     return json({ error: `Unknown action: ${action ?? ""}` }, 400);

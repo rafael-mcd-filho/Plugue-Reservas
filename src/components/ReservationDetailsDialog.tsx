@@ -2,9 +2,10 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, AlertTriangle, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Star, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
+import ReservationTableAssignment from '@/components/ReservationTableAssignment';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,9 @@ interface ReservationCompanion {
 
 export interface ReservationDetails {
   id: string;
+  company_id?: string | null;
+  table_id?: string | null;
+  created_in_mode?: string | null;
   guest_name: string;
   guest_phone: string;
   guest_email: string | null;
@@ -615,6 +619,17 @@ export default function ReservationDetailsDialog({
                 )}
               </div>
 
+              {companyId && reservation.created_in_mode !== 'capacity' && (
+                <ReservationTableAssignment
+                  companyId={companyId}
+                  reservationId={reservation.id}
+                  date={reservation.date}
+                  time={reservation.time}
+                  partySize={reservation.party_size}
+                  initialTableId={reservation.table_id ?? null}
+                />
+              )}
+
               {(visibleOccasion || reservation.notes) && (
                 <div className="space-y-3">
                   {visibleOccasion && (
@@ -873,11 +888,11 @@ export default function ReservationDetailsDialog({
                 </div>
               )}
 
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <div className="flex items-start justify-between gap-4">
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground">Link de acompanhamento</p>
-                    <p className="break-all text-xs text-muted-foreground">{trackingUrl}</p>
                     {reservation.origin_affiliate_name && (
                       <div className="pt-2">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem afiliada</p>
@@ -892,28 +907,34 @@ export default function ReservationDetailsDialog({
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={copyTrackingLink}>
                     <Copy className="h-4 w-4" />
-                    Copiar link
+                    Copiar
                   </Button>
                   <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={openTrackingLink}>
                     <ExternalLink className="h-4 w-4" />
-                    Abrir acompanhamento
+                    Abrir link
                   </Button>
+                </div>
                 </div>
 
                 {reviewUrl && (
-                  <div className="mt-3 rounded-lg border border-border bg-muted/20 p-4">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-foreground">Link de avaliação</p>
-                      {effectiveReviewStatus === 'submitted' ? (
-                        <p className="text-xs text-success">Avaliação já respondida pelo cliente.</p>
-                      ) : (
-                        <p className="break-all text-xs text-muted-foreground">{reviewUrl}</p>
-                      )}
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                        <Star className="h-4 w-4 fill-current" />
+                      </span>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-sm font-medium text-foreground">Link de avaliação</p>
+                        {effectiveReviewStatus === 'submitted' ? (
+                          <p className="text-xs text-success">Avaliação já respondida pelo cliente.</p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Disponível para envio ao cliente.</p>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={copyReviewLink}>
+                      <Button type="button" variant="outline" className="w-full gap-2 bg-background sm:w-auto" onClick={copyReviewLink}>
                         <Copy className="h-4 w-4" />
-                        Copiar link de avaliação
+                        Copiar link
                       </Button>
                     </div>
                   </div>

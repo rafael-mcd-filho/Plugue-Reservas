@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -86,6 +86,11 @@ interface ReviewDetail {
     guest_phone: string | null;
     date: string;
   } | null;
+}
+
+interface CompanyNpsConfig {
+  company_id: string;
+  enabled: boolean;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -385,6 +390,7 @@ type DetailFilter = 'all' | 'promoter' | 'passive' | 'detractor' | 'pending' | '
 
 export default function CompanyNpsReports() {
   const { companyId } = useMaybeCompanySlug() ?? {};
+  const queryClient = useQueryClient();
 
   const [period,        setPeriod]        = useState('30');
   const [activeTab,     setActiveTab]     = useState<'resumo' | 'registros'>('resumo');
@@ -399,6 +405,47 @@ export default function CompanyNpsReports() {
   const toDate       = format(new Date(),                               'yyyy-MM-dd');
   const prevFromDate = format(subDays(new Date(), Number(period) * 2), 'yyyy-MM-dd');
   const prevToDate   = format(subDays(new Date(), Number(period) + 1), 'yyyy-MM-dd');
+
+  const { data: npsConfig, isLoading: npsConfigLoading } = useQuery<CompanyNpsConfig | null>({
+    queryKey: ['company-nps-activation', companyId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from('company_nps_configs')
+        .select('company_id, enabled')
+        .eq('company_id', companyId!)
+        .maybeSingle();
+
+      if (error) throw error;
+      return (data ?? null) as CompanyNpsConfig | null;
+    },
+    enabled: !!companyId,
+  });
+
+  const npsActive = npsConfig?.enabled ?? false;
+
+  const updateNpsActiveMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      if (!companyId) throw new Error('Empresa não encontrada.');
+
+      const { error } = await (supabase as any)
+        .from('company_nps_configs')
+        .upsert({
+          company_id: companyId,
+          enabled,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'company_id' });
+
+      if (error) throw error;
+    },
+    onSuccess: (_, enabled) => {
+      queryClient.invalidateQueries({ queryKey: ['company-nps-activation', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-nps-config', companyId] });
+      toast.success(enabled ? 'Avaliações ativadas.' : 'Avaliações desativadas.');
+    },
+    onError: (error: any) => {
+      toast.error(`Não foi possível atualizar as avaliações: ${error.message}`);
+    },
+  });
 
   function makeSummaryQuery(from: string, to: string) {
     return {
@@ -523,13 +570,45 @@ export default function CompanyNpsReports() {
           <h1 className="text-2xl font-bold tracking-tight">Avaliações</h1>
           <p className="text-sm text-muted-foreground">NPS e satisfação dos clientes pós-visita.</p>
         </div>
-        <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-full sm:w-[180px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {PERIOD_OPTIONS.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            type="button"
+            variant={npsActive ? 'outline' : 'default'}
+            disabled={npsConfigLoading || updateNpsActiveMutation.isPending}
+            onClick={() => updateNpsActiveMutation.mutate(!npsActive)}
+          >
+            {updateNpsActiveMutation.isPending
+              ? 'Salvando...'
+              : npsActive
+                ? 'Desativar avaliações'
+                : 'Ativar avaliações'}
+          </Button>
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="w-full sm:w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PERIOD_OPTIONS.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+
+      <Card className={`border ${npsActive ? 'border-success/25 bg-success/5' : 'border-amber-200 bg-amber-50/60'}`}>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {npsActive ? 'Coleta de avaliações ativa' : 'Coleta de avaliações desativada'}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {npsActive
+                ? 'Novos check-ins geram links de avaliação automaticamente.'
+                : 'A tela está liberada, mas novos check-ins ainda não geram links de avaliação.'}
+            </p>
+          </div>
+          <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-medium ${npsActive ? 'bg-success/10 text-success' : 'bg-amber-100 text-amber-800'}`}>
+            {npsActive ? 'Ativo' : 'Inativo'}
+          </span>
+        </CardContent>
+      </Card>
 
       {summaryLoading ? (
         <div className="space-y-4">

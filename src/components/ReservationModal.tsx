@@ -140,14 +140,21 @@ interface SlotAvailability {
   reservationCount: number;
   maxPartySizePerReservation: number | null;
   maxReservationsPerSlot: number | null;
+  availabilityMode: 'tables' | 'capacity';
+  durationMinutes: number | null;
+  maxGuestsPerSlot: number | null;
 }
 
 interface PublicReservationSchedule {
   source: 'blocked' | 'date_specific' | 'date_range' | 'weekly' | 'default';
   rule_id: string | null;
   rule_name: string | null;
+  block_id: string | null;
+  block_name: string | null;
   slots: string[];
   max_party_size_per_reservation: number | null;
+  availability_mode: 'tables' | 'capacity';
+  default_duration_minutes: number | null;
 }
 
 async function getPublicReservationSchedule(companyId: string, date: string): Promise<PublicReservationSchedule> {
@@ -163,10 +170,16 @@ async function getPublicReservationSchedule(companyId: string, date: string): Pr
     source: row?.source ?? 'default',
     rule_id: row?.rule_id ?? null,
     rule_name: row?.rule_name ?? null,
+    block_id: row?.block_id ?? null,
+    block_name: row?.block_name ?? null,
     slots: sortReservationScheduleSlots(Array.isArray(row?.slots) ? row.slots : []),
     max_party_size_per_reservation: row?.max_party_size_per_reservation == null
       ? null
       : Number(row.max_party_size_per_reservation),
+    availability_mode: row?.availability_mode === 'capacity' ? 'capacity' : 'tables',
+    default_duration_minutes: row?.default_duration_minutes == null
+      ? null
+      : Number(row.default_duration_minutes),
   };
 }
 
@@ -574,6 +587,9 @@ export default function ReservationModal({
             maxReservationsPerSlot: row.max_reservations_per_slot == null
               ? null
               : Number(row.max_reservations_per_slot),
+            availabilityMode: row.availability_mode === 'capacity' ? 'capacity' : 'tables',
+            durationMinutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
+            maxGuestsPerSlot: row.max_guests_per_slot == null ? null : Number(row.max_guests_per_slot),
           };
         });
         if (slotAvailabilityRequestIdRef.current !== requestId) return;
@@ -612,6 +628,21 @@ export default function ReservationModal({
       setLoadingTables(false);
       return;
     }
+
+    const selectedAvailabilityMode = slotAvailability[selectedTime]?.availabilityMode
+      ?? publicSchedule?.availability_mode
+      ?? 'tables';
+
+    if (selectedAvailabilityMode === 'capacity') {
+      setAvailableTables([]);
+      setSelectedTableId('');
+      setSelectedTableMapId('');
+      setResolvedTableLookupKey(tableLookupKey);
+      setTableAvailabilityError(null);
+      setLoadingTables(false);
+      return;
+    }
+
     if (tablesLoading || tableMapsLoading) return;
 
     if (allTables.length === 0) {
@@ -669,7 +700,7 @@ export default function ReservationModal({
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken, slotAvailability]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken, slotAvailability, publicSchedule?.availability_mode]);
 
   const handleReset = () => {
     setStep(1);
@@ -937,6 +968,10 @@ export default function ReservationModal({
         companyId,
         companySlug: slug,
       });
+      const submittingSlotAvailability = selectedTime ? slotAvailability[selectedTime] : null;
+      const submittingAvailabilityMode = submittingSlotAvailability?.availabilityMode
+        ?? publicSchedule?.availability_mode
+        ?? 'tables';
 
       const attributionSnapshot = {
         ...trackingSnapshot.attribution_snapshot,
@@ -966,8 +1001,8 @@ export default function ReservationModal({
         id: reservationId,
         public_tracking_code: trackingCode,
         company_id: companyId,
-        table_id: selectedTableId || null,
-        table_map_id: selectedTableMapId || null,
+        table_id: submittingAvailabilityMode === 'capacity' ? null : (selectedTableId || null),
+        table_map_id: submittingAvailabilityMode === 'capacity' ? null : (selectedTableMapId || null),
         guest_name: form.name,
         guest_phone: normalizedPhone,
         guest_email: normalizedEmail || null,
@@ -975,7 +1010,7 @@ export default function ReservationModal({
         date: dateStr,
         time: selectedTime + ':00',
         party_size: selectedPartySize,
-        duration_minutes: reservationDuration,
+        duration_minutes: submittingSlotAvailability?.durationMinutes ?? reservationDuration,
         occasion: form.occasion || null,
         notes: form.observation || null,
         visitor_id: trackingSnapshot.anonymous_id,
@@ -1144,6 +1179,9 @@ export default function ReservationModal({
   }, [getSlotRemainingCapacity, slotAvailability, timeSlots]);
 
   const selectedSlotAvailability = selectedTime ? slotAvailability[selectedTime] : null;
+  const selectedSlotMode = selectedSlotAvailability?.availabilityMode
+    ?? publicSchedule?.availability_mode
+    ?? 'tables';
   const selectedSlotRemainingCapacity = selectedSlotAvailability
     ? getSlotRemainingCapacity(selectedSlotAvailability)
     : 0;
@@ -1196,13 +1234,15 @@ export default function ReservationModal({
     && !isLargeParty
     && (scheduleLoading || tablesLoading || tableMapsLoading || isFetchingInitialSlotAvailability);
   const isCheckingSelectedTable = !!selectedTime
+    && selectedSlotMode !== 'capacity'
     && (tablesLoading || tableMapsLoading || loadingTables || resolvedTableLookupKey !== tableLookupKey);
   const showNoTableAvailability = !!selectedTime
+    && selectedSlotMode !== 'capacity'
     && !isCheckingSelectedTable
     && !tableAvailabilityError
     && availableTables.length === 0;
   const canContinueToForm = !!selectedTime
-    && !!selectedTableId
+    && (selectedSlotMode === 'capacity' || !!selectedTableId)
     && selectedSlotAvailability?.isAvailable === true
     && !isCheckingSelectedTable
     && !tableAvailabilityError;

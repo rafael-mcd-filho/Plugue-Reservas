@@ -532,8 +532,8 @@ export default function CompanyUsers() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-foreground">Usuários</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -541,45 +541,47 @@ export default function CompanyUsers() {
           </p>
         </div>
 
-        <Button className="gap-2 self-start rounded-lg px-4" onClick={() => setShowCreateDialog(true)}>
+        <Button size="sm" className="gap-2 self-start rounded-md px-3" onClick={() => setShowCreateDialog(true)}>
           <Plus className="h-4 w-4" />
           Novo usuário
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3 lg:flex-row">
-        <div className="relative w-full max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar por nome ou e-mail..."
-            className="h-10 rounded-lg bg-card pl-10"
-          />
-        </div>
+      <Card className="border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+        <CardContent className="flex flex-col gap-2 p-3 lg:flex-row">
+          <div className="relative w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nome ou e-mail..."
+              className="h-9 rounded-md bg-background pl-10"
+            />
+          </div>
 
-        <Select value={filterRole} onValueChange={setFilterRole}>
-          <SelectTrigger className="h-10 w-full rounded-lg bg-card lg:w-[180px]">
-            <SelectValue placeholder="Todos os perfis" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os perfis</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="operator">Operador</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          <Select value={filterRole} onValueChange={setFilterRole}>
+            <SelectTrigger className="h-9 w-full rounded-md bg-background lg:w-[180px]">
+              <SelectValue placeholder="Todos os perfis" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os perfis</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="operator">Operador</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
 
       {isLoading ? (
-        <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
           <CardContent className="space-y-3 p-6">
             {[1, 2, 3].map((item) => (
-              <Skeleton key={item} className="h-16 w-full rounded-2xl" />
+              <Skeleton key={item} className="h-9 w-full rounded-md" />
             ))}
           </CardContent>
         </Card>
       ) : error ? (
-        <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
           <CardContent className="py-14 text-center text-muted-foreground">
             <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
             <p className="font-medium text-foreground">Não foi possível carregar os usuários.</p>
@@ -591,42 +593,42 @@ export default function CompanyUsers() {
           </CardContent>
         </Card>
       ) : filtered.length === 0 ? (
-        <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
           <CardContent className="py-14 text-center text-muted-foreground">
             <UsersIcon className="mx-auto mb-3 h-12 w-12 opacity-30" />
             Nenhum usuario encontrado.
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-          <Table>
-            <TableHeader className="bg-muted/55">
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="h-12 px-5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
+          <Table className="min-w-[760px] text-xs">
+            <TableHeader className="bg-muted/25">
+              <TableRow className="border-border/60 hover:bg-transparent">
+                <TableHead className="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Nome
                 </TableHead>
-                <TableHead className="h-12 px-5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   E-mail
                 </TableHead>
-                <TableHead className="h-12 px-5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Perfil
                 </TableHead>
-                <TableHead className="h-12 px-5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Status
                 </TableHead>
-                <TableHead className="h-12 px-5 text-right text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="h-8 px-3 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Ações
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((user) => (
-                <TableRow key={user.id} className="border-border/80 bg-card hover:bg-muted/25">
-                  <TableCell className="px-5 py-4">
-                    <div className="flex items-center gap-3">
+                <TableRow key={user.id} className="border-border/60 bg-card hover:bg-primary-soft/20">
+                  <TableCell className="px-3 py-2">
+                    <div className="flex items-center gap-2">
                       <div
                         className={cn(
-                          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold ring-1 ring-black/[0.03]',
                           getAvatarTone(user),
                         )}
                       >
@@ -635,18 +637,18 @@ export default function CompanyUsers() {
                       <span className="font-medium text-foreground">{user.full_name || '-'}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="px-5 py-4 text-sm text-muted-foreground">
+                  <TableCell className="px-3 py-2 text-xs text-muted-foreground">
                     {user.email}
                   </TableCell>
-                  <TableCell className="px-5 py-4">
-                    <div className="flex flex-wrap gap-2">
+                  <TableCell className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {user.roles
                         .filter((role) => role !== 'superadmin')
                         .map((role) => (
                           <span
                             key={role}
                             className={cn(
-                              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium',
+                              'inline-flex h-5 items-center rounded-md border px-2 text-[11px] font-medium',
                               roleBadgeClassNames[role] || 'border-border bg-muted text-foreground',
                             )}
                           >
@@ -655,15 +657,15 @@ export default function CompanyUsers() {
                         ))}
                     </div>
                     {hasCustomOperatorAccess(user) && (
-                      <p className="mt-2 text-xs text-muted-foreground">
+                      <p className="mt-1 text-[11px] text-muted-foreground">
                         Acesso do operador personalizado
                       </p>
                     )}
                   </TableCell>
-                  <TableCell className="px-5 py-4">
+                  <TableCell className="px-3 py-2">
                     <span
                       className={cn(
-                        'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium',
+                        'inline-flex h-5 items-center rounded-md border px-2 text-[11px] font-medium',
                         user.is_banned
                           ? 'border-destructive/20 bg-destructive-soft text-destructive'
                           : 'border-success/20 bg-success-soft text-success',
@@ -672,16 +674,16 @@ export default function CompanyUsers() {
                       {user.is_banned ? 'Bloqueado' : 'Ativo'}
                     </span>
                   </TableCell>
-                  <TableCell className="px-5 py-4 text-right">
+                  <TableCell className="px-3 py-2 text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="icon"
-                          className="h-9 w-9 rounded-lg border-border bg-card text-muted-foreground hover:bg-muted"
+                          className="h-7 w-7 rounded-md text-muted-foreground hover:bg-primary-soft hover:text-primary"
                           aria-label={`Ações para ${user.full_name || user.email}`}
                         >
-                          <MoreVertical className="h-4 w-4" />
+                          <MoreVertical className="h-3.5 w-3.5" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52 rounded-lg">

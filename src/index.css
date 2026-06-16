@@ -122,6 +122,9 @@
 
   html {
     scroll-behavior: smooth;
+    /* Reserva permanente da barra de rolagem: evita o deslocamento horizontal
+       (a "tela piscando") quando modais Radix travam/destravam o scroll do body. */
+    scrollbar-gutter: stable;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;

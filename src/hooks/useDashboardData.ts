@@ -55,8 +55,15 @@ interface RawWaitlistEntry {
   removed_at: string | null;
 }
 
+interface RawDailyCapacity {
+  capacity_date: string;
+  total_capacity: number | null;
+  slot_count: number | null;
+}
+
 const EMPTY_RESERVATIONS: RawReservation[] = [];
 const EMPTY_WAITLIST: RawWaitlistEntry[] = [];
+const EMPTY_DAILY_CAPACITY: RawDailyCapacity[] = [];
 const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)';
 const DASHBOARD_WAITLIST_SELECT = 'id, status, created_at, seated_at, expired_at, removed_at';
 
@@ -89,6 +96,29 @@ export interface WaitlistDailyStat {
   seated: number;
   dropped: number;
   avgWaitMin: number | null;
+}
+
+export type DailyCapacityStatus = 'below' | 'full' | 'over' | 'no_capacity';
+
+export interface DailyCapacityStat {
+  date: string;
+  label: string;
+  totalCapacity: number;
+  slotCount: number;
+  checkedInGuests: number;
+  occupancyRate: number;
+  overCapacityGuests: number;
+  status: DailyCapacityStatus;
+}
+
+export interface DailyCapacityTotals {
+  totalCapacity: number;
+  checkedInGuests: number;
+  occupancyRate: number;
+  daysWithCapacity: number;
+  fullDays: number;
+  overCapacityDays: number;
+  noCapacityDays: number;
 }
 
 export interface HeatmapCellBreakdown {
@@ -333,12 +363,29 @@ export function useDashboardData(
     refetchIntervalInBackground: false,
   });
 
+  const dailyCapacityQuery = useQuery({
+    queryKey: ['dashboard-daily-capacity', companyId ?? 'all', startStr, endStr],
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as any)('get_dashboard_daily_capacity', {
+        _company_id: companyId ?? null,
+        _start_date: startStr,
+        _end_date: endStr,
+      });
+
+      if (error) throw error;
+      return (data ?? []) as RawDailyCapacity[];
+    },
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+  });
+
   const rawReservations = reservationsQuery.data ?? EMPTY_RESERVATIONS;
   const rawWaitlist = waitlistQuery.data ?? EMPTY_WAITLIST;
   const rawWaitlistSeated = waitlistSeatedQuery.data ?? EMPTY_WAITLIST;
   const rawWaitlistDropped = waitlistDroppedQuery.data ?? EMPTY_WAITLIST;
   const prevReservations = previousReservationsQuery.data ?? EMPTY_RESERVATIONS;
   const createdReservations = createdReservationsQuery.data ?? EMPTY_RESERVATIONS;
+  const rawDailyCapacity = dailyCapacityQuery.data ?? EMPTY_DAILY_CAPACITY;
 
   const dailyStats = useMemo(() => {
     const days = eachDayOfInterval({ start: startDate, end: endDate });
@@ -471,14 +518,14 @@ export function useDashboardData(
       direct_organic: 0, ads: 0, affiliate: 0, manual: 0, waitlist: 0,
     };
 
-    for (const reservation of createdReservations) {
+    for (const reservation of rawReservations) {
       const key = classifyReservationOrigin(reservation);
       counts[key] += 1;
       people[key] += reservation.party_size || 1;
     }
 
-    const total = createdReservations.length;
-    const totalPeople = createdReservations.reduce((s, r) => s + (r.party_size || 1), 0);
+    const total = rawReservations.length;
+    const totalPeople = rawReservations.reduce((s, r) => s + (r.party_size || 1), 0);
     const items = (Object.keys(RESERVATION_ORIGIN_CONFIG) as ReservationOriginKey[]).map((key) => {
       const value = counts[key];
       return {
@@ -492,21 +539,21 @@ export function useDashboardData(
     });
 
     return { total, totalPeople, items };
-  }, [createdReservations]);
+  }, [rawReservations]);
 
   const reservationOriginDailyStats = useMemo(() => {
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const byDate: Record<string, ReservationOriginDailyStat> = {};
 
-    for (const reservation of createdReservations) {
-      const createdDate = format(new Date(reservation.created_at), 'yyyy-MM-dd');
+    for (const reservation of rawReservations) {
+      const reservationDate = reservation.date;
       const originKey = classifyReservationOrigin(reservation);
       const partySize = reservation.party_size || 1;
 
-      if (!byDate[createdDate]) {
-        byDate[createdDate] = {
-          date: createdDate,
-          label: format(new Date(`${createdDate}T12:00:00`), 'dd/MM', { locale: ptBR }),
+      if (!byDate[reservationDate]) {
+        byDate[reservationDate] = {
+          date: reservationDate,
+          label: format(new Date(`${reservationDate}T12:00:00`), 'dd/MM', { locale: ptBR }),
           totalReservations: 0,
           totalPeople: 0,
           direct_organic: 0,
@@ -522,7 +569,7 @@ export function useDashboardData(
         };
       }
 
-      const bucket = byDate[createdDate];
+      const bucket = byDate[reservationDate];
       bucket.totalReservations += 1;
       bucket.totalPeople += partySize;
       bucket[originKey] += 1;
@@ -550,7 +597,7 @@ export function useDashboardData(
         waitlistPeople: 0,
       };
     });
-  }, [createdReservations, startDate, endDate]);
+  }, [rawReservations, startDate, endDate]);
 
   const prevTotals = useMemo(() => {
     const acc = {
@@ -670,6 +717,75 @@ export function useDashboardData(
       };
     });
   }, [endDate, rawWaitlist, rawWaitlistDropped, rawWaitlistSeated, startDate]);
+
+  const dailyCapacityStats = useMemo(() => {
+    const capacityByDate = new Map(
+      rawDailyCapacity.map((row) => [
+        row.capacity_date,
+        {
+          totalCapacity: Math.max(0, Number(row.total_capacity ?? 0)),
+          slotCount: Math.max(0, Number(row.slot_count ?? 0)),
+        },
+      ]),
+    );
+
+    return dailyStats.map((day): DailyCapacityStat => {
+      const capacity = capacityByDate.get(day.date) ?? { totalCapacity: 0, slotCount: 0 };
+      const checkedInGuests = day.completedGuests;
+      const occupancyRate = capacity.totalCapacity > 0
+        ? Math.round((checkedInGuests / capacity.totalCapacity) * 100)
+        : 0;
+      const overCapacityGuests = capacity.totalCapacity > 0
+        ? Math.max(checkedInGuests - capacity.totalCapacity, 0)
+        : 0;
+      const status: DailyCapacityStatus = capacity.totalCapacity <= 0
+        ? 'no_capacity'
+        : checkedInGuests > capacity.totalCapacity
+          ? 'over'
+          : checkedInGuests === capacity.totalCapacity && checkedInGuests > 0
+            ? 'full'
+            : 'below';
+
+      return {
+        date: day.date,
+        label: day.label,
+        totalCapacity: capacity.totalCapacity,
+        slotCount: capacity.slotCount,
+        checkedInGuests,
+        occupancyRate,
+        overCapacityGuests,
+        status,
+      };
+    });
+  }, [dailyStats, rawDailyCapacity]);
+
+  const dailyCapacityTotals = useMemo<DailyCapacityTotals>(() => {
+    const totals = dailyCapacityStats.reduce(
+      (acc, day) => ({
+        totalCapacity: acc.totalCapacity + day.totalCapacity,
+        checkedInGuests: acc.checkedInGuests + day.checkedInGuests,
+        daysWithCapacity: acc.daysWithCapacity + (day.totalCapacity > 0 ? 1 : 0),
+        fullDays: acc.fullDays + (day.status === 'full' ? 1 : 0),
+        overCapacityDays: acc.overCapacityDays + (day.status === 'over' ? 1 : 0),
+        noCapacityDays: acc.noCapacityDays + (day.status === 'no_capacity' ? 1 : 0),
+      }),
+      {
+        totalCapacity: 0,
+        checkedInGuests: 0,
+        daysWithCapacity: 0,
+        fullDays: 0,
+        overCapacityDays: 0,
+        noCapacityDays: 0,
+      },
+    );
+
+    return {
+      ...totals,
+      occupancyRate: totals.totalCapacity > 0
+        ? Math.round((totals.checkedInGuests / totals.totalCapacity) * 100)
+        : 0,
+    };
+  }, [dailyCapacityStats]);
 
   const heatmapData = useMemo(() => {
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
@@ -847,6 +963,8 @@ export function useDashboardData(
 
   return {
     dailyStats,
+    dailyCapacityStats,
+    dailyCapacityTotals,
     createdReservationDailyStats,
     reservationGuestDailyStats,
     reservationLeadTrend,
@@ -859,7 +977,7 @@ export function useDashboardData(
     waitlistTotals,
     heatmapData,
     isLoading: reservationsQuery.isLoading || waitlistQuery.isLoading || waitlistSeatedQuery.isLoading || waitlistDroppedQuery.isLoading || previousReservationsQuery.isLoading || createdReservationsQuery.isLoading,
-    isFetching: reservationsQuery.isFetching || waitlistQuery.isFetching || waitlistSeatedQuery.isFetching || waitlistDroppedQuery.isFetching || previousReservationsQuery.isFetching || createdReservationsQuery.isFetching,
+    isFetching: reservationsQuery.isFetching || waitlistQuery.isFetching || waitlistSeatedQuery.isFetching || waitlistDroppedQuery.isFetching || previousReservationsQuery.isFetching || createdReservationsQuery.isFetching || dailyCapacityQuery.isFetching,
     lastUpdatedAt: Math.max(
       reservationsQuery.dataUpdatedAt || 0,
       waitlistQuery.dataUpdatedAt || 0,
@@ -867,6 +985,7 @@ export function useDashboardData(
       waitlistDroppedQuery.dataUpdatedAt || 0,
       previousReservationsQuery.dataUpdatedAt || 0,
       createdReservationsQuery.dataUpdatedAt || 0,
+      dailyCapacityQuery.dataUpdatedAt || 0,
     ),
   };
 }

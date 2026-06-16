@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "vite.config.ts.timestamp-*.mjs"] },
+  { ignores: ["backups", "dist", "vite.config.ts.timestamp-*.mjs"] },
   {
     files: ["api/**/*.{ts,tsx}"],
     languageOptions: {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -69,6 +69,7 @@ export default function Companies() {
   const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
   const { data: featureMatrix = {}, isLoading: featureMatrixLoading } = useCompaniesFeatureMatrix(companies);
   const handledRouteRef = useRef<string | null>(null);
+  const routeDialogCompanyIdRef = useRef<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -82,8 +83,9 @@ export default function Companies() {
   const [impersonationDialogOpen, setImpersonationDialogOpen] = useState(false);
   const [companyToImpersonate, setCompanyToImpersonate] = useState<Company | null>(null);
 
-  const resolveFeatures = (company: Company) =>
-    featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier));
+  const resolveFeatures = useCallback((company: Company) =>
+    featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier)),
+  [featureMatrix]);
 
   const { data: impersonationCandidates = [], isLoading: impersonationCandidatesLoading, isError: impersonationCandidatesError, error: impersonationCandidatesErrorObj } = useQuery({
     queryKey: ['impersonation-candidates', companyToImpersonate?.id, manageUserScopeKey],
@@ -120,24 +122,39 @@ export default function Companies() {
     refetchOnWindowFocus: false,
   });
 
-  const resetDialogState = () => {
-    setDialogOpen(false);
+  const clearDialogSelection = useCallback(() => {
     setSelectedCompany(null);
     setDialogFeatures(null);
-  };
+    routeDialogCompanyIdRef.current = null;
+  }, []);
+
+  const resetDialogState = useCallback(() => {
+    setDialogOpen(false);
+    clearDialogSelection();
+  }, [clearDialogSelection]);
+
+  const closeDialog = useCallback((options?: { clearSelection?: boolean }) => {
+    setDialogOpen(false);
+
+    if (options?.clearSelection) {
+      clearDialogSelection();
+    }
+  }, [clearDialogSelection]);
 
   const openCreate = () => {
     handledRouteRef.current = null;
+    routeDialogCompanyIdRef.current = null;
     setSelectedCompany(null);
     setDialogFeatures(getPlanDefaultFeatures(normalizeCompanyPlanTier(undefined)));
     setDialogOpen(true);
   };
 
-  const openEdit = (company: Company) => {
+  const openEdit = useCallback((company: Company, options?: { openedFromRoute?: boolean }) => {
+    routeDialogCompanyIdRef.current = options?.openedFromRoute ? company.id : null;
     setSelectedCompany(company);
     setDialogFeatures(resolveFeatures(company));
     setDialogOpen(true);
-  };
+  }, [resolveFeatures]);
 
   const openImpersonationDialog = (company: Company) => {
     setCompanyToImpersonate(company);
@@ -173,7 +190,7 @@ export default function Companies() {
       return;
     }
 
-    resetDialogState();
+    closeDialog();
 
     if (routeCompanyId) {
       navigate('/empresas', { replace: true });
@@ -200,15 +217,15 @@ export default function Companies() {
       return;
     }
 
-    openEdit(company);
+    openEdit(company, { openedFromRoute: true });
     handledRouteRef.current = routeCompanyId;
-  }, [routeCompanyId, isLoading, featureMatrixLoading, companies, dialogOpen, navigate, selectedCompany?.id]);
+  }, [routeCompanyId, isLoading, featureMatrixLoading, companies, dialogOpen, navigate, openEdit, resetDialogState, selectedCompany?.id]);
 
   useEffect(() => {
-    if (!routeCompanyId && selectedCompany && dialogOpen) {
-      resetDialogState();
+    if (!routeCompanyId && routeDialogCompanyIdRef.current && dialogOpen) {
+      closeDialog({ clearSelection: true });
     }
-  }, [routeCompanyId, dialogOpen, selectedCompany]);
+  }, [routeCompanyId, closeDialog, dialogOpen]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -333,9 +350,9 @@ export default function Companies() {
                   <TableRow
                     key={company.id}
                     className="cursor-pointer"
-                    onClick={() => navigate(`/empresas/${company.id}`)}
+                    onClick={() => openEdit(company)}
                     tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/empresas/${company.id}`); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openEdit(company); }}
                   >
                     <TableCell>
                       <div>
@@ -372,7 +389,7 @@ export default function Companies() {
                             <DropdownMenuItem onClick={() => openImpersonationDialog(company)}>
                               <ExternalLink className="mr-2 h-4 w-4" /> Escolher impersonação
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => navigate(`/empresas/${company.id}`)}>
+                            <DropdownMenuItem onClick={() => openEdit(company)}>
                               <Pencil className="mr-2 h-4 w-4" /> Editar e configurar
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => togglePause(company)}>

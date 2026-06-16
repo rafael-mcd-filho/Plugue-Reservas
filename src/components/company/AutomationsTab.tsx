@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, History, Radio, Save, Send, Smartphone } from 'lucide-react';
+import { Bot, History, Radio, Save, Send } from 'lucide-react';
 import PlugueChatMessageHistory from './PlugueChatMessageHistory';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,9 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import BroadcastsTab from './BroadcastsTab';
 import ChannelTab from './ChannelTab';
 import PlugueChatBroadcastsTab from './PlugueChatBroadcastsTab';
-import PlugueChatConnection from './PlugueChatConnection';
 import PlugueChatMessages from './PlugueChatMessages';
-import WhatsAppConnection from './WhatsAppConnection';
 import WhatsAppMessageHistory from './WhatsAppMessageHistory';
 import { type AutomationSetting, useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
 import { useWhatsAppChannel } from '@/hooks/useWhatsAppChannel';
@@ -24,6 +22,8 @@ interface Props {
 }
 
 type AutomationLocalState = Record<string, { enabled: boolean; message_template: string }>;
+
+const automationTabTriggerClass = 'min-h-[36px] shrink-0 gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none';
 
 function buildAutomationState(automations: AutomationSetting[] | undefined): AutomationLocalState {
   const nextState: AutomationLocalState = {};
@@ -94,34 +94,25 @@ export default function AutomationsTab({ companyId }: Props) {
 
   return (
     <Tabs defaultValue="channel" className="space-y-6">
-      <TabsList className="w-full grid grid-cols-5">
-        <TabsTrigger value="channel" className="gap-2">
-          <Radio className="h-4 w-4 max-sm:hidden" /> Canal
-        </TabsTrigger>
-        <TabsTrigger value="connection" className="gap-2">
-          <Smartphone className="h-4 w-4 max-sm:hidden" /> Conexão
-        </TabsTrigger>
-        <TabsTrigger value="messages" className="gap-2">
-          <Bot className="h-4 w-4 max-sm:hidden" /> Mensagens
-        </TabsTrigger>
-        <TabsTrigger value="broadcast" className="gap-2">
-          <Send className="h-4 w-4 max-sm:hidden" /> Disparo
-        </TabsTrigger>
-        <TabsTrigger value="history" className="gap-2">
-          <History className="h-4 w-4 max-sm:hidden" /> Histórico
-        </TabsTrigger>
-      </TabsList>
+      <div className="overflow-x-auto pb-1">
+        <TabsList className="h-auto w-max min-w-full justify-start rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-1 md:min-w-0">
+          <TabsTrigger value="channel" className={automationTabTriggerClass}>
+            <Radio className="h-4 w-4" /> Canal
+          </TabsTrigger>
+          <TabsTrigger value="messages" className={automationTabTriggerClass}>
+            <Bot className="h-4 w-4" /> Mensagens
+          </TabsTrigger>
+          <TabsTrigger value="broadcast" className={automationTabTriggerClass}>
+            <Send className="h-4 w-4" /> Disparo
+          </TabsTrigger>
+          <TabsTrigger value="history" className={automationTabTriggerClass}>
+            <History className="h-4 w-4" /> Histórico
+          </TabsTrigger>
+        </TabsList>
+      </div>
 
       <TabsContent value="channel">
         <ChannelTab companyId={companyId} activeChannel={channel} />
-      </TabsContent>
-
-      <TabsContent value="connection">
-        {isPlugueChat ? (
-          <PlugueChatConnection companyId={companyId} activeChannel={channel} />
-        ) : (
-          <WhatsAppConnection companyId={companyId} />
-        )}
       </TabsContent>
 
       <TabsContent value="messages" className="space-y-4">

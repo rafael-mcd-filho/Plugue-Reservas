@@ -120,7 +120,7 @@ ALTER TABLE public.whatsapp_message_queue
 
 ALTER TABLE public.whatsapp_message_queue
   ADD CONSTRAINT whatsapp_message_queue_status_check
-  CHECK (status IN ('pending', 'processing', 'sent', 'failed'));
+  CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'expired'));
 
 WITH ranked_reservation AS (
   SELECT

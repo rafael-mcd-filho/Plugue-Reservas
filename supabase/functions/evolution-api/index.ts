@@ -402,10 +402,41 @@ Deno.serve(async (req) => {
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               const p = Array.isArray(profileData) ? profileData[0] : profileData;
-              const displayName = p?.profileName ?? p?.instance?.profileName ?? null;
-              const profilePictureUrl = p?.profilePicUrl ?? p?.instance?.profilePicUrl ?? null;
-              const ownerJid = p?.ownerJid ?? p?.owner ?? p?.instance?.owner ?? null;
-              const phoneNumber = ownerJid ? String(ownerJid).split('@')[0] : null;
+              const displayName =
+                p?.profileName ??
+                p?.displayName ??
+                p?.pushName ??
+                p?.name ??
+                p?.instance?.profileName ??
+                p?.instance?.displayName ??
+                p?.instance?.pushName ??
+                p?.instance?.name ??
+                null;
+              const profilePictureUrl =
+                p?.profilePicUrl ??
+                p?.profilePictureUrl ??
+                p?.picture ??
+                p?.instance?.profilePicUrl ??
+                p?.instance?.profilePictureUrl ??
+                p?.instance?.picture ??
+                null;
+              const ownerJid =
+                p?.ownerJid ??
+                p?.owner ??
+                p?.jid ??
+                p?.instance?.ownerJid ??
+                p?.instance?.owner ??
+                p?.instance?.jid ??
+                null;
+              const rawPhoneNumber =
+                p?.number ??
+                p?.phone ??
+                p?.phoneNumber ??
+                p?.instance?.number ??
+                p?.instance?.phone ??
+                p?.instance?.phoneNumber ??
+                null;
+              const phoneNumber = rawPhoneNumber ? String(rawPhoneNumber) : ownerJid ? String(ownerJid).split('@')[0] : null;
               if (displayName) dbUpdate.display_name = displayName;
               if (profilePictureUrl) dbUpdate.profile_picture_url = profilePictureUrl;
               if (phoneNumber) dbUpdate.phone_number = phoneNumber;

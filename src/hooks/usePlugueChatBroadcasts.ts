@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 export interface PlugueChatBroadcast {
   id: string;
   company_id: string;
+  name?: string | null;
   template_id: string;
   template_name: string | null;
   audience_filter: Record<string, unknown>;
@@ -57,6 +58,7 @@ export function useCreatePlugueChatBroadcast() {
   return useMutation({
     mutationFn: async (payload: {
       company_id: string;
+      name?: string | null;
       template_id: string;
       template_name?: string | null;
       recipient_reservation_ids?: string[];
@@ -67,6 +69,7 @@ export function useCreatePlugueChatBroadcast() {
         body: {
           action: 'create_broadcast',
           company_id: payload.company_id,
+          name: payload.name ?? null,
           template_id: payload.template_id,
           template_name: payload.template_name ?? null,
           recipient_reservation_ids: payload.recipient_reservation_ids ?? [],

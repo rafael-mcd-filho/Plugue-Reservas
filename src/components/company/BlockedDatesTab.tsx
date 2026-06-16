@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarOff, Plus, Trash2 } from 'lucide-react';
+import { CalendarOff, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface Props {
@@ -33,9 +35,63 @@ const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-w
 const settingsFieldClassName = 'h-10 rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
 
+function formatBlockedDate(date: string, pattern = 'dd/MM/yyyy (EEE)') {
+  return format(new Date(`${date}T12:00:00`), pattern, { locale: ptBR });
+}
+
+function BlockedDateItem({
+  blockedDate,
+  muted = false,
+  onDelete,
+}: {
+  blockedDate: BlockedDate;
+  muted?: boolean;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-4 rounded-xl border px-4 py-4 md:flex-row md:items-center md:justify-between',
+        muted
+          ? 'border-[rgba(0,0,0,0.06)] bg-muted/10'
+          : 'border-[rgba(0,0,0,0.08)] bg-background',
+      )}
+    >
+      <div className="space-y-2">
+        <div className="text-sm font-semibold">
+          {formatBlockedDate(blockedDate.date)}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {blockedDate.all_day ? (
+            <Badge variant={muted ? 'outline' : 'secondary'} className="rounded-full px-3 py-1 text-xs">
+              Dia inteiro
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
+              {blockedDate.start_time?.substring(0, 5)} às {blockedDate.end_time?.substring(0, 5)}
+            </Badge>
+          )}
+          {blockedDate.reason && <span className="text-sm text-muted-foreground">{blockedDate.reason}</span>}
+        </div>
+      </div>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-10 w-10 rounded-lg text-destructive hover:bg-destructive-soft hover:text-destructive"
+        aria-label={`Remover bloqueio de ${formatBlockedDate(blockedDate.date, 'dd/MM/yyyy')}`}
+        onClick={() => onDelete(blockedDate.id)}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 export default function BlockedDatesTab({ companyId }: Props) {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
+  const [showPastDates, setShowPastDates] = useState(false);
   const [form, setForm] = useState({
     date: '',
     all_day: true,
@@ -96,7 +152,9 @@ export default function BlockedDatesTab({ companyId }: Props) {
 
   const today = new Date().toISOString().split('T')[0];
   const futureDates = blockedDates.filter((blockedDate) => blockedDate.date >= today);
-  const pastDates = blockedDates.filter((blockedDate) => blockedDate.date < today);
+  const pastDates = blockedDates
+    .filter((blockedDate) => blockedDate.date < today)
+    .sort((left, right) => right.date.localeCompare(left.date));
 
   if (isLoading) {
     return <Skeleton className="h-48 w-full" />;
@@ -140,44 +198,62 @@ export default function BlockedDatesTab({ companyId }: Props) {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            {futureDates.map((blockedDate) => (
-              <div
-                key={blockedDate.id}
-                className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-background px-4 py-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="text-sm font-semibold">
-                    {format(new Date(`${blockedDate.date}T12:00:00`), 'dd/MM/yyyy (EEE)', { locale: ptBR })}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {blockedDate.all_day ? (
-                      <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
-                        Dia inteiro
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
-                        {blockedDate.start_time?.substring(0, 5)} às {blockedDate.end_time?.substring(0, 5)}
-                      </Badge>
-                    )}
-                    {blockedDate.reason && <span className="text-sm text-muted-foreground">{blockedDate.reason}</span>}
-                  </div>
-                </div>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 rounded-lg text-destructive hover:bg-destructive-soft hover:text-destructive"
-                  aria-label={`Remover bloqueio de ${format(new Date(`${blockedDate.date}T12:00:00`), 'dd/MM/yyyy')}`}
-                  onClick={() => deleteMutation.mutate(blockedDate.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+          <div className="space-y-4">
+            {futureDates.length > 0 ? (
+              <div className="space-y-3">
+                {futureDates.map((blockedDate) => (
+                  <BlockedDateItem
+                    key={blockedDate.id}
+                    blockedDate={blockedDate}
+                    onDelete={(id) => deleteMutation.mutate(id)}
+                  />
+                ))}
               </div>
-            ))}
+            ) : (
+              <div className="rounded-xl border border-dashed border-[rgba(0,0,0,0.12)] bg-muted/10 px-4 py-5 text-sm text-muted-foreground">
+                Nenhuma data futura bloqueada.
+              </div>
+            )}
 
             {pastDates.length > 0 && (
-              <p className="pt-1 text-xs text-muted-foreground">+ {pastDates.length} data(s) passada(s)</p>
+              <Collapsible
+                open={showPastDates}
+                onOpenChange={setShowPastDates}
+                className="overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/10"
+              >
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="flex h-auto w-full items-center justify-between gap-3 rounded-none px-4 py-3 text-left hover:bg-muted/20"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-foreground">Datas passadas</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Histórico de bloqueios que não afetam novas reservas.
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-xs">
+                        {pastDates.length}
+                      </Badge>
+                      <ChevronDown className={cn('h-4 w-4 transition-transform', showPastDates && 'rotate-180')} />
+                    </span>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-2 border-t border-[rgba(0,0,0,0.08)] p-3">
+                    {pastDates.map((blockedDate) => (
+                      <BlockedDateItem
+                        key={blockedDate.id}
+                        blockedDate={blockedDate}
+                        muted
+                        onDelete={(id) => deleteMutation.mutate(id)}
+                      />
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             )}
           </div>
         )}
@@ -213,7 +289,11 @@ export default function BlockedDatesTab({ companyId }: Props) {
 
             <div className="flex items-center justify-between rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-3">
               <Label htmlFor="blocked-date-all-day">Dia inteiro</Label>
-              <Switch id="blocked-date-all-day" checked={form.all_day} onCheckedChange={(checked) => setForm({ ...form, all_day: checked })} />
+              <Switch
+                id="blocked-date-all-day"
+                checked={form.all_day}
+                onCheckedChange={(checked) => setForm({ ...form, all_day: checked })}
+              />
             </div>
 
             {!form.all_day && (

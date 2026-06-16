@@ -25,14 +25,7 @@ function isDueBroadcast(broadcast: any, nowMs: number) {
   return Date.parse(broadcast.scheduled_for) <= nowMs;
 }
 
-function getRecipientParameters(recipient: any): Record<string, string> {
-  const raw = recipient.parameters;
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return Object.fromEntries(
-      Object.entries(raw).map(([key, value]) => [key, String(value ?? "")]),
-    );
-  }
-
+function getRecipientParameters(): Record<string, string> {
   return {};
 }
 
@@ -52,18 +45,18 @@ async function materializeLegacyRecipientsIfNeeded(supabaseAdmin: SupabaseAdmin,
 
   const { data: customers, error } = await supabaseAdmin
     .from("reservations")
-    .select("guest_name, guest_phone")
+    .select("guest_phone")
     .eq("company_id", broadcast.company_id)
     .not("guest_phone", "is", null)
     .limit(LEGACY_RECIPIENT_LIMIT);
 
   if (error) throw error;
 
-  const uniquePhones = new Map<string, { name: string; phone: string }>();
+  const uniquePhones = new Map<string, { phone: string }>();
   for (const customer of customers ?? []) {
     const phone = normalizePhone(String(customer.guest_phone ?? ""));
     if (!phone || uniquePhones.has(phone)) continue;
-    uniquePhones.set(phone, { name: String(customer.guest_name ?? ""), phone });
+    uniquePhones.set(phone, { phone });
   }
 
   if (uniquePhones.size === 0) return 0;
@@ -72,7 +65,7 @@ async function materializeLegacyRecipientsIfNeeded(supabaseAdmin: SupabaseAdmin,
     broadcast_id: broadcast.id,
     company_id: broadcast.company_id,
     phone: recipient.phone,
-    parameters: { nome: recipient.name },
+    parameters: {},
     status: "pending",
   }));
 
@@ -190,7 +183,7 @@ Deno.serve(async (req) => {
             type: "broadcast",
             template_id: broadcast.template_id,
             template_name: broadcast.template_name ?? null,
-            parameters: getRecipientParameters(recipient),
+            parameters: getRecipientParameters(),
             idempotency_key: `pluguechat:broadcast:${broadcast.id}:${phone}`,
           });
 

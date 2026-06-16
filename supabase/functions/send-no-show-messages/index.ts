@@ -134,7 +134,8 @@ Deno.serve(async (req) => {
         });
 
         pcQueueIds.add(reservation.id);
-        result === "inserted" ? queued++ : skipped++;
+        if (result === "inserted") queued++;
+        else skipped++;
         continue;
       }
 
@@ -164,7 +165,8 @@ Deno.serve(async (req) => {
 
       await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "queued" });
       queuedIds.add(reservation.id);
-      enqueueResult === "inserted" ? queued++ : skipped++;
+      if (enqueueResult === "inserted") queued++;
+      else skipped++;
     }
 
     return new Response(JSON.stringify({ queued, skipped, total: reservations.length }), {

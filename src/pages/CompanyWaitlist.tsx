@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bell,
   CalendarDays,
+  CheckCircle2,
   Clock3,
   Copy,
   Eye,
   Link2,
+  Loader2,
   Mail,
-  PencilLine,
   Phone,
   Plus,
   Save,
@@ -58,6 +59,7 @@ import {
   hasWaitlistCallExpired,
   WAITLIST_CALL_TIMEOUT_MINUTES,
 } from '@/lib/waitlist';
+import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
 import { toast } from 'sonner';
 
 interface WaitlistEntry {
@@ -180,33 +182,6 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   removed: { label: 'Removido', className: 'border-destructive/20 bg-destructive-soft text-destructive' },
 };
 
-const statCards = [
-  {
-    key: 'waiting',
-    label: 'Aguardando',
-    icon: Users,
-    iconClassName: 'bg-primary-soft text-primary',
-  },
-  {
-    key: 'called',
-    label: 'Chamados',
-    icon: Bell,
-    iconClassName: 'bg-info-soft text-info',
-  },
-  {
-    key: 'seated',
-    label: 'Sentados hoje',
-    icon: UserCheck,
-    iconClassName: 'bg-success-soft text-success',
-  },
-  {
-    key: 'avgWait',
-    label: 'Espera média',
-    icon: Clock3,
-    iconClassName: 'bg-muted text-muted-foreground',
-  },
-] as const;
-
 export default function CompanyWaitlist() {
   const { companyId, companyName, slug } = useCompanySlug();
   const qc = useQueryClient();
@@ -231,6 +206,27 @@ export default function CompanyWaitlist() {
   const [seatCompanionForms, setSeatCompanionForms] = useState<WaitlistCompanionForm[]>([]);
   const [removeEntry, setRemoveEntry] = useState<WaitlistEntry | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const addFormPhoneDigits = useMemo(
+    () => normalizeBrazilPhoneDigits(addForm.guest_phone),
+    [addForm.guest_phone],
+  );
+  const {
+    data: addFormLead,
+    isFetching: addFormLeadLoading,
+  } = useCrmLeadPrefill(companyId, addFormPhoneDigits, showAdd);
+  const showAddFormLeadLookup = showAdd
+    && addFormPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
+
+  useEffect(() => {
+    if (!showAdd || !addFormLead) return;
+
+    setAddForm((current) => ({
+      ...current,
+      guest_name: addFormLead.full_name || current.guest_name,
+      guest_email: addFormLead.email || current.guest_email,
+      guest_birthdate: addFormLead.birthdate || current.guest_birthdate,
+    }));
+  }, [showAdd, addFormLead]);
   const automationFailureMessages: Record<string, string> = {
     evolution_not_configured: 'A automação do WhatsApp não foi enviada porque a Evolution API não está configurada.',
     instance_not_configured: 'A automação do WhatsApp não foi enviada porque a instância desta unidade não está configurada.',
@@ -636,16 +632,6 @@ export default function CompanyWaitlist() {
     };
   }, [seatedTodayEntries]);
 
-  const stats = useMemo(
-    () => ({
-      waiting: waitingCount,
-      called: calledCount,
-      seated: seatedTodayStats.seated,
-      avgWait: `${seatedTodayStats.avgWaitMin}min`,
-    }),
-    [calledCount, seatedTodayStats.avgWaitMin, seatedTodayStats.seated, waitingCount],
-  );
-
   const callNext = () => {
     const nextEntry = entries.find((entry) => entry.status === 'waiting');
     if (!nextEntry) {
@@ -699,13 +685,6 @@ export default function CompanyWaitlist() {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       openDetailsDialog(entry);
-    }
-  };
-
-  const handleSeatedCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      setShowSeatedToday(true);
     }
   };
 
@@ -836,8 +815,8 @@ export default function CompanyWaitlist() {
   }, [contactHistoryReservations]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-foreground">Lista de Espera</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -845,96 +824,77 @@ export default function CompanyWaitlist() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             variant="outline"
-            className="gap-2 rounded-lg px-4"
+            size="sm"
+            className="gap-2 rounded-md bg-card px-3"
             onClick={callNext}
             disabled={waitingCount === 0}
           >
             <Bell className="h-4 w-4" />
             Chamar próximo
           </Button>
-          <Button className="gap-2 rounded-lg px-4" onClick={() => setShowAdd(true)}>
+          <Button size="sm" className="gap-2 rounded-md px-3" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" />
             Adicionar
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          const value = stats[card.key];
-          const isSeatedCard = card.key === 'seated';
-          const isWaitingActive = card.key === 'waiting' && stats.waiting > 0;
-          const isCalledActive = card.key === 'called' && stats.called > 0;
-
-          return (
-            <Card
-              key={card.key}
-              role={isSeatedCard ? 'button' : undefined}
-              tabIndex={isSeatedCard ? 0 : undefined}
-              aria-label={isSeatedCard ? 'Abrir lista de clientes sentados hoje' : undefined}
-              className={cn(
-                'rounded-2xl border border-border bg-card shadow-sm transition-colors',
-                isWaitingActive && 'border-primary/30',
-                isCalledActive && 'border-info/40',
-                isSeatedCard && 'cursor-pointer hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20',
+      <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
+        <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-foreground">Fila atual</h3>
+              <span className="inline-flex h-6 items-center rounded-md bg-primary-soft px-2 text-xs font-semibold text-primary">
+                {waitingCount} aguardando
+              </span>
+              {calledCount > 0 && (
+                <span className="inline-flex h-6 items-center rounded-md bg-info-soft px-2 text-xs font-semibold text-info">
+                  {calledCount} chamado{calledCount === 1 ? '' : 's'}
+                </span>
               )}
-              onClick={isSeatedCard ? () => setShowSeatedToday(true) : undefined}
-              onKeyDown={isSeatedCard ? handleSeatedCardKeyDown : undefined}
-            >
-              <CardContent className="flex items-center gap-4 p-5">
-                <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-xl', card.iconClassName, isCalledActive && 'animate-pulse')}>
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-2xl font-bold leading-none text-foreground">{value}</p>
-                  <p className="mt-1.5 text-sm text-muted-foreground">{card.label}</p>
-                </div>
-                {isSeatedCard && (
-                  <span className="ml-auto inline-flex shrink-0 items-center gap-1 self-start text-xs font-medium text-muted-foreground">
-                    ver →
-                  </span>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-base font-semibold text-foreground">Fila atual</h3>
-            {waitingCount > 0 && (
-              <span className="text-sm text-muted-foreground">· {waitingCount} aguardando</span>
-            )}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Espera média de hoje: {seatedTodayStats.avgWaitMin}min
+            </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-background px-2.5 text-xs font-medium text-muted-foreground ring-1 ring-black/[0.05] transition hover:bg-muted/50 hover:text-foreground focus:outline-none focus-visible:ring-primary/30"
+              aria-label="Abrir lista de clientes sentados hoje"
+              onClick={() => setShowSeatedToday(true)}
+            >
+              <UserCheck className="h-3.5 w-3.5 text-success" />
+              Sentados hoje: <span className="font-semibold text-foreground">{seatedTodayStats.seated}</span>
+            </button>
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-background px-2.5 text-xs text-muted-foreground ring-1 ring-black/[0.05]">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+              </span>
+              Atualizado agora
             </span>
-            Atualizado agora
-          </span>
+          </div>
         </div>
 
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="space-y-3 p-5">
+            <div className="space-y-2 p-4">
               {[1, 2, 3].map((item) => (
-                <Skeleton key={item} className="h-20 w-full rounded-2xl" />
+                <Skeleton key={item} className="h-14 w-full rounded-md" />
               ))}
             </div>
           ) : entries.length === 0 ? (
-            <div className="flex min-h-[320px] flex-col items-center justify-center px-6 py-14 text-center">
-              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <Users className="h-7 w-7 opacity-60" />
+            <div className="flex min-h-[240px] flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Users className="h-6 w-6 opacity-60" />
               </div>
-              <p className="text-xl font-medium text-foreground">Nenhum cliente na fila</p>
-              <p className="mt-3 max-w-md text-sm text-muted-foreground">
+              <p className="text-lg font-medium text-foreground">Nenhum cliente na fila</p>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
                 Clique em &quot;Adicionar&quot; para incluir alguém na fila de espera.
               </p>
             </div>
@@ -967,14 +927,14 @@ export default function CompanyWaitlist() {
                     tabIndex={0}
                     aria-label={`Abrir resumo da fila de ${entry.guest_name}`}
                     className={cn(
-                      'group flex cursor-pointer flex-col gap-4 border-l-4 px-5 py-4 transition-colors hover:bg-muted/20 focus:outline-none focus-visible:bg-muted/20 xl:flex-row xl:items-center',
+                      'group flex cursor-pointer flex-col gap-3 border-l-2 px-4 py-3 transition-colors hover:bg-primary-soft/20 focus:outline-none focus-visible:bg-primary-soft/20 xl:flex-row xl:items-center',
                       rowAccent,
                     )}
                     onClick={() => openDetailsDialog(entry)}
                     onKeyDown={(event) => handleWaitlistRowKeyDown(event, entry)}
                   >
-                    <div className="flex min-w-0 flex-1 items-start gap-4">
-                      <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold', avatarClass)}>
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold ring-1 ring-black/[0.03]', avatarClass)}>
                         {queueNumber ?? '-'}
                       </div>
 
@@ -984,25 +944,22 @@ export default function CompanyWaitlist() {
                             {entry.guest_name}
                           </p>
                           <span
-                            className={cn(
-                              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium',
-                              status.className,
-                            )}
+                            className={cn('inline-flex h-5 items-center rounded-md border px-2 text-[11px] font-medium', status.className)}
                           >
                             {status.label}
                           </span>
                         </div>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                          <span className="inline-flex items-center gap-1.5">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                             <Phone className="h-3.5 w-3.5" />
                             {formatBrazilPhone(entry.guest_phone)}
                           </span>
-                          <span className="inline-flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                             <Users className="h-3.5 w-3.5" />
                             {entry.party_size} pessoas
                           </span>
-                          <span className="inline-flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                             <Clock3 className="h-3.5 w-3.5" />
                             Na fila há {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
                           </span>
@@ -1011,7 +968,7 @@ export default function CompanyWaitlist() {
                         {entry.status === 'called' && (
                           <div
                             className={cn(
-                              'mt-3 inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs font-medium tabular-nums',
+                              'mt-2 inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-xs font-medium tabular-nums',
                               calledExpired
                                 ? 'border-destructive/30 bg-destructive-soft text-destructive'
                                 : 'border-info/30 bg-info-soft text-info',
@@ -1025,13 +982,8 @@ export default function CompanyWaitlist() {
                         )}
 
                         {entry.notes && (
-                          <p className="mt-2 text-sm text-muted-foreground">{entry.notes}</p>
+                          <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">{entry.notes}</p>
                         )}
-
-                        <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground/80 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                          <PencilLine className="h-3.5 w-3.5" />
-                          Clique para conferir e editar os dados
-                        </div>
                       </div>
                     </div>
 
@@ -1039,7 +991,7 @@ export default function CompanyWaitlist() {
                       {entry.status === 'waiting' && (
                         <Button
                           size="sm"
-                          className="flex-1 gap-2 rounded-lg sm:flex-none"
+                          className="h-8 flex-1 gap-2 rounded-md px-3 sm:flex-none"
                           onClick={(event) => {
                             stopRowAction(event);
                             void handleCallEntry(entry);
@@ -1053,7 +1005,7 @@ export default function CompanyWaitlist() {
                       {entry.status === 'called' && (
                         <Button
                           size="sm"
-                          className="flex-1 gap-2 rounded-lg sm:flex-none"
+                          className="h-8 flex-1 gap-2 rounded-md px-3 sm:flex-none"
                           onClick={(event) => {
                             stopRowAction(event);
                             openSeatDialog(entry);
@@ -1068,7 +1020,7 @@ export default function CompanyWaitlist() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground"
+                          className="h-8 w-8 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                           title="Histórico do cliente"
                           aria-label={`Histórico de ${entry.guest_name}`}
                           onClick={(event) => {
@@ -1081,7 +1033,7 @@ export default function CompanyWaitlist() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground"
+                          className="h-8 w-8 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                           title="Copiar link de acompanhamento"
                           aria-label={`Copiar link de ${entry.guest_name}`}
                           onClick={(event) => {
@@ -1096,7 +1048,7 @@ export default function CompanyWaitlist() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 rounded-lg text-destructive hover:text-destructive"
+                            className="h-8 w-8 rounded-md text-destructive hover:bg-destructive-soft hover:text-destructive"
                             title="Remover da fila"
                             aria-label={`Remover ${entry.guest_name} da fila`}
                             onClick={(event) => {
@@ -1112,7 +1064,7 @@ export default function CompanyWaitlist() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 rounded-lg text-destructive hover:text-destructive"
+                            className="h-8 w-8 rounded-md text-destructive hover:bg-destructive-soft hover:text-destructive"
                             title={calledExpired ? 'Expirar agora' : 'Expirar'}
                             aria-label={`Expirar ${entry.guest_name}`}
                             onClick={(event) => {
@@ -1286,6 +1238,23 @@ export default function CompanyWaitlist() {
                 maxLength={15}
                 required
               />
+              {showAddFormLeadLookup && (addFormLeadLoading || addFormLead) && (
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                  {addFormLeadLoading ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Buscando lead pelo WhatsApp...</span>
+                    </>
+                  ) : addFormLead ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                      <span>
+                        Lead encontrado{addFormLead.full_name ? `: ${addFormLead.full_name}` : ''}. Dados preenchidos.
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="waitlist-add-email">Email</Label>

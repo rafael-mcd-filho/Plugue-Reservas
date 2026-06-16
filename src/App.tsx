@@ -23,6 +23,9 @@ const TableMap = lazyWithReload(() => import("@/pages/TableMap"));
 const CalendarView = lazyWithReload(() => import("@/pages/CalendarView"));
 const Companies = lazyWithReload(() => import("@/pages/Companies"));
 const SettingsPage = lazyWithReload(() => import("@/pages/Settings"));
+const AdminNotifications = lazyWithReload(() => import("@/pages/AdminNotifications"));
+const AuditLogs = lazyWithReload(() => import("@/pages/AuditLogs"));
+const AdminIntegrations = lazyWithReload(() => import("@/pages/AdminIntegrations"));
 const CompanySettings = lazyWithReload(() => import("@/pages/CompanySettings"));
 const CompanyEvents = lazyWithReload(() => import("@/pages/CompanyEvents"));
 const CompanyAutomations = lazyWithReload(() => import("@/pages/CompanyAutomations"));
@@ -380,6 +383,30 @@ const App = () => (
                 element={
                   <SuperadminRoute>
                     <SettingsPage />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
+                path="/notificacoes"
+                element={
+                  <SuperadminRoute>
+                    <AdminNotifications />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
+                path="/logs"
+                element={
+                  <SuperadminRoute>
+                    <AuditLogs />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
+                path="/integracoes"
+                element={
+                  <SuperadminRoute>
+                    <AdminIntegrations />
                   </SuperadminRoute>
                 }
               />

@@ -52,10 +52,6 @@ export default function AffiliateCompanyPublicPage() {
   const codeIsValid = isValidAffiliateLinkCode(normalizedCode);
   const shouldCanonicalizeCode = rawCode.trim() !== normalizedCode;
 
-  if (slugIsValid && codeIsValid && shouldCanonicalizeCode) {
-    return <Navigate to={`/${slug}/f/${encodeURIComponent(normalizedCode)}${buildCanonicalAffiliateSearch(rawCode, location.search)}`} replace />;
-  }
-
   const { data: affiliateLink, isFetched } = useQuery({
     queryKey: ['public-affiliate-link', slug, normalizedCode],
     queryFn: async () => {
@@ -101,6 +97,10 @@ export default function AffiliateCompanyPublicPage() {
     if (!isFetched || affiliateLink || !slug) return;
     clearAffiliateAttribution(slug);
   }, [affiliateLink, isFetched, slug]);
+
+  if (slugIsValid && codeIsValid && shouldCanonicalizeCode) {
+    return <Navigate to={`/${slug}/f/${encodeURIComponent(normalizedCode)}${buildCanonicalAffiliateSearch(rawCode, location.search)}`} replace />;
+  }
 
   if (!slugIsValid || !codeIsValid) {
     return <Navigate to={slug ? `/${slug}` : '/'} replace />;

@@ -7,6 +7,7 @@ import {
   CalendarIcon,
   Download,
   Eye,
+  Filter,
   Loader2,
   Mail,
   MapPin,
@@ -37,6 +38,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
 import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
@@ -381,10 +383,6 @@ function formatLeadVisitContext(visit: LeadVisitRecord) {
     : ' · Titular da reserva';
 }
 
-function formatLeadCreatedAt(date: string) {
-  return format(parseISO(date), 'dd/MM/yyyy', { locale: ptBR });
-}
-
 function formatLeadDateRangeLabel(range: DateRange | undefined) {
   return formatDateRangeLabel(range, 'Criado em');
 }
@@ -534,6 +532,24 @@ function getVisiblePages(currentPage: number, totalPages: number) {
   }
 
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages] as const;
+}
+
+function formatLeadVisitsText(count: number) {
+  return `${count} ${count === 1 ? 'visita' : 'visitas'}`;
+}
+
+function getLeadSourceBadgeClassName(source: LeadSource) {
+  if (source === 'imported') {
+    return 'border-border bg-muted/50 text-muted-foreground';
+  }
+
+  if (source === 'mixed') {
+    return 'border-info/20 bg-info-soft text-info';
+  }
+
+  return isCompanionVisitSource(source)
+    ? 'border-primary/20 bg-primary-soft text-primary'
+    : 'border-success/20 bg-success-soft text-success';
 }
 
 export default function Leads() {
@@ -1421,91 +1437,117 @@ export default function Leads() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Leads</h1>
-          <p className="text-sm text-muted-foreground">{summaryText}</p>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Leads</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Base consolidada de clientes, reservas, fila de espera e importações.
+            </p>
+          </div>
+
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <Select value={pageSize} onValueChange={(value) => setPageSize(value as (typeof LEADS_PAGE_SIZE_OPTIONS)[number])}>
+              <SelectTrigger className="h-9 w-full rounded-md bg-card shadow-sm sm:w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LEADS_PAGE_SIZE_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option} por página
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setImportDialogOpen(true)} variant="outline" size="sm" className="w-full gap-2 bg-card sm:w-auto">
+              <Upload className="h-4 w-4" />
+              Importar CSV
+            </Button>
+            <Button
+              onClick={() => setExportDialogOpen(true)}
+              variant="outline"
+              size="sm"
+              className="w-full gap-2 bg-card sm:w-auto"
+              disabled={leads.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
+          </div>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:justify-end">
-          <Select value={pageSize} onValueChange={(value) => setPageSize(value as (typeof LEADS_PAGE_SIZE_OPTIONS)[number])}>
-            <SelectTrigger className="w-full sm:w-[160px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LEADS_PAGE_SIZE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option} por página
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={() => setImportDialogOpen(true)} variant="outline" className="w-full gap-2 sm:w-auto">
-            <Upload className="h-4 w-4" />
-            Importar CSV
-          </Button>
-          <Button onClick={() => setExportDialogOpen(true)} variant="outline" className="w-full gap-2 sm:w-auto" disabled={leads.length === 0}>
-            <Download className="h-4 w-4" />
-            Exportar leads
-          </Button>
-        </div>
+
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_220px_220px_220px_130px_130px_auto]">
-        <div className="relative md:col-span-2 xl:col-span-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nome, telefone ou email..."
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="pl-10"
-          />
-        </div>
+      <Card className="border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+        <CardContent className="space-y-3 p-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Filter className="h-4 w-4 text-primary" />
+              Filtros
+            </div>
+            <p className="text-xs text-muted-foreground">{summaryText}</p>
+          </div>
 
-        <Select value={stateFilter} onValueChange={setStateFilter}>
-          <SelectTrigger>
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os estados</SelectItem>
-            <SelectItem value="unknown">DDD não identificado</SelectItem>
-            {stateOptions.map((state) => (
-              <SelectItem key={state.code} value={state.code}>
-                {state.name} ({state.code})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_220px_220px_130px_130px_auto]">
+            <div className="relative md:col-span-2 xl:col-span-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nome, telefone ou email..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="h-10 rounded-md bg-background pl-10"
+              />
+            </div>
 
-        <DateRangePicker
-          value={createdRange}
-          onChange={setCreatedRange}
-          placeholder="Selecionar período"
-          className="w-full"
-        />
+            <Select value={stateFilter} onValueChange={setStateFilter}>
+              <SelectTrigger className="h-10 rounded-md bg-background">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os estados</SelectItem>
+                <SelectItem value="unknown">DDD não identificado</SelectItem>
+                {stateOptions.map((state) => (
+                  <SelectItem key={state.code} value={state.code}>
+                    {state.name} ({state.code})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-        <Input
-          type="number"
-          min="1"
-          inputMode="numeric"
-          placeholder="Visitas min."
-          value={minReservations}
-          onChange={(event) => setMinReservations(event.target.value)}
-        />
+            <DateRangePicker
+              value={createdRange}
+              onChange={setCreatedRange}
+              placeholder="Selecionar período"
+              className="h-10 w-full rounded-md bg-background"
+            />
 
-        <Input
-          type="number"
-          min="1"
-          inputMode="numeric"
-          placeholder="Visitas max."
-          value={maxReservations}
-          onChange={(event) => setMaxReservations(event.target.value)}
-        />
+            <Input
+              type="number"
+              min="1"
+              inputMode="numeric"
+              placeholder="Visitas min."
+              value={minReservations}
+              onChange={(event) => setMinReservations(event.target.value)}
+              className="h-10 rounded-md bg-background"
+            />
 
-        <Button variant="ghost" className="gap-2" disabled={!hasActiveFilters} onClick={clearFilters}>
-          <X className="h-4 w-4" />
-          Limpar
-        </Button>
-      </div>
+            <Input
+              type="number"
+              min="1"
+              inputMode="numeric"
+              placeholder="Visitas max."
+              value={maxReservations}
+              onChange={(event) => setMaxReservations(event.target.value)}
+              className="h-10 rounded-md bg-background"
+            />
+
+            <Button variant="ghost" className="h-10 gap-2 px-3" disabled={!hasActiveFilters} onClick={clearFilters}>
+              <X className="h-4 w-4" />
+              Limpar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {isLoading ? (
         <p className="py-12 text-center text-muted-foreground">Carregando...</p>
@@ -1515,67 +1557,82 @@ export default function Leads() {
         </p>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-            <span>{pageSummary}</span>
-            <span>Página {currentPage} de {totalPages}</span>
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Clientes encontrados</h2>
+              <p className="text-sm text-muted-foreground">{pageSummary}</p>
+            </div>
+            <span className="text-xs font-medium text-muted-foreground">Página {currentPage} de {totalPages}</span>
           </div>
 
-          <div className="grid gap-3">
-            {paginatedLeads.map((lead) => (
-              <Card
-                key={lead.key}
-                className="cursor-pointer border shadow-sm transition-shadow hover:shadow-md"
-                onClick={() => setSelectedLead(lead)}
-              >
-                <CardContent className="flex items-center justify-between gap-4 py-4">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                      {(lead.guest_name.charAt(0) || '?').toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate font-semibold text-foreground">{lead.guest_name}</p>
-                        {lead.importedLeadId && (
-                          <Badge variant="outline" className="rounded-full">
-                            Importado
-                          </Badge>
-                        )}
+          <Card className="overflow-hidden border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+            <Table className="min-w-[760px] text-xs">
+              <TableHeader className="bg-muted/25">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="h-8 w-[34%] px-2 text-[11px]">Nome</TableHead>
+                  <TableHead className="h-8 px-2 text-[11px]">Telefone</TableHead>
+                  <TableHead className="h-8 px-2 text-[11px]">Email</TableHead>
+                  <TableHead className="h-8 w-[110px] px-2 text-right text-[11px]">Visitas</TableHead>
+                  <TableHead className="h-8 w-9 px-2" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedLeads.map((lead) => (
+                  <TableRow
+                    key={lead.key}
+                    role="button"
+                    tabIndex={0}
+                    className="group cursor-pointer hover:bg-primary-soft/25"
+                    onClick={() => setSelectedLead(lead)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedLead(lead);
+                      }
+                    }}
+                  >
+                    <TableCell className="px-2 py-1.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary-soft text-[11px] font-bold text-primary ring-1 ring-primary/15">
+                          {(lead.guest_name.charAt(0) || '?').toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <p className="truncate font-medium text-foreground">{lead.guest_name}</p>
+                            <Badge
+                              variant="outline"
+                              className={cn('h-4 shrink-0 rounded px-1.5 text-[9px] leading-none', getLeadSourceBadgeClassName(lead.source))}
+                            >
+                              {formatLeadSource(lead.source)}
+                            </Badge>
+                            {lead.importedLeadId && (
+                              <Badge variant="outline" className="h-4 shrink-0 rounded border-amber-200 bg-amber-50 px-1.5 text-[9px] leading-none text-amber-700">
+                                Importado
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          {formatLeadPhoneText(lead.guest_phone)}
-                        </span>
-                        {lead.guest_email && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            {lead.guest_email}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <CalendarDays className="h-3 w-3" />
-                          Lead desde {formatLeadCreatedAt(lead.lead_created_at)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          {formatLeadState(lead)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3 text-right">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{lead.total_reservations}</p>
-                      <p className="text-xs text-muted-foreground">visitas</p>
-                    </div>
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell className="px-2 py-1.5">
+                      <span className="whitespace-nowrap text-xs text-foreground">{formatLeadPhoneText(lead.guest_phone)}</span>
+                    </TableCell>
+                    <TableCell className="max-w-[260px] px-2 py-1.5">
+                      <span className="block truncate text-xs text-muted-foreground">{lead.guest_email || 'Não informado'}</span>
+                    </TableCell>
+                    <TableCell className="px-2 py-1.5 text-right">
+                      <span className="font-semibold text-foreground">{formatLeadVisitsText(lead.total_reservations)}</span>
+                    </TableCell>
+                    <TableCell className="px-2 py-1.5">
+                      <span className="ml-auto flex h-6 w-6 items-center justify-center rounded bg-background text-muted-foreground ring-1 ring-black/[0.05] transition group-hover:bg-primary-soft group-hover:text-primary">
+                        <Eye className="h-3.5 w-3.5" />
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
 
           {totalPages > 1 && (
             <Pagination>

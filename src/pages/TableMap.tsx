@@ -4,14 +4,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarRange,
   CheckCircle2,
+  Clock3,
   CopyPlus,
   Layers3,
+  LayoutGrid,
   Pencil,
   Plus,
   Star,
+  Table2,
   Trash2,
   Users,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
@@ -82,12 +86,110 @@ interface RestaurantTable {
   status: TableStatus;
 }
 
-const STATUS_LABELS: Record<TableStatus, string> = {
-  available: 'Disponivel',
-  occupied: 'Ocupada',
-  reserved: 'Reservada',
-  maintenance: 'Manutenção',
+const METRIC_TONES = {
+  default: 'bg-muted/40 text-muted-foreground ring-border',
+  primary: 'bg-primary-soft/60 text-primary ring-primary/20',
+  success: 'bg-success-soft/70 text-success ring-success/20',
+  info: 'bg-info-soft/70 text-info ring-info/20',
+  warning: 'bg-warning-soft/80 text-warning ring-warning/25',
+  danger: 'bg-destructive-soft/70 text-destructive ring-destructive/20',
 };
+
+type MetricTone = keyof typeof METRIC_TONES;
+
+function formatNumber(value: number) {
+  return value.toLocaleString('pt-BR');
+}
+
+function formatTableCount(value: number) {
+  return `${formatNumber(value)} ${value === 1 ? 'mesa' : 'mesas'}`;
+}
+
+function formatSeatCount(value: number) {
+  return `${formatNumber(value)} ${value === 1 ? 'lugar' : 'lugares'}`;
+}
+
+function formatReservationCount(value: number) {
+  return `${formatNumber(value)} ${value === 1 ? 'reserva' : 'reservas'}`;
+}
+
+function MapMetric({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone = 'default',
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  detail?: string;
+  tone?: MetricTone;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-md bg-background/70 px-3 py-2 ring-1 ring-black/[0.04]">
+      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md ring-1', METRIC_TONES[tone])}>
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+        <p className="truncate text-base font-semibold leading-tight text-foreground">{value}</p>
+        {detail && <p className="truncate text-xs text-muted-foreground">{detail}</p>}
+      </div>
+    </div>
+  );
+}
+
+function TableVisual({ capacity }: { capacity: number }) {
+  const seatPositions = capacity <= 2
+    ? [
+        'left-1 top-1/2 -translate-y-1/2',
+        'right-1 top-1/2 -translate-y-1/2',
+      ]
+    : capacity <= 4
+      ? [
+          'left-1/2 top-0.5 -translate-x-1/2',
+          'right-0.5 top-1/2 -translate-y-1/2',
+          'bottom-0.5 left-1/2 -translate-x-1/2',
+          'left-0.5 top-1/2 -translate-y-1/2',
+        ]
+      : [
+          'left-2 top-0.5',
+          'right-2 top-0.5',
+          'right-0.5 top-1/2 -translate-y-1/2',
+          'bottom-0.5 right-2',
+          'bottom-0.5 left-2',
+          'left-0.5 top-1/2 -translate-y-1/2',
+        ];
+
+  return (
+    <div
+      className="relative flex h-12 w-14 shrink-0 items-center justify-center rounded-md bg-primary-soft/45 text-primary ring-1 ring-primary/15"
+      aria-hidden="true"
+    >
+      <span
+        className={cn(
+          'relative z-10 flex items-center justify-center shadow-sm ring-1 ring-current/15',
+          capacity <= 2 ? 'h-6 w-8 rounded-full' : capacity <= 4 ? 'h-8 w-8 rounded-md' : 'h-7 w-10 rounded-md',
+          'bg-background/90',
+        )}
+      >
+        <Table2 className="h-3.5 w-3.5" />
+      </span>
+      {seatPositions.map((position) => (
+        <span
+          key={position}
+          className={cn('absolute h-2 w-2 rounded-full bg-current/30 ring-1 ring-background', position)}
+        />
+      ))}
+      {capacity > 6 && (
+        <span className="absolute -right-1 -top-1 rounded-full bg-background px-1 text-[10px] font-bold leading-4 shadow-sm ring-1 ring-primary/20">
+          +
+        </span>
+      )}
+    </div>
+  );
+}
 
 const ACTIVATION_OPTIONS: Array<{
   value: ActivationMode;
@@ -332,6 +434,7 @@ export default function TableMap() {
   const [sectionForm, setSectionForm] = useState({ name: '' });
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [bulkForm, setBulkForm] = useState({ quantity: '5', capacity: '2', section: 'salao' });
+  const [capacityFilter, setCapacityFilter] = useState<'all' | '2' | '4' | '6plus'>('all');
 
   const { data: tableMaps = [], isLoading: mapsLoading } = useQuery({
     queryKey: ['table-maps', companyId],
@@ -430,6 +533,15 @@ export default function TableMap() {
     [rawTables, tableSections],
   );
 
+  const tableMapStats = useMemo(() => {
+    const totalSeats = tables.reduce((sum, table) => sum + table.capacity, 0);
+
+    return {
+      totalTables: tables.length,
+      totalSeats,
+    };
+  }, [tables]);
+
   const { data: selectedMapReservationCount = 0 } = useQuery({
     queryKey: ['table-map-reservations-count', companyId, selectedMapId],
     queryFn: async () => {
@@ -468,6 +580,18 @@ export default function TableMap() {
       })),
     ].sort((first, second) => first.sort_order - second.sort_order || first.name.localeCompare(second.name));
   }, [tableSections, tables]);
+
+  const visibleTables = useMemo(() => {
+    return tables.filter((table) => {
+      const matchesCapacity =
+        capacityFilter === 'all' ||
+        (capacityFilter === '2' && table.capacity <= 2) ||
+        (capacityFilter === '4' && table.capacity > 2 && table.capacity <= 4) ||
+        (capacityFilter === '6plus' && table.capacity >= 5);
+
+      return matchesCapacity;
+    });
+  }, [capacityFilter, tables]);
 
   const isLoading = mapsLoading || sectionsLoading || (selectedMapId ? tablesLoading : false);
 
@@ -1004,16 +1128,15 @@ export default function TableMap() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 border-b border-border/70 pb-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="max-w-2xl">
           <h1 className="text-xl font-semibold tracking-tight">Mapas de Mesas</h1>
-          <p className="mt-1 text-muted-foreground">
-            Mantenha um mapa padrão, crie eventos com ativação programada e organize as seções da unidade.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Configure o mapa padrão, eventos programados, seções e capacidade das mesas da unidade.
           </p>
         </div>
-
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 lg:justify-end">
           <Button variant="outline" className="gap-2" onClick={openCreateMap}>
             <Plus className="h-4 w-4" />
             Novo mapa
@@ -1022,32 +1145,28 @@ export default function TableMap() {
             <CopyPlus className="h-4 w-4" />
             Duplicar mapa
           </Button>
-          <Button variant="outline" className="gap-2" onClick={openCreateSection}>
-            <Layers3 className="h-4 w-4" />
-            Nova seção
-          </Button>
-          <Button variant="outline" onClick={openBulkCreate} className="gap-2" disabled={!selectedMapId}>
-            <Layers3 className="h-4 w-4" />
-            Criar mesas em lote
-          </Button>
-          <Button onClick={openCreate} className="gap-2" disabled={!selectedMapId}>
-            <Plus className="h-4 w-4" />
-            Nova mesa
-          </Button>
         </div>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <Card className="rounded-[24px] border border-[rgba(0,0,0,0.08)] shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg">Mapas cadastrados</CardTitle>
-            <CardDescription>
-              Veja rapidamente qual é o mapa padrão, quais eventos estão ativos e quais ainda estão parados.
-            </CardDescription>
+        <Card className="overflow-hidden border-0 bg-card shadow-sm ring-1 ring-black/[0.06]">
+          <CardHeader className="p-4 pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Mapas cadastrados</CardTitle>
+                <CardDescription className="mt-1 text-xs">
+                  Padrão, eventos ativos e programações futuras.
+                </CardDescription>
+              </div>
+              <Badge variant="secondary">{orderedTableMaps.length}</Badge>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2 p-4 pt-0">
             {orderedTableMaps.map((tableMap) => {
               const state = getMapState(tableMap);
+              const isSelected = selectedMapId === tableMap.id;
+              const isActiveNow = activeMapNow?.id === tableMap.id;
+              const MapIcon = tableMap.is_default ? Star : CalendarRange;
 
               return (
                 <button
@@ -1055,30 +1174,47 @@ export default function TableMap() {
                   type="button"
                   onClick={() => setSelectedMapId(tableMap.id)}
                   className={cn(
-                    'w-full rounded-2xl border p-4 text-left transition-all',
-                    selectedMapId === tableMap.id
-                      ? 'border-primary bg-primary-soft shadow-sm'
-                      : 'border-[rgba(0,0,0,0.08)] bg-white hover:border-primary/35',
+                    'group w-full rounded-md p-3 text-left transition-all ring-1',
+                    isSelected
+                      ? 'bg-primary-soft/55 shadow-sm ring-primary/25'
+                      : 'bg-background/70 ring-black/[0.04] hover:bg-muted/40 hover:ring-primary/20',
                   )}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{tableMap.name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{formatMapPeriod(tableMap)}</p>
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={cn(
+                        'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md ring-1',
+                        tableMap.is_default
+                          ? 'bg-primary-soft text-primary ring-primary/20'
+                          : 'bg-muted/60 text-muted-foreground ring-border',
+                      )}
+                    >
+                      <MapIcon className="h-4 w-4" />
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-foreground">{tableMap.name}</p>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'shrink-0 border-0 px-2 py-0.5 text-[10px]',
+                            tableMap.is_default ? 'bg-primary text-primary-foreground' : state.badgeClassName,
+                          )}
+                        >
+                          {tableMap.is_default ? 'Padrão' : state.label}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
+                        {formatMapPeriod(tableMap)}
+                      </p>
+                      {isActiveNow && (
+                        <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-semibold text-success">
+                          <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                          Em uso agora
+                        </span>
+                      )}
                     </div>
-
-                    {tableMap.is_default ? (
-                      <Badge className="bg-primary text-primary-foreground hover:bg-primary">Padrao</Badge>
-                    ) : (
-                      <Badge variant="secondary">Evento</Badge>
-                    )}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge className={state.badgeClassName}>{state.label}</Badge>
-                    {activeMapNow?.id === tableMap.id && !tableMap.is_default && (
-                      <Badge className="bg-success-soft text-success hover:bg-success-soft">Sobrepondo</Badge>
-                    )}
                   </div>
                 </button>
               );
@@ -1088,45 +1224,60 @@ export default function TableMap() {
 
         <div className="space-y-6">
           {selectedMap && (
-            <Card className="rounded-[24px] border border-[rgba(0,0,0,0.08)] shadow-sm">
-              <CardHeader className="space-y-4">
+            <Card className="overflow-hidden border-0 bg-card shadow-sm ring-1 ring-black/[0.06]">
+              <CardHeader className="space-y-4 p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="space-y-3">
-                    <div>
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <CardTitle className="text-lg">{selectedMap.name}</CardTitle>
-                      <CardDescription>{selectedMapState?.description}</CardDescription>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
                       {selectedMap.is_default ? (
-                        <Badge className="gap-1 bg-primary text-primary-foreground hover:bg-primary">
+                        <Badge className="gap-1 border-0 bg-primary text-primary-foreground hover:bg-primary">
                           <Star className="h-3.5 w-3.5" />
-                          Mapa padrão
+                          Padrão
                         </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="gap-1">
-                          <CalendarRange className="h-3.5 w-3.5" />
-                          Evento
-                        </Badge>
-                      )}
-
-                      {selectedMapState && (
-                        <Badge className={cn('gap-1', selectedMapState.badgeClassName)}>
+                      ) : selectedMapState ? (
+                        <Badge className={cn('gap-1 border-0', selectedMapState.badgeClassName)}>
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           {selectedMapState.label}
                         </Badge>
+                      ) : null}
+                      {activeMapNow?.id === selectedMap.id && selectedMapState?.key !== 'active' && (
+                        <Badge className="gap-1 border-0 bg-success-soft text-success hover:bg-success-soft">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Em uso agora
+                        </Badge>
                       )}
+                    </div>
+                    <CardDescription>{selectedMapState?.description}</CardDescription>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      <span>{formatMapPeriod(selectedMap)}</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="gap-2" onClick={openEditMap}>
+                  <div className="flex flex-wrap items-center gap-2 xl:shrink-0 xl:justify-end">
+                    <Button size="sm" className="gap-2 whitespace-nowrap" onClick={openCreate} disabled={!selectedMapId}>
+                      <Plus className="h-4 w-4" />
+                      Nova mesa
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 whitespace-nowrap"
+                      onClick={openBulkCreate}
+                      disabled={!selectedMapId}
+                    >
+                      <Layers3 className="h-4 w-4" />
+                      Criar em lote
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-2 whitespace-nowrap" onClick={openEditMap}>
                       <Pencil className="h-4 w-4" />
                       Editar mapa
                     </Button>
                     {!selectedMap.is_default && (
                       <Button
                         variant="outline"
+                        size="sm"
                         className="gap-2"
                         onClick={() => setDefaultMapMutation.mutate(selectedMap)}
                         disabled={setDefaultMapMutation.isPending}
@@ -1138,6 +1289,7 @@ export default function TableMap() {
                     {!selectedMap.is_default && (
                       <Button
                         variant="outline"
+                        size="sm"
                         className="gap-2 text-destructive hover:text-destructive"
                         onClick={() => setDeleteMapConfirmOpen(true)}
                       >
@@ -1149,58 +1301,51 @@ export default function TableMap() {
                 </div>
               </CardHeader>
 
-              <CardContent className="space-y-5">
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Período</p>
-                    <p className="mt-2 text-sm font-medium text-foreground">{formatMapPeriod(selectedMap)}</p>
+              <CardContent className="space-y-4 p-4 pt-0">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <div className="flex min-w-0 flex-1 items-center gap-3 rounded-md bg-background/70 px-3 py-2.5 ring-1 ring-black/[0.04]">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary-soft/60 text-primary ring-1 ring-primary/20">
+                      <Table2 className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Capacidade do mapa</p>
+                      <p className="truncate text-base font-semibold leading-tight text-foreground">
+                        {formatTableCount(tableMapStats.totalTables)} · {formatSeatCount(tableMapStats.totalSeats)}
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Mesas neste mapa</p>
-                    <p className="mt-2 text-sm font-medium text-foreground">{tables.length}</p>
-                  </div>
-
-                  <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Mapa ativo agora</p>
-                    <p className="mt-2 text-sm font-medium text-foreground">{activeMapNow?.name ?? 'Nenhum'}</p>
-                  </div>
-
-                  <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Reservas vinculadas</p>
-                    <p className="mt-2 text-sm font-medium text-foreground">
-                      {selectedMap.is_default ? 'N/A' : selectedMapReservationCount}
-                    </p>
-                  </div>
+                  {!selectedMap.is_default && (
+                    <MapMetric
+                      icon={CalendarRange}
+                      label="Reservas"
+                      value={formatReservationCount(selectedMapReservationCount)}
+                      detail="vinculadas ao evento"
+                      tone={selectedMapReservationCount > 0 ? 'warning' : 'default'}
+                    />
+                  )}
                 </div>
-
-                {!selectedMap.is_default && (
-                  <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4 text-sm text-muted-foreground">
-                    Quando este evento estiver habilitado dentro do período escolhido, ele sobrepõe o mapa padrão.
-                    Ao fim do período, o sistema volta automaticamente para o padrão.
-                  </div>
-                )}
               </CardContent>
             </Card>
           )}
 
-          <Card className="rounded-[24px] border border-[rgba(0,0,0,0.08)] shadow-sm">
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle className="text-lg">Secoes da unidade</CardTitle>
-                <CardDescription>
-                  Crie e renomeie areas como Salao, Varanda, Deck ou Rooftop. As mesas de qualquer mapa usam essa lista.
+          <Card className="border-0 bg-card shadow-sm ring-1 ring-black/[0.06]">
+            <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <CardTitle className="text-base">Seções da unidade</CardTitle>
+                <CardDescription className="mt-1 text-xs">
+                  Áreas reutilizadas pelos mapas, como salão, varanda, deck ou rooftop.
                 </CardDescription>
               </div>
 
-              <Button variant="outline" className="gap-2" onClick={openCreateSection}>
+              <Button variant="outline" size="sm" className="gap-2" onClick={openCreateSection}>
                 <Plus className="h-4 w-4" />
                 Nova seção
               </Button>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="grid gap-2 p-4 pt-0 sm:grid-cols-2">
               {displaySections.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[rgba(0,0,0,0.14)] px-4 py-8 text-center text-sm text-muted-foreground">
+                <div className="rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground sm:col-span-2">
                   Nenhuma seção cadastrada.
                 </div>
               ) : (
@@ -1211,32 +1356,42 @@ export default function TableMap() {
                   return (
                     <div
                       key={section.id}
-                      className="flex flex-col gap-3 rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex items-center justify-between gap-3 rounded-md bg-background/70 px-3 py-2.5 ring-1 ring-black/[0.04]"
                     >
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-medium text-foreground">{section.name}</p>
-                          {!section.managed && <Badge variant="outline">Legado</Badge>}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary-soft text-primary">
+                          <Layers3 className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="truncate text-sm font-medium text-foreground">{section.name}</p>
+                            {!section.managed && <Badge variant="outline">Legado</Badge>}
+                          </div>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {section.code} · {formatTableCount(tableCount)} neste mapa
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Código interno: {section.code} - {tableCount} mesa(s) neste mapa
-                        </p>
                       </div>
 
                       {managedSection && (
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" className="gap-2" onClick={() => openEditSection(managedSection)}>
-                            <Pencil className="h-4 w-4" />
-                            Editar
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openEditSection(managedSection)}
+                            aria-label={`Editar seção ${section.name}`}
+                          >
+                            <Pencil className="h-4 w-4 text-muted-foreground" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="gap-2 text-destructive hover:text-destructive"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
                             onClick={() => setSectionToDelete(managedSection)}
+                            aria-label={`Excluir seção ${section.name}`}
                           >
                             <Trash2 className="h-4 w-4" />
-                            Excluir
                           </Button>
                         </div>
                       )}
@@ -1247,67 +1402,130 @@ export default function TableMap() {
             </CardContent>
           </Card>
 
-          <div className="flex justify-end">
-            <span className="text-sm font-medium text-foreground">Total: {tables.length} mesas</span>
+          <div className="rounded-lg bg-card p-4 shadow-sm ring-1 ring-black/[0.06]">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold text-foreground">Inventário de mesas</h2>
+                <Badge variant="secondary">{formatTableCount(visibleTables.length)}</Badge>
+                {visibleTables.length !== tables.length && (
+                  <Badge variant="outline">{formatTableCount(tables.length)} no mapa</Badge>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Filtre por capacidade e edite as mesas cadastradas no mapa selecionado.
+              </p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 'all' as const, label: 'Todos lugares' },
+                  { value: '2' as const, label: 'Até 2' },
+                  { value: '4' as const, label: '3 a 4' },
+                  { value: '6plus' as const, label: '5+' },
+                ].map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={capacityFilter === option.value ? 'default' : 'outline'}
+                    className="h-8 gap-1.5"
+                    onClick={() => setCapacityFilter(option.value)}
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {tables.length === 0 ? (
-            <Card className="rounded-[24px] border-dashed">
+            <Card className="border-dashed shadow-none">
               <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <p className="mb-4 text-muted-foreground">Nenhuma mesa cadastrada neste mapa.</p>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                  <Table2 className="h-6 w-6" />
+                </div>
+                <p className="mb-4 text-sm text-muted-foreground">Nenhuma mesa cadastrada neste mapa.</p>
                 <Button onClick={openCreate} variant="outline" className="gap-2" disabled={!selectedMapId}>
                   <Plus className="h-4 w-4" />
                   Cadastrar primeira mesa
                 </Button>
               </CardContent>
             </Card>
+          ) : visibleTables.length === 0 ? (
+            <Card className="border-dashed shadow-none">
+              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Table2 className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-medium text-foreground">Nenhuma mesa neste filtro</p>
+                <p className="mt-1 text-sm text-muted-foreground">Ajuste o filtro de lugares para ver outras mesas.</p>
+              </CardContent>
+            </Card>
           ) : (
             displaySections.map((section) => {
-              const sectionTables = tables.filter((table) => table.section === section.code);
+              const sectionTables = visibleTables.filter((table) => table.section === section.code);
               if (sectionTables.length === 0) return null;
 
+              const sectionSeatCount = sectionTables.reduce((sum, table) => sum + table.capacity, 0);
+
               return (
-                <Card key={section.code} className="rounded-[24px] border border-[rgba(0,0,0,0.08)] shadow-sm">
-                  <CardHeader className="flex flex-row items-center justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">{section.name}</CardTitle>
-                      <CardDescription>{sectionTables.length} mesa(s) nesta seção</CardDescription>
+                <Card key={section.code} className="overflow-hidden border-0 bg-card shadow-sm ring-1 ring-black/[0.06]">
+                  <CardHeader className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary-soft text-primary">
+                        <LayoutGrid className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <CardTitle className="truncate text-base">{section.name}</CardTitle>
+                          <Badge variant="outline">{section.code}</Badge>
+                        </div>
+                        <CardDescription className="mt-0.5 text-xs">
+                          {formatTableCount(sectionTables.length)} · {formatSeatCount(sectionSeatCount)}
+                        </CardDescription>
+                      </div>
                     </div>
-                    <Badge variant="outline">{section.code}</Badge>
                   </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  <CardContent className="p-4 pt-0">
+                    <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                       {sectionTables.map((table) => (
                         <div
                           key={table.id}
-                          className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-card p-4 shadow-sm"
+                          className="group rounded-lg bg-background/80 p-3 shadow-sm ring-1 ring-black/[0.06] transition hover:-translate-y-0.5 hover:shadow-md hover:ring-primary/20"
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <span className="text-lg font-bold text-foreground">Mesa {table.number}</span>
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                Capacidade para {table.capacity} {table.capacity === 1 ? 'pessoa' : 'pessoas'}
+                          <div className="flex items-center gap-3">
+                            <TableVisual capacity={table.capacity} />
+
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-base font-semibold text-foreground">Mesa {table.number}</p>
+                              <p className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                <Users className="h-3.5 w-3.5" />
+                                {formatSeatCount(table.capacity)}
                               </p>
                             </div>
 
-                            <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
-                              <Users className="h-3.5 w-3.5" />
-                              <span className="text-sm font-medium">{table.capacity}</span>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(table.id)}
+                                aria-label={`Editar mesa ${table.number}`}
+                              >
+                                <Pencil className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => deleteMutation.mutate(table.id)}
+                                aria-label={`Excluir mesa ${table.number}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
-                          </div>
-
-                          <div className="mt-4 flex justify-end gap-1 border-t border-border/70 pt-3">
-                            <Button variant="ghost" size="icon" onClick={() => openEdit(table.id)} aria-label={`Editar mesa ${table.number}`}>
-                              <Pencil className="h-4 w-4 text-muted-foreground" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => deleteMutation.mutate(table.id)}
-                              aria-label={`Excluir mesa ${table.number}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
                           </div>
                         </div>
                       ))}
@@ -1406,7 +1624,7 @@ export default function TableMap() {
               />
             </div>
 
-            <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
+            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
               {editingSection
                 ? `O código interno desta seção continua "${editingSection.code}". Renomear aqui não quebra as mesas já cadastradas.`
                 : 'Ao criar, a seção fica disponível para todos os mapas da unidade.'}
@@ -1447,7 +1665,7 @@ export default function TableMap() {
             </div>
 
             {editingMap?.is_default ? (
-              <div className="rounded-xl border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary">
+              <div className="rounded-md border border-primary/20 bg-primary-soft px-4 py-3 text-sm text-primary">
                 O mapa padrão fica sempre sem período. Ele entra automaticamente quando nenhum evento estiver ativo.
               </div>
             ) : (
@@ -1464,10 +1682,10 @@ export default function TableMap() {
                         key={option.value}
                         htmlFor={`activation-${option.value}`}
                         className={cn(
-                          'flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3',
+                          'flex cursor-pointer items-start gap-3 rounded-md border px-4 py-3',
                           mapForm.activationMode === option.value
                             ? 'border-primary bg-primary-soft'
-                            : 'border-[rgba(0,0,0,0.08)] bg-white',
+                            : 'border-border bg-card',
                         )}
                       >
                         <RadioGroupItem id={`activation-${option.value}`} value={option.value} className="mt-1" />
@@ -1504,7 +1722,7 @@ export default function TableMap() {
                   </div>
                 )}
 
-                <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
+                <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                   O sistema não permite dois eventos ativos ou programados para o mesmo período. Se houver conflito,
                   você precisará ajustar a agenda antes de salvar.
                 </div>
@@ -1512,7 +1730,7 @@ export default function TableMap() {
             )}
 
             {!editingMap && (
-              <div className="flex items-center justify-between rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-3">
+              <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">Duplicar mesas do mapa selecionado</p>
                   <p className="text-xs text-muted-foreground">
@@ -1627,7 +1845,7 @@ export default function TableMap() {
             )}
 
             {bulkPreview.length > 0 && (
-              <div className="rounded-md border border-[rgba(0,0,0,0.08)] bg-muted/15 px-3 py-2 text-sm text-muted-foreground">
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                 Serão criadas:{' '}
                 <span className="font-medium text-foreground">
                   {bulkPreview.length <= 10

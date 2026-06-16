@@ -4,15 +4,32 @@ import { sortReservationScheduleSlotSettings } from '@/lib/reservation-schedule'
 import { toast } from 'sonner';
 
 export type ReservationScheduleRuleScope = 'weekly' | 'date_specific' | 'date_range';
+export type ReservationAvailabilityMode = 'tables' | 'capacity';
 
 export interface ReservationScheduleRuleSlot {
   id: string;
   rule_id: string;
+  block_id: string;
   time: string;
   sort_order: number;
+  duration_minutes: number | null;
   max_party_size_per_reservation: number | null;
   max_reservations_per_slot: number | null;
+  max_guests_per_slot: number | null;
   created_at: string;
+}
+
+export interface ReservationScheduleRuleBlock {
+  id: string;
+  rule_id: string;
+  name: string;
+  weekdays: number[] | null;
+  availability_mode: ReservationAvailabilityMode;
+  default_duration_minutes: number | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  reservation_schedule_rule_slots: ReservationScheduleRuleSlot[];
 }
 
 export interface ReservationScheduleRule {
@@ -26,9 +43,13 @@ export interface ReservationScheduleRule {
   enabled: boolean;
   priority: number;
   max_party_size_per_reservation: number | null;
+  availability_mode: ReservationAvailabilityMode | null;
+  publish_at: string | null;
+  default_duration_minutes: number | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  reservation_schedule_rule_blocks: ReservationScheduleRuleBlock[];
   reservation_schedule_rule_slots: ReservationScheduleRuleSlot[];
 }
 
@@ -42,11 +63,18 @@ export interface ReservationScheduleRuleDraft {
   end_date: string | null;
   enabled: boolean;
   priority: number;
-  max_party_size_per_reservation: number | null;
-  slots: Array<{
-    time: string;
-    max_party_size_per_reservation: number | null;
-    max_reservations_per_slot: number | null;
+  publish_at: string | null;
+  blocks: Array<{
+    name: string;
+    weekdays: number[] | null;
+    availability_mode: ReservationAvailabilityMode;
+    slots: Array<{
+      time: string;
+      duration_minutes: number | null;
+      max_party_size_per_reservation: number | null;
+      max_reservations_per_slot: number | null;
+      max_guests_per_slot: number | null;
+    }>;
   }>;
 }
 
@@ -62,7 +90,7 @@ export function useReservationScheduleRules(companyId: string | null | undefined
     queryFn: async () => {
       const { data, error } = await supabase
         .from('reservation_schedule_rules' as any)
-        .select('*, reservation_schedule_rule_slots(*)')
+        .select('*, reservation_schedule_rule_blocks(*, reservation_schedule_rule_slots(*)), reservation_schedule_rule_slots(*)')
         .eq('company_id', companyId)
         .is('archived_at', null)
         .order('priority', { ascending: true })
@@ -72,6 +100,13 @@ export function useReservationScheduleRules(companyId: string | null | undefined
 
       return ((data ?? []) as unknown as ReservationScheduleRule[]).map((rule) => ({
         ...rule,
+        reservation_schedule_rule_blocks: [...(rule.reservation_schedule_rule_blocks ?? [])]
+          .map((block) => ({
+            ...block,
+            reservation_schedule_rule_slots: [...(block.reservation_schedule_rule_slots ?? [])]
+              .sort((left, right) => left.time.localeCompare(right.time)),
+          }))
+          .sort((left, right) => left.sort_order - right.sort_order || left.created_at.localeCompare(right.created_at)),
         reservation_schedule_rule_slots: [...(rule.reservation_schedule_rule_slots ?? [])]
           .sort((left, right) => left.time.localeCompare(right.time)),
       }));
@@ -90,14 +125,17 @@ export function useSaveReservationScheduleRule() {
         _rule_id: draft.id ?? null,
         _name: draft.name.trim(),
         _scope: draft.scope,
-        _weekdays: draft.scope === 'weekly' ? draft.weekdays : null,
         _start_date: draft.scope === 'weekly' ? null : draft.start_date,
         _end_date: draft.scope === 'date_range' ? draft.end_date : draft.start_date,
         _enabled: draft.enabled,
         _priority: draft.priority,
-        _max_party_size_per_reservation: draft.max_party_size_per_reservation,
-        _slots: sortReservationScheduleSlotSettings(draft.slots).map((slot) => slot.time),
-        _slot_settings: sortReservationScheduleSlotSettings(draft.slots),
+        _publish_at: draft.publish_at,
+        _blocks: draft.blocks.map((block) => ({
+          name: block.name.trim(),
+          weekdays: block.weekdays,
+          availability_mode: block.availability_mode,
+          slots: sortReservationScheduleSlotSettings(block.slots),
+        })),
       });
 
       if (error) throw error;

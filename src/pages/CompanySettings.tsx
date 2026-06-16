@@ -22,6 +22,7 @@ import {
   QrCode,
   Wallet,
   CalendarCheck,
+  CalendarClock,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
@@ -105,12 +106,13 @@ const DEFAULT_PAYMENTS: Record<string, boolean> = {
   vale_refeicao: false,
 };
 
-const SETTINGS_TABS = ['info', 'location', 'hours', 'reservations', 'payments', 'public-page'] as const;
+const SETTINGS_TABS = ['info', 'location', 'hours', 'reservations', 'availability', 'payments', 'public-page'] as const;
 const SETTINGS_TAB_ITEMS = [
   { value: 'info', label: 'Empresa', icon: Info },
   { value: 'location', label: 'Localização', icon: MapPin },
   { value: 'hours', label: 'Agenda', icon: Clock },
   { value: 'reservations', label: 'Reservas', icon: CalendarCheck },
+  { value: 'availability', label: 'Disponibilidade', icon: CalendarClock },
   { value: 'payments', label: 'Pagamentos', icon: CreditCard },
   { value: 'public-page', label: 'Página Pública', icon: Megaphone },
 ] as const;
@@ -133,9 +135,9 @@ const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
-const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
-const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
@@ -147,6 +149,7 @@ function isSettingsTab(value: string | null): value is SettingsTab {
 function normalizeSettingsTab(value: string | null): SettingsTab | null {
   if (isSettingsTab(value)) return value;
   if (value === 'blocked') return 'hours';
+  if (value === 'schedule-rules' || value === 'rules') return 'availability';
   return null;
 }
 
@@ -216,15 +219,16 @@ export default function CompanySettings() {
             'public_reservation_exit_prompt_secondary_text_size',
             'large_party_whatsapp_threshold',
             'reservation_late_tolerance_minutes',
+            'reservation_slot_interval_minutes',
           ],
         },
         {
           select: COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT,
-          missingColumns: ['show_public_reservation_exit_prompt'],
+          missingColumns: ['show_public_reservation_exit_prompt', 'reservation_slot_interval_minutes'],
         },
         {
           select: COMPANY_SETTINGS_SELECT_WITH_STICKY,
-          missingColumns: ['show_public_sticky_reserve_button'],
+          missingColumns: ['show_public_sticky_reserve_button', 'reservation_slot_interval_minutes'],
         },
         {
           select: COMPANY_SETTINGS_SELECT_LEGACY,
@@ -311,6 +315,7 @@ export default function CompanySettings() {
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [googleReviewUrl, setGoogleReviewUrl] = useState('');
   const [reservationDuration, setReservationDuration] = useState(30);
+  const [reservationSlotIntervalMinutes, setReservationSlotIntervalMinutes] = useState(30);
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
   const [reservationLateToleranceMinutes, setReservationLateToleranceMinutes] = useState(10);
@@ -362,6 +367,7 @@ export default function CompanySettings() {
     setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
     setGoogleMapsUrl(company.google_maps_url || '');
     setReservationDuration((company as any).reservation_duration ?? 30);
+    setReservationSlotIntervalMinutes((company as any).reservation_slot_interval_minutes ?? (company as any).reservation_duration ?? 30);
     setMaxGuestsPerSlot((company as any).max_guests_per_slot ?? 0);
     setLargePartyThreshold(normalizeLargePartyThreshold((company as any).large_party_whatsapp_threshold));
     setReservationLateToleranceMinutes(normalizeReservationLateToleranceMinutes((company as any).reservation_late_tolerance_minutes));
@@ -461,9 +467,14 @@ export default function CompanySettings() {
         public_waitlist_enabled: publicWaitlistEnabled,
         google_maps_url: normalizedMapsEmbedUrl || null,
         reservation_duration: reservationDuration,
+        reservation_slot_interval_minutes: reservationSlotIntervalMinutes,
         max_guests_per_slot: maxGuestsPerSlot,
         updated_at: new Date().toISOString(),
       } as any;
+      const {
+        reservation_slot_interval_minutes: _reservationSlotIntervalMinutes,
+        ...legacyBaseCompanyUpdate
+      } = baseCompanyUpdate;
       const companyUpdateWithLargePartyThreshold = {
         ...baseCompanyUpdate,
         large_party_whatsapp_threshold: normalizedLargePartyThreshold,
@@ -488,6 +499,7 @@ export default function CompanySettings() {
             'public_reservation_exit_prompt_secondary_text_size',
             'large_party_whatsapp_threshold',
             'reservation_late_tolerance_minutes',
+            'reservation_slot_interval_minutes',
           ],
         },
         {
@@ -505,6 +517,7 @@ export default function CompanySettings() {
             'public_reservation_exit_prompt_primary_text_size',
             'public_reservation_exit_prompt_secondary_text',
             'public_reservation_exit_prompt_secondary_text_size',
+            'reservation_slot_interval_minutes',
           ],
         },
         {
@@ -513,21 +526,25 @@ export default function CompanySettings() {
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
             show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
           } as any,
-          missingColumns: ['show_public_reservation_exit_prompt', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes'],
+          missingColumns: ['show_public_reservation_exit_prompt', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
         },
         {
           payload: {
             ...companyUpdateWithLargePartyThreshold,
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
           } as any,
-          missingColumns: ['show_public_sticky_reserve_button', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes'],
+          missingColumns: ['show_public_sticky_reserve_button', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
         },
         {
           payload: companyUpdateWithLargePartyThreshold,
-          missingColumns: ['large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes'],
+          missingColumns: ['large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
         },
         {
           payload: baseCompanyUpdate,
+          missingColumns: ['reservation_slot_interval_minutes'],
+        },
+        {
+          payload: legacyBaseCompanyUpdate,
           missingColumns: [],
         },
       ] as const;
@@ -1037,11 +1054,11 @@ export default function CompanySettings() {
               </div>
             </CardHeader>
             <CardContent className="pt-2">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
+              <div className="grid gap-3 md:grid-cols-2 min-[920px]:grid-cols-3">
+                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
                   <div className="space-y-1">
-                    <Label className="text-base font-semibold text-foreground">Duração de cada reserva</Label>
-                    <p className="text-sm text-muted-foreground">Intervalo entre os horários disponíveis no fluxo público.</p>
+                    <Label className="text-sm font-semibold text-foreground">Duração padrão da reserva</Label>
+                    <p className="text-xs leading-snug text-muted-foreground">Tempo que mesa/capacidade fica ocupada sem regra específica.</p>
                   </div>
                   <div className="mt-auto">
                     <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
@@ -1060,10 +1077,32 @@ export default function CompanySettings() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
+                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
                   <div className="space-y-1">
-                    <Label htmlFor="company-settings-max-guests" className="text-base font-semibold text-foreground">Capacidade máxima / horário</Label>
-                    <p className="text-sm text-muted-foreground">Total de pessoas por horário. Use 0 para trabalhar sem limite.</p>
+                    <Label className="text-sm font-semibold text-foreground">Intervalo da grade pública</Label>
+                    <p className="text-xs leading-snug text-muted-foreground">Gera horários públicos quando não houver regra ativa.</p>
+                  </div>
+                  <div className="mt-auto">
+                    <Select value={String(reservationSlotIntervalMinutes)} onValueChange={(value) => setReservationSlotIntervalMinutes(Number(value))}>
+                      <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar intervalo da grade pública">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="15">15 min</SelectItem>
+                        <SelectItem value="30">30 min</SelectItem>
+                        <SelectItem value="45">45 min</SelectItem>
+                        <SelectItem value="60">1 hora</SelectItem>
+                        <SelectItem value="90">1h30</SelectItem>
+                        <SelectItem value="120">2 horas</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="company-settings-max-guests" className="text-sm font-semibold text-foreground">Capacidade máxima / horário</Label>
+                    <p className="text-xs leading-snug text-muted-foreground">Teto de pessoas no horário. Use 0 para sem limite.</p>
                   </div>
                   <div className="mt-auto">
                     <Input
@@ -1079,12 +1118,12 @@ export default function CompanySettings() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
+                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
                   <div className="space-y-1">
-                    <Label htmlFor="company-settings-large-party-threshold" className="text-base font-semibold text-foreground">Limite de pessoas por reserva</Label>
-                    <p className="text-sm text-muted-foreground">Se o cliente selecionar esse número de pessoas ou uma quantidade maior, ele será direcionado para o WhatsApp.</p>
+                    <Label htmlFor="company-settings-large-party-threshold" className="text-sm font-semibold text-foreground">Limite de pessoas por reserva</Label>
+                    <p className="text-xs leading-snug text-muted-foreground">A partir deste tamanho, o cliente vai para o WhatsApp.</p>
                   </div>
-                  <div className="mt-auto space-y-2">
+                  <div className="mt-auto space-y-1.5">
                     <Input
                       id="company-settings-large-party-threshold"
                       name="large_party_whatsapp_threshold"
@@ -1096,18 +1135,18 @@ export default function CompanySettings() {
                       className={settingsFieldClassName}
                       placeholder="10"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Ex.: com 20, grupos de 19 pessoas ainda seguem o fluxo normal; 20 ou mais vão para o WhatsApp.
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Ex.: 20 manda grupos de 20+ para o WhatsApp.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-4">
+                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
                   <div className="space-y-1">
-                    <Label htmlFor="company-settings-late-tolerance" className="text-base font-semibold text-foreground">Tolerância de atraso</Label>
-                    <p className="text-sm text-muted-foreground">Tempo informado ao cliente na página de acompanhamento da reserva. Use 0 para não exibir o aviso.</p>
+                    <Label htmlFor="company-settings-late-tolerance" className="text-sm font-semibold text-foreground">Tolerância de atraso</Label>
+                    <p className="text-xs leading-snug text-muted-foreground">Aviso exibido no acompanhamento. Use 0 para ocultar.</p>
                   </div>
-                  <div className="mt-auto space-y-2">
+                  <div className="mt-auto space-y-1.5">
                     <Input
                       id="company-settings-late-tolerance"
                       name="reservation_late_tolerance_minutes"
@@ -1119,16 +1158,14 @@ export default function CompanySettings() {
                       className={settingsFieldClassName}
                       placeholder="10"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Ex.: com 10, o cliente verá que existe tolerância de até 10 minutos de atraso.
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Ex.: 10 mostra tolerância de até 10 min.
                     </p>
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
-
-          {companyId && <ReservationScheduleRulesCard companyId={companyId} />}
 
           {featureFlags?.features.flow_protection !== false && <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
@@ -1348,6 +1385,10 @@ export default function CompanySettings() {
               </div>
             </CardContent>
           </Card>}
+        </TabsContent>
+
+        <TabsContent value="availability" className="space-y-4">
+          {companyId && <ReservationScheduleRulesCard companyId={companyId} />}
         </TabsContent>
 
         <TabsContent value="payments">

@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS public.pluguechat_official_configs (
 ALTER TABLE public.pluguechat_official_configs ENABLE ROW LEVEL SECURITY;
 
 -- Leitura: membros da empresa ou superadmin (nunca retorna o token; o frontend deve consultar apenas colunas seguras)
+DROP POLICY IF EXISTS "pluguechat_configs_select"
+  ON public.pluguechat_official_configs;
+
 CREATE POLICY "pluguechat_configs_select"
   ON public.pluguechat_official_configs
   FOR SELECT
@@ -64,6 +67,9 @@ CREATE TABLE IF NOT EXISTS public.pluguechat_automation_templates (
 
 ALTER TABLE public.pluguechat_automation_templates ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pluguechat_templates_select"
+  ON public.pluguechat_automation_templates;
+
 CREATE POLICY "pluguechat_templates_select"
   ON public.pluguechat_automation_templates
   FOR SELECT
@@ -76,6 +82,9 @@ CREATE POLICY "pluguechat_templates_select"
     )
   );
 
+DROP POLICY IF EXISTS "pluguechat_templates_insert"
+  ON public.pluguechat_automation_templates;
+
 CREATE POLICY "pluguechat_templates_insert"
   ON public.pluguechat_automation_templates
   FOR INSERT
@@ -86,8 +95,11 @@ CREATE POLICY "pluguechat_templates_insert"
       WHERE ur.user_id = auth.uid()
         AND ur.company_id = pluguechat_automation_templates.company_id
         AND ur.role IN ('admin', 'operator')
-    )
+      )
   );
+
+DROP POLICY IF EXISTS "pluguechat_templates_update"
+  ON public.pluguechat_automation_templates;
 
 CREATE POLICY "pluguechat_templates_update"
   ON public.pluguechat_automation_templates
@@ -139,6 +151,9 @@ CREATE INDEX IF NOT EXISTS pluguechat_message_queue_company_idx
 
 ALTER TABLE public.pluguechat_message_queue ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pluguechat_queue_select"
+  ON public.pluguechat_message_queue;
+
 CREATE POLICY "pluguechat_queue_select"
   ON public.pluguechat_message_queue
   FOR SELECT
@@ -177,6 +192,9 @@ CREATE INDEX IF NOT EXISTS pluguechat_message_logs_company_idx
 
 ALTER TABLE public.pluguechat_message_logs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pluguechat_logs_select"
+  ON public.pluguechat_message_logs;
+
 CREATE POLICY "pluguechat_logs_select"
   ON public.pluguechat_message_logs
   FOR SELECT
@@ -212,6 +230,9 @@ CREATE TABLE IF NOT EXISTS public.pluguechat_broadcasts (
 
 ALTER TABLE public.pluguechat_broadcasts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pluguechat_broadcasts_select"
+  ON public.pluguechat_broadcasts;
+
 CREATE POLICY "pluguechat_broadcasts_select"
   ON public.pluguechat_broadcasts
   FOR SELECT
@@ -244,6 +265,9 @@ CREATE TABLE IF NOT EXISTS public.pluguechat_broadcast_recipients (
 );
 
 ALTER TABLE public.pluguechat_broadcast_recipients ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "pluguechat_broadcast_recipients_select"
+  ON public.pluguechat_broadcast_recipients;
 
 CREATE POLICY "pluguechat_broadcast_recipients_select"
   ON public.pluguechat_broadcast_recipients

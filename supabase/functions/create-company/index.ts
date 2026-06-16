@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
       name, slug, razao_social, cnpj, phone, email, address,
       responsible_name, responsible_email, responsible_phone,
       instagram, whatsapp, google_maps_url, description, logo_url,
-      opening_hours, payment_methods, reservation_duration, max_guests_per_slot,
+      opening_hours, payment_methods, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot,
     } = body;
 
     if (!name || !slug || !responsible_email) {
@@ -276,6 +276,7 @@ Deno.serve(async (req) => {
           opening_hours,
           payment_methods,
           reservation_duration,
+          reservation_slot_interval_minutes: reservation_slot_interval_minutes ?? reservation_duration ?? 30,
           max_guests_per_slot,
           status: "active",
         })

@@ -70,6 +70,7 @@ import {
 import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
+import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
 
 type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
@@ -89,6 +90,7 @@ interface Reservation {
   company_id: string;
   table_id: string | null;
   table_map_id: string | null;
+  created_in_mode?: string | null;
   source: string | null;
   tracking_session?: {
     utm_medium?: string | null;
@@ -266,6 +268,27 @@ export default function Reservations() {
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
   const canDeleteReservations = hasPermission('reservations_delete');
+  const manualReservationPhoneDigits = useMemo(
+    () => normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
+    [manualReservationForm.guest_phone],
+  );
+  const {
+    data: manualReservationLead,
+    isFetching: manualReservationLeadLoading,
+  } = useCrmLeadPrefill(companyId, manualReservationPhoneDigits, createDialog);
+  const showManualReservationLeadLookup = createDialog
+    && manualReservationPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
+
+  useEffect(() => {
+    if (!createDialog || !manualReservationLead) return;
+
+    setManualReservationForm((current) => ({
+      ...current,
+      guest_name: manualReservationLead.full_name || current.guest_name,
+      guest_email: manualReservationLead.email || current.guest_email,
+      guest_birthdate: manualReservationLead.birthdate || current.guest_birthdate,
+    }));
+  }, [createDialog, manualReservationLead]);
 
   const handleOperationalFilterChange = (value: ReservationOperationalFilter) => {
     setOperationalFilter(value);
@@ -300,21 +323,6 @@ export default function Reservations() {
     },
     enabled: !!companyId,
     refetchInterval: 30000,
-  });
-
-  const { data: reservationSettings } = useQuery({
-    queryKey: ['reservation-settings', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies' as any)
-        .select('reservation_duration')
-        .eq('id', companyId)
-        .maybeSingle();
-
-      if (error) throw error;
-      return data as { reservation_duration: number | null } | null;
-    },
-    enabled: !!companyId,
   });
 
   const { data: leadCreatedAtByPhone = {}, isFetching: leadCreatedAtByPhoneLoading } = useQuery({
@@ -510,19 +518,21 @@ export default function Reservations() {
       if (!dataEditForm.date || !dataEditForm.time) throw new Error('Informe data e horário.');
       if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) throw new Error('Quantidade invalida de pessoas.');
 
-      const { error } = await supabase
-        .from('reservations' as any)
-        .update({
-          guest_name: dataEditForm.guest_name.trim(),
-          guest_phone: normalizeBrazilPhoneDigits(dataEditForm.guest_phone),
-          guest_email: normalizeEmail(dataEditForm.guest_email) || null,
-          date: dataEditForm.date,
-          time: `${dataEditForm.time}:00`,
-          party_size: parsedPartySize,
-          occasion: dataEditForm.occasion.trim() || null,
-          notes: dataEditForm.notes.trim() || null,
-        })
-        .eq('id', dataEditReservation.id);
+      // Edicao via RPC segura: revalida capacidade e mesa quando data/horario/
+      // pessoas mudam, em vez de gravar direto em reservations (Fase 5).
+      const { error } = await (supabase.rpc as any)('update_panel_reservation', {
+        _reservation_id: dataEditReservation.id,
+        _date: dataEditForm.date,
+        _time: `${dataEditForm.time}:00`,
+        _party_size: parsedPartySize,
+        _guest_name: dataEditForm.guest_name.trim(),
+        _guest_phone: normalizeBrazilPhoneDigits(dataEditForm.guest_phone),
+        _guest_email: normalizeEmail(dataEditForm.guest_email) || null,
+        _occasion: dataEditForm.occasion.trim() || null,
+        _notes: dataEditForm.notes.trim() || null,
+        _keep_table: true,
+        _allow_unassigned: true,
+      });
 
       if (error) throw error;
     },
@@ -576,35 +586,29 @@ export default function Reservations() {
         throw new Error('Informe uma quantidade válida de pessoas.');
       }
 
-      const reservationId = crypto.randomUUID();
-      const trackingCode = crypto.randomUUID().replace(/-/g, '');
-      const payload = {
-        id: reservationId,
-        public_tracking_code: trackingCode,
-        company_id: companyId,
-        table_id: null,
-        table_map_id: null,
-        guest_name: manualReservationForm.guest_name.trim(),
-        guest_phone: normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
-        guest_email: normalizeEmail(manualReservationForm.guest_email) || null,
-        guest_birthdate: manualReservationForm.guest_birthdate || null,
-        date: manualReservationForm.date,
-        time: `${manualReservationForm.time}:00`,
-        party_size: parsedPartySize,
-        duration_minutes: reservationSettings?.reservation_duration ?? 30,
-        occasion: manualReservationForm.occasion.trim() || null,
-        notes: manualReservationForm.notes.trim() || null,
-        status: 'confirmed',
-      };
-
-      const { data, error } = await supabase
-        .from('reservations' as any)
-        .insert(payload as any)
-        .select('*')
-        .single();
+      // Criacao via RPC segura: valida capacidade/limites e auto-atribui a
+      // menor mesa livre no modo por mesas, em vez de inserir direto com
+      // table_id nulo (Fase 4). _allow_unassigned mantem a criacao possivel
+      // mesmo sem mesa livre, marcando a reserva como "alocar depois".
+      const { data, error } = await (supabase.rpc as any)('create_panel_reservation', {
+        _company_id: companyId,
+        _date: manualReservationForm.date,
+        _time: `${manualReservationForm.time}:00`,
+        _party_size: parsedPartySize,
+        _guest_name: manualReservationForm.guest_name.trim(),
+        _guest_phone: normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
+        _guest_email: normalizeEmail(manualReservationForm.guest_email) || null,
+        _guest_birthdate: manualReservationForm.guest_birthdate || null,
+        _occasion: manualReservationForm.occasion.trim() || null,
+        _notes: manualReservationForm.notes.trim() || null,
+        _table_id: null,
+        _allow_unassigned: true,
+        _assignment_note: null,
+        _status: 'confirmed',
+      });
 
       if (error) throw error;
-      return data as Reservation;
+      return (Array.isArray(data) ? data[0] : data) as Reservation;
     },
     onSuccess: (createdReservation) => {
       qc.invalidateQueries({ queryKey: ['reservations', companyId] });
@@ -1934,6 +1938,23 @@ export default function Reservations() {
                   maxLength={15}
                   required
                 />
+                {showManualReservationLeadLookup && (manualReservationLeadLoading || manualReservationLead) && (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                    {manualReservationLeadLoading ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Buscando lead pelo WhatsApp...</span>
+                      </>
+                    ) : manualReservationLead ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                        <span>
+                          Lead encontrado{manualReservationLead.full_name ? `: ${manualReservationLead.full_name}` : ''}. Dados preenchidos.
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

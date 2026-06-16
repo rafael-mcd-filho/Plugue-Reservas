@@ -180,6 +180,7 @@ function createEmptyForm(): CompanyInsert {
     opening_hours: cloneHours(DEFAULT_HOURS),
     payment_methods: getDefaultPayments(),
     reservation_duration: 30,
+    reservation_slot_interval_minutes: 30,
     max_guests_per_slot: 0,
     status: 'active',
   };
@@ -205,6 +206,7 @@ function buildFormFromCompany(company: Company): CompanyInsert {
     opening_hours: normalizeOpeningHours(company.opening_hours),
     payment_methods: normalizePaymentMethods(company.payment_methods),
     reservation_duration: company.reservation_duration ?? 30,
+    reservation_slot_interval_minutes: company.reservation_slot_interval_minutes ?? company.reservation_duration ?? 30,
     max_guests_per_slot: company.max_guests_per_slot ?? 0,
     status: company.status,
   };
@@ -446,6 +448,7 @@ export default function CompanyDialog({
       opening_hours: normalizeOpeningHours(form.opening_hours),
       payment_methods: normalizePaymentMethods(form.payment_methods),
       reservation_duration: form.reservation_duration ?? 30,
+      reservation_slot_interval_minutes: form.reservation_slot_interval_minutes ?? form.reservation_duration ?? 30,
       max_guests_per_slot: form.max_guests_per_slot ?? 0,
     };
 

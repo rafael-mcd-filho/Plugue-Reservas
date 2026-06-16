@@ -15,7 +15,7 @@ import {
 import { ptBR } from 'date-fns/locale';
 import {
   BarChart, Bar, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, Legend,
+  ResponsiveContainer, Legend, ReferenceLine,
 } from 'recharts';
 import {
   CalendarCheck, Users, TrendingUp, CalendarIcon,
@@ -69,6 +69,25 @@ const CHART_COLORS = {
   surface: 'hsl(var(--card))',
   border: 'rgba(0, 0, 0, 0.08)',
 };
+
+const DAILY_CAPACITY_STATUS_META = {
+  below: {
+    label: 'Abaixo da capacidade',
+    color: 'hsl(145, 63%, 42%)',
+  },
+  full: {
+    label: 'Lotado',
+    color: 'hsl(28, 85%, 55%)',
+  },
+  over: {
+    label: 'Acima da capacidade',
+    color: 'hsl(0, 72%, 51%)',
+  },
+  no_capacity: {
+    label: 'Sem capacidade',
+    color: 'hsl(0, 0%, 45%)',
+  },
+} as const;
 
 function formatDashboardDateRangeLabel(range: DateRange | undefined) {
   if (!range?.from) {
@@ -458,6 +477,8 @@ export default function Dashboard() {
 
   const {
     dailyStats,
+    dailyCapacityStats,
+    dailyCapacityTotals,
     createdReservationDailyStats,
     reservationLeadTrend,
     createdReservationTotals,
@@ -537,6 +558,7 @@ export default function Dashboard() {
   const dataIsStale = hasFreshnessData && dataLagMs > 45000;
   const dataIsSyncing = dashFetching || funnelFetching || liveFunnelFetching;
   const freshnessLabel = dataIsSyncing ? 'Sincronizando' : dataIsStale ? 'Dados com atraso' : 'Tempo real';
+  const isInitialFeatureFlagsLoading = isCompanyContext && featureFlagsLoading && !featureFlags;
 
   const periodLabel = comparisonLabel;
   const currentPeriodRangeLabel = formatComparisonPeriodRangeLabel(startDate, endDate);
@@ -643,6 +665,7 @@ export default function Dashboard() {
       realizedRate: isPeople ? day.realizedRateGuests : day.realizedRate,
     }));
   }, [expectedVsActualDailyStats, expectedVsActualMetric]);
+  const dailyCapacityHasCapacity = dailyCapacityTotals.totalCapacity > 0;
 
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
@@ -719,7 +742,7 @@ export default function Dashboard() {
         />
       )}
 
-      {dashLoading || (isCompanyContext && featureFlagsLoading) ? (
+      {dashLoading || isInitialFeatureFlagsLoading ? (
         <>
           {/* KPI skeleton */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 [&>*]:min-w-0">
@@ -1483,6 +1506,164 @@ export default function Dashboard() {
             </Card>
           )}
 
+          {advancedReportsEnabled && (
+            <Card className="border border-border shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base">
+                      <SectionTitle
+                        title="Ocupação da capacidade diária"
+                        tooltip="Compara, dia a dia, a capacidade total dos horários de reserva com as pessoas que fizeram check-in. A capacidade respeita regras por capacidade, limites globais por horário, mapas ativos, bloqueios e o período selecionado no dashboard."
+                      />
+                    </CardTitle>
+                    <CardDescription>
+                      {dailyCapacityHasCapacity
+                        ? `${dailyCapacityTotals.checkedInGuests.toLocaleString('pt-BR')} pessoas presentes em ${dailyCapacityTotals.totalCapacity.toLocaleString('pt-BR')} lugares disponíveis no período.`
+                        : 'Sem capacidade calculada no período selecionado.'}
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs sm:justify-end">
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <span className="text-muted-foreground">Capacidade</span>
+                      <span className="font-semibold text-foreground">
+                        {dailyCapacityTotals.totalCapacity.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-success/30 bg-success-soft px-2 py-1">
+                      <span className="text-muted-foreground">Pessoas presentes</span>
+                      <span className="font-semibold text-success">
+                        {dailyCapacityTotals.checkedInGuests.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-info/20 bg-info-soft/40 px-2 py-1">
+                      <span className="text-muted-foreground">Ocupação</span>
+                      <span className="font-semibold text-info">
+                        {dailyCapacityTotals.occupancyRate.toLocaleString('pt-BR')}%
+                      </span>
+                    </div>
+                    {dailyCapacityTotals.overCapacityDays > 0 && (
+                      <div className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive-soft px-2 py-1">
+                        <span className="text-muted-foreground">Acima</span>
+                        <span className="font-semibold text-destructive">
+                          {dailyCapacityTotals.overCapacityDays.toLocaleString('pt-BR')} dia{dailyCapacityTotals.overCapacityDays === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                  {(['below', 'full', 'over'] as const).map((status) => (
+                    <span key={status} className="inline-flex items-center gap-1.5">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: DAILY_CAPACITY_STATUS_META[status].color }}
+                        aria-hidden="true"
+                      />
+                      {DAILY_CAPACITY_STATUS_META[status].label}
+                    </span>
+                  ))}
+                </div>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={dailyCapacityStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis yAxisId="guests" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                      <YAxis
+                        yAxisId="rate"
+                        orientation="right"
+                        domain={[0, (dataMax: number) => Math.max(120, Math.ceil(dataMax / 10) * 10)]}
+                        tick={{ fontSize: 12 }}
+                        stroke="hsl(202, 89%, 48%)"
+                        tickFormatter={(value: number) => `${value}%`}
+                      />
+                      <RechartsTooltip
+                        content={({ active, payload, label }: any) => {
+                          if (!active || !payload?.length) return null;
+
+                          const point = payload[0]?.payload;
+                          if (!point) return null;
+
+                          const status = point.status as keyof typeof DAILY_CAPACITY_STATUS_META;
+                          const statusMeta = DAILY_CAPACITY_STATUS_META[status] ?? DAILY_CAPACITY_STATUS_META.no_capacity;
+
+                          return (
+                            <div className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
+                              <div className="flex items-center justify-between gap-4">
+                                <p className="font-semibold text-foreground">{label}</p>
+                                <span
+                                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+                                  style={{ backgroundColor: statusMeta.color }}
+                                >
+                                  {statusMeta.label}
+                                </span>
+                              </div>
+                              <div className="mt-2 space-y-1 text-muted-foreground">
+                                <p>Capacidade: <span className="font-medium text-foreground">{(point.totalCapacity ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Horários com capacidade: <span className="font-medium text-foreground">{(point.slotCount ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Pessoas presentes: <span className="font-medium text-success">{(point.checkedInGuests ?? 0).toLocaleString('pt-BR')}</span></p>
+                                <p>Ocupação: <span className="font-medium text-info">{(point.occupancyRate ?? 0).toLocaleString('pt-BR')}%</span></p>
+                                {(point.overCapacityGuests ?? 0) > 0 && (
+                                  <p>Excesso: <span className="font-medium text-destructive">{point.overCapacityGuests.toLocaleString('pt-BR')} pessoa{point.overCapacityGuests === 1 ? '' : 's'}</span></p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Legend />
+                      <Bar
+                        yAxisId="guests"
+                        dataKey="totalCapacity"
+                        name="Capacidade"
+                        fill="hsl(0, 0%, 82%)"
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={42}
+                      />
+                      <Bar
+                        yAxisId="guests"
+                        dataKey="checkedInGuests"
+                        name="Pessoas presentes"
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={42}
+                      >
+                        {dailyCapacityStats.map((day) => (
+                          <Cell
+                            key={day.date}
+                            fill={DAILY_CAPACITY_STATUS_META[day.status].color}
+                          />
+                        ))}
+                      </Bar>
+                      <ReferenceLine
+                        yAxisId="rate"
+                        y={100}
+                        stroke="hsl(0, 72%, 51%)"
+                        strokeDasharray="4 4"
+                        ifOverflow="extendDomain"
+                      />
+                      <Line
+                        yAxisId="rate"
+                        type="monotone"
+                        dataKey="occupancyRate"
+                        name="Ocupação"
+                        stroke="hsl(202, 89%, 48%)"
+                        strokeWidth={2.5}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        isAnimationActive
+                        animationDuration={500}
+                        animationEasing="ease-out"
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border border-border shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">
@@ -1655,11 +1836,11 @@ export default function Dashboard() {
               <CardTitle className="text-base">
                 <SectionTitle
                   title="Origem das Reservas"
-                  tooltip="Mostra de onde vieram as reservas criadas no período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data de criação da reserva — quando o agendamento foi feito."
+                  tooltip="Mostra de onde vieram as reservas do período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data da reserva — quando o cliente está programado para visitar."
                 />
               </CardTitle>
               <CardDescription>
-                Considera a data de criação da reserva. Cada reserva entra em uma única categoria — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
+                Considera a data da reserva. Cada reserva entra em uma única categoria — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1746,7 +1927,7 @@ export default function Dashboard() {
                       <div>
                         <p className="text-sm font-medium text-foreground">Origem por dia</p>
                         <p className="text-xs text-muted-foreground">
-                          Uma barra empilhada por data de criação, mostrando a composição diária das reservas.
+                          Uma barra empilhada por data da reserva, mostrando a composição diária das reservas.
                         </p>
                       </div>
                       <p className="max-w-xl text-right text-xs text-muted-foreground">
@@ -1823,7 +2004,7 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
-                  Sem reservas criadas no período para classificar por origem.
+                  Sem reservas no período para classificar por origem.
                 </div>
               )}
             </CardContent>
