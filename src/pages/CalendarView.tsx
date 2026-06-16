@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addMonths,
   eachDayOfInterval,
@@ -610,6 +610,7 @@ export default function CalendarView() {
       return ((data as AdminCapacityRow[]) ?? []);
     },
     enabled: !!companyId && !!selectedDateStr,
+    placeholderData: keepPreviousData,
     refetchInterval: 30000,
   });
 
@@ -644,6 +645,7 @@ export default function CalendarView() {
       return getPublicReservationSchedule(companyId, selectedDateStr);
     },
     enabled: !!companyId && !!selectedDateStr,
+    placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
   });
 
