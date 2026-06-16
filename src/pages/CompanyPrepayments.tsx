@@ -271,8 +271,15 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
     } else if (payment.status === 'pending' || payment.status === 'awaiting_method') {
       bucket.pending += payment.amount;
       bucket.pendingCount += 1;
-    } else if (payment.status === 'refunded' || payment.status === 'partial_refunded') {
-      bucket.refunded += payment.status === 'partial_refunded' ? payment.refunded_amount : payment.amount;
+    } else if (payment.status === 'partial_refunded') {
+      // Estorno parcial: a parte devolvida vira "estornado" e a parte retida
+      // continua sendo receita (entra em paid), preservando o total recebido.
+      const retained = Math.max(payment.amount - payment.refunded_amount, 0);
+      bucket.paid += retained;
+      bucket.refunded += payment.refunded_amount;
+      bucket.refundedCount += 1;
+    } else if (payment.status === 'refunded') {
+      bucket.refunded += payment.amount;
       bucket.refundedCount += 1;
     } else if (payment.status === 'chargeback') {
       bucket.chargeback += payment.amount;
@@ -901,7 +908,15 @@ export default function CompanyPrepayments() {
     ),
     [filteredFinancialDaily],
   );
-  const netRevenue = chartTotals.paid - chartTotals.refunded - chartTotals.chargeback;
+  // "Pagos" no resumo é o BRUTO recebido: todo pagamento que chegou a ser capturado,
+  // inclusive os que depois foram estornados ou sofreram chargeback. Esses ficam em
+  // buckets próprios (para o gráfico empilhado não dobrar valores), então o bruto é a
+  // soma dos três. Estornos parciais já entram com a parte retida em `paid` e a parte
+  // devolvida em `refunded`, somando o valor cheio aqui.
+  const grossPaid = chartTotals.paid + chartTotals.refunded + chartTotals.chargeback;
+  const grossPaidCount = chartTotals.paidCount + chartTotals.refundedCount + chartTotals.chargebackCount;
+  // Líquido = bruto menos estornos e chargebacks, descontados uma única vez.
+  const netRevenue = grossPaid - chartTotals.refunded - chartTotals.chargeback;
 
   const paymentsListQueryKey = useMemo(
     () => [
@@ -2037,8 +2052,8 @@ export default function CompanyPrepayments() {
             <MetricCard
               icon={CheckCircle2}
               label="Pagamentos pagos"
-              value={String(chartTotals.paidCount)}
-              detail="Reservas com pagamento confirmado"
+              value={String(grossPaidCount)}
+              detail="Reservas com pagamento confirmado (inclui estornados)"
             />
             <MetricCard
               icon={Banknote}
@@ -2115,8 +2130,8 @@ export default function CompanyPrepayments() {
                 <CardDescription>Eventos financeiros entre {summaryPeriodLabel}.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <SummaryLine label="Pagamentos pagos" value={String(chartTotals.paidCount)} tone="success" />
-                <SummaryLine label="Valor pago" value={formatPrepaymentAmount(chartTotals.paid)} tone="success" />
+                <SummaryLine label="Pagamentos pagos" value={String(grossPaidCount)} tone="success" />
+                <SummaryLine label="Valor pago (bruto)" value={formatPrepaymentAmount(grossPaid)} tone="success" />
                 <SummaryLine label="Receita liquida" value={formatPrepaymentAmount(netRevenue)} tone="success" />
                 <SummaryLine label="Valor estornado" value={formatPrepaymentAmount(chartTotals.refunded)} tone="default" />
                 <SummaryLine label="Chargeback" value={formatPrepaymentAmount(chartTotals.chargeback)} tone="destructive" />
