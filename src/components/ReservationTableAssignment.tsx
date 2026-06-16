@@ -73,6 +73,35 @@ export default function ReservationTableAssignment({
     [options, currentTableId],
   );
 
+  // Busca leve dos dados da mesa atribuida para exibir numero/secao mesmo com o
+  // seletor fechado (a lista completa de opcoes so carrega ao abrir).
+  const { data: currentTableInfo } = useQuery({
+    queryKey: ['reservation-current-table', currentTableId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('restaurant_tables' as any)
+        .select('number, section')
+        .eq('id', currentTableId!)
+        .maybeSingle();
+
+      if (error) throw error;
+      return (data as { number: number; section: string | null } | null) ?? null;
+    },
+    enabled: !!currentTableId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const currentTableLabel = useMemo(() => {
+    if (!currentTableId) return null;
+    if (currentOption) return formatTableLabel(currentOption);
+    if (currentTableInfo) {
+      return currentTableInfo.section
+        ? `Mesa ${currentTableInfo.number} · ${currentTableInfo.section}`
+        : `Mesa ${currentTableInfo.number}`;
+    }
+    return 'Mesa atribuída';
+  }, [currentTableId, currentOption, currentTableInfo]);
+
   const assignMutation = useMutation({
     mutationFn: async ({ tableId, allowUnassigned }: { tableId: string | null; allowUnassigned: boolean }) => {
       const { data, error } = await (supabase.rpc as any)('assign_reservation_table', {
@@ -111,9 +140,7 @@ export default function ReservationTableAssignment({
           <div>
             <p className="text-sm font-medium text-foreground">Mesa</p>
             <p className="text-xs text-muted-foreground">
-              {currentTableId
-                ? (currentOption ? formatTableLabel(currentOption) : 'Mesa atribuída')
-                : 'Sem mesa · alocar depois'}
+              {currentTableLabel ?? 'Sem mesa · alocar depois'}
             </p>
           </div>
         </div>
