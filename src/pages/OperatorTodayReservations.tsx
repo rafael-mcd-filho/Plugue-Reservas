@@ -2,7 +2,7 @@ import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInMinutes, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Ban, CheckCircle2, ChevronDown, Clock3, Loader2, Search, Users } from 'lucide-react';
+import { Ban, CalendarCheck, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clock3, Loader2, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
@@ -323,14 +323,6 @@ function getVisibleOccasionLabel(occasion: string | null | undefined) {
   const normalizedOccasion = occasion?.trim();
   if (!normalizedOccasion) return null;
   return normalizedOccasion.toLowerCase() === 'outro' ? null : normalizedOccasion;
-}
-
-function formatReservationCountLabel(count: number) {
-  return `${count} ${count === 1 ? 'reserva' : 'reservas'}`;
-}
-
-function formatGuestCountLabel(count: number) {
-  return `${count} ${count === 1 ? 'pessoa' : 'pessoas'}`;
 }
 
 function timeToMinutes(value: string) {
@@ -731,7 +723,7 @@ export default function OperatorTodayReservations() {
   const [checkInReservation, setCheckInReservation] = useState<Reservation | null>(null);
   const [noShowReservation, setNoShowReservation] = useState<Reservation | null>(null);
   const [checkedInPartySize, setCheckedInPartySize] = useState('1');
-  const [expandedReservationGroupKey, setExpandedReservationGroupKey] = useState<string | null>(null);
+  const [expandedReservationGroupKeys, setExpandedReservationGroupKeys] = useState<Set<string>>(() => new Set());
   const [hideEmptyReservationSlots, setHideEmptyReservationSlots] = useState(true);
 
   const invalidateReservationQueries = () => {
@@ -956,6 +948,38 @@ export default function OperatorTodayReservations() {
     () => groupReservationsByCapacitySlots(filteredProcessedReservations, capacitySlots, slotDuration, false),
     [capacitySlots, filteredProcessedReservations, slotDuration],
   );
+
+  const toggleReservationGroup = (key: string) => {
+    setExpandedReservationGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const pendingExpansionKeys = useMemo(
+    () => pendingReservationGroups.map((group) => `pending:${group.key}`),
+    [pendingReservationGroups],
+  );
+
+  const allPendingExpanded = pendingExpansionKeys.length > 0
+    && pendingExpansionKeys.every((key) => expandedReservationGroupKeys.has(key));
+
+  const toggleAllPending = () => {
+    setExpandedReservationGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (allPendingExpanded) {
+        pendingExpansionKeys.forEach((key) => next.delete(key));
+      } else {
+        pendingExpansionKeys.forEach((key) => next.add(key));
+      }
+      return next;
+    });
+  };
   const summaryItems = [
     {
       label: 'Reservas',
@@ -1298,7 +1322,7 @@ export default function OperatorTodayReservations() {
           const slotIsCurrent = options.accent === 'primary' && isNowWithinSlot(group, now);
           const capacitySlot = group.capacitySlot;
           const groupExpansionKey = `${options.listKey}:${group.key}`;
-          const groupIsExpanded = hasActiveSearch || expandedReservationGroupKey === groupExpansionKey;
+          const groupIsExpanded = hasActiveSearch || expandedReservationGroupKeys.has(groupExpansionKey);
 
           return (
             <section
@@ -1311,11 +1335,7 @@ export default function OperatorTodayReservations() {
               <button
                 type="button"
                 aria-expanded={groupIsExpanded}
-                onClick={() => {
-                  setExpandedReservationGroupKey((current) => (
-                    current === groupExpansionKey ? null : groupExpansionKey
-                  ));
-                }}
+                onClick={() => toggleReservationGroup(groupExpansionKey)}
                 className={cn(
                   'grid w-full gap-2 px-3 py-2 text-left transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
                   slotIsCurrent ? 'bg-primary/[0.05]' : 'bg-muted/[0.08]',
@@ -1346,9 +1366,16 @@ export default function OperatorTodayReservations() {
                           </span>
                         )}
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatReservationCountLabel(group.reservations.length)} chegando · {formatGuestCountLabel(group.totalGuests)}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                          <span className="tabular-nums">{group.reservations.length}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5 text-info" />
+                          <span className="tabular-nums">{group.totalGuests}</span>
+                        </span>
+                      </div>
                       {group.isOutsideConfiguredSchedule && (
                         <span className="mt-1 inline-flex rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                           Fora dos horários configurados
@@ -1478,6 +1505,17 @@ export default function OperatorTodayReservations() {
                         Ocultar vazias
                       </Label>
                     </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                      onClick={toggleAllPending}
+                      disabled={hasActiveSearch || pendingExpansionKeys.length === 0}
+                    >
+                      {allPendingExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
+                      {allPendingExpanded ? 'Recolher todas' : 'Expandir todas'}
+                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">Clique em uma faixa para ver as reservas.</p>
                 </div>

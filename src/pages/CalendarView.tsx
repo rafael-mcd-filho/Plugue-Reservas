@@ -14,12 +14,16 @@ import {
 import { ptBR } from 'date-fns/locale';
 import {
   AlertTriangle,
+  CalendarCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Eye,
   Loader2,
   Table2,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
@@ -562,7 +566,7 @@ export default function CalendarView() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [calendarMetricMode, setCalendarMetricMode] = useState<CalendarMetricMode>('guests');
-  const [expandedSlotTime, setExpandedSlotTime] = useState<string | null>(null);
+  const [expandedSlotTimes, setExpandedSlotTimes] = useState<Set<string>>(() => new Set());
   const [hideEmptyCapacitySlots, setHideEmptyCapacitySlots] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
@@ -576,7 +580,7 @@ export default function CalendarView() {
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
 
   useEffect(() => {
-    setExpandedSlotTime(null);
+    setExpandedSlotTimes(new Set());
   }, [selectedDateStr]);
 
   const invalidateReservationQueries = () => {
@@ -777,13 +781,49 @@ export default function CalendarView() {
     [daySlots, hideEmptyCapacitySlots],
   );
 
+  // Remove do conjunto expandido as faixas que deixaram de existir (ex.: ao
+  // ativar "Ocultar vazias"); mantem 'off-schedule' sempre valido.
   useEffect(() => {
-    if (!expandedSlotTime || expandedSlotTime === 'off-schedule') return;
+    setExpandedSlotTimes((prev) => {
+      if (prev.size === 0) return prev;
+      const validTimes = new Set(visibleDaySlots.map((slot) => slot.time));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((key) => {
+        if (key === 'off-schedule' || validTimes.has(key)) {
+          next.add(key);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [visibleDaySlots]);
 
-    if (!visibleDaySlots.some((slot) => slot.time === expandedSlotTime)) {
-      setExpandedSlotTime(null);
-    }
-  }, [expandedSlotTime, visibleDaySlots]);
+  const expandableSlotKeys = useMemo(() => {
+    const keys = visibleDaySlots.map((slot) => slot.time);
+    if (offScheduleReservations.length > 0) keys.push('off-schedule');
+    return keys;
+  }, [visibleDaySlots, offScheduleReservations.length]);
+
+  const allSlotsExpanded = expandableSlotKeys.length > 0
+    && expandableSlotKeys.every((key) => expandedSlotTimes.has(key));
+
+  const toggleAllSlots = () => {
+    setExpandedSlotTimes(allSlotsExpanded ? new Set() : new Set(expandableSlotKeys));
+  };
+
+  const toggleSlot = (key: string) => {
+    setExpandedSlotTimes((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   const capacityLoading = capacityRowsLoading || scheduleLoading;
   const dayEmptyMessage = 'Nenhuma reserva ativa nesta data';
@@ -1097,6 +1137,17 @@ export default function CalendarView() {
                         Ocultar vazias
                       </Label>
                     </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                      onClick={toggleAllSlots}
+                      disabled={expandableSlotKeys.length === 0}
+                    >
+                      {allSlotsExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
+                      {allSlotsExpanded ? 'Recolher todas' : 'Expandir todas'}
+                    </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Horários ativos do dia com ocupação e reservas relacionadas.
@@ -1157,11 +1208,11 @@ export default function CalendarView() {
                     <section className="overflow-hidden rounded-md bg-background/92 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ring-1 ring-amber-200/80">
                       <button
                         type="button"
-                        aria-expanded={expandedSlotTime === 'off-schedule'}
-                        onClick={() => setExpandedSlotTime((current) => (current === 'off-schedule' ? null : 'off-schedule'))}
+                        aria-expanded={expandedSlotTimes.has('off-schedule')}
+                        onClick={() => toggleSlot('off-schedule')}
                         className={cn(
                           'grid w-full gap-2 px-3 py-2 text-left transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
-                          expandedSlotTime === 'off-schedule' ? 'border-b border-amber-200/60 bg-amber-50/70' : 'bg-amber-50/45 hover:bg-amber-50/70',
+                          expandedSlotTimes.has('off-schedule') ? 'border-b border-amber-200/60 bg-amber-50/70' : 'bg-amber-50/45 hover:bg-amber-50/70',
                         )}
                       >
                         <div className="min-w-0">
@@ -1176,9 +1227,16 @@ export default function CalendarView() {
                                   Revisar horário
                                 </span>
                               </div>
-                              <p className="mt-1 text-xs text-amber-800">
-                                {formatReservationCountLabel(offScheduleReservations.length)} · {formatGuestCountLabel(daySummary.offScheduleGuests)}
-                              </p>
+                              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-amber-800">
+                                <span className="flex items-center gap-1">
+                                  <CalendarCheck className="h-3.5 w-3.5" />
+                                  <span className="tabular-nums">{offScheduleReservations.length}</span>
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3.5 w-3.5" />
+                                  <span className="tabular-nums">{daySummary.offScheduleGuests}</span>
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1186,11 +1244,11 @@ export default function CalendarView() {
                           <div className="w-fit rounded border border-amber-200 bg-background/85 px-2 py-1 text-xs font-semibold tabular-nums text-amber-900">
                             {offScheduleReservations.length}
                           </div>
-                          <ChevronDown className={cn('h-4 w-4 shrink-0 text-amber-800 transition-transform', expandedSlotTime === 'off-schedule' && 'rotate-180')} />
+                          <ChevronDown className={cn('h-4 w-4 shrink-0 text-amber-800 transition-transform', expandedSlotTimes.has('off-schedule') && 'rotate-180')} />
                         </div>
                       </button>
 
-                      {expandedSlotTime === 'off-schedule' && (
+                      {expandedSlotTimes.has('off-schedule') && (
                         <div className="divide-y divide-amber-200/60 bg-background">
                           {offScheduleReservations.map((reservation) => {
                             const paidPayment = getPaidReservationPayment(reservation);
@@ -1239,7 +1297,7 @@ export default function CalendarView() {
                   )}
 
                   {visibleDaySlots.map((slot) => {
-                    const isExpanded = expandedSlotTime === slot.time;
+                    const isExpanded = expandedSlotTimes.has(slot.time);
                     const modeLabel = slot.availabilityMode === 'capacity' ? 'Por capacidade' : 'Por mesas';
                     const progressValue = Math.min(slot.fillPercent, 100);
                     const slotIsCurrent = isNowWithinCalendarSlot(slot, selectedDate);
@@ -1259,7 +1317,7 @@ export default function CalendarView() {
                         <button
                           type="button"
                           aria-expanded={isExpanded}
-                          onClick={() => setExpandedSlotTime((current) => (current === slot.time ? null : slot.time))}
+                          onClick={() => toggleSlot(slot.time)}
                           className={cn(
                             'grid w-full gap-2 px-3 py-2 text-left transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
                             slotIsCurrent ? 'bg-primary/[0.05]' : 'bg-muted/[0.08]',
@@ -1281,9 +1339,16 @@ export default function CalendarView() {
                                     </span>
                                   )}
                                 </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {formatReservationCountLabel(slot.arrivalReservationCount)} na faixa · {formatGuestCountLabel(slot.arrivalGuests)}
-                                </p>
+                                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                                    <span className="tabular-nums">{slot.arrivalReservationCount}</span>
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Users className="h-3.5 w-3.5 text-info" />
+                                    <span className="tabular-nums">{slot.arrivalGuests}</span>
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
