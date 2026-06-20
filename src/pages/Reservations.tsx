@@ -45,7 +45,13 @@ import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import ReservationOperationalFilterControl from '@/components/ReservationOperationalFilterControl';
-import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import {
+  downloadSpreadsheet,
+  formatDateRangeLabel,
+  matchesLocalDateRange,
+  matchesTimestampRange,
+  type SpreadsheetColumn,
+} from '@/lib/export-utils';
 import {
   matchesReservationOperationalFilter,
   type ReservationOperationalFilter,
@@ -265,6 +271,7 @@ export default function Reservations() {
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
   const [exportStatuses, setExportStatuses] = useState<ReservationStatus[]>([]);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
+  const [exportSpreadsheetPending, setExportSpreadsheetPending] = useState(false);
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
   const canDeleteReservations = hasPermission('reservations_delete');
@@ -894,7 +901,7 @@ export default function Reservations() {
     );
   };
 
-  const exportReservationsCsv = () => {
+  const exportReservationsSpreadsheet = async () => {
     const rows = exportedReservations.map((reservation) => {
       const leadCreatedAt = leadCreatedAtByPhone[normalizePhone(reservation.guest_phone)] ?? null;
 
@@ -903,41 +910,57 @@ export default function Reservations() {
         reservation.source === 'waitlist' ? 'Fila convertida' : 'Agendada',
         formatBrazilPhone(reservation.guest_phone),
         reservation.guest_email ?? '',
-        format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy'),
+        new Date(`${reservation.date}T12:00:00`),
         reservation.time.slice(0, 5),
         reservation.party_size,
         reservation.occasion ?? '',
         formatReservationStatusLabel(reservation.status),
-        format(new Date(reservation.created_at), 'dd/MM/yyyy HH:mm'),
-        leadCreatedAt ? format(parseISO(leadCreatedAt), 'dd/MM/yyyy HH:mm') : '',
-        reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'dd/MM/yyyy HH:mm') : '',
+        new Date(reservation.created_at),
+        leadCreatedAt ? parseISO(leadCreatedAt) : null,
+        reservation.checked_in_at ? new Date(reservation.checked_in_at) : null,
         reservation.notes ?? '',
         `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`,
       ];
     });
+    const columns: SpreadsheetColumn[] = [
+      { header: 'Cliente', width: 30 },
+      { header: 'Origem', width: 18 },
+      { header: 'WhatsApp', width: 20 },
+      { header: 'Email', width: 34 },
+      { header: 'Data da reserva', width: 16, align: 'center', format: 'dd/mm/yyyy' },
+      { header: 'Horário', width: 11, align: 'center' },
+      { header: 'Pessoas', width: 10, align: 'center', format: '0' },
+      { header: 'Ocasião', width: 22 },
+      { header: 'Status', width: 23 },
+      { header: 'Criada em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Lead criado em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Check-in em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Observações', width: 42, wrap: true },
+      { header: 'Link de acompanhamento', width: 50, wrap: true },
+    ];
 
-    downloadCsv(
-      `reservas_${format(new Date(), 'yyyy-MM-dd')}.csv`,
-      [
-        'Cliente',
-        'Origem',
-        'WhatsApp',
-        'Email',
-        'Data da reserva',
-        'Horário',
-        'Pessoas',
-        'Ocasião',
-        'Status',
-        'Criada em',
-        'Lead criado em',
-        'Check-in em',
-        'Observações',
-        'Link de acompanhamento',
-      ],
-      rows,
-    );
+    setExportSpreadsheetPending(true);
 
-    toast.success(`${exportedReservations.length} reservas exportadas.`);
+    try {
+      await downloadSpreadsheet({
+        filename: `reservas_${format(new Date(), 'yyyy-MM-dd')}.xlsx`,
+        sheetName: 'Reservas',
+        columns,
+        rows,
+        getRowHeight: (row) => {
+          const notesLength = String(row[12] ?? '').length;
+          const estimatedLines = Math.min(3, Math.max(1, Math.ceil(notesLength / 55)));
+          return Math.max(22, estimatedLines * 15);
+        },
+      });
+
+      toast.success(`${exportedReservations.length} reservas exportadas em Excel.`);
+    } catch (error) {
+      console.error('Reservation spreadsheet export error:', error);
+      toast.error('Não foi possível gerar a planilha de reservas.');
+    } finally {
+      setExportSpreadsheetPending(false);
+    }
   };
 
   const openCreateDialog = () => {
@@ -1560,11 +1583,11 @@ export default function Reservations() {
                   </p>
                   <Button
                     className="gap-2"
-                    onClick={exportReservationsCsv}
-                    disabled={exportedReservations.length === 0}
+                    onClick={exportReservationsSpreadsheet}
+                    disabled={exportedReservations.length === 0 || exportSpreadsheetPending}
                   >
-                    <Download className="h-4 w-4" />
-                    Exportar planilha
+                    {exportSpreadsheetPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {exportSpreadsheetPending ? 'Gerando planilha...' : 'Exportar planilha'}
                   </Button>
                 </div>
               </div>

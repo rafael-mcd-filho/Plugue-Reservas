@@ -31,7 +31,10 @@ describe('downloadSpreadsheet', () => {
         { header: 'Nascimento', width: 15, align: 'center', format: 'dd/mm/yyyy' },
         { header: 'Visitas', width: 12, align: 'center', format: '0' },
       ],
-      rows: [['Maria', new Date('1990-06-20T12:00:00'), 3]],
+      rows: [
+        ['Maria', new Date('1990-06-20T12:00:00'), 3],
+        ['Dado\u0000 inválido', new Date('invalid'), Number.POSITIVE_INFINITY],
+      ],
     });
 
     expect(click).toHaveBeenCalledOnce();
@@ -59,5 +62,9 @@ describe('downloadSpreadsheet', () => {
     expect(stylesXml).toContain('9A5A27');
     expect(workbookText).toContain('Nome');
     expect(workbookText).toContain('Maria');
+    expect(workbookText).toContain('Dado inválido');
+    expect(workbookText).not.toContain('\u0000');
+    expect(workbookText).not.toContain('Invalid Date');
+    expect(workbookText).not.toContain('Infinity');
   });
 });

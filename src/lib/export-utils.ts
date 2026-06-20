@@ -1,5 +1,6 @@
 import { endOfDay, format, startOfDay } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
+import writeExcelFile from 'write-excel-file/universal';
 
 export type SpreadsheetCellValue = string | number | boolean | Date | null | undefined;
 
@@ -24,6 +25,29 @@ const SPREADSHEET_HEADER_TEXT = '#FFFFFF';
 const SPREADSHEET_BODY_TEXT = '#2E251F';
 const SPREADSHEET_ALT_ROW_BACKGROUND = '#FFF8F1';
 const SPREADSHEET_BORDER = '#E7D9CC';
+const EXCEL_MAX_CELL_TEXT_LENGTH = 32767;
+
+function normalizeSpreadsheetValue(value: SpreadsheetCellValue): Exclude<SpreadsheetCellValue, null | undefined> {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : '';
+  }
+
+  if (typeof value === 'string') {
+    return Array.from(value)
+      .filter((character) => {
+        const code = character.charCodeAt(0);
+        return code === 9 || code === 10 || code === 13 || code >= 32;
+      })
+      .join('')
+      .slice(0, EXCEL_MAX_CELL_TEXT_LENGTH);
+  }
+
+  return value ?? '';
+}
 
 export function escapeCsvValue(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
@@ -52,7 +76,6 @@ export async function downloadSpreadsheet({
   rows,
   getRowHeight,
 }: DownloadSpreadsheetOptions) {
-  const { default: writeExcelFile } = await import('write-excel-file/universal');
   const borderStyle = 'thin' as const;
   const headerRow = columns.map((column) => ({
     value: column.header,
@@ -81,7 +104,7 @@ export async function downloadSpreadsheet({
 
     return columns.map((column, columnIndex) => {
       const rawValue = row[columnIndex];
-      const value = rawValue ?? '';
+      const value = normalizeSpreadsheetValue(rawValue);
       const type = value instanceof Date
         ? Date
         : typeof value === 'number'
@@ -93,7 +116,7 @@ export async function downloadSpreadsheet({
       return {
         value,
         type,
-        format: column.format ?? (type === String ? '@' : undefined),
+        format: type === String ? '@' : column.format,
         height: rowHeight,
         align: column.align ?? 'left',
         alignVertical: column.wrap ? 'top' as const : 'center' as const,
