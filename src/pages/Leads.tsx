@@ -39,7 +39,14 @@ import {
 } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { downloadCsv, formatDateRangeLabel, matchesLocalDateRange, matchesTimestampRange } from '@/lib/export-utils';
+import {
+  downloadCsv,
+  downloadSpreadsheet,
+  formatDateRangeLabel,
+  matchesLocalDateRange,
+  matchesTimestampRange,
+  type SpreadsheetColumn,
+} from '@/lib/export-utils';
 import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
@@ -391,6 +398,14 @@ function formatLeadPhoneText(phone: string | null | undefined) {
   return formatBrazilPhone(phone) || 'Não informado';
 }
 
+function isBirthdayInMonth(birthdate: string | null | undefined, month: number) {
+  const match = birthdate?.match(/^\d{4}-(\d{2})-\d{2}/);
+  if (!match) return false;
+
+  const birthMonth = Number(match[1]);
+  return birthMonth >= 1 && birthMonth <= 12 && birthMonth === month;
+}
+
 function mergeImportedNotes(currentNotes: string | null, nextNotes: string | null) {
   if (!currentNotes) return nextNotes;
   if (!nextNotes || nextNotes === currentNotes) return currentNotes;
@@ -564,6 +579,7 @@ export default function Leads() {
   const [stateFilter, setStateFilter] = useState('all');
   const [minReservations, setMinReservations] = useState('');
   const [maxReservations, setMaxReservations] = useState('');
+  const [birthdaysThisMonthOnly, setBirthdaysThisMonthOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof LEADS_PAGE_SIZE_OPTIONS)[number]>('25');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -580,7 +596,11 @@ export default function Leads() {
   const [exportVisitRange, setExportVisitRange] = useState<DateRange | undefined>();
   const [exportStateFilter, setExportStateFilter] = useState('all');
   const [exportStatuses, setExportStatuses] = useState<string[]>([]);
+  const [exportBirthdaysThisMonthOnly, setExportBirthdaysThisMonthOnly] = useState(false);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
+  const [exportSpreadsheetPending, setExportSpreadsheetPending] = useState(false);
+  const currentMonth = new Date().getMonth() + 1;
+  const currentMonthLabel = format(new Date(), 'MMMM', { locale: ptBR });
 
   useEffect(() => {
     setCreatedFrom(createdRange?.from);
@@ -1222,6 +1242,10 @@ export default function Leads() {
         return false;
       }
 
+      if (birthdaysThisMonthOnly && !isBirthdayInMonth(lead.guest_birthdate, currentMonth)) {
+        return false;
+      }
+
       if (parsedMinReservations !== null && !Number.isNaN(parsedMinReservations) && lead.total_reservations < parsedMinReservations) {
         return false;
       }
@@ -1232,7 +1256,7 @@ export default function Leads() {
 
       return true;
     });
-  }, [createdFrom, createdTo, leads, maxReservations, minReservations, search, stateFilter]);
+  }, [birthdaysThisMonthOnly, createdFrom, createdTo, currentMonth, leads, maxReservations, minReservations, search, stateFilter]);
 
   const filteredLeadRecordsCount = useMemo(
     () =>
@@ -1277,11 +1301,12 @@ export default function Leads() {
     !!createdTo ||
     stateFilter !== 'all' ||
     minReservations.trim().length > 0 ||
-    maxReservations.trim().length > 0;
+    maxReservations.trim().length > 0 ||
+    birthdaysThisMonthOnly;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, createdFrom, createdTo, stateFilter, minReservations, maxReservations, pageSize]);
+  }, [search, createdFrom, createdTo, stateFilter, minReservations, maxReservations, birthdaysThisMonthOnly, pageSize]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -1301,6 +1326,10 @@ export default function Leads() {
         }
 
         if (exportStateFilter !== 'all' && exportStateFilter !== 'unknown' && lead.stateCode !== exportStateFilter) {
+          return null;
+        }
+
+        if (exportBirthdaysThisMonthOnly && !isBirthdayInMonth(lead.guest_birthdate, currentMonth)) {
           return null;
         }
 
@@ -1335,7 +1364,7 @@ export default function Leads() {
         };
       })
       .filter((item): item is { lead: Lead; matchedVisits: LeadVisitRecord[]; matchedSource: LeadSource } => item !== null);
-  }, [exportLeadCreatedRange, exportStateFilter, exportStatuses, exportVisitRange, leads]);
+  }, [currentMonth, exportBirthdaysThisMonthOnly, exportLeadCreatedRange, exportStateFilter, exportStatuses, exportVisitRange, leads]);
 
   const exportedLeadsSummary = useMemo(() => {
     return {
@@ -1351,6 +1380,7 @@ export default function Leads() {
     setStateFilter('all');
     setMinReservations('');
     setMaxReservations('');
+    setBirthdaysThisMonthOnly(false);
     setCurrentPage(1);
   };
 
@@ -1359,6 +1389,7 @@ export default function Leads() {
     setExportVisitRange(undefined);
     setExportStateFilter('all');
     setExportStatuses([]);
+    setExportBirthdaysThisMonthOnly(false);
     setExportSearchTriggered(false);
   };
 
@@ -1368,20 +1399,20 @@ export default function Leads() {
     );
   };
 
-  const exportLeadsCsv = () => {
+  const exportLeadsSpreadsheet = async () => {
     const rows = exportedLeads.map(({ lead, matchedVisits, matchedSource }) => [
       lead.guest_name,
       formatLeadPhoneText(lead.guest_phone),
       lead.guest_email || '',
       lead.stateCode ? `${lead.stateName} (${lead.stateCode})` : '',
-      lead.guest_birthdate || '',
-      format(parseISO(lead.lead_created_at), 'dd/MM/yyyy HH:mm'),
+      lead.guest_birthdate ? new Date(`${lead.guest_birthdate}T12:00:00`) : null,
+      parseISO(lead.lead_created_at),
       formatLeadSource(matchedSource),
       matchedVisits.length,
       lead.total_reservations,
       matchedVisits[0]
-        ? `${format(new Date(`${matchedVisits[0].date}T12:00:00`), 'dd/MM/yyyy')} ${matchedVisits[0].time.slice(0, 5)}`
-        : '',
+        ? new Date(`${matchedVisits[0].date}T${matchedVisits[0].time}`)
+        : null,
       matchedVisits.length > 0
         ? matchedVisits
           .map((visit) => {
@@ -1392,26 +1423,42 @@ export default function Leads() {
           .join(' | ')
         : 'Lead importado sem reservas',
     ]);
+    const columns: SpreadsheetColumn[] = [
+      { header: 'Nome', width: 30 },
+      { header: 'WhatsApp', width: 20 },
+      { header: 'Email', width: 34 },
+      { header: 'Estado', width: 27 },
+      { header: 'Nascimento', width: 15, align: 'center', format: 'dd/mm/yyyy' },
+      { header: 'Lead criado em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Papel filtrado', width: 20 },
+      { header: 'Visitas filtradas', width: 16, align: 'center', format: '0' },
+      { header: 'Visitas totais', width: 14, align: 'center', format: '0' },
+      { header: 'Última visita filtrada', width: 23, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Histórico filtrado', width: 64, wrap: true },
+    ];
 
-    downloadCsv(
-      `leads_${format(new Date(), 'yyyy-MM-dd')}.csv`,
-      [
-        'Nome',
-        'WhatsApp',
-        'Email',
-        'Estado',
-        'Nascimento',
-        'Lead criado em',
-        'Papel filtrado',
-        'Visitas filtradas',
-        'Visitas totais',
-        'Última visita filtrada',
-        'Histórico filtrado',
-      ],
-      rows,
-    );
+    setExportSpreadsheetPending(true);
 
-    toast.success(`${exportedLeads.length} leads exportados.`);
+    try {
+      await downloadSpreadsheet({
+        filename: `leads_${format(new Date(), 'yyyy-MM-dd')}.xlsx`,
+        sheetName: 'Leads',
+        columns,
+        rows,
+        getRowHeight: (row) => {
+          const historyLength = String(row[10] ?? '').length;
+          const estimatedLines = Math.min(4, Math.max(1, Math.ceil(historyLength / 85)));
+          return Math.max(22, estimatedLines * 15);
+        },
+      });
+
+      toast.success(`${exportedLeads.length} leads exportados em Excel.`);
+    } catch (error) {
+      console.error('Lead spreadsheet export error:', error);
+      toast.error('Não foi possível gerar a planilha de leads.');
+    } finally {
+      setExportSpreadsheetPending(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -1481,9 +1528,29 @@ export default function Leads() {
       <Card className="border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
         <CardContent className="space-y-3 p-3">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Filter className="h-4 w-4 text-primary" />
-              Filtros
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Filter className="h-4 w-4 text-primary" />
+                Filtros
+              </div>
+              <label
+                htmlFor="birthdays-this-month"
+                className={cn(
+                  'flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors',
+                  birthdaysThisMonthOnly
+                    ? 'border-primary/25 bg-primary-soft text-primary'
+                    : 'border-border bg-background text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Checkbox
+                  id="birthdays-this-month"
+                  checked={birthdaysThisMonthOnly}
+                  onCheckedChange={(checked) => setBirthdaysThisMonthOnly(checked === true)}
+                  className="h-3.5 w-3.5"
+                />
+                <CalendarDays className="h-3.5 w-3.5" />
+                Aniversariantes de {currentMonthLabel}
+              </label>
             </div>
             <p className="text-xs text-muted-foreground">{summaryText}</p>
           </div>
@@ -1906,6 +1973,29 @@ export default function Leads() {
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="export-birthdays-this-month">Aniversariantes</Label>
+                <label
+                  htmlFor="export-birthdays-this-month"
+                  className={cn(
+                    'flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border px-4 py-2.5 transition-colors',
+                    exportBirthdaysThisMonthOnly
+                      ? 'border-primary/30 bg-primary-soft/60'
+                      : 'border-border bg-card hover:bg-muted/20',
+                  )}
+                >
+                  <Checkbox
+                    id="export-birthdays-this-month"
+                    checked={exportBirthdaysThisMonthOnly}
+                    onCheckedChange={(checked) => setExportBirthdaysThisMonthOnly(checked === true)}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">Somente aniversariantes de {currentMonthLabel}</p>
+                    <p className="text-xs text-muted-foreground">Leads sem data de nascimento não serão incluídos.</p>
+                  </div>
+                </label>
+              </div>
+
             </div>
 
             <div className="space-y-3">
@@ -1953,9 +2043,13 @@ export default function Leads() {
                       ? 'Nenhum lead encontrado com os filtros informados.'
                       : 'A planilha vai sair com os dados do lead e um histórico resumido somente das visitas filtradas.'}
                   </p>
-                  <Button className="gap-2" onClick={exportLeadsCsv} disabled={exportedLeads.length === 0}>
-                    <Download className="h-4 w-4" />
-                    Exportar planilha
+                  <Button
+                    className="gap-2"
+                    onClick={exportLeadsSpreadsheet}
+                    disabled={exportedLeads.length === 0 || exportSpreadsheetPending}
+                  >
+                    {exportSpreadsheetPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {exportSpreadsheetPending ? 'Gerando planilha...' : 'Exportar planilha'}
                   </Button>
                 </div>
               </div>
