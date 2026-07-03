@@ -13,6 +13,7 @@ import {
   getCompanyChannels,
   normalizePhone,
 } from "../_shared/pluguechat.ts";
+import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
@@ -226,7 +227,7 @@ Deno.serve(async (req) => {
 
       if (!claimed) { skipped++; continue; }
 
-      const message = automation.message_template.replace(/\{nome\}/g, contact.guest_name || "");
+      const message = automation.message_template.replace(/\{nome\}/g, getFirstName(contact.guest_name));
       const enqueueResult = await enqueueWhatsAppMessageOnce(supabaseAdmin, {
         company_id: contact.company_id,
         phone,

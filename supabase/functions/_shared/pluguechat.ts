@@ -1,6 +1,8 @@
 // Helper interno PlugueChat — API oficial do WhatsApp
 // hiddenSession é sempre true; o token nunca é exposto ao frontend.
 
+import { getFirstName } from "./names.ts";
+
 export interface PlugueChatSendPayload {
   from: string;
   to: string;
@@ -327,7 +329,7 @@ export function buildReservationParameters(
   trackingUrl: string | null = null,
   reviewUrl: string | null = null,
 ): Record<string, string> {
-  const nome = String(reservation.guest_name ?? "");
+  const nome = getFirstName(reservation.guest_name);
   const pessoas = String(reservation.party_size ?? 1);
   const data = formatDate(String(reservation.date ?? ""));
   const hora = formatTime(String(reservation.time ?? ""));
@@ -356,7 +358,7 @@ export function buildWaitlistParameters(
   waitlist: Record<string, unknown>,
   trackingUrl: string | null = null,
 ): Record<string, string> {
-  const nome = String(waitlist.guest_name ?? "");
+  const nome = getFirstName(waitlist.guest_name);
   const pessoas = String(waitlist.party_size ?? 1);
   const posicao = String(waitlist.position ?? "");
   const link = trackingUrl ?? "";
@@ -372,7 +374,7 @@ export function buildWaitlistParameters(
 }
 
 export function buildBirthdayParameters(nome: string, daysUntil = 4): Record<string, string> {
-  return { nome, dias_para_aniversario: String(daysUntil) };
+  return { nome: getFirstName(nome), dias_para_aniversario: String(daysUntil) };
 }
 
 // ----------------------------------------------------------------

@@ -37,7 +37,7 @@ describe('PhoneWhatsAppLink', () => {
         companyId="company-1"
         slug="restaurante"
         reservation={{
-          guest_name: 'Ana',
+          guest_name: 'Ana Maria Souza',
           guest_phone: '(85) 99999-0000',
           date: '2026-06-02',
           time: '20:30:00',

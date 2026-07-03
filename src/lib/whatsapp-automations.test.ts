@@ -22,7 +22,7 @@ describe('reservation WhatsApp automations', () => {
       renderReservationWhatsAppTemplate(
         'Olá, {nome}! Reserva para {pessoas} em {data} às {hora}. WhatsApp: {telefone}. Link: {link_acompanhamento}',
         {
-          guestName: 'Ana',
+          guestName: '  Ana Maria Souza  ',
           guestPhone: '(85) 99999-0000',
           date: '2026-06-02',
           time: '20:30:00',

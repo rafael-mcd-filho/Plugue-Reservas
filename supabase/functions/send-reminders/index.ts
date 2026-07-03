@@ -13,6 +13,7 @@ import {
   getCompanyChannels,
   normalizePhone,
 } from "../_shared/pluguechat.ts";
+import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
@@ -36,7 +37,7 @@ function replaceTemplateVars(template: string, reservation: any): string {
   const dateFormatted = day && month && year ? `${day}/${month}/${year}` : reservation.date;
 
   return template
-    .replace(/\{nome\}/g, reservation.guest_name || "")
+    .replace(/\{nome\}/g, getFirstName(reservation.guest_name))
     .replace(/\{pessoas\}/g, String(reservation.party_size || 1))
     .replace(/\{data\}/g, dateFormatted)
     .replace(/\{hora\}/g, timeFormatted)

@@ -127,12 +127,19 @@ function formatReservationTime(value: string | null | undefined) {
   return hours && minutes ? `${hours}:${minutes}` : value ?? '';
 }
 
+export function getFirstName(value: string | null | undefined) {
+  const text = (value ?? '').trim();
+  if (!text) return '';
+
+  return text.split(/\s+/)[0] ?? '';
+}
+
 export function renderReservationWhatsAppTemplate(
   template: string,
   context: ReservationWhatsAppTemplateContext,
 ) {
   return template
-    .replace(/\{nome\}/g, context.guestName ?? '')
+    .replace(/\{nome\}/g, getFirstName(context.guestName))
     .replace(/\{pessoas\}/g, String(context.partySize ?? 1))
     .replace(/\{data\}/g, formatReservationDate(context.date))
     .replace(/\{hora\}/g, formatReservationTime(context.time))

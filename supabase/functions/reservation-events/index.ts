@@ -24,6 +24,7 @@ import {
   getCompanyChannel,
   normalizePhone,
 } from "../_shared/pluguechat.ts";
+import { getFirstName } from "../_shared/names.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -84,7 +85,7 @@ function replaceTemplateVars(
   const dateFormatted = day && month && year ? `${day}/${month}/${year}` : reservation.date;
 
   return template
-    .replace(/\{nome\}/g, reservation.guest_name || "")
+    .replace(/\{nome\}/g, getFirstName(reservation.guest_name))
     .replace(/\{pessoas\}/g, String(reservation.party_size || 1))
     .replace(/\{data\}/g, dateFormatted)
     .replace(/\{hora\}/g, timeFormatted)
@@ -631,7 +632,7 @@ async function sendWaitlistAutomation(
   if (!automation?.message_template) return;
 
   const message = automation.message_template
-    .replace(/\{nome\}/g, waitlist.guest_name || "")
+    .replace(/\{nome\}/g, getFirstName(waitlist.guest_name))
     .replace(/\{pessoas\}/g, String(waitlist.party_size || 1))
     .replace(/\{posicao\}/g, String(waitlist.position || ""))
     .replace(/\{link_acompanhamento\}/g, trackingUrl || "")
