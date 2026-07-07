@@ -323,6 +323,25 @@ function formatTime(time: string): string {
   return h && m ? `${h}:${m}` : time;
 }
 
+function getReservationTrackingCode(
+  reservation: Record<string, unknown>,
+  trackingUrl: string | null,
+): string {
+  const publicTrackingCode = typeof reservation.public_tracking_code === "string"
+    ? reservation.public_tracking_code.trim()
+    : "";
+
+  if (publicTrackingCode) return publicTrackingCode;
+  if (!trackingUrl) return "";
+
+  try {
+    const url = new URL(trackingUrl);
+    return url.pathname.split("/").filter(Boolean).pop() ?? trackingUrl;
+  } catch {
+    return trackingUrl.split("/").filter(Boolean).pop() ?? trackingUrl;
+  }
+}
+
 export function buildReservationParameters(
   type: string,
   reservation: Record<string, unknown>,
@@ -334,10 +353,11 @@ export function buildReservationParameters(
   const data = formatDate(String(reservation.date ?? ""));
   const hora = formatTime(String(reservation.time ?? ""));
   const link = trackingUrl ?? "";
+  const trackingCode = getReservationTrackingCode(reservation, trackingUrl);
 
   switch (type) {
     case "confirmation_message":
-      return { nome, pessoas, data, hora, link_acompanhamento: link };
+      return { nome, pessoas, data, hora, link_acompanhamento: trackingCode };
     case "cancellation_message":
       return { nome, data, hora, link_acompanhamento: link };
     case "reminder_24h":
