@@ -70,7 +70,7 @@ export const PLUGUECHAT_AUTOMATIONS: PlugueChatAutomationDefinition[] = [
     label: 'Aniversário',
     description: 'Enviada 4 dias antes do aniversário do cliente.',
     icon: PartyPopper,
-    parameters: ['nome', 'dias_para_aniversario'],
+    parameters: ['nome'],
   },
 ];
 

@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
           type: "birthday_message",
           template_id: template.template_id,
           template_name: template.template_name ?? null,
-          parameters: buildBirthdayParameters(contact.guest_name || "", BIRTHDAY_ADVANCE_DAYS),
+          parameters: buildBirthdayParameters(contact.guest_name || ""),
           scheduled_for: scheduledFor.toISOString(),
           expires_at: expiresAt.toISOString(),
           idempotency_key: `pluguechat:birthday:${contact.company_id}:${targetDateKey}:${phone}`,

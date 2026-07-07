@@ -393,8 +393,8 @@ export function buildWaitlistParameters(
   }
 }
 
-export function buildBirthdayParameters(nome: string, daysUntil = 4): Record<string, string> {
-  return { nome: getFirstName(nome), dias_para_aniversario: String(daysUntil) };
+export function buildBirthdayParameters(nome: string): Record<string, string> {
+  return { nome: getFirstName(nome) };
 }
 
 // ----------------------------------------------------------------
