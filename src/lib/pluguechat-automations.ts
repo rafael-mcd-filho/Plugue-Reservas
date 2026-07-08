@@ -1,4 +1,4 @@
-import { Ban, Clock, MessageCircle, PartyPopper, Star, UserX, type LucideIcon } from 'lucide-react';
+import { Ban, Clock, MessageCircle, PartyPopper, RotateCcw, Star, UserX, type LucideIcon } from 'lucide-react';
 
 export interface PlugueChatAutomationDefinition {
   type: string;
@@ -71,6 +71,13 @@ export const PLUGUECHAT_AUTOMATIONS: PlugueChatAutomationDefinition[] = [
     description: 'Enviada 4 dias antes do aniversário do cliente.',
     icon: PartyPopper,
     parameters: ['nome'],
+  },
+  {
+    type: 'reactivation_30d',
+    label: 'Reativação 30 dias',
+    description: 'Enviada uma vez quando o cliente completa 30 dias sem nova visita.',
+    icon: RotateCcw,
+    parameters: ['nome', 'dias_sem_visita', 'data_ultima_visita', 'link_reserva'],
   },
 ];
 

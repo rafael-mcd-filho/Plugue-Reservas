@@ -1,4 +1,4 @@
-import { Ban, Clock, MessageCircle, PartyPopper, Star, UserX, type LucideIcon } from 'lucide-react';
+import { Ban, Clock, MessageCircle, PartyPopper, RotateCcw, Star, UserX, type LucideIcon } from 'lucide-react';
 
 export interface WhatsAppAutomationDefinition {
   type: string;
@@ -68,6 +68,14 @@ export const WHATSAPP_AUTOMATIONS: WhatsAppAutomationDefinition[] = [
     variables: ['nome'],
   },
   {
+    type: 'reactivation_30d',
+    label: 'Reativação 30 dias',
+    description: 'Enfileirada uma vez quando o cliente completa 30 dias sem nova visita',
+    icon: RotateCcw,
+    defaultTemplate: 'Ola, {nome}! Sentimos sua falta por aqui. Ja faz {dias_sem_visita} dias desde sua ultima visita em {data_ultima_visita}.\n\nQue tal voltar para viver uma nova experiencia?\nReserve por aqui: {link_reserva}',
+    variables: ['nome', 'dias_sem_visita', 'data_ultima_visita', 'telefone', 'link_reserva'],
+  },
+  {
     type: 'no_show_message',
     label: 'Mensagem de No-Show',
     description: 'Enfileirada às 09:00 do dia seguinte para reservas que não compareceram, com cadência controlada',
@@ -115,6 +123,9 @@ export interface ReservationWhatsAppTemplateContext {
   partySize?: number | null;
   trackingUrl?: string | null;
   reviewUrl?: string | null;
+  daysWithoutVisit?: number | null;
+  lastVisitDate?: string | null;
+  reservationUrl?: string | null;
 }
 
 function formatReservationDate(value: string | null | undefined) {
@@ -145,6 +156,9 @@ export function renderReservationWhatsAppTemplate(
     .replace(/\{hora\}/g, formatReservationTime(context.time))
     .replace(/\{link_acompanhamento\}/g, context.trackingUrl ?? '')
     .replace(/\{link_avaliacao\}/g, context.reviewUrl ?? '')
+    .replace(/\{dias_sem_visita\}/g, String(context.daysWithoutVisit ?? ''))
+    .replace(/\{data_ultima_visita\}/g, formatReservationDate(context.lastVisitDate))
+    .replace(/\{link_reserva\}/g, context.reservationUrl ?? '')
     .replace(/\{telefone\}/g, context.guestPhone ?? '');
 }
 
@@ -156,6 +170,7 @@ export const WHATSAPP_MESSAGE_TYPE_LABELS: Record<string, string> = {
   post_visit: 'Pós-visita',
   no_show: 'No-show',
   birthday: 'Aniversário',
+  reactivation_30d: 'Reativação 30 dias',
   waitlist_entry: 'Fila - Entrada',
   waitlist_called: 'Fila - Chamado',
 };

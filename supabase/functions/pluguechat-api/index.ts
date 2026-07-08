@@ -42,6 +42,35 @@ function uniqueStringArray(value: unknown): string[] {
   return [...seen];
 }
 
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const result: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof rawValue !== "string") continue;
+    result[key] = rawValue;
+  }
+  return result;
+}
+
+function uniqueLeadRecipients(value: unknown): Array<{ phone: string; parameters: Record<string, string> }> {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Map<string, { phone: string; parameters: Record<string, string> }>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const phone = normalizePhone(String(row.phone ?? row.guest_phone ?? ""));
+    if (!phone || seen.has(phone)) continue;
+    seen.set(phone, {
+      phone,
+      parameters: stringRecord(row.parameters),
+    });
+  }
+
+  return [...seen.values()];
+}
+
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
@@ -259,38 +288,55 @@ Deno.serve(async (req) => {
       }
 
       const recipientReservationIds = uniqueStringArray(body.recipient_reservation_ids);
-      if (recipientReservationIds.length === 0) {
-        return json({ error: "recipient_reservation_ids required" }, 400);
+      const directLeadRecipients = uniqueLeadRecipients(body.recipient_leads);
+      if (recipientReservationIds.length === 0 && directLeadRecipients.length === 0) {
+        return json({ error: "recipient_reservation_ids_or_recipient_leads required" }, 400);
       }
 
-      if (recipientReservationIds.length > 500) {
+      if (recipientReservationIds.length > 500 || directLeadRecipients.length > 500) {
         return json({ error: "recipient_limit_exceeded" }, 400);
       }
 
-      const { data: reservationRows, error: reservationError } = await supabaseAdmin
-        .from("reservations")
-        .select("id, guest_phone")
-        .eq("company_id", companyId)
-        .in("id", recipientReservationIds)
-        .not("guest_phone", "is", null);
-
-      if (reservationError) {
-        console.error("pluguechat-api broadcast recipients load error", reservationError);
-        return json({ error: "Erro ao carregar destinatarios." }, 500);
+      const uniqueRecipients = new Map<string, { phone: string; parameters: Record<string, string> }>();
+      for (const recipient of directLeadRecipients) {
+        uniqueRecipients.set(recipient.phone, recipient);
       }
 
-      const uniqueRecipients = new Map<string, { phone: string }>();
-      for (const reservation of reservationRows ?? []) {
-        const phone = normalizePhone(String(reservation.guest_phone ?? ""));
-        if (!phone || uniqueRecipients.has(phone)) continue;
+      if (recipientReservationIds.length > 0) {
+        const { data: reservationRows, error: reservationError } = await supabaseAdmin
+          .from("reservations")
+          .select("id, guest_name, guest_phone, date, time, party_size")
+          .eq("company_id", companyId)
+          .in("id", recipientReservationIds)
+          .not("guest_phone", "is", null);
 
-        uniqueRecipients.set(phone, {
-          phone,
-        });
+        if (reservationError) {
+          console.error("pluguechat-api broadcast recipients load error", reservationError);
+          return json({ error: "Erro ao carregar destinatarios." }, 500);
+        }
+
+        for (const reservation of reservationRows ?? []) {
+          const phone = normalizePhone(String(reservation.guest_phone ?? ""));
+          if (!phone || uniqueRecipients.has(phone)) continue;
+
+          uniqueRecipients.set(phone, {
+            phone,
+            parameters: {
+              nome: String(reservation.guest_name ?? "").trim().split(/\s+/)[0] ?? "",
+              pessoas: String(reservation.party_size ?? ""),
+              data: typeof reservation.date === "string" ? reservation.date : "",
+              hora: typeof reservation.time === "string" ? reservation.time.slice(0, 5) : "",
+            },
+          });
+        }
       }
 
       if (uniqueRecipients.size === 0) {
         return json({ error: "Nenhum destinatario valido encontrado." }, 400);
+      }
+
+      if (uniqueRecipients.size > 500) {
+        return json({ error: "recipient_limit_exceeded" }, 400);
       }
 
       const audienceFilter =
@@ -329,7 +375,7 @@ Deno.serve(async (req) => {
         company_id: companyId,
         customer_id: null,
         phone: recipient.phone,
-        parameters: {},
+        parameters: recipient.parameters,
         status: "pending",
       }));
 

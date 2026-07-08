@@ -1606,7 +1606,7 @@ export default function CompanyWaitlist() {
                     </div>
 
                     <div className="rounded-xl border border-border bg-muted/20 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ultima visita</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Última visita</p>
                       <p className="mt-2 text-sm font-semibold text-foreground">
                         {contactHistoryStats.lastVisit
                           ? format(

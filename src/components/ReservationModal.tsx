@@ -112,6 +112,39 @@ function formatBirthdateLabel(birthdate: string) {
   return `${day}/${month}/${year}`;
 }
 
+function getBirthdateParts(birthdate: string) {
+  const [year = '', month = '', day = ''] = birthdate.split('-');
+  return { year, month, day };
+}
+
+function composeBirthdate(parts: { year?: string; month?: string; day?: string }) {
+  const year = parts.year ?? '';
+  const month = parts.month ?? '';
+  const day = parts.day ?? '';
+
+  return year || month || day ? `${year}-${month}-${day}` : '';
+}
+
+function parseValidBirthdate(birthdate: string) {
+  const match = birthdate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+
+  if (
+    parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
 
 interface AvailableTable {
   id: string;
@@ -918,6 +951,25 @@ export default function ReservationModal({
       return;
     }
 
+    if (!form.birthdate) {
+      toast.error('Informe sua data de nascimento.');
+      return;
+    }
+
+    const parsedBirthdate = parseValidBirthdate(form.birthdate);
+    if (!parsedBirthdate) {
+      toast.error('Informe uma data de nascimento válida.');
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    parsedBirthdate.setHours(0, 0, 0, 0);
+    if (parsedBirthdate > today) {
+      toast.error('A data de nascimento não pode ser futura.');
+      return;
+    }
+
     if (!selectedDate || !selectedTime) return;
 
     setSubmitting(true);
@@ -1189,7 +1241,8 @@ export default function ReservationModal({
     && selectedSlotAvailability.isAvailable
     && selectedSlotRemainingCapacity > 0
     && selectedSlotRemainingCapacity <= 2;
-  const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name;
+  const hasValidBirthdate = !!parseValidBirthdate(form.birthdate);
+  const shouldCollapseIdentityFields = customerFoundForCurrentPhone && identityFieldsCollapsed && !!form.name && hasValidBirthdate;
   const resolvedLargePartyThreshold = normalizeLargePartyThreshold(largePartyThreshold);
   const isLargeParty = isLargePartyReservation(selectedPartySize, resolvedLargePartyThreshold);
   const largePartyWhatsappUrl = buildLargePartyWhatsappUrl(companyWhatsapp, resolvedLargePartyThreshold);
@@ -1371,7 +1424,7 @@ export default function ReservationModal({
                     Reservas a partir de {resolvedLargePartyThreshold} pessoas precisam ser confirmadas pelo WhatsApp.
                   </p>
                   <p className="text-sm leading-relaxed text-muted-foreground">
-                    O processo e rapido, e nossa equipe finaliza tudo com voce por la.
+                    O processo é rápido, e nossa equipe finaliza tudo com você por lá.
                   </p>
                 </div>
                 {largePartyWhatsappUrl ? (
@@ -1787,13 +1840,15 @@ export default function ReservationModal({
                 />
               </div>
               <div className={cn('space-y-2', shouldCollapseIdentityFields && 'hidden')} role="group" aria-labelledby="public-reservation-birthdate-label">
-                <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de Nascimento</p>
+                <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de Nascimento *</p>
                 <div className="grid grid-cols-3 gap-1.5 xs:gap-2">
                   <Select
                     value={form.birthdate ? form.birthdate.split('-')[2] : ''}
                     onValueChange={d => {
-                      const [y, m] = (form.birthdate || '--').split('-');
-                      setForm(f => ({ ...f, birthdate: `${y || '2000'}-${m || '01'}-${d}` }));
+                      setForm(f => {
+                        const parts = getBirthdateParts(f.birthdate);
+                        return { ...f, birthdate: composeBirthdate({ ...parts, day: d }) };
+                      });
                     }}
                   >
                     <SelectTrigger aria-label="Selecionar dia do nascimento"><SelectValue placeholder="Dia" /></SelectTrigger>
@@ -1806,8 +1861,10 @@ export default function ReservationModal({
                   <Select
                     value={form.birthdate ? form.birthdate.split('-')[1] : ''}
                     onValueChange={m => {
-                      const [y, , d] = (form.birthdate || '--').split('-');
-                      setForm(f => ({ ...f, birthdate: `${y || '2000'}-${m}-${d || '01'}` }));
+                      setForm(f => {
+                        const parts = getBirthdateParts(f.birthdate);
+                        return { ...f, birthdate: composeBirthdate({ ...parts, month: m }) };
+                      });
                     }}
                   >
                     <SelectTrigger><SelectValue placeholder="Mês" /></SelectTrigger>
@@ -1820,8 +1877,10 @@ export default function ReservationModal({
                   <Select
                     value={form.birthdate ? form.birthdate.split('-')[0] : ''}
                     onValueChange={y => {
-                      const [, m, d] = (form.birthdate || '--').split('-');
-                      setForm(f => ({ ...f, birthdate: `${y}-${m || '01'}-${d || '01'}` }));
+                      setForm(f => {
+                        const parts = getBirthdateParts(f.birthdate);
+                        return { ...f, birthdate: composeBirthdate({ ...parts, year: y }) };
+                      });
                     }}
                   >
                     <SelectTrigger aria-label="Selecionar ano do nascimento"><SelectValue placeholder="Ano" /></SelectTrigger>

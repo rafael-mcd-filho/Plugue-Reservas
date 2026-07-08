@@ -276,7 +276,6 @@ Deno.serve(async (req) => {
 
     const supabaseAdmin = createSupabaseAdminClient();
     const now = new Date().toISOString();
-    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now);
 
     // Busca itens pendentes prontos para envio
     const { data: items, error: fetchError } = await supabaseAdmin
@@ -286,7 +285,9 @@ Deno.serve(async (req) => {
       .lte("scheduled_for", now)
       .gt("expires_at", now)
       .lt("attempts", 3)
+      .order("priority", { ascending: true })
       .order("scheduled_for", { ascending: true })
+      .order("created_at", { ascending: true })
       .limit(BATCH_SIZE);
 
     if (fetchError) {
@@ -298,6 +299,8 @@ Deno.serve(async (req) => {
     }
 
     if (!items || items.length === 0) {
+      const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now);
+
       return new Response(JSON.stringify({
         sent: 0,
         failed: 0,
@@ -318,13 +321,15 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       // Marca como em processamento para evitar reprocessamento paralelo
-      const { error: claimError } = await supabaseAdmin
+      const { data: claimedItem, error: claimError } = await supabaseAdmin
         .from("pluguechat_message_queue")
         .update({ status: "processing", last_attempt_at: now, attempts: item.attempts + 1 })
         .eq("id", item.id)
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
 
-      if (claimError) {
+      if (claimError || !claimedItem) {
         skipped++;
         continue;
       }
@@ -456,6 +461,8 @@ Deno.serve(async (req) => {
         failed++;
       }
     }
+
+    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now);
 
     return new Response(JSON.stringify({
       sent,

@@ -397,6 +397,25 @@ export function buildBirthdayParameters(nome: string): Record<string, string> {
   return { nome: getFirstName(nome) };
 }
 
+export function buildReactivationParameters({
+  nome,
+  diasSemVisita,
+  dataUltimaVisita,
+  linkReserva,
+}: {
+  nome: string;
+  diasSemVisita: number;
+  dataUltimaVisita: string;
+  linkReserva: string;
+}): Record<string, string> {
+  return {
+    nome: getFirstName(nome),
+    dias_sem_visita: String(diasSemVisita),
+    data_ultima_visita: formatDate(dataUltimaVisita),
+    link_reserva: linkReserva,
+  };
+}
+
 // ----------------------------------------------------------------
 // Enfileirar mensagem na pluguechat_message_queue com idempotência
 // ----------------------------------------------------------------
@@ -414,6 +433,7 @@ export async function enqueuePlugueChatMessage(
     parameters: Record<string, string>;
     scheduled_for?: string;
     expires_at?: string;
+    priority?: number;
     idempotency_key?: string | null;
   },
 ): Promise<"inserted" | "duplicate"> {
@@ -434,6 +454,7 @@ export async function enqueuePlugueChatMessage(
       parameters: payload.parameters,
       scheduled_for: scheduledFor,
       expires_at: expiresAt,
+      priority: payload.priority ?? 100,
       idempotency_key: payload.idempotency_key ?? null,
       status: "pending",
     });

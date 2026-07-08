@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
             type: "broadcast",
             template_id: broadcast.template_id,
             template_name: broadcast.template_name ?? null,
-            parameters: getRecipientParameters(),
+            parameters: recipient.parameters ?? getRecipientParameters(),
             idempotency_key: `pluguechat:broadcast:${broadcast.id}:${phone}`,
           });
 

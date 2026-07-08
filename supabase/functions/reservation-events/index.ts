@@ -73,6 +73,7 @@ interface WhatsAppMessagePayload {
 }
 
 const RESERVATION_AUTOMATION_EVENTS = new Set(["reservation_created", "reservation_cancelled"]);
+const PLUGUECHAT_TRANSACTIONAL_PRIORITY = 10;
 
 function replaceTemplateVars(
   template: string,
@@ -267,6 +268,79 @@ async function getEvolutionConfig(supabaseAdmin: ReturnType<typeof createSupabas
   };
 }
 
+async function getInternalJobSecret(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>) {
+  const envSecret = Deno.env.get("INTERNAL_JOB_SECRET");
+  if (envSecret) return envSecret;
+
+  const { data, error } = await supabaseAdmin
+    .from("system_settings")
+    .select("value")
+    .eq("key", "internal_job_secret")
+    .maybeSingle();
+
+  if (error) {
+    console.error("reservation-events internal job secret load error", error);
+    return null;
+  }
+
+  return typeof data?.value === "string" && data.value.trim() ? data.value.trim() : null;
+}
+
+async function processPlugueChatQueueNow(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>) {
+  const secret = await getInternalJobSecret(supabaseAdmin);
+  if (!secret) {
+    console.warn("reservation-events pluguechat queue process skipped: internal job secret not configured");
+    return;
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.replace(/\/+$/, "");
+  if (!supabaseUrl) {
+    console.warn("reservation-events pluguechat queue process skipped: SUPABASE_URL not configured");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/process-pluguechat-message-queue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-job-secret": secret,
+      },
+      body: "{}",
+    });
+
+    if (!response.ok) {
+      let details = "";
+      try {
+        details = await response.text();
+      } catch {
+        details = "";
+      }
+      console.warn("reservation-events pluguechat queue process failed", response.status, details);
+    }
+  } catch (error) {
+    console.warn(
+      "reservation-events pluguechat queue process error",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+function runInBackground(task: Promise<unknown>) {
+  const edgeRuntime = (globalThis as unknown as {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(task);
+    return;
+  }
+
+  task.catch((error) => {
+    console.warn("reservation-events background task error", error);
+  });
+}
+
 async function insertWhatsAppLog(
   supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
   payload: WhatsAppMessagePayload,
@@ -370,6 +444,7 @@ async function enqueuePlugueChatReservation(
     template_id: template.template_id,
     template_name: template.template_name ?? null,
     parameters,
+    priority: PLUGUECHAT_TRANSACTIONAL_PRIORITY,
     idempotency_key: idempotencyKey,
   });
 
@@ -410,6 +485,7 @@ async function enqueuePlugueChatWaitlist(
     template_id: template.template_id,
     template_name: template.template_name ?? null,
     parameters,
+    priority: PLUGUECHAT_TRANSACTIONAL_PRIORITY,
     idempotency_key: idempotencyKey,
   });
 
@@ -850,7 +926,7 @@ Deno.serve(async (req) => {
       publicReservationTrackingCode,
     );
 
-    const results: { whatsapp?: string } = {};
+    const results: { whatsapp?: string; pluguechat_processing?: string } = {};
     const companyId = reservation?.company_id ?? waitlist?.company_id ?? null;
     const activeChannel = companyId ? await getCompanyChannel(supabaseAdmin, companyId) : "evolution";
 
@@ -868,6 +944,11 @@ Deno.serve(async (req) => {
       } else {
         await sendWaitlistAutomation(supabaseAdmin, event, waitlist, waitlistTrackingUrl, results);
       }
+    }
+
+    if (activeChannel === "pluguechat_official" && results.whatsapp === "pluguechat_queued") {
+      runInBackground(processPlugueChatQueueNow(supabaseAdmin));
+      results.pluguechat_processing = "scheduled";
     }
 
     return new Response(JSON.stringify({ success: true, results }), {
