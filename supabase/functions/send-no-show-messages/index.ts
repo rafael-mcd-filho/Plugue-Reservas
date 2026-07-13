@@ -42,6 +42,13 @@ function getLocalDateTime(date: string, time: string) {
   return new Date(`${date}T${hours}:${minutes}:00-03:00`);
 }
 
+function buildAttendanceContactKey(companyId: string, phone: string | null | undefined) {
+  if (!phone) return null;
+
+  const normalizedPhone = normalizePhone(phone);
+  return normalizedPhone ? `${companyId}:${normalizedPhone}` : null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -91,6 +98,43 @@ Deno.serve(async (req) => {
 
     const channelMap = await getCompanyChannels(supabaseAdmin, companyIds);
 
+    const { data: attendedReservations, error: attendedReservationsError } = await supabaseAdmin
+      .from("reservations")
+      .select("id, company_id, guest_phone")
+      .in("company_id", companyIds)
+      .eq("date", yesterdayStr)
+      .in("status", ["checked_in", "completed"])
+      .not("guest_phone", "is", null);
+
+    if (attendedReservationsError) {
+      throw new Error(`Erro ao verificar check-ins antes do envio de no-show: ${attendedReservationsError.message}`);
+    }
+
+    const attendedContactKeys = new Set<string>();
+    const attendedReservationIds = (attendedReservations || []).map((reservation: any) => reservation.id);
+
+    for (const reservation of attendedReservations || []) {
+      const key = buildAttendanceContactKey(reservation.company_id, reservation.guest_phone);
+      if (key) attendedContactKeys.add(key);
+    }
+
+    if (attendedReservationIds.length > 0) {
+      const { data: attendedCompanions, error: attendedCompanionsError } = await supabaseAdmin
+        .from("reservation_companions")
+        .select("company_id, phone")
+        .in("reservation_id", attendedReservationIds)
+        .not("phone", "is", null);
+
+      if (attendedCompanionsError) {
+        throw new Error(`Erro ao verificar acompanhantes antes do envio de no-show: ${attendedCompanionsError.message}`);
+      }
+
+      for (const companion of attendedCompanions || []) {
+        const key = buildAttendanceContactKey(companion.company_id, companion.phone);
+        if (key) attendedContactKeys.add(key);
+      }
+    }
+
     const [
       { data: automations }, { data: alreadySent }, { data: alreadyQueued },
       { data: plugueChatTemplates }, { data: plugueChatLogs }, { data: plugueChatQueue },
@@ -110,8 +154,16 @@ Deno.serve(async (req) => {
 
     let queued = 0;
     let skipped = 0;
+    let skippedDueToAttendance = 0;
 
     for (const reservation of reservations) {
+      const attendanceKey = buildAttendanceContactKey(reservation.company_id, reservation.guest_phone);
+      if (attendanceKey && attendedContactKeys.has(attendanceKey)) {
+        skipped++;
+        skippedDueToAttendance++;
+        continue;
+      }
+
       const channel = channelMap.get(reservation.company_id) ?? "evolution";
 
       if (channel === "pluguechat_official") {
@@ -170,10 +222,13 @@ Deno.serve(async (req) => {
       else skipped++;
     }
 
-    return new Response(JSON.stringify({ queued, skipped, total: reservations.length }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ queued, skipped, skipped_due_to_attendance: skippedDueToAttendance, total: reservations.length }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (error: unknown) {
     console.error("No-show messages error:", error);
     const msg = error instanceof Error ? error.message : "Unknown error";

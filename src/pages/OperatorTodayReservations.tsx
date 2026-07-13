@@ -2,7 +2,7 @@ import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInMinutes, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Ban, CalendarCheck, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clock3, Loader2, Search, Users } from 'lucide-react';
+import { AlertTriangle, Ban, CalendarCheck, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clock3, Loader2, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
@@ -28,7 +28,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 import type { ReservationStatus } from '@/types/restaurant';
-import { normalizePhoneDigits } from '@/lib/validation';
+import { normalizeBrazilPhoneDigits, normalizePhoneDigits } from '@/lib/validation';
 
 const DEFAULT_RESERVATION_DURATION_MINUTES = 30;
 const RECENT_PENDING_PAYMENT_GRACE_MS = 2 * 60 * 1000;
@@ -291,6 +291,10 @@ function sortProcessedReservations(left: Reservation, right: Reservation) {
 
   if (leftTimestamp !== rightTimestamp) return rightTimestamp - leftTimestamp;
   return sortReservations(left, right);
+}
+
+function getReservationPhoneMatchKey(reservation: Pick<Reservation, 'guest_phone'>) {
+  return normalizeBrazilPhoneDigits(reservation.guest_phone) || normalizePhoneDigits(reservation.guest_phone);
 }
 
 function getReservationDateTime(reservation: Reservation) {
@@ -750,7 +754,9 @@ export default function OperatorTodayReservations() {
   const [historyDetailsReservation, setHistoryDetailsReservation] = useState<ReservationDetails | null>(null);
   const [historyDetailsOpen, setHistoryDetailsOpen] = useState(false);
   const [checkInReservation, setCheckInReservation] = useState<Reservation | null>(null);
+  const [checkInDuplicateCandidates, setCheckInDuplicateCandidates] = useState<Reservation[]>([]);
   const [noShowReservation, setNoShowReservation] = useState<Reservation | null>(null);
+  const [duplicateNoShowReservations, setDuplicateNoShowReservations] = useState<Reservation[]>([]);
   const [checkedInPartySize, setCheckedInPartySize] = useState('1');
   const [expandedReservationGroupKeys, setExpandedReservationGroupKeys] = useState<Set<string>>(() => new Set());
   const [hideEmptyReservationSlots, setHideEmptyReservationSlots] = useState(true);
@@ -855,15 +861,29 @@ export default function OperatorTodayReservations() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const findPendingDuplicateReservations = (checkedReservation: Reservation) => {
+    const phoneMatchKey = getReservationPhoneMatchKey(checkedReservation);
+    if (!phoneMatchKey) return [];
+
+    return reservations.filter((reservation) =>
+      reservation.id !== checkedReservation.id
+      && reservation.company_id === checkedReservation.company_id
+      && reservation.date === checkedReservation.date
+      && reservation.status === 'confirmed'
+      && getReservationPhoneMatchKey(reservation) === phoneMatchKey);
+  };
+
   const statusMutation = useMutation({
     mutationFn: async ({
       reservationId,
       status,
       totalPresent,
+      duplicateCandidates,
     }: {
       reservationId: string;
       status: ReservationStatus;
       totalPresent?: number;
+      duplicateCandidates?: Reservation[];
     }) => {
       if (status === 'checked_in') {
         const { data, error } = await (supabase as any).rpc('check_in_reservation', {
@@ -884,16 +904,25 @@ export default function OperatorTodayReservations() {
       if (error) throw error;
       return normalizeReservationRecord((Array.isArray(data) ? data[0] : data) as Reservation);
     },
-    onSuccess: (updated) => {
+    onSuccess: (updated, variables) => {
       invalidateReservationQueries();
       syncReservationInDialogs(updated);
       toast.success(updated.status === 'checked_in' ? 'Check-in registrado.' : 'Reserva marcada como No-Show.');
       if (updated.status === 'checked_in') {
+        const duplicateReservations = variables.status === 'checked_in'
+          ? variables.duplicateCandidates ?? []
+          : [];
+
         setCheckInReservation(null);
+        setCheckInDuplicateCandidates([]);
         setCheckedInPartySize('1');
+        if (duplicateReservations.length > 0) {
+          setDuplicateNoShowReservations(duplicateReservations);
+        }
       }
       if (updated.status === 'no-show') {
         setNoShowReservation(null);
+        setDuplicateNoShowReservations((current) => current.filter((reservation) => reservation.id !== updated.id));
       }
       supabase.functions.invoke('reservation-events', {
         body: { event: updated.status === 'cancelled' ? 'reservation_cancelled' : 'status_changed', reservation: { id: updated.id } },
@@ -907,6 +936,44 @@ export default function OperatorTodayReservations() {
       toast.error(errorMessage);
       return;
       toast.error('Não foi possível registrar o check-in.');
+    },
+  });
+
+  const duplicateNoShowMutation = useMutation({
+    mutationFn: async (duplicateReservations: Reservation[]) => {
+      const updatedReservations: Reservation[] = [];
+
+      for (const reservation of duplicateReservations) {
+        const { data, error } = await (supabase as any).rpc('update_reservation_status', {
+          _reservation_id: reservation.id,
+          _status: 'no-show',
+        });
+
+        if (error) throw error;
+        updatedReservations.push(normalizeReservationRecord((Array.isArray(data) ? data[0] : data) as Reservation));
+      }
+
+      return updatedReservations;
+    },
+    onSuccess: (updatedReservations) => {
+      invalidateReservationQueries();
+      updatedReservations.forEach(syncReservationInDialogs);
+      setDuplicateNoShowReservations([]);
+      toast.success(
+        updatedReservations.length === 1
+          ? 'Reserva duplicada marcada como No-Show.'
+          : `${updatedReservations.length} reservas duplicadas marcadas como No-Show.`,
+      );
+
+      Promise.all(
+        updatedReservations.map((reservation) =>
+          supabase.functions.invoke('reservation-events', {
+            body: { event: 'status_changed', reservation: { id: reservation.id } },
+          })),
+      ).catch((error) => console.warn('Reservation events error:', error));
+    },
+    onError: () => {
+      toast.error('Nao foi possivel marcar as reservas duplicadas como No-Show.');
     },
   });
 
@@ -1069,12 +1136,14 @@ export default function OperatorTodayReservations() {
     setDetailsOpen(false);
     setHistoryDetailsOpen(false);
     setCheckInReservation(reservation);
+    setCheckInDuplicateCandidates(findPendingDuplicateReservations(reservation));
     setCheckedInPartySize(String(reservation.checked_in_party_size ?? reservation.party_size));
   };
 
   const handleCheckInDialogChange = (open: boolean) => {
     if (open) return;
     setCheckInReservation(null);
+    setCheckInDuplicateCandidates([]);
     setCheckedInPartySize('1');
   };
 
@@ -1091,6 +1160,7 @@ export default function OperatorTodayReservations() {
       reservationId: checkInReservation.id,
       status: 'checked_in',
       totalPresent: parsedCheckedInCount,
+      duplicateCandidates: checkInDuplicateCandidates,
     });
   };
 
@@ -1100,6 +1170,11 @@ export default function OperatorTodayReservations() {
       reservationId: reservation.id,
       status: 'no-show',
     });
+  };
+
+  const handleMarkDuplicateReservationsNoShow = () => {
+    if (duplicateNoShowReservations.length === 0) return;
+    duplicateNoShowMutation.mutate(duplicateNoShowReservations);
   };
 
   const renderPendingReservationItem = (reservation: Reservation) => {
@@ -1707,6 +1782,69 @@ export default function OperatorTodayReservations() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={duplicateNoShowReservations.length > 0}
+        onOpenChange={(open) => {
+          if (!open && !duplicateNoShowMutation.isPending) {
+            setDuplicateNoShowReservations([]);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-left">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-700">
+                <AlertTriangle className="h-4 w-4" />
+              </span>
+              Outra reserva para este cliente
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left">
+              Ha reserva confirmada no mesmo dia e telefone. Ela pode ser marcada como No-Show agora.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {duplicateNoShowReservations.map((reservation) => (
+              <div
+                key={reservation.id}
+                className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-md border border-black/[0.08] bg-muted/15 px-3 py-2 text-left"
+              >
+                <div className="flex h-9 w-12 items-center justify-center rounded-md bg-background text-sm font-semibold text-foreground">
+                  {reservation.time.slice(0, 5)}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Reserva para {reservation.party_size} pessoas
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={duplicateNoShowMutation.isPending}>Manter pendente</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={duplicateNoShowMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                handleMarkDuplicateReservationsNoShow();
+              }}
+            >
+              {duplicateNoShowMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Marcando...
+                </>
+              ) : (
+                duplicateNoShowReservations.length === 1 ? 'Marcar como No-Show' : 'Marcar todas como No-Show'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!noShowReservation} onOpenChange={(open) => !open && setNoShowReservation(null)}>
         <AlertDialogContent>
