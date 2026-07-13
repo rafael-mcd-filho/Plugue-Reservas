@@ -276,6 +276,23 @@ function sortReservations(left: Reservation, right: Reservation) {
   return left.time.localeCompare(right.time);
 }
 
+function getProcessedReservationTimestamp(reservation: Reservation) {
+  const timestampSource = reservation.status === 'checked_in'
+    ? reservation.checked_in_at ?? reservation.updated_at
+    : reservation.updated_at ?? reservation.checked_in_at;
+  const timestamp = timestampSource ? new Date(timestampSource).getTime() : Number.NEGATIVE_INFINITY;
+
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function sortProcessedReservations(left: Reservation, right: Reservation) {
+  const leftTimestamp = getProcessedReservationTimestamp(left);
+  const rightTimestamp = getProcessedReservationTimestamp(right);
+
+  if (leftTimestamp !== rightTimestamp) return rightTimestamp - leftTimestamp;
+  return sortReservations(left, right);
+}
+
 function getReservationDateTime(reservation: Reservation) {
   return new Date(`${reservation.date}T${reservation.time}`);
 }
@@ -349,7 +366,11 @@ function buildSlotLabel(startMinutes: number, durationInMinutes: number) {
   return `${formatMinutesLabel(startMinutes)} - ${formatMinutesLabel(startMinutes + durationInMinutes)}`;
 }
 
-function groupReservationsBySlot(reservations: Reservation[], durationInMinutes: number) {
+function groupReservationsBySlot(
+  reservations: Reservation[],
+  durationInMinutes: number,
+  sortGroupReservations = sortReservations,
+) {
   const groups = new Map<string, ReservationSlotGroup>();
 
   reservations.forEach((reservation) => {
@@ -372,7 +393,12 @@ function groupReservationsBySlot(reservations: Reservation[], durationInMinutes:
     group.totalGuests += reservation.party_size;
   });
 
-  return Array.from(groups.values()).sort((left, right) => left.startMinutes - right.startMinutes);
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      reservations: [...group.reservations].sort(sortGroupReservations),
+    }))
+    .sort((left, right) => left.startMinutes - right.startMinutes);
 }
 
 function isReservationOccupyingCapacity(reservation: Reservation, nowMs = Date.now()) {
@@ -613,8 +639,11 @@ function groupReservationsByCapacitySlots(
   capacitySlots: OperatorCapacitySlot[],
   fallbackDurationInMinutes: number,
   includeEmptyCapacitySlots = false,
+  sortGroupReservations = sortReservations,
 ) {
-  if (capacitySlots.length === 0) return groupReservationsBySlot(reservations, fallbackDurationInMinutes);
+  if (capacitySlots.length === 0) {
+    return groupReservationsBySlot(reservations, fallbackDurationInMinutes, sortGroupReservations);
+  }
 
   const reservationIds = new Set(reservations.map((reservation) => reservation.id));
   const groupedIds = new Set<string>();
@@ -623,7 +652,7 @@ function groupReservationsByCapacitySlots(
       const slotReservations = slot.reservations
         .filter((slotReservation) => slotReservation.isArrival && reservationIds.has(slotReservation.reservation.id))
         .map((slotReservation) => slotReservation.reservation)
-        .sort(sortReservations);
+        .sort(sortGroupReservations);
 
       if (slotReservations.length === 0 && !includeEmptyCapacitySlots) return null;
       slotReservations.forEach((reservation) => groupedIds.add(reservation.id));
@@ -641,7 +670,7 @@ function groupReservationsByCapacitySlots(
     .filter((group): group is ReservationSlotGroup => Boolean(group));
 
   const orphanReservations = reservations.filter((reservation) => !groupedIds.has(reservation.id));
-  const orphanGroups = groupReservationsBySlot(orphanReservations, fallbackDurationInMinutes)
+  const orphanGroups = groupReservationsBySlot(orphanReservations, fallbackDurationInMinutes, sortGroupReservations)
     .map((group) => ({
       ...group,
       isOutsideConfiguredSchedule: true,
@@ -945,7 +974,13 @@ export default function OperatorTodayReservations() {
     [capacitySlots, filteredPendingReservations, hasActiveSearch, hideEmptyReservationSlots, slotDuration],
   );
   const processedReservationGroups = useMemo(
-    () => groupReservationsByCapacitySlots(filteredProcessedReservations, capacitySlots, slotDuration, false),
+    () => groupReservationsByCapacitySlots(
+      filteredProcessedReservations,
+      capacitySlots,
+      slotDuration,
+      false,
+      sortProcessedReservations,
+    ),
     [capacitySlots, filteredProcessedReservations, slotDuration],
   );
 
