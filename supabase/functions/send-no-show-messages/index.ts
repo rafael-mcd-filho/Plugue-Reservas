@@ -84,6 +84,7 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("date", yesterdayStr)
       .eq("status", "no-show")
+      .eq("suppress_no_show_message", false)
       .not("guest_phone", "is", null);
 
     if (!reservations || reservations.length === 0) {
