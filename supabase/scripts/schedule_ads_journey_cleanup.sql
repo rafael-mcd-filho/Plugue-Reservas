@@ -1,7 +1,7 @@
 -- Optional rollout step for Ads journey V2.
 -- Run only after the shadow migration has been applied and validated.
 --
--- A state expires 15 days after its last eligible activity. This job keeps
+-- A state expires 30 days after its last eligible activity. This job keeps
 -- expired rows for another 30 days for diagnostics, then removes them. The
 -- frozen attribution snapshot on reservations is not deleted.
 

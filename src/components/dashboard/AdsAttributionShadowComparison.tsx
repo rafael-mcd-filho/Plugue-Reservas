@@ -161,7 +161,7 @@ export default function AdsAttributionShadowComparison({
               </Badge>
             </div>
             <CardDescription className="mt-1.5 max-w-3xl leading-relaxed">
-              Compara diariamente o classificador atual com a memória de Ads de 15 dias.
+              Compara diariamente o classificador atual com a memória de Ads de 30 dias.
               A visão das empresas continua usando exclusivamente o método atual.
             </CardDescription>
           </div>
@@ -220,7 +220,7 @@ export default function AdsAttributionShadowComparison({
               <Metric
                 label="Ads pela jornada V2"
                 value={formatCount(totals.journeyAds)}
-                detail="Paid ou pr_ad em uma cadeia ativa de 15 dias"
+                detail="Paid ou pr_ad em uma cadeia ativa de 30 dias"
                 tone="journey"
               />
               <Metric

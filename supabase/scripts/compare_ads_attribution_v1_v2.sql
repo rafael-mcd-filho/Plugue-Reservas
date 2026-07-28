@@ -1,5 +1,5 @@
 -- Compares the Ads attribution used by the current Dashboard (legacy_v1)
--- with the proposed 15-day rolling journey attribution (journey_v2).
+-- with the 30-day rolling journey attribution (journey_v2).
 --
 -- Run manually in the Supabase SQL Editor. This is NOT a migration.
 -- It never changes public application data: it only creates temporary tables
@@ -13,12 +13,12 @@
 --   1. any visit/activity contains either:
 --        - utm_medium exactly equal to "paid"; or
 --        - a non-empty custom marker (default: pr_ad);
---   2. every gap between subsequent meaningful activities is at most 15 days;
+--   2. every gap between subsequent meaningful activities is at most 30 days;
 --   3. the paid touch happened before or at reservation.created_at.
 --
 -- Organic activity renews an already-active chain. After a gap greater than
--- 15 days, organic activity starts a clean chain and does not reactivate Ads.
--- A new paid touch can reactivate it. Exactly 15 days is considered active.
+-- 30 days, organic activity starts a clean chain and does not reactivate Ads.
+-- A new paid touch can reactivate it. Exactly 30 days is considered active.
 --
 -- Historical limits
 -- -----------------
@@ -63,7 +63,7 @@ SELECT
     - interval '1 day'
   )::date AS reservation_date_end,
   NULL::timestamptz AS history_start_at,
-  interval '15 days' AS inactivity_window,
+  interval '30 days' AS inactivity_window,
   ARRAY['paid']::text[] AS v2_paid_medium_values,
   'pr_ad'::text AS custom_paid_param,
   300::integer AS detail_limit;
