@@ -10,6 +10,8 @@ import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/hooks/useImpersonation';
 import { supabase } from '@/integrations/supabase/client';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
@@ -274,9 +276,28 @@ export default function ReservationDetailsDialog({
   showLeadHistory = false,
   onReservationSelect,
 }: ReservationDetailsDialogProps) {
+  const { roles, user } = useAuth();
+  const { effectiveRoles, isImpersonatingCompany, scopeCompanyId } = useImpersonation();
   const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
   const [auditHistoryOpen, setAuditHistoryOpen] = useState(false);
   const normalizedPhone = normalizeBrazilPhoneDigits(reservation?.guest_phone);
+  const eventHistoryCompanyScope = reservation?.company_id ?? companyId ?? null;
+  const eventHistoryRoleScope = isImpersonatingCompany
+    ? `impersonated:${scopeCompanyId ?? 'unknown'}:${effectiveRoles.join(',')}`
+    : `direct:${[...roles].sort().join(',')}`;
+  const impersonationAllowsEventHistory =
+    !isImpersonatingCompany
+    || (
+      effectiveRoles.includes('admin')
+      && !!eventHistoryCompanyScope
+      && scopeCompanyId === eventHistoryCompanyScope
+    );
+  const shouldCheckEventHistoryAccess =
+    showEventHistory
+    && impersonationAllowsEventHistory
+    && open
+    && !!user?.id
+    && !!reservation?.id;
   const trackingUrl = reservation
     ? `${window.location.origin}/${slug}/reserva/${reservation.public_tracking_code}`
     : '';
@@ -335,11 +356,49 @@ export default function ReservationDetailsDialog({
     : null;
 
   const {
+    data: hasEventHistoryAccess = false,
+    isError: eventHistoryAccessError,
+    isFetching: eventHistoryAccessLoading,
+  } = useQuery({
+    queryKey: [
+      'reservation-event-history-access',
+      user?.id,
+      eventHistoryCompanyScope,
+      reservation?.id,
+      eventHistoryRoleScope,
+    ],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc('can_view_reservation_event_history', {
+        _reservation_id: reservation!.id,
+      });
+
+      if (error) throw error;
+      return data === true;
+    },
+    enabled: shouldCheckEventHistoryAccess,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+
+  const canViewEventHistory =
+    shouldCheckEventHistoryAccess
+    && !eventHistoryAccessError
+    && !eventHistoryAccessLoading
+    && hasEventHistoryAccess;
+
+  const {
     data: timeline = [],
     isLoading: timelineLoading,
     error: timelineError,
   } = useQuery({
-    queryKey: ['reservation-event-history', reservation?.id],
+    queryKey: [
+      'reservation-event-history',
+      user?.id,
+      eventHistoryCompanyScope,
+      reservation?.id,
+      eventHistoryRoleScope,
+    ],
     queryFn: async () => {
       const { data, error } = await (supabase as any).rpc('get_reservation_event_history', {
         _reservation_id: reservation!.id,
@@ -348,7 +407,7 @@ export default function ReservationDetailsDialog({
       if (error) throw error;
       return ((data as any[]) ?? []) as ReservationTimelineItem[];
     },
-    enabled: showEventHistory && open && !!reservation?.id,
+    enabled: canViewEventHistory,
   });
 
   const {
@@ -647,7 +706,7 @@ export default function ReservationDetailsDialog({
                 </div>
               )}
 
-              {showEventHistory && (
+              {canViewEventHistory && (
                 <div className="space-y-3">
                 <div className="rounded-lg border border-border bg-muted/20">
                 <button
