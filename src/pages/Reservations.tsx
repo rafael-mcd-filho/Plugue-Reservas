@@ -304,7 +304,7 @@ export default function Reservations() {
 
   const invalidateReservationQueries = () => {
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-    qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
+    qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
     qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['reservation-companions'] });
     qc.invalidateQueries({ queryKey: ['reservation-event-history'] });
@@ -619,7 +619,7 @@ export default function Reservations() {
     },
     onSuccess: (createdReservation) => {
       qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
       qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
       qc.invalidateQueries({ queryKey: ['leads-reservations', companyId] });
       toast.success('Reserva criada manualmente.');

@@ -50,6 +50,10 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  buildReservationCalendarDayMetrics,
+  type ReservationCalendarMetricRow,
+} from '@/lib/reservation-calendar-metrics';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import {
   formatBrazilPhone,
@@ -558,8 +562,6 @@ function mapCapacityRowToSlot(row: AdminCapacityRow): CalendarCapacitySlot {
   };
 }
 
-const ACTIVE_CALENDAR_BADGE_STATUSES = new Set<string>(['confirmed', 'checked_in', 'pending_payment']);
-
 export default function CalendarView() {
   const { companyId, slug } = useCompanySlug();
   const qc = useQueryClient();
@@ -578,6 +580,9 @@ export default function CalendarView() {
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const calendarMonthDays = useMemo(() => getCalendarMonthDays(calendarMonth), [calendarMonth]);
+  const calendarRangeStart = getDateKey(calendarMonthDays[0]);
+  const calendarRangeEnd = getDateKey(calendarMonthDays[calendarMonthDays.length - 1]);
 
   useEffect(() => {
     setExpandedSlotTimes(new Set());
@@ -620,26 +625,24 @@ export default function CalendarView() {
 
   // Metricas leves para os selos do calendario (apenas o mes visivel), no lugar
   // de carregar todas as reservas da empresa.
-  const monthRangeKey = format(calendarMonth, 'yyyy-MM');
-  const { data: monthMetricRows = [] } = useQuery({
-    queryKey: ['calendar-month-metrics', companyId, monthRangeKey],
+  const {
+    data: monthMetricRows = [],
+    isError: monthMetricsError,
+  } = useQuery({
+    queryKey: ['calendar-month-metrics', companyId, calendarRangeStart, calendarRangeEnd],
     queryFn: async () => {
-      const monthDays = getCalendarMonthDays(calendarMonth);
-      const start = getDateKey(monthDays[0]);
-      const end = getDateKey(monthDays[monthDays.length - 1]);
-
-      const { data, error } = await supabase
-        .from('reservations' as any)
-        .select('date, party_size, status')
-        .eq('company_id', companyId)
-        .gte('date', start)
-        .lte('date', end);
+      const { data, error } = await (supabase.rpc as any)('get_admin_reservation_calendar_metrics', {
+        _company_id: companyId,
+        _start_date: calendarRangeStart,
+        _end_date: calendarRangeEnd,
+      });
 
       if (error) throw error;
-      return ((data as any[]) ?? []) as Array<{ date: string; party_size: number; status: string }>;
+      return ((data as ReservationCalendarMetricRow[]) ?? []);
     },
     enabled: !!companyId,
     staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
   });
 
   const { data: publicSchedule, isLoading: scheduleLoading, isError: scheduleError } = useQuery({
@@ -730,17 +733,8 @@ export default function CalendarView() {
     },
   });
 
-  const calendarMonthDays = useMemo(() => getCalendarMonthDays(calendarMonth), [calendarMonth]);
-
   const calendarDayMetrics = useMemo(
-    () => monthMetricRows.reduce<Record<string, { guests: number; reservations: number }>>((acc, row) => {
-      if (!ACTIVE_CALENDAR_BADGE_STATUSES.has(row.status)) return acc;
-      const current = acc[row.date] ?? { guests: 0, reservations: 0 };
-      current.guests += Number(row.party_size) || 0;
-      current.reservations += 1;
-      acc[row.date] = current;
-      return acc;
-    }, {}),
+    () => buildReservationCalendarDayMetrics(monthMetricRows),
     [monthMetricRows],
   );
 
@@ -1017,6 +1011,12 @@ export default function CalendarView() {
                     </div>
                   ))}
                 </div>
+
+                {monthMetricsError && (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+                    Não foi possível carregar os totais do calendário. Tente novamente em instantes.
+                  </div>
+                )}
 
                 <div className="mt-1 grid grid-cols-7 gap-1">
                   {calendarMonthDays.map((date) => {

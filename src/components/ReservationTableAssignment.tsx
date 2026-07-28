@@ -120,7 +120,6 @@ export default function ReservationTableAssignment({
       onAssigned?.(reservationId, nextTableId ?? null);
       qc.invalidateQueries({ queryKey: ['reservation-table-options', reservationId] });
       qc.invalidateQueries({ queryKey: ['calendar-day-capacity', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
       qc.invalidateQueries({ queryKey: ['reservations', companyId] });
       qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
       qc.invalidateQueries({ queryKey: ['reservation-event-history', reservationId] });

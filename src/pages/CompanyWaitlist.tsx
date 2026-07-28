@@ -599,7 +599,7 @@ export default function CompanyWaitlist() {
       qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
       qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
       qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
       qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
       qc.invalidateQueries({ queryKey: ['dashboard-reservations'] });
       qc.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
