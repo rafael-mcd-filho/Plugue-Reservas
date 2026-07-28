@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { normalizeTrackingTextValue } from '@/lib/trackingAttribution';
 
 export const FUNNEL_STEPS = [
   'page_view',
@@ -82,6 +83,7 @@ interface TrackingEventPayload {
   utm_campaign?: string | null;
   utm_content?: string | null;
   utm_term?: string | null;
+  pr_ad?: string | null;
   user_data?: TrackingUserData | null;
   retryCount?: number;
 }
@@ -100,6 +102,7 @@ export interface TrackingSnapshot {
   utm_campaign: string | null;
   utm_content: string | null;
   utm_term: string | null;
+  pr_ad?: string | null;
   page_url: string | null;
   path: string | null;
   referrer: string | null;
@@ -163,7 +166,7 @@ function deriveFbc(fbc: string | null, fbclid: string | null): string | null {
   return `fb.1.${Date.now()}.${fbclid}`;
 }
 
-function getCurrentAttribution() {
+export function getCurrentAttribution() {
   if (typeof window === 'undefined') {
     return {
       fbclid: null,
@@ -174,6 +177,7 @@ function getCurrentAttribution() {
       utm_campaign: null,
       utm_content: null,
       utm_term: null,
+      pr_ad: null,
     };
   }
 
@@ -191,6 +195,7 @@ function getCurrentAttribution() {
     utm_campaign: url.searchParams.get('utm_campaign'),
     utm_content: url.searchParams.get('utm_content'),
     utm_term: url.searchParams.get('utm_term'),
+    pr_ad: normalizeTrackingTextValue(url.searchParams.get('pr_ad')),
   };
 }
 
@@ -326,6 +331,10 @@ function buildPayload(
 ): TrackingEventPayload {
   const attribution = getCurrentAttribution();
   const location = safeGetLocation();
+  const metadata = {
+    ...(extra?.metadata ?? {}),
+    ...(attribution.pr_ad ? { pr_ad: attribution.pr_ad } : {}),
+  };
 
   return {
     event_name: eventName,
@@ -348,7 +357,9 @@ function buildPayload(
     utm_campaign: attribution.utm_campaign,
     utm_content: attribution.utm_content,
     utm_term: attribution.utm_term,
+    pr_ad: attribution.pr_ad,
     ...extra,
+    metadata,
   };
 }
 
@@ -370,6 +381,7 @@ function buildSnapshot(state: StoredTrackingState, companyId: string | undefined
     utm_campaign: attribution.utm_campaign,
     utm_content: attribution.utm_content,
     utm_term: attribution.utm_term,
+    pr_ad: attribution.pr_ad,
     page_url: location.pageUrl,
     path: location.path,
     referrer: location.referrer,
@@ -391,6 +403,7 @@ function buildSnapshot(state: StoredTrackingState, companyId: string | undefined
       utm_campaign: attribution.utm_campaign,
       utm_content: attribution.utm_content,
       utm_term: attribution.utm_term,
+      pr_ad: attribution.pr_ad,
     },
   };
 }

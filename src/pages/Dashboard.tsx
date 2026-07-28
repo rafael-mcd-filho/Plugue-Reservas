@@ -38,6 +38,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import AdsAttributionShadowComparison from '@/components/dashboard/AdsAttributionShadowComparison';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import type { DateRange } from 'react-day-picker';
@@ -521,6 +522,7 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-prev'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
+          queryClient.invalidateQueries({ queryKey: ['ads-attribution-shadow-comparison'] });
         },
       )
       .on(
@@ -2009,6 +2011,13 @@ export default function Dashboard() {
               )}
             </CardContent>
           </Card>
+          {!isCompanyContext && (
+            <AdsAttributionShadowComparison
+              companyId={effectiveCompanyId}
+              startDate={startDate}
+              endDate={endDate}
+            />
+          )}
           {advancedReportsEnabled ? (
             <>
           <div className="[&>*]:min-w-0">

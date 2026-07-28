@@ -2,6 +2,11 @@ import {
   createSupabaseAdminClient,
   getClientIpAddress,
 } from "../_shared/internal-auth.ts";
+import {
+  buildAdsJourneyRpcArgs,
+  recordAdsJourneyActivityBestEffort,
+  resolvePrAd,
+} from "./ads-journey.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +40,7 @@ interface TrackingBody {
   utm_campaign?: string | null;
   utm_content?: string | null;
   utm_term?: string | null;
+  pr_ad?: string | null;
   user_data?: {
     email?: string | null;
     phone?: string | null;
@@ -165,6 +171,7 @@ function buildSessionPatch(
     utm_campaign: nullableText(body.utm_campaign),
     utm_content: nullableText(body.utm_content),
     utm_term: nullableText(body.utm_term),
+    pr_ad: resolvePrAd(body),
     fbclid: nullableText(body.fbclid),
     fbp: nullableText(body.fbp),
     fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
@@ -198,6 +205,7 @@ function mergeAttributionSnapshot(
     utm_campaign: nullableText(body.utm_campaign) ?? getSessionText("utm_campaign"),
     utm_content: nullableText(body.utm_content) ?? getSessionText("utm_content"),
     utm_term: nullableText(body.utm_term) ?? getSessionText("utm_term"),
+    pr_ad: resolvePrAd(body) ?? getSessionText("pr_ad"),
     fbclid: nullableText(body.fbclid) ?? getSessionText("fbclid"),
     fbp: nullableText(body.fbp) ?? getSessionText("fbp"),
     fbc: deriveFbc(nullableText(body.fbc) ?? getSessionText("fbc"), nullableText(body.fbclid) ?? getSessionText("fbclid")),
@@ -218,6 +226,7 @@ Deno.serve(async (req) => {
     const requestedJourneyId = nullableText(body.journey_id);
     const reservationId = nullableText(body.reservation_id);
     const eventId = nullableText(body.event_id) ?? crypto.randomUUID();
+    const receivedAt = new Date().toISOString();
     const supabaseAdmin = createSupabaseAdminClient();
     const companyId = await resolveCompanyId(supabaseAdmin, body);
 
@@ -243,6 +252,7 @@ Deno.serve(async (req) => {
           utm_campaign: nullableText(body.utm_campaign),
           utm_content: nullableText(body.utm_content),
           utm_term: nullableText(body.utm_term),
+          pr_ad: resolvePrAd(body),
           fbclid: nullableText(body.fbclid),
           fbp: nullableText(body.fbp),
           fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
@@ -358,11 +368,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    let adsJourneyActivityAt = receivedAt;
+    let requireAdsJourneyWrite = false;
+
     if (eventName !== "session_ping") {
       const eventSourceUrl = nullableText(body.event_source_url) ?? nullableText(body.page_url);
       const occurredAt = nullableText(body.occurred_at) ?? new Date().toISOString();
 
-      const { error: eventInsertError } = await supabaseAdmin
+      const { data: insertedEvent, error: eventInsertError } = await supabaseAdmin
         .from("tracking_events")
         .insert({
           company_id: companyId,
@@ -385,13 +398,69 @@ Deno.serve(async (req) => {
             fbp: nullableText(body.fbp),
             fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
             fbclid: nullableText(body.fbclid),
+            utm_source: nullableText(body.utm_source)
+              ?? nullableText(session.utm_source),
+            utm_medium: nullableText(body.utm_medium)
+              ?? nullableText(session.utm_medium),
+            utm_campaign: nullableText(body.utm_campaign)
+              ?? nullableText(session.utm_campaign),
+            pr_ad: resolvePrAd(body) ?? nullableText(session.pr_ad),
           },
           user_data_snapshot: buildUserDataSnapshot(body, anonymousId),
-        });
+        })
+        .select("created_at")
+        .single();
 
-      if (eventInsertError && !eventInsertError.message.includes("duplicate key")) {
-        throw new Error(eventInsertError.message);
+      if (eventInsertError) {
+        const isDuplicate = eventInsertError.code === "23505"
+          || eventInsertError.message.includes("duplicate key");
+
+        if (!isDuplicate) {
+          throw new Error(eventInsertError.message);
+        }
+
+        const { data: existingEvent, error: existingEventError } = await supabaseAdmin
+          .from("tracking_events")
+          .select("created_at")
+          .eq("event_id", eventId)
+          .eq("company_id", companyId)
+          .maybeSingle();
+
+        if (existingEventError) {
+          throw new Error(existingEventError.message);
+        }
+
+        if (!existingEvent?.created_at) {
+          throw new Error("event_id ja pertence a outro contexto de tracking");
+        }
+
+        adsJourneyActivityAt = existingEvent.created_at as string;
+      } else if (insertedEvent?.created_at) {
+        adsJourneyActivityAt = insertedEvent.created_at as string;
       }
+
+      // If the V2 write fails, the browser keeps this event in its existing
+      // retry queue. The tracking_events row supplies a stable server time on
+      // replay, so retries cannot keep extending the attribution window.
+      requireAdsJourneyWrite = true;
+    }
+
+    const adsJourneyRecorded = await recordAdsJourneyActivityBestEffort(
+      supabaseAdmin,
+      buildAdsJourneyRpcArgs(body, {
+        companyId,
+        anonymousId,
+        sessionId,
+        journeyId,
+        reservationId,
+        eventName,
+        eventId,
+        receivedAt: adsJourneyActivityAt,
+      }),
+    );
+
+    if (requireAdsJourneyWrite && !adsJourneyRecorded) {
+      throw new Error("Falha temporaria ao registrar a jornada de Ads");
     }
 
     return new Response(JSON.stringify({
