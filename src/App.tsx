@@ -26,10 +26,13 @@ const SettingsPage = lazyWithReload(() => import("@/pages/Settings"));
 const AdminNotifications = lazyWithReload(() => import("@/pages/AdminNotifications"));
 const AuditLogs = lazyWithReload(() => import("@/pages/AuditLogs"));
 const AdminIntegrations = lazyWithReload(() => import("@/pages/AdminIntegrations"));
+const AdminFinance = lazyWithReload(() => import("@/pages/AdminFinance"));
+const AdminCompanyBillingPreview = lazyWithReload(() => import("@/pages/AdminCompanyBillingPreview"));
 const CompanySettings = lazyWithReload(() => import("@/pages/CompanySettings"));
 const CompanyEvents = lazyWithReload(() => import("@/pages/CompanyEvents"));
 const CompanyAutomations = lazyWithReload(() => import("@/pages/CompanyAutomations"));
 const CompanyPrepayments = lazyWithReload(() => import("@/pages/CompanyPrepayments"));
+const CompanyBilling = lazyWithReload(() => import("@/pages/CompanyBilling"));
 const CompanyUsers = lazyWithReload(() => import("@/pages/CompanyUsers"));
 const CompanyWaitlist = lazyWithReload(() => import("@/pages/CompanyWaitlist"));
 const OperatorTodayReservations = lazyWithReload(() => import("@/pages/OperatorTodayReservations"));
@@ -411,6 +414,22 @@ const App = () => (
                 }
               />
               <Route
+                path="/financeiro"
+                element={
+                  <SuperadminRoute>
+                    <AdminFinance />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
+                path="/financeiro/empresa/:companyId"
+                element={
+                  <SuperadminRoute>
+                    <AdminCompanyBillingPreview />
+                  </SuperadminRoute>
+                }
+              />
+              <Route
                 path="/perfil"
                 element={
                   <SuperadminRoute>
@@ -556,6 +575,14 @@ const App = () => (
                     requiredCompanyFeature="reservation_prepayment"
                   >
                     <CompanyPrepayments />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/financeiro"
+                element={
+                  <CompanyAdminRoute allowedRoles={["admin", "superadmin"]}>
+                    <CompanyBilling />
                   </CompanyAdminRoute>
                 }
               />

@@ -3,10 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
+  AlertTriangle,
   Building2,
   Calendar,
   CalendarOff,
+  CheckCircle2,
   Circle,
+  CircleDollarSign,
   Clock3,
   CreditCard,
   Globe,
@@ -14,6 +17,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  RefreshCw,
   ShieldCheck,
   Trash2,
   Upload,
@@ -36,8 +40,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { useCreateCompany, useUpdateCompany, type Company, type CompanyInsert, type CompanyStatus } from '@/hooks/useCompanies';
 import { useSaveCompanyFeatures, type CompanyFeatureState } from '@/hooks/useCompanyFeatures';
+import {
+  useCompanyBillingLink,
+  usePlatformBillingModuleStatus,
+  useRemoveCompanyBillingLink,
+  useSaveCompanyBillingLink,
+  useSetCompanyBillingEnabled,
+  useValidateAsaasCustomer,
+} from '@/hooks/usePlatformBilling';
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
+import {
+  PLATFORM_BILLING_DESCRIPTION_MARKER,
+  type ValidatedAsaasCustomer,
+} from '@/lib/platform-billing-contracts';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
+import AsaasCustomerFinder from '@/components/billing/AsaasCustomerFinder';
 import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchList';
 import { normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import { toSafeRichTextHtml } from '@/lib/richText';
@@ -228,10 +245,21 @@ export default function CompanyDialog({
   const createCompany = useCreateCompany();
   const updateCompany = useUpdateCompany();
   const saveCompanyFeatures = useSaveCompanyFeatures();
+  const billingModuleQuery = usePlatformBillingModuleStatus({ enabled: open });
+  const billingLinkQuery = useCompanyBillingLink(company?.id, { enabled: open && !!company?.id });
+  const validateBillingCustomer = useValidateAsaasCustomer();
+  const saveBillingLink = useSaveCompanyBillingLink();
+  const removeBillingLink = useRemoveCompanyBillingLink();
+  const setCompanyBillingEnabled = useSetCompanyBillingEnabled();
   const [form, setForm] = useState<CompanyInsert>(createEmptyForm());
   const [featureForm, setFeatureForm] = useState<CompanyFeatureState>(getInitialFeatures(null));
   const [activeTab, setActiveTab] = useState('geral');
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [billingCustomerId, setBillingCustomerId] = useState('');
+  const [billingCustomerDirty, setBillingCustomerDirty] = useState(false);
+  const [billingEnabled, setBillingEnabled] = useState(false);
+  const [billingEnabledDirty, setBillingEnabledDirty] = useState(false);
+  const [validatedBillingCustomer, setValidatedBillingCustomer] = useState<ValidatedAsaasCustomer | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -239,7 +267,44 @@ export default function CompanyDialog({
     setActiveTab('geral');
     setForm(company ? buildFormFromCompany(company) : createEmptyForm());
     setFeatureForm(getInitialFeatures(company, initialFeatures));
-  }, [open, company?.id]);
+    setBillingCustomerId('');
+    setBillingCustomerDirty(false);
+    setBillingEnabled(false);
+    setBillingEnabledDirty(false);
+    setValidatedBillingCustomer(null);
+  }, [open, company, initialFeatures]);
+
+  useEffect(() => {
+    if (!open || !company || billingCustomerDirty || billingEnabledDirty || !billingLinkQuery.isSuccess) return;
+    const link = billingLinkQuery.data;
+    if (!link) {
+      setBillingCustomerId('');
+      setBillingEnabled(false);
+      setBillingEnabledDirty(false);
+      setValidatedBillingCustomer(null);
+      return;
+    }
+    setBillingCustomerId(link.customerId);
+    setBillingEnabled(link.billingEnabled);
+    setBillingEnabledDirty(false);
+    setValidatedBillingCustomer({
+      id: link.customerId,
+      name: link.customerName || 'Cliente Asaas',
+      cpfCnpj: link.customerDocument,
+      email: null,
+      mobilePhone: null,
+      externalReference: null,
+      linkedCompanyId: link.companyId,
+      billingEnabled: link.billingEnabled,
+    });
+  }, [
+    billingCustomerDirty,
+    billingEnabledDirty,
+    billingLinkQuery.data,
+    billingLinkQuery.isSuccess,
+    company,
+    open,
+  ]);
 
   const { data: timeline = [], isLoading: timelineLoading } = useQuery({
     queryKey: ['company-activity-timeline', company?.id],
@@ -305,7 +370,13 @@ export default function CompanyDialog({
     enabled: open && !!company?.id,
   });
 
-  const pending = createCompany.isPending || updateCompany.isPending || saveCompanyFeatures.isPending;
+  const pending = createCompany.isPending
+    || updateCompany.isPending
+    || saveCompanyFeatures.isPending
+    || validateBillingCustomer.isPending
+    || saveBillingLink.isPending
+    || setCompanyBillingEnabled.isPending
+    || removeBillingLink.isPending;
   const headerStatus = company ? statusConfig[company.status] : null;
   const hours = normalizeOpeningHours(form.opening_hours);
   const payments = normalizePaymentMethods(form.payment_methods);
@@ -336,6 +407,85 @@ export default function CompanyDialog({
         [key]: enabled,
       },
     }));
+  };
+
+  const handleBillingCustomerChange = (value: string) => {
+    const nextCustomerId = value.trimStart();
+    setBillingCustomerId(nextCustomerId);
+    setBillingCustomerDirty(true);
+    setValidatedBillingCustomer(null);
+    validateBillingCustomer.reset();
+    if (nextCustomerId.trim() !== (billingLinkQuery.data?.customerId ?? '')) {
+      setBillingEnabled(false);
+      setBillingEnabledDirty(true);
+    }
+  };
+
+  const handleBillingCustomerSelect = (customer: ValidatedAsaasCustomer) => {
+    setBillingCustomerId(customer.id);
+    setValidatedBillingCustomer(customer);
+    setBillingCustomerDirty(customer.id !== (billingLinkQuery.data?.customerId ?? ''));
+    if (customer.id !== (billingLinkQuery.data?.customerId ?? '')) {
+      setBillingEnabled(false);
+      setBillingEnabledDirty(true);
+    }
+    validateBillingCustomer.reset();
+    toast.success('Cliente selecionado. O Customer ID foi preenchido automaticamente.');
+  };
+
+  const handleValidateBillingCustomer = async () => {
+    const customerId = billingCustomerId.trim();
+    if (!customerId) {
+      toast.error('Informe o Customer ID do Asaas.');
+      return;
+    }
+
+    try {
+      const customer = await validateBillingCustomer.mutateAsync({
+        companyId: company?.id,
+        customerId,
+      });
+      setValidatedBillingCustomer(customer);
+      setBillingCustomerDirty(true);
+      toast.success('Cliente localizado no Asaas.');
+    } catch (error: any) {
+      setValidatedBillingCustomer(null);
+      toast.error(error?.message || 'Não foi possível validar o cliente no Asaas.');
+    }
+  };
+
+  const persistBillingLink = async (companyId: string) => {
+    const customerId = billingCustomerId.trim();
+    let savedLink = billingLinkQuery.data ?? null;
+
+    if (!billingCustomerDirty && !billingEnabledDirty) return;
+
+    if (!customerId) {
+      if (billingLinkQuery.data) {
+        await removeBillingLink.mutateAsync({ companyId });
+      }
+      return;
+    }
+
+    if (billingCustomerDirty) {
+      const result = await saveBillingLink.mutateAsync({
+        companyId,
+        customerId,
+        descriptionMarker: PLATFORM_BILLING_DESCRIPTION_MARKER,
+      });
+      savedLink = result.link;
+      if (result.warning) {
+        toast.warning(result.warning);
+      }
+    }
+
+    if (savedLink && savedLink.billingEnabled !== billingEnabled) {
+      await setCompanyBillingEnabled.mutateAsync({
+        companyId,
+        enabled: billingEnabled,
+        expectedBillingRevision: savedLink.billingRevision,
+      });
+    }
   };
 
   const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -463,6 +613,13 @@ export default function CompanyDialog({
         companyId: company.id,
         features: featureForm,
       });
+      try {
+        await persistBillingLink(company.id);
+      } catch (error: any) {
+        toast.error(error?.message || 'A empresa foi salva, mas o vínculo financeiro não pôde ser atualizado.');
+        setActiveTab('financeiro');
+        return;
+      }
       onOpenChange(false);
       return;
     }
@@ -475,6 +632,14 @@ export default function CompanyDialog({
         companyId: createdCompanyId,
         features: featureForm,
       });
+
+      try {
+        await persistBillingLink(createdCompanyId);
+      } catch (error: any) {
+        toast.error(error?.message || 'A empresa foi criada, mas o vínculo financeiro não pôde ser salvo.');
+        onOpenChange(false);
+        return;
+      }
     }
 
     onOpenChange(false);
@@ -502,9 +667,10 @@ export default function CompanyDialog({
 
         <form onSubmit={handleSubmit} className="mt-4 flex min-h-0 flex-1 flex-col">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-            <TabsList className={`grid w-full ${isEditing ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <TabsList className={`grid w-full ${isEditing ? 'grid-cols-4' : 'grid-cols-3'}`}>
               <TabsTrigger value="geral">Geral</TabsTrigger>
               <TabsTrigger value="features">Features</TabsTrigger>
+              <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
               {isEditing && <TabsTrigger value="historico">Histórico</TabsTrigger>}
             </TabsList>
 
@@ -804,6 +970,215 @@ export default function CompanyDialog({
                     </CardContent>
                   </Card>
                 )}
+              </TabsContent>
+
+              <TabsContent value="financeiro" className="mt-0 space-y-6">
+                <Card className="overflow-hidden border-primary/15 shadow-sm">
+                  <div className="h-1 bg-primary" />
+                  <CardHeader className="pb-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <CircleDollarSign className="h-4 w-4 text-primary" />
+                          Mensalidades da Plug Guest
+                        </CardTitle>
+                        <CardDescription className="mt-1 max-w-2xl">
+                          Vincule o Customer ID da conta global do Asaas. O sistema apenas consulta e exibe as cobranças identificadas.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="w-fit border-border bg-muted/50 font-mono text-[11px] text-muted-foreground">
+                        {PLATFORM_BILLING_DESCRIPTION_MARKER}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    {billingModuleQuery.isFetching && !billingModuleQuery.data?.available ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full max-w-xl" />
+                        <Skeleton className="h-20 w-full max-w-xl" />
+                      </div>
+                    ) : !billingModuleQuery.data?.available ? (
+                      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+                        A estrutura financeira ainda não está disponível neste ambiente. O restante do cadastro da empresa continua funcionando normalmente.
+                      </div>
+                    ) : !billingModuleQuery.data.configured ? (
+                      <div className="rounded-lg border border-warning/25 bg-warning-soft p-4 text-sm leading-relaxed text-amber-900">
+                        Configure e valide primeiro o token global do Asaas na página de Integrações. Depois disso, este campo será liberado para vínculo.
+                      </div>
+                    ) : billingLinkQuery.isLoading && company ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full max-w-xl" />
+                        <Skeleton className="h-20 w-full max-w-xl" />
+                      </div>
+                    ) : billingLinkQuery.isError && company ? (
+                      <div className="flex max-w-2xl flex-col items-start gap-3 rounded-lg border border-destructive/25 bg-destructive-soft/50 p-4">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                          <div>
+                            <p className="text-sm font-semibold text-destructive">Não foi possível carregar o vínculo financeiro</p>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                              O Customer ID ficou bloqueado para evitar que uma falha de leitura pareça um vínculo vazio ou remova a configuração atual.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void billingLinkQuery.refetch()}
+                          className="gap-2"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Tentar novamente
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className={`max-w-2xl rounded-xl border p-4 transition-colors ${
+                          billingEnabled
+                            ? 'border-success/30 bg-success-soft/55'
+                            : 'border-border bg-muted/20'
+                        }`}>
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-0.5 rounded-lg p-2 ${billingEnabled ? 'bg-success text-white' : 'bg-background text-muted-foreground shadow-sm'}`}>
+                                <CircleDollarSign className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-semibold">Financeiro desta empresa</p>
+                                  <Badge
+                                    variant="outline"
+                                    className={billingEnabled
+                                      ? 'border-success/30 bg-background/70 text-success'
+                                      : 'border-border bg-background/70 text-muted-foreground'}
+                                  >
+                                    {billingEnabled ? 'Ativo' : 'Desativado'}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                                  {billingEnabled
+                                    ? billingModuleQuery.data.enabled
+                                      ? 'O admin da empresa verá as faturas, alertas de atraso e esta empresa participará da sincronização automática.'
+                                      : 'A empresa está preparada, mas só verá as faturas quando o Financeiro global também estiver ativo.'
+                                    : 'O admin da empresa não verá o Financeiro e ela ficará fora da sincronização automática. O superadmin ainda poderá abrir a prévia e sincronizar manualmente.'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-2 shadow-sm">
+                              <Label htmlFor="company-platform-billing-enabled" className="cursor-pointer text-xs font-semibold">
+                                {billingEnabled ? 'Liberado' : 'Bloqueado'}
+                              </Label>
+                              <Switch
+                                id="company-platform-billing-enabled"
+                                checked={billingEnabled}
+                                onCheckedChange={(checked) => {
+                                  setBillingEnabled(checked);
+                                  setBillingEnabledDirty(true);
+                                }}
+                                disabled={pending || (!billingEnabled && validatedBillingCustomer?.id !== billingCustomerId.trim())}
+                                aria-label={billingEnabled ? 'Desativar Financeiro nesta empresa' : 'Ativar Financeiro nesta empresa'}
+                              />
+                            </div>
+                          </div>
+                          {!billingEnabled && validatedBillingCustomer?.id !== billingCustomerId.trim() && (
+                            <p className="mt-3 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                              Localize ou valide um cliente do Asaas antes de liberar as cobranças para esta empresa.
+                            </p>
+                          )}
+                        </div>
+
+                        <AsaasCustomerFinder
+                          companyId={company?.id}
+                          selectedCustomerId={billingCustomerId.trim()}
+                          disabled={pending}
+                          onSelect={handleBillingCustomerSelect}
+                        />
+
+                        <div className="max-w-2xl">
+                          <div className="mb-2 flex items-center gap-3">
+                            <span className="h-px flex-1 bg-border" />
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">ou informe manualmente</span>
+                            <span className="h-px flex-1 bg-border" />
+                          </div>
+                          <Label htmlFor="company-asaas-customer-id">Customer ID do Asaas</Label>
+                          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              id="company-asaas-customer-id"
+                              value={billingCustomerId}
+                              onChange={(event) => handleBillingCustomerChange(event.target.value)}
+                              placeholder="cus_000000000000"
+                              autoComplete="off"
+                              spellCheck={false}
+                              className="font-mono"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleValidateBillingCustomer}
+                              disabled={!billingCustomerId.trim() || validateBillingCustomer.isPending}
+                              className="shrink-0 gap-2"
+                            >
+                              {validateBillingCustomer.isPending
+                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                : <RefreshCw className="h-4 w-4" />}
+                              Validar cliente
+                            </Button>
+                          </div>
+                          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                            Esse identificador não é secreto. O token global permanece protegido no backend e nunca é salvo na empresa.
+                          </p>
+                        </div>
+
+                        {validatedBillingCustomer && (
+                          <div className="max-w-2xl rounded-lg border border-success/25 bg-success-soft/65 p-4">
+                            <div className="flex items-start gap-3">
+                              <div className="rounded-full bg-background p-1.5 text-success shadow-sm">
+                                <CheckCircle2 className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-foreground">Cliente encontrado</p>
+                                <p className="mt-1 truncate text-sm text-foreground/75">{validatedBillingCustomer.name}</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                  {[validatedBillingCustomer.cpfCnpj, validatedBillingCustomer.email].filter(Boolean).join(' · ') || validatedBillingCustomer.id}
+                                </p>
+                                <p className="mt-1 font-mono text-[11px] text-muted-foreground">{validatedBillingCustomer.id}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {billingLinkQuery.data?.lastSyncError && !billingCustomerDirty && (
+                          <div className="max-w-2xl rounded-lg border border-destructive/25 bg-destructive-soft/60 p-4 text-sm text-destructive">
+                            A última sincronização falhou: {billingLinkQuery.data.lastSyncError}
+                          </div>
+                        )}
+
+                        {billingLinkQuery.data && !billingCustomerId.trim() && billingCustomerDirty && (
+                          <div className="max-w-2xl rounded-lg border border-warning/25 bg-warning-soft p-4 text-sm text-amber-900">
+                            O vínculo atual será removido ao salvar. A cópia local das faturas será limpa e poderá ser reconstruída ao vincular o cliente novamente.
+                          </div>
+                        )}
+
+                        <div className="max-w-2xl rounded-lg border border-border bg-muted/20 px-4 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Como o filtro funciona</p>
+                          <p className="mt-1.5 text-sm leading-relaxed text-foreground/70">
+                            A cada sincronização, serão importadas apenas as cobranças deste cliente cuja descrição contenha exatamente <span className="font-mono font-semibold text-foreground">{PLATFORM_BILLING_DESCRIPTION_MARKER}</span>.
+                          </p>
+                          {billingLinkQuery.data?.lastSyncedAt && !billingCustomerDirty && (
+                            <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                              <p>Última sincronização: {new Date(billingLinkQuery.data.lastSyncedAt).toLocaleString('pt-BR')}.</p>
+                              <p>
+                                {billingLinkQuery.data.lastMatchedCount} importadas de {billingLinkQuery.data.lastFetchedCount} cobranças encontradas
+                                {billingLinkQuery.data.lastIgnoredCount > 0 ? ` · ${billingLinkQuery.data.lastIgnoredCount} sem o marcador` : ''}.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
 
               <TabsContent value="features" className="mt-0">

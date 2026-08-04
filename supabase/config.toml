@@ -77,3 +77,9 @@ verify_jwt = false
 
 [functions.reconcile-reservation-payments]
 verify_jwt = false
+
+[functions.platform-billing-config]
+verify_jwt = true
+
+[functions.platform-billing]
+verify_jwt = false

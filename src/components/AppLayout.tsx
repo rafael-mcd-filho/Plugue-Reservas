@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -21,6 +21,7 @@ import {
   Pin,
   PinOff,
   Plug,
+  ReceiptText,
   type LucideIcon,
   ScrollText,
   Settings,
@@ -47,6 +48,11 @@ import {
   type CompanyPanelPermission,
 } from '@/lib/companyPermissions';
 import type { CompanyFeatureKey } from '@/lib/companyFeatures';
+import {
+  useCompanyBillingSummary,
+  usePlatformBillingModuleStatus,
+} from '@/hooks/usePlatformBilling';
+import OverdueBillingDialog from '@/components/billing/OverdueBillingDialog';
 
 interface NavItem {
   label: string;
@@ -57,6 +63,7 @@ interface NavItem {
   requiredPermission?: CompanyPanelPermission;
   requiredFeature?: CompanyFeatureKey;
   matchPrefix?: boolean;
+  badgeCount?: number;
 }
 
 const ROLE_LABELS: Record<AppRole, string> = {
@@ -66,6 +73,17 @@ const ROLE_LABELS: Record<AppRole, string> = {
 };
 
 const DESKTOP_SIDEBAR_PINNED_STORAGE_KEY = 'app-layout:desktop-sidebar-pinned';
+
+function getFortalezaDateKey() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Fortaleza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 function formatRoleLabel(role: AppRole) {
   return ROLE_LABELS[role] ?? role;
@@ -77,6 +95,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const companyContext = useMaybeCompanySlug();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [overdueBillingDialogOpen, setOverdueBillingDialogOpen] = useState(false);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY) === 'true';
@@ -99,6 +118,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const { activeRoles, hasPermission, permissionsLoading } = useCompanyPermissions();
   const rolesLoaded = !loading && activeRoles.length > 0;
+  const canViewCompanyBilling = !!slug && (activeRoles.includes('admin') || activeRoles.includes('superadmin'));
+  const billingModuleQuery = usePlatformBillingModuleStatus({ enabled: canViewCompanyBilling });
+  const companyBillingSummaryQuery = useCompanyBillingSummary(companyContext?.companyId, {
+    enabled: canViewCompanyBilling,
+  });
+  const companyBillingSummary = companyBillingSummaryQuery.data;
   const sidebarContextLabel = slug ? 'Painel da unidade' : 'Painel global';
   const companyName = companyContext?.companyName || slug || 'Unidade';
   const hasCompanyPermission = (permission?: CompanyPanelPermission) => !permission || hasPermission(permission);
@@ -166,6 +191,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'automations_view',
           requiredFeature: 'whatsapp_integration',
+        },
+        {
+          label: 'Financeiro',
+          description: 'Plano e faturas da unidade',
+          icon: ReceiptText,
+          path: `/${slug}/admin/financeiro`,
+          showFor: ['admin', 'superadmin'],
+          badgeCount: companyBillingSummary?.overdueCount ?? 0,
         },
         {
           label: 'Pagamentos',
@@ -246,6 +279,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           matchPrefix: true,
         },
         {
+          label: 'Financeiro',
+          description: 'Mensalidades da plataforma',
+          icon: ReceiptText,
+          path: '/financeiro',
+          showFor: ['superadmin'],
+          matchPrefix: true,
+        },
+        {
           label: 'Usu\u00E1rios',
           description: 'Acesso global',
           icon: Users,
@@ -309,6 +350,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
     if (permissionsLoading && item.requiredPermission) return false;
     if (!hasCompanyPermission(item.requiredPermission)) return false;
+    if (
+      slug
+      && item.path === `/${slug}/admin/financeiro`
+      && (
+        !billingModuleQuery.data?.enabled
+        || !companyBillingSummary?.companyBillingEnabled
+      )
+    ) return false;
     if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
@@ -330,10 +379,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return location.pathname === item.path;
   };
 
-  const activeNavItem = useMemo(
-    () => visibleNavItems.find((item) => isNavItemActive(item)) ?? null,
-    [location.pathname, visibleNavItems],
-  );
+  const activeNavItem = visibleNavItems.find((item) => isNavItemActive(item)) ?? null;
   const isProfileRoute = location.pathname === profilePath;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
   const showHeaderContextBadges = !isOperatorPanel;
@@ -392,6 +438,36 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const companyId = companyContext?.companyId;
+    if (
+      !canViewCompanyBilling
+      || !billingModuleQuery.data?.enabled
+      || !companyBillingSummary?.companyBillingEnabled
+      || !companyId
+      || !companyBillingSummary?.showOverduePopup
+    ) {
+      setOverdueBillingDialogOpen(false);
+      return;
+    }
+
+    const storageKey = `platform-billing:overdue-popup:${companyId}:${getFortalezaDateKey()}`;
+    try {
+      if (window.sessionStorage.getItem(storageKey)) return;
+      window.sessionStorage.setItem(storageKey, 'shown');
+    } catch {
+      // If session storage is unavailable, showing once per current mount is the safest fallback.
+    }
+
+    setOverdueBillingDialogOpen(true);
+  }, [
+    billingModuleQuery.data?.enabled,
+    canViewCompanyBilling,
+    companyBillingSummary?.companyBillingEnabled,
+    companyBillingSummary?.showOverduePopup,
+    companyContext?.companyId,
+  ]);
+
   const handleSignOut = async () => {
     stopImpersonation();
     await signOut();
@@ -424,7 +500,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             isActive ? 'text-primary-foreground' : 'text-sidebar-foreground/45 group-hover:text-sidebar-foreground/80',
           )}
         />
-        <span className="truncate">{item.label}</span>
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {!!item.badgeCount && item.badgeCount > 0 && (
+          <span
+            aria-label={`${item.badgeCount} ${item.badgeCount === 1 ? 'fatura vencida' : 'faturas vencidas'}`}
+            className={cn(
+              'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums',
+              isActive
+                ? 'bg-primary-foreground text-primary'
+                : 'bg-destructive text-destructive-foreground',
+            )}
+          >
+            {item.badgeCount > 99 ? '99+' : item.badgeCount}
+          </span>
+        )}
       </Link>
     );
   };
@@ -659,6 +748,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
+      {slug && canViewCompanyBilling && companyBillingSummary && (
+        <OverdueBillingDialog
+          open={overdueBillingDialogOpen}
+          overdueCount={companyBillingSummary.overdueCount}
+          overdueTotal={companyBillingSummary.overdueTotal}
+          oldestOverdueDays={companyBillingSummary.oldestOverdueDays}
+          onOpenChange={setOverdueBillingDialogOpen}
+          onViewInvoices={() => {
+            setOverdueBillingDialogOpen(false);
+            navigate(`/${slug}/admin/financeiro`);
+          }}
+        />
+      )}
     </div>
   );
 }
