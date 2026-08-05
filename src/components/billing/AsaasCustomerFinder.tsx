@@ -10,6 +10,7 @@ import type { ValidatedAsaasCustomer } from '@/lib/platform-billing-contracts';
 interface AsaasCustomerFinderProps {
   companyId?: string | null;
   selectedCustomerId?: string | null;
+  allowLinkedCustomers?: boolean;
   disabled?: boolean;
   onSelect: (customer: ValidatedAsaasCustomer) => void;
 }
@@ -17,6 +18,7 @@ interface AsaasCustomerFinderProps {
 export default function AsaasCustomerFinder({
   companyId,
   selectedCustomerId,
+  allowLinkedCustomers = false,
   disabled = false,
   onSelect,
 }: AsaasCustomerFinderProps) {
@@ -110,6 +112,7 @@ export default function AsaasCustomerFinder({
                 {customers.map((customer) => {
                   const selected = customer.id === selectedCustomerId;
                   const linkedElsewhere = !!customer.linkedCompanyId && customer.linkedCompanyId !== companyId;
+                  const linkedSelectionDisabled = linkedElsewhere && !allowLinkedCustomers;
                   const detail = [customer.cpfCnpj, customer.email].filter(Boolean).join(' · ');
 
                   return (
@@ -117,10 +120,12 @@ export default function AsaasCustomerFinder({
                       key={customer.id}
                       type="button"
                       onClick={() => onSelect(customer)}
-                      disabled={disabled || linkedElsewhere}
+                      disabled={disabled || linkedSelectionDisabled}
                       className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                        linkedElsewhere
+                        linkedSelectionDisabled
                           ? 'cursor-not-allowed border-border/50 bg-muted/15 opacity-60'
+                          : linkedElsewhere
+                          ? 'border-warning/20 bg-warning-soft/25 hover:border-warning/35'
                           : selected
                           ? 'border-primary/35 bg-primary/[0.08]'
                           : 'border-transparent bg-muted/25 hover:border-border hover:bg-muted/50'
@@ -147,7 +152,7 @@ export default function AsaasCustomerFinder({
                         </Badge>
                         <span className={`mt-1 flex items-center justify-end gap-1 text-[10px] font-medium ${linkedElsewhere ? 'text-amber-800' : 'text-primary opacity-0 transition-opacity group-hover:opacity-100'}`}>
                           {!linkedElsewhere && <ArrowRight className="h-2.5 w-2.5" />}
-                          {linkedElsewhere ? 'Vinculado a outra empresa' : 'Selecionar'}
+                          {linkedElsewhere ? (allowLinkedCustomers ? 'Ver Customer ID' : 'Vinculado a outra empresa') : 'Selecionar'}
                         </span>
                       </span>
                     </button>

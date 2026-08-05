@@ -424,7 +424,7 @@ function BillingPreviewBanner({
           {!globalEnabled
             ? 'O Financeiro global está desativado. Você pode conferir o vínculo, sincronizar e revisar esta tela; os administradores da empresa ainda não veem o módulo.'
             : !companyEnabled
-              ? 'O Financeiro desta empresa está bloqueado. A prévia e a sincronização manual continuam disponíveis somente para você; o admin da empresa não vê o módulo.'
+              ? 'O Financeiro desta empresa está desativado. A prévia e a sincronização manual continuam disponíveis somente para você; o admin da empresa não vê o módulo.'
               : 'Esta é uma prévia administrativa. Os dados continuam protegidos para os demais perfis.'}
         </p>
       </div>

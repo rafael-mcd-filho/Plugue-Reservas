@@ -1067,7 +1067,7 @@ export default function CompanyDialog({
                             </div>
                             <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-2 shadow-sm">
                               <Label htmlFor="company-platform-billing-enabled" className="cursor-pointer text-xs font-semibold">
-                                {billingEnabled ? 'Liberado' : 'Bloqueado'}
+                                {billingEnabled ? 'Liberado' : 'Desativado'}
                               </Label>
                               <Switch
                                 id="company-platform-billing-enabled"

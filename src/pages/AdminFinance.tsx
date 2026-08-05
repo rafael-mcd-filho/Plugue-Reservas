@@ -9,6 +9,7 @@ import {
   CircleDollarSign,
   Clock3,
   Eye,
+  Info,
   Loader2,
   RefreshCw,
   Search,
@@ -16,6 +17,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import AsaasCustomerLookupDialog from '@/components/billing/AsaasCustomerLookupDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -71,6 +73,7 @@ function formatDateTime(value: string | null | undefined) {
 export default function AdminFinance() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<CompanyFilter>('all');
+  const [customerLookupOpen, setCustomerLookupOpen] = useState(false);
   const moduleQuery = usePlatformBillingModuleStatus();
   const configQuery = usePlatformAsaasConfig();
   const overviewQuery = useSuperadminBillingOverview();
@@ -212,6 +215,17 @@ export default function AdminFinance() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setCustomerLookupOpen(true)}
+            disabled={!config?.configured}
+            className="gap-2"
+            title={config?.configured ? 'Pesquisar clientes no Asaas' : 'Configure o token global do Asaas primeiro'}
+          >
+            <Search className="h-4 w-4" />
+            Localizar Customer ID
+          </Button>
           <Button asChild variant="outline" className="gap-2">
             <Link to="/integracoes">
               <Settings2 className="h-4 w-4" />
@@ -295,6 +309,16 @@ export default function AdminFinance() {
         />
       </section>
 
+      <div className="flex items-start gap-3 rounded-xl border border-primary/15 bg-primary/[0.045] px-4 py-3.5">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <div>
+          <p className="text-sm font-semibold">O que significa “Financeiro liberado”?</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            O admin da empresa passa a ver as faturas, os avisos de atraso e o sistema sincroniza as cobranças a cada quatro horas. Isso não pausa nem bloqueia automaticamente a conta por inadimplência.
+          </p>
+        </div>
+      </div>
+
       <Card className="overflow-hidden shadow-sm">
         <CardHeader className="border-b border-border bg-muted/15">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -325,7 +349,7 @@ export default function AdminFinance() {
                   <SelectItem value="all">Todas as empresas</SelectItem>
                   <SelectItem value="overdue">Com fatura vencida</SelectItem>
                   <SelectItem value="enabled">Financeiro liberado</SelectItem>
-                  <SelectItem value="disabled">Financeiro bloqueado</SelectItem>
+                  <SelectItem value="disabled">Financeiro desativado</SelectItem>
                   <SelectItem value="configured">Vinculadas</SelectItem>
                   <SelectItem value="unconfigured">Não vinculadas</SelectItem>
                   <SelectItem value="error">Revalidar ou com erro</SelectItem>
@@ -371,6 +395,12 @@ export default function AdminFinance() {
           )}
         </CardContent>
       </Card>
+
+      <AsaasCustomerLookupDialog
+        open={customerLookupOpen}
+        onOpenChange={setCustomerLookupOpen}
+        companies={companies ?? []}
+      />
     </div>
   );
 }
@@ -416,7 +446,7 @@ function CompanyOverviewRow({
       toast.success(
         pendingEnabled
           ? `Financeiro liberado para ${company.companyName}.`
-          : `Financeiro bloqueado para ${company.companyName}.`,
+          : `Financeiro desativado para ${company.companyName}.`,
       );
       setPendingEnabled(null);
     } catch (error: any) {
@@ -440,7 +470,7 @@ function CompanyOverviewRow({
             aria-label={`${company.billingEnabled ? 'Desativar' : 'Ativar'} Financeiro para ${company.companyName}`}
           />
           <span className={company.billingEnabled ? 'text-xs font-semibold text-success' : 'text-xs font-medium text-muted-foreground'}>
-            {company.billingEnabled ? (globalEnabled ? 'Liberado' : 'Preparado') : 'Bloqueado'}
+            {company.billingEnabled ? (globalEnabled ? 'Liberado' : 'Preparado') : 'Desativado'}
           </span>
         </div>
         <p className="mt-1 max-w-40 text-[11px] leading-snug text-muted-foreground">
@@ -524,13 +554,13 @@ function CompanyOverviewRow({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingEnabled ? 'Liberar Financeiro para esta empresa?' : 'Bloquear Financeiro desta empresa?'}
+              {pendingEnabled ? 'Liberar Financeiro para esta empresa?' : 'Desativar Financeiro desta empresa?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
               <span className="block">
                 {pendingEnabled
                   ? globalEnabled
-                    ? `Os administradores de ${company.companyName} passarão a ver as faturas e alertas. A empresa também entrará na sincronização automática a cada quatro horas.`
+                    ? `Os administradores de ${company.companyName} passarão a ver as faturas e alertas. A empresa também entrará na sincronização automática a cada quatro horas. Isso não pausa nem bloqueia automaticamente a conta por atraso.`
                     : `${company.companyName} ficará preparada para o piloto. A visualização do admin e a sincronização automática começarão somente quando o Financeiro global for ativado.`
                   : `Os administradores de ${company.companyName} deixarão de ver o Financeiro e a empresa sairá da sincronização automática.`}
               </span>
@@ -549,7 +579,7 @@ function CompanyOverviewRow({
               disabled={setCompanyEnabled.isPending}
             >
               {setCompanyEnabled.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {pendingEnabled ? 'Liberar empresa' : 'Bloquear empresa'}
+              {pendingEnabled ? 'Liberar empresa' : 'Desativar Financeiro'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
