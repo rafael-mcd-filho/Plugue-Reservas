@@ -18,6 +18,7 @@ import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
+const CustomerRecurrenceReport = lazyWithReload(() => import("@/pages/CustomerRecurrenceReport"));
 const Reservations = lazyWithReload(() => import("@/pages/Reservations"));
 const TableMap = lazyWithReload(() => import("@/pages/TableMap"));
 const CalendarView = lazyWithReload(() => import("@/pages/CalendarView"));
@@ -508,6 +509,18 @@ const App = () => (
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
                     <CompanyAdminHome />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/relatorios/recorrencia"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="leads_view"
+                    requiredCompanyFeature="advanced_reports"
+                  >
+                    <CustomerRecurrenceReport />
                   </CompanyAdminRoute>
                 }
               />
