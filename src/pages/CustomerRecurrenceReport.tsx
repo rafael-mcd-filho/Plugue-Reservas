@@ -505,9 +505,9 @@ export default function CustomerRecurrenceReport() {
     <Card className="border-border bg-card/95 shadow-sm">
       <CardContent className="p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:max-w-[620px]">
+          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:max-w-[620px]">
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
+              <div className="flex h-6 items-center gap-1">
                 <Label htmlFor="recurrence-period">Período da análise</Label>
                 <InfoTooltip
                   content="Nos períodos mensais, a comparação usa o mesmo recorte do mês anterior. No período personalizado, usa um intervalo anterior com a mesma duração."
@@ -516,7 +516,7 @@ export default function CustomerRecurrenceReport() {
                 />
               </div>
               <Select value={periodMode} onValueChange={(value) => handlePeriodModeChange(value as PeriodMode)}>
-                <SelectTrigger id="recurrence-period" aria-label="Período da análise">
+                <SelectTrigger id="recurrence-period" className="h-11" aria-label="Período da análise">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -528,44 +528,54 @@ export default function CustomerRecurrenceReport() {
             </div>
 
             {periodMode === 'custom' ? (
-              <div className="space-y-1.5">
-                <p className="text-sm font-medium leading-none">Intervalo personalizado</p>
+              <div
+                className="space-y-1.5"
+                role="group"
+                aria-labelledby="recurrence-custom-range-label"
+              >
+                <div className="flex h-6 items-center">
+                  <p id="recurrence-custom-range-label" className="text-sm font-medium leading-none">
+                    Intervalo personalizado
+                  </p>
+                </div>
                 <DateRangePicker
                   value={customRange}
                   onChange={handleCustomRangeChange}
-                  className="w-full"
+                  className="h-11 w-full"
                   align="start"
                 />
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label>Intervalo considerado</Label>
-                <div className="flex h-9 items-center rounded-md border border-border bg-muted/25 px-3 text-sm tabular-nums text-muted-foreground">
+                <div className="flex h-6 items-center">
+                  <Label>Intervalo considerado</Label>
+                </div>
+                <div className="flex h-11 items-center rounded-md border border-border bg-muted/25 px-3 text-sm tabular-nums text-muted-foreground">
                   {format(effectiveRange.from!, 'dd/MM/yyyy')} – {format(effectiveRange.to!, 'dd/MM/yyyy')}
                 </div>
               </div>
             )}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-              <Switch
-                id="include-companions"
-                checked={includeCompanions}
-                onCheckedChange={handleIncludeCompanionsChange}
-                aria-describedby="include-companions-help"
-              />
-              <div>
-                <div className="flex items-center gap-1">
-                  <Label htmlFor="include-companions" className="cursor-pointer text-sm">
-                    Incluir acompanhantes
-                  </Label>
-                  <InfoTooltip
-                    content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
-                    ariaLabel="Entender a inclusão de acompanhantes"
-                    interaction="popover"
-                  />
-                </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between xl:justify-end">
+            <div className="w-full space-y-1.5 sm:w-auto sm:min-w-[284px]">
+              <div className="flex h-6 items-center gap-1">
+                <Label htmlFor="include-companions" className="cursor-pointer text-sm">
+                  Incluir acompanhantes
+                </Label>
+                <InfoTooltip
+                  content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
+                  ariaLabel="Entender a inclusão de acompanhantes"
+                  interaction="popover"
+                />
+              </div>
+              <div className="flex h-11 items-center gap-3 rounded-md border border-border bg-muted/20 px-3">
+                <Switch
+                  id="include-companions"
+                  checked={includeCompanions}
+                  onCheckedChange={handleIncludeCompanionsChange}
+                  aria-describedby="include-companions-help"
+                />
                 <p id="include-companions-help" className="text-[11px] text-muted-foreground">
                   Apenas os identificados por telefone
                 </p>
@@ -576,6 +586,7 @@ export default function CustomerRecurrenceReport() {
               type="button"
               variant="outline"
               size="icon"
+              className="shrink-0 self-end"
               onClick={() => reportQuery.refetch()}
               disabled={reportQuery.isFetching}
               aria-label="Atualizar relatório"
