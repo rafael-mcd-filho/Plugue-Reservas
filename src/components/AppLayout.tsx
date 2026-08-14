@@ -67,6 +67,7 @@ interface NavItem {
   requiredFeature?: CompanyFeatureKey;
   matchPrefix?: boolean;
   badgeCount?: number;
+  statusLabel?: string;
 }
 
 const ROLE_LABELS: Record<AppRole, string> = {
@@ -197,6 +198,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'superadmin'],
           requiredPermission: 'leads_view',
           requiredFeature: 'advanced_reports',
+          statusLabel: 'Em desenvolvimento',
         },
       ]
     : [];
@@ -550,7 +552,28 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             isActive ? 'text-primary-foreground' : 'text-sidebar-foreground/45 group-hover:text-sidebar-foreground/80',
           )}
         />
-        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{item.label}</span>
+          {item.statusLabel && (
+            <span
+              className={cn(
+                'mt-1 flex w-fit max-w-full items-center gap-1.5 text-[10px] font-semibold leading-none',
+                isActive
+                  ? 'rounded-full bg-amber-100 px-1.5 py-1 text-amber-950'
+                  : 'text-amber-400',
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  isActive ? 'bg-amber-500' : 'bg-amber-400',
+                )}
+              />
+              <span className="truncate">{item.statusLabel}</span>
+            </span>
+          )}
+        </span>
         {!!item.badgeCount && item.badgeCount > 0 && (
           <span
             aria-label={`${item.badgeCount} ${item.badgeCount === 1 ? 'fatura vencida' : 'faturas vencidas'}`}

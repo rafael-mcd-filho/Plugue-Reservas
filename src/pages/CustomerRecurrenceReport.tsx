@@ -56,6 +56,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   type CustomerFrequencyBandKey,
@@ -251,6 +252,7 @@ function KpiCard({
   label,
   value,
   helper,
+  explanation,
   icon: Icon,
   tone,
   current,
@@ -261,6 +263,7 @@ function KpiCard({
   label: string;
   value: string;
   helper: string;
+  explanation: string;
   icon: LucideIcon;
   tone: KpiTone;
   current: number;
@@ -273,7 +276,15 @@ function KpiCard({
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+            <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              <span>{label}</span>
+              <InfoTooltip
+                content={`${explanation} A variação abaixo compara com ${comparisonLabel}.`}
+                ariaLabel={`Como é calculado: ${label}`}
+                className="shrink-0 normal-case tracking-normal"
+                interaction="popover"
+              />
+            </div>
             <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</p>
           </div>
           <div className={cn('rounded-lg p-2.5', KPI_TONE_CLASSES[tone])}>
@@ -496,7 +507,14 @@ export default function CustomerRecurrenceReport() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:max-w-[620px]">
             <div className="space-y-1.5">
-              <Label htmlFor="recurrence-period">Período da análise</Label>
+              <div className="flex items-center gap-1">
+                <Label htmlFor="recurrence-period">Período da análise</Label>
+                <InfoTooltip
+                  content="Nos períodos mensais, a comparação usa o mesmo recorte do mês anterior. No período personalizado, usa um intervalo anterior com a mesma duração."
+                  ariaLabel="Entender a comparação entre períodos"
+                  interaction="popover"
+                />
+              </div>
               <Select value={periodMode} onValueChange={(value) => handlePeriodModeChange(value as PeriodMode)}>
                 <SelectTrigger id="recurrence-period" aria-label="Período da análise">
                   <SelectValue />
@@ -538,9 +556,16 @@ export default function CustomerRecurrenceReport() {
                 aria-describedby="include-companions-help"
               />
               <div>
-                <Label htmlFor="include-companions" className="cursor-pointer text-sm">
-                  Incluir acompanhantes
-                </Label>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="include-companions" className="cursor-pointer text-sm">
+                    Incluir acompanhantes
+                  </Label>
+                  <InfoTooltip
+                    content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
+                    ariaLabel="Entender a inclusão de acompanhantes"
+                    interaction="popover"
+                  />
+                </div>
                 <p id="include-companions-help" className="text-[11px] text-muted-foreground">
                   Apenas os identificados por telefone
                 </p>
@@ -632,11 +657,16 @@ export default function CustomerRecurrenceReport() {
                   <h2 id="recurrence-summary-title">Resumo da recorrência</h2>
                   <p>Comparação com {comparisonLabel}.</p>
                 </div>
+                <div className="mb-3 rounded-lg border border-info/15 bg-info-soft/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  <span className="font-semibold text-foreground">Como ler: </span>
+                  <span><strong>recorrente</strong> já visitava antes do período; <strong>repetiu no período</strong> fez duas ou mais visitas dentro dele.</span>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
                   <KpiCard
                     label="Identificados"
                     value={formatInteger(report.summary.identified_customers)}
                     helper="Clientes únicos que compareceram"
+                    explanation="Clientes únicos reconhecidos pelos dígitos do telefone informado, com presença confirmada no período. Sem telefone identificável, não entram no cálculo."
                     icon={UsersRound}
                     tone="neutral"
                     current={report.summary.identified_customers}
@@ -647,6 +677,7 @@ export default function CustomerRecurrenceReport() {
                     label="Recorrentes"
                     value={formatInteger(report.summary.returning_customers)}
                     helper="Já tinham uma visita antes do período"
+                    explanation="Clientes do período que já tinham pelo menos uma visita anterior registrada. É consultado todo o histórico disponível, sem limite de 30, 60 ou 90 dias."
                     icon={UserCheck}
                     tone="success"
                     current={report.summary.returning_customers}
@@ -657,6 +688,7 @@ export default function CustomerRecurrenceReport() {
                     label="Taxa de recorrência"
                     value={formatPercent(report.summary.recurrence_rate)}
                     helper="Recorrentes entre todos os identificados"
+                    explanation="Recorrentes ÷ clientes identificados × 100. Exemplo: 7 recorrentes entre 368 identificados resultam em 1,9%."
                     icon={Repeat2}
                     tone="success"
                     current={report.summary.recurrence_rate}
@@ -668,6 +700,7 @@ export default function CustomerRecurrenceReport() {
                     label="Novos clientes"
                     value={formatInteger(report.summary.new_customers)}
                     helper="Primeira visita registrada no sistema"
+                    explanation="Clientes cuja primeira visita registrada aconteceu dentro do período. Quem veio duas vezes pela primeira vez ainda é considerado novo aqui."
                     icon={UserPlus}
                     tone="primary"
                     current={report.summary.new_customers}
@@ -678,6 +711,7 @@ export default function CustomerRecurrenceReport() {
                     label="Repetiram no período"
                     value={formatInteger(report.summary.repeated_in_period)}
                     helper={`${formatPercent(report.summary.repeat_rate)} fizeram 2 ou mais visitas`}
+                    explanation="Clientes com duas ou mais visitas dentro do intervalo selecionado, independentemente de já terem uma visita anterior."
                     icon={CalendarClock}
                     tone="info"
                     current={report.summary.repeated_in_period}
@@ -688,6 +722,7 @@ export default function CustomerRecurrenceReport() {
                     label="Visitas adicionais"
                     value={formatInteger(report.summary.additional_visits)}
                     helper="Visitas além da primeira no intervalo"
+                    explanation="Soma das visitas além da primeira de cada cliente dentro do intervalo. Exemplo: três visitas do mesmo cliente geram duas visitas adicionais."
                     icon={Repeat2}
                     tone="warning"
                     current={report.summary.additional_visits}
@@ -702,9 +737,16 @@ export default function CustomerRecurrenceReport() {
                   <CardHeader className="pb-2">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <CardTitle id="monthly-composition-title">Novos × recorrentes</CardTitle>
+                        <div className="flex items-center gap-1.5">
+                          <CardTitle id="monthly-composition-title">Novos × recorrentes</CardTitle>
+                          <InfoTooltip
+                            content="Em cada mês, é recorrente quem já tinha uma visita antes do primeiro dia daquele mês. Os demais são classificados como novos."
+                            ariaLabel="Entender o gráfico de novos e recorrentes"
+                            interaction="popover"
+                          />
+                        </div>
                         <CardDescription className="mt-1">
-                          Composição mensal dos clientes identificados nos últimos 6 meses
+                          Nos últimos 6 meses: novo começa no mês; recorrente já tinha histórico antes dele
                         </CardDescription>
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground sm:text-right">
@@ -786,9 +828,16 @@ export default function CustomerRecurrenceReport() {
 
                 <Card className="min-w-0 border-border shadow-sm xl:col-span-2">
                   <CardHeader className="pb-2">
-                    <CardTitle id="frequency-bands-title">Faixas de frequência</CardTitle>
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle id="frequency-bands-title">Faixas de frequência</CardTitle>
+                      <InfoTooltip
+                        content="Entre os clientes que visitaram no período, agrupa pela quantidade total de visitas acumuladas até o fim do intervalo, somando o histórico anterior."
+                        ariaLabel="Entender o gráfico de faixas de frequência"
+                        interaction="popover"
+                      />
+                    </div>
                     <CardDescription className="mt-1">
-                      Total acumulado de visitas até o fim do período
+                      Considera todo o histórico acumulado até o fim do período
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-3">
@@ -871,9 +920,16 @@ export default function CustomerRecurrenceReport() {
                 <Card className="min-w-0 border-border shadow-sm">
                   <CardHeader className="gap-4 pb-3 lg:flex-row lg:items-end lg:justify-between">
                     <div>
-                      <CardTitle id="customer-base-title">Base de clientes do período</CardTitle>
+                      <div className="flex items-center gap-1.5">
+                        <CardTitle id="customer-base-title">Base de clientes do período</CardTitle>
+                        <InfoTooltip
+                          content="Uma linha por telefone identificado. “Antes” mostra as visitas anteriores ao intervalo; “No período”, as visitas dentro dele; e “Total”, todo o histórico até o fim do período."
+                          ariaLabel="Entender a base de clientes"
+                          interaction="popover"
+                        />
+                      </div>
                       <CardDescription className="mt-1">
-                        Histórico consolidado por telefone, com dados pessoais protegidos
+                        Uma linha por telefone; nome mais recente e contato mascarado
                       </CardDescription>
                     </div>
                     <div className="relative w-full lg:w-[320px]">
