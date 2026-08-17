@@ -4,7 +4,9 @@
 --   2. apply 20260814120000_fix_customer_recurrence_waitlist_fallback.sql
 --   3. execute fixtures before @apply-core-migration and capture old recurrence JSON
 --   4. apply 20260814130000_add_server_side_crm_leads_read_model.sql
---   5. execute assertions after @apply-core-migration and compare recurrence JSON
+--   5. apply 20260817120000_add_recurrence_minimum_visits_filter.sql at
+--      @apply-recurrence-pagination-filter-migration
+--   6. execute assertions and compare the pre-core recurrence JSON
 
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
@@ -524,7 +526,64 @@ SELECT
   '2026-08-05 02:30:00+00'
 FROM generate_series(1, 101) AS series(value);
 
+-- A dedicated company with more than 1,000 identified customers proves that
+-- recurrence pagination can address rows beyond 1,000 inside the single JSON
+-- value returned by the RPC. PostgREST's max_rows limit applies to top-level
+-- result rows, not to this nested page. The first 1,005 customers have two
+-- visits; the final seven have one.
+INSERT INTO public.reservations (
+  id, company_id, status, guest_name, guest_phone, guest_email,
+  guest_birthdate, checked_in_at, date, time, party_size,
+  checked_in_party_size, occasion, origin_waitlist_id, created_at
+)
+SELECT
+  (
+    '70000000-0000-4000-8000-' || lpad(series.value::text, 12, '0')
+  )::uuid,
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc'::uuid,
+  'completed',
+  'Scale Customer ' || lpad(series.value::text, 4, '0'),
+  '84' || lpad((910000000 + series.value)::text, 9, '0'),
+  NULL,
+  NULL,
+  NULL,
+  '2026-08-10',
+  '19:00',
+  2,
+  NULL,
+  NULL,
+  NULL,
+  '2026-08-01 12:00:00+00'
+FROM generate_series(1, 1012) AS series(value);
+
+INSERT INTO public.reservations (
+  id, company_id, status, guest_name, guest_phone, guest_email,
+  guest_birthdate, checked_in_at, date, time, party_size,
+  checked_in_party_size, occasion, origin_waitlist_id, created_at
+)
+SELECT
+  (
+    '71000000-0000-4000-8000-' || lpad(series.value::text, 12, '0')
+  )::uuid,
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc'::uuid,
+  'completed',
+  'Scale Customer ' || lpad(series.value::text, 4, '0'),
+  '84' || lpad((910000000 + series.value)::text, 9, '0'),
+  NULL,
+  NULL,
+  NULL,
+  '2026-07-10',
+  '19:00',
+  2,
+  NULL,
+  NULL,
+  NULL,
+  '2026-07-01 12:00:00+00'
+FROM generate_series(1, 1005) AS series(value);
+
 -- @apply-core-migration
+
+-- @apply-recurrence-pagination-filter-migration
 
 DO $regression$
 DECLARE
@@ -533,9 +592,171 @@ DECLARE
   _history jsonb;
   _lead jsonb;
   _key text;
+  _recurrence_page jsonb;
+  _recurrence_next_page jsonb;
+  _recurrence_filtered jsonb;
+  _recurrence_compat jsonb;
+  _recurrence_base jsonb;
 BEGIN
   PERFORM set_config('request.jwt.claim.role', 'service_role', false);
   PERFORM set_config('request.jwt.claim.sub', '', false);
+
+  IF (
+    SELECT count(*)
+    FROM public.reservations
+    WHERE company_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'::uuid
+  ) <> 2017 THEN
+    RAISE EXCEPTION 'scale fixture must stay above 1,000 source rows';
+  END IF;
+
+  -- Eight positional arguments exercise compatibility with clients deployed
+  -- before min_total_visits existed. Only the nine-argument public signature
+  -- must remain, so PostgREST has no overload ambiguity.
+  _recurrence_compat := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    84, 12, NULL, 'previous_period'
+  );
+  _recurrence_page := _recurrence_compat;
+  _recurrence_base := public._get_customer_recurrence_report_without_min_filter(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    84, 12, NULL, 'previous_period'
+  );
+
+  IF _recurrence_compat IS DISTINCT FROM jsonb_set(
+      _recurrence_base,
+      '{meta,min_total_visits}',
+      'null'::jsonb,
+      true
+    ) THEN
+    RAISE EXCEPTION 'null minimum changed the legacy report payload';
+  END IF;
+
+  IF (_recurrence_page #>> '{meta,customers_total}')::integer <> 1012
+    OR (_recurrence_page #>> '{meta,filtered_customers_total}')::integer <> 1012
+    OR (_recurrence_page #>> '{summary,identified_customers}')::integer <> 1012
+    OR (_recurrence_page #>> '{meta,page}')::integer <> 84
+    OR (_recurrence_page #>> '{meta,page_size}')::integer <> 12
+    OR (_recurrence_page #> '{meta,min_total_visits}') IS DISTINCT FROM 'null'::jsonb
+    OR jsonb_array_length(_recurrence_page -> 'customers') <> 12
+    OR _recurrence_page #>> '{customers,0,customer_key}' <> 'customer:997'
+    OR _recurrence_page #>> '{customers,11,customer_key}' <> 'customer:1008' THEN
+    RAISE EXCEPTION 'recurrence page crossing row 1,000 mismatch: %',
+      _recurrence_page -> 'meta';
+  END IF;
+
+  _recurrence_next_page := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    85, 12, NULL, 'previous_period', NULL
+  );
+
+  IF (_recurrence_next_page #>> '{meta,page}')::integer <> 85
+    OR jsonb_array_length(_recurrence_next_page -> 'customers') <> 4
+    OR _recurrence_next_page #>> '{customers,0,customer_key}' <> 'customer:1009'
+    OR _recurrence_next_page #>> '{customers,3,customer_key}' <> 'customer:1012'
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(_recurrence_page -> 'customers') AS page_84
+      JOIN jsonb_array_elements(_recurrence_next_page -> 'customers') AS page_85
+        ON page_84 ->> 'customer_key' = page_85 ->> 'customer_key'
+    ) THEN
+    RAISE EXCEPTION 'recurrence pages after row 1,000 overlap or truncate: %, %',
+      _recurrence_page -> 'meta', _recurrence_next_page -> 'meta';
+  END IF;
+
+  -- These are the same middle/last-page numbers visible in the production UI
+  -- report that originally exposed the client-side pagination problem.
+  _recurrence_filtered := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    28, 12, NULL, 'previous_period', 2
+  );
+  IF (_recurrence_filtered #>> '{meta,page}')::integer <> 28
+    OR (_recurrence_filtered #>> '{meta,filtered_customers_total}')::integer <> 1005
+    OR jsonb_array_length(_recurrence_filtered -> 'customers') <> 12
+    OR _recurrence_filtered #>> '{customers,0,customer_key}' <> 'customer:325'
+    OR _recurrence_filtered #>> '{customers,11,customer_key}' <> 'customer:336' THEN
+    RAISE EXCEPTION 'recurrence filtered page 28 mismatch: %',
+      _recurrence_filtered -> 'meta';
+  END IF;
+
+  _recurrence_next_page := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    31, 12, NULL, 'previous_period', NULL
+  );
+  IF (_recurrence_next_page #>> '{meta,page}')::integer <> 31
+    OR jsonb_array_length(_recurrence_next_page -> 'customers') <> 12
+    OR _recurrence_next_page #>> '{customers,0,customer_key}' <> 'customer:361'
+    OR _recurrence_next_page #>> '{customers,11,customer_key}' <> 'customer:372' THEN
+    RAISE EXCEPTION 'recurrence page 31 mismatch: %',
+      _recurrence_next_page -> 'meta';
+  END IF;
+
+  _recurrence_filtered := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    84, 12, NULL, 'previous_period', 2
+  );
+
+  IF (_recurrence_filtered #>> '{meta,customers_total}')::integer <> 1012
+    OR (_recurrence_filtered #>> '{meta,filtered_customers_total}')::integer <> 1005
+    OR (_recurrence_filtered #>> '{meta,min_total_visits}')::integer <> 2
+    OR (_recurrence_filtered #>> '{meta,page}')::integer <> 84
+    OR jsonb_array_length(_recurrence_filtered -> 'customers') <> 9
+    OR _recurrence_filtered #>> '{customers,0,customer_key}' <> 'customer:997'
+    OR _recurrence_filtered #>> '{customers,8,customer_key}' <> 'customer:1005'
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(_recurrence_filtered -> 'customers') AS customer
+      WHERE (customer ->> 'total_visits')::integer < 2
+    ) THEN
+    RAISE EXCEPTION 'minimum total visits filter/pagination mismatch: %',
+      _recurrence_filtered;
+  END IF;
+
+  IF _recurrence_filtered -> 'summary' IS DISTINCT FROM _recurrence_page -> 'summary'
+    OR _recurrence_filtered -> 'comparison' IS DISTINCT FROM _recurrence_page -> 'comparison'
+    OR _recurrence_filtered -> 'frequency_bands' IS DISTINCT FROM _recurrence_page -> 'frequency_bands'
+    OR _recurrence_filtered -> 'monthly_composition' IS DISTINCT FROM _recurrence_page -> 'monthly_composition' THEN
+    RAISE EXCEPTION 'minimum visits filter unexpectedly changed aggregate sections';
+  END IF;
+
+  _recurrence_filtered := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    1, 12, 'Scale Customer 1010', 'previous_period', 2
+  );
+  IF (_recurrence_filtered #>> '{meta,filtered_customers_total}')::integer <> 0
+    OR jsonb_array_length(_recurrence_filtered -> 'customers') <> 0 THEN
+    RAISE EXCEPTION 'search and minimum visits must be combined with AND: %',
+      _recurrence_filtered -> 'meta';
+  END IF;
+
+  FOREACH _key IN ARRAY ARRAY['0', '-1', '1000001']
+  LOOP
+    BEGIN
+      PERFORM public.get_customer_recurrence_report(
+        'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        DATE '2026-08-01', DATE '2026-08-13', false,
+        1, 12, NULL, 'previous_period', _key::integer
+      );
+      RAISE EXCEPTION 'min_total_visits=% unexpectedly accepted', _key;
+    EXCEPTION
+      WHEN SQLSTATE '22023' THEN NULL;
+    END;
+  END LOOP;
+
+  IF to_regprocedure(
+      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text)'
+    ) IS NOT NULL
+    OR to_regprocedure(
+      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)'
+    ) IS NULL THEN
+    RAISE EXCEPTION 'recurrence report overload rollout is ambiguous';
+  END IF;
 
   IF public._crm_state_name('PB') <> 'Paraíba'
     OR public._crm_state_name('SP') <> 'São Paulo' THEN
@@ -791,6 +1012,21 @@ BEGIN
       'service_role',
       'public._get_crm_lead_profiles(uuid)',
       'EXECUTE'
+    )
+    OR has_function_privilege(
+      'authenticated',
+      'public._get_customer_recurrence_report_without_min_filter(uuid,date,date,boolean,integer,integer,text,text)',
+      'EXECUTE'
+    )
+    OR has_function_privilege(
+      'anon',
+      'public._get_customer_recurrence_report_without_min_filter(uuid,date,date,boolean,integer,integer,text,text)',
+      'EXECUTE'
+    )
+    OR has_function_privilege(
+      'service_role',
+      'public._get_customer_recurrence_report_without_min_filter(uuid,date,date,boolean,integer,integer,text,text)',
+      'EXECUTE'
     ) THEN
     RAISE EXCEPTION 'internal helper leaked EXECUTE privilege';
   END IF;
@@ -807,7 +1043,7 @@ BEGIN
     )
     OR has_function_privilege(
       'anon',
-      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text)',
+      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)',
       'EXECUTE'
     )
     OR NOT has_function_privilege(
@@ -822,7 +1058,7 @@ BEGIN
     )
     OR NOT has_function_privilege(
       'authenticated',
-      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text)',
+      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)',
       'EXECUTE'
     )
     OR NOT has_function_privilege(
@@ -837,7 +1073,7 @@ BEGIN
     )
     OR NOT has_function_privilege(
       'service_role',
-      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text)',
+      'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)',
       'EXECUTE'
     ) THEN
     RAISE EXCEPTION 'public RPC grant matrix mismatch';
@@ -851,6 +1087,17 @@ BEGIN
       1, 25, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     );
     RAISE EXCEPTION 'anon unexpectedly authorized';
+  EXCEPTION
+    WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  BEGIN
+    PERFORM public.get_customer_recurrence_report(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      DATE '2026-08-01', DATE '2026-08-13', false,
+      1, 12, NULL, 'previous_period', 0
+    );
+    RAISE EXCEPTION 'anon unexpectedly reached minimum visits validation';
   EXCEPTION
     WHEN SQLSTATE '42501' THEN NULL;
   END;

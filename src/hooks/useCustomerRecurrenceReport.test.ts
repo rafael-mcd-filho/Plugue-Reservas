@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCustomerRecurrenceReport } from '@/hooks/useCustomerRecurrenceReport';
+import {
+  buildCustomerRecurrenceQueryKey,
+  buildCustomerRecurrenceRpcParams,
+  isSameCustomerRecurrenceDataset,
+  normalizeCustomerRecurrenceReport,
+  normalizeMinimumTotalVisits,
+  resolveCustomerRecurrenceDisplayedPage,
+} from '@/hooks/useCustomerRecurrenceReport';
 
 const fallback = {
   periodStart: '2026-08-01',
@@ -59,6 +66,7 @@ describe('normalizeCustomerRecurrenceReport', () => {
         page_size: 12,
         customers_total: '10',
         filtered_customers_total: '10',
+        min_total_visits: '2',
         generated_at: '2026-08-13T12:00:00Z',
       },
     }, fallback);
@@ -81,6 +89,7 @@ describe('normalizeCustomerRecurrenceReport', () => {
       frequency_band: 'three_four',
     });
     expect(report.meta.customers_total).toBe(10);
+    expect(report.meta.min_total_visits).toBe(2);
   });
 
   it('usa metadados de fallback e ignora linhas inválidas', () => {
@@ -109,5 +118,56 @@ describe('normalizeCustomerRecurrenceReport', () => {
     expect(() => normalizeCustomerRecurrenceReport(null, fallback)).toThrow(
       'O relatório de recorrência não retornou dados válidos.',
     );
+  });
+});
+
+describe('consulta paginada de recorrência', () => {
+  const params = {
+    companyId: '00000000-0000-0000-0000-000000000001',
+    periodStart: '2026-08-01',
+    periodEnd: '2026-08-17',
+    comparisonMode: 'month_to_date' as const,
+    includeCompanions: false,
+    page: 28,
+    pageSize: 12,
+    search: '  João  ',
+    minTotalVisits: 2,
+  };
+
+  it('envia página e mínimo de visitas para a RPC sem consulta client-side limitada a 1.000 linhas', () => {
+    expect(buildCustomerRecurrenceRpcParams(params)).toEqual({
+      _company_id: params.companyId,
+      _period_start: params.periodStart,
+      _period_end: params.periodEnd,
+      _comparison_mode: 'month_to_date',
+      _include_companions: false,
+      _page: 28,
+      _page_size: 12,
+      _search: 'João',
+      _min_total_visits: 2,
+    });
+  });
+
+  it('separa páginas no cache e só reaproveita placeholder quando os filtros são iguais', () => {
+    const firstPageKey = buildCustomerRecurrenceQueryKey({ ...params, page: 1 });
+    const page28Key = buildCustomerRecurrenceQueryKey(params);
+    const anotherMinimumKey = buildCustomerRecurrenceQueryKey({ ...params, minTotalVisits: 3 });
+
+    expect(page28Key).not.toEqual(firstPageKey);
+    expect(isSameCustomerRecurrenceDataset(firstPageKey, page28Key)).toBe(true);
+    expect(isSameCustomerRecurrenceDataset(page28Key, anotherMinimumKey)).toBe(false);
+  });
+
+  it('mantém o rodapé na página da resposta enquanto a nova página ainda carrega', () => {
+    expect(resolveCustomerRecurrenceDisplayedPage(28, 1)).toBe(1);
+    expect(resolveCustomerRecurrenceDisplayedPage(28, 28)).toBe(28);
+    expect(resolveCustomerRecurrenceDisplayedPage(28)).toBe(28);
+  });
+
+  it('aceita somente mínimos inteiros positivos', () => {
+    expect(normalizeMinimumTotalVisits(2.9)).toBe(2);
+    expect(normalizeMinimumTotalVisits(0)).toBeNull();
+    expect(normalizeMinimumTotalVisits(Number.NaN)).toBeNull();
+    expect(normalizeMinimumTotalVisits(undefined)).toBeNull();
   });
 });

@@ -61,6 +61,7 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   type CustomerFrequencyBandKey,
   type CustomerRecurrenceRow,
+  resolveCustomerRecurrenceDisplayedPage,
   useCustomerRecurrenceReport,
 } from '@/hooks/useCustomerRecurrenceReport';
 import { cn } from '@/lib/utils';
@@ -414,6 +415,7 @@ export default function CustomerRecurrenceReport() {
   const [includeCompanions, setIncludeCompanions] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [minimumTotalVisits, setMinimumTotalVisits] = useState<number | undefined>();
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -440,6 +442,7 @@ export default function CustomerRecurrenceReport() {
     page,
     pageSize: PAGE_SIZE,
     search: debouncedSearch,
+    minTotalVisits: minimumTotalVisits,
   });
 
   useEffect(() => {
@@ -451,6 +454,11 @@ export default function CustomerRecurrenceReport() {
     1,
     Math.ceil((report?.meta.filtered_customers_total ?? 0) / (report?.meta.page_size ?? PAGE_SIZE)),
   );
+  const displayedPage = resolveCustomerRecurrenceDisplayedPage(page, report?.meta.page);
+  const isChangingPage = !!report
+    && reportQuery.isPlaceholderData
+    && reportQuery.isFetching
+    && page !== report.meta.page;
 
   useEffect(() => {
     if (report && page > totalPages) setPage(totalPages);
@@ -459,7 +467,7 @@ export default function CustomerRecurrenceReport() {
   const comparisonLabel = report
     ? formatRangeLabel(report.comparison.period_start, report.comparison.period_end)
     : 'período anterior';
-  const visiblePages = getVisiblePages(page, totalPages);
+  const visiblePages = getVisiblePages(displayedPage, totalPages);
 
   const compositionData = useMemo(
     () => (report?.monthly_composition ?? []).map((row) => ({
@@ -480,6 +488,7 @@ export default function CustomerRecurrenceReport() {
     [report?.frequency_bands],
   );
   const hasFrequencyData = frequencyData.some((band) => band.customers > 0);
+  const hasCustomerFilters = !!searchInput.trim() || !!minimumTotalVisits;
 
   const handlePeriodModeChange = (value: PeriodMode) => {
     setPeriodMode(value);
@@ -494,6 +503,13 @@ export default function CustomerRecurrenceReport() {
 
   const handleIncludeCompanionsChange = (checked: boolean) => {
     setIncludeCompanions(checked);
+    setPage(1);
+  };
+
+  const clearCustomerFilters = () => {
+    setSearchInput('');
+    setDebouncedSearch('');
+    setMinimumTotalVisits(undefined);
     setPage(1);
   };
 
@@ -943,41 +959,104 @@ export default function CustomerRecurrenceReport() {
                         Uma linha por telefone; nome mais recente e contato mascarado
                       </CardDescription>
                     </div>
-                    <div className="relative w-full lg:w-[320px]">
-                      <Search
-                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                      <Input
-                        type="search"
-                        name="customer-search"
-                        autoComplete="off"
-                        value={searchInput}
-                        onChange={(event) => {
-                          setSearchInput(event.target.value);
-                          setPage(1);
-                        }}
-                        placeholder="Buscar por nome ou telefone…"
-                        className="pl-9 pr-9"
-                        aria-label="Buscar cliente por nome ou telefone"
-                      />
-                      {reportQuery.isFetching && debouncedSearch && (
-                        <Loader2
-                          className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
-                          aria-hidden="true"
+                    <div className="grid w-full gap-3 sm:grid-cols-[minmax(220px,1fr)_180px] lg:w-auto lg:grid-cols-[320px_180px]">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="customer-search" className="text-xs text-muted-foreground">
+                          Cliente
+                        </Label>
+                        <div className="relative">
+                          <Search
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                          <Input
+                            id="customer-search"
+                            type="search"
+                            name="customer-search"
+                            autoComplete="off"
+                            value={searchInput}
+                            onChange={(event) => {
+                              setSearchInput(event.target.value);
+                              setPage(1);
+                            }}
+                            placeholder="Nome ou telefone…"
+                            className="h-10 pl-9 pr-9"
+                            aria-label="Buscar cliente por nome ou telefone"
+                          />
+                          {reportQuery.isFetching && debouncedSearch && (
+                            <Loader2
+                              className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+                              aria-hidden="true"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1">
+                          <Label htmlFor="minimum-total-visits" className="text-xs text-muted-foreground">
+                            Mínimo de visitas
+                          </Label>
+                          <InfoTooltip
+                            content="Filtra somente a base abaixo pelo histórico total acumulado até o fim do período; os cards e gráficos não mudam. Digite 2 para ver quem visitou duas vezes ou mais."
+                            ariaLabel="Entender o filtro de mínimo de visitas"
+                            interaction="popover"
+                          />
+                        </div>
+                        <Input
+                          id="minimum-total-visits"
+                          type="number"
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          value={minimumTotalVisits ?? ''}
+                          onChange={(event) => {
+                            const rawValue = event.target.value;
+                            const parsedValue = Number(rawValue);
+                            setMinimumTotalVisits(
+                              rawValue === '' || !Number.isFinite(parsedValue)
+                                ? undefined
+                                : Math.max(1, Math.floor(parsedValue)),
+                            );
+                            setPage(1);
+                          }}
+                          placeholder="Ex.: 2"
+                          className="h-10 tabular-nums"
+                          aria-label="Quantidade mínima de visitas totais"
                         />
-                      )}
+                      </div>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="p-0">
+                  <CardContent className="relative p-0">
+                    {isChangingPage && (
+                      <div
+                        className="absolute inset-0 z-20 flex min-h-[250px] items-center justify-center bg-card/80 backdrop-blur-[1px]"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground shadow-sm">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                          Carregando página {page}
+                        </div>
+                      </div>
+                    )}
                     {report.customers.length === 0 ? (
                       <div className="flex min-h-[250px] flex-col items-center justify-center px-6 py-12 text-center">
                         <Search className="h-7 w-7 text-muted-foreground/60" aria-hidden="true" />
-                        <h3 className="mt-4 text-sm font-semibold">Nenhum cliente encontrado</h3>
+                        <h3 className="mt-4 text-sm font-semibold">
+                          {hasCustomerFilters ? 'Nenhum cliente corresponde aos filtros' : 'Nenhum cliente encontrado'}
+                        </h3>
                         <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                          Tente buscar por outro nome ou pelos últimos dígitos do telefone.
+                          {hasCustomerFilters
+                            ? 'Tente outro nome, telefone ou reduza o mínimo de visitas.'
+                            : 'Não há clientes identificados para exibir nesta base.'}
                         </p>
+                        {hasCustomerFilters && (
+                          <Button type="button" variant="outline" size="sm" className="mt-4" onClick={clearCustomerFilters}>
+                            Limpar filtros
+                          </Button>
+                        )}
                       </div>
                     ) : (
                       <>
@@ -1054,7 +1133,7 @@ export default function CustomerRecurrenceReport() {
                         <p className="text-xs text-muted-foreground" aria-live="polite">
                           {formatInteger((report.meta.page - 1) * report.meta.page_size + 1)}–{formatInteger(Math.min(report.meta.page * report.meta.page_size, report.meta.filtered_customers_total))}
                           {' '}de {formatInteger(report.meta.filtered_customers_total)} clientes
-                          {debouncedSearch && report.meta.filtered_customers_total !== report.meta.customers_total
+                          {(debouncedSearch || minimumTotalVisits) && report.meta.filtered_customers_total !== report.meta.customers_total
                             ? ` · ${formatInteger(report.meta.customers_total)} no período`
                             : ''}
                         </p>
@@ -1068,8 +1147,8 @@ export default function CustomerRecurrenceReport() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-9 w-9"
-                                  disabled={page === 1 || reportQuery.isFetching}
-                                  onClick={() => goToPage(page - 1)}
+                                  disabled={displayedPage === 1 || reportQuery.isFetching}
+                                  onClick={() => goToPage(displayedPage - 1)}
                                   aria-label="Ir para página anterior"
                                 >
                                   <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -1082,9 +1161,11 @@ export default function CustomerRecurrenceReport() {
                                   ) : (
                                     <PaginationLink
                                       href="#"
-                                      isActive={visiblePage === page}
+                                      isActive={visiblePage === displayedPage}
                                       aria-label={`Ir para página ${visiblePage}`}
-                                      aria-current={visiblePage === page ? 'page' : undefined}
+                                      aria-current={visiblePage === displayedPage ? 'page' : undefined}
+                                      aria-disabled={reportQuery.isFetching}
+                                      className={cn(reportQuery.isFetching && 'pointer-events-none opacity-50')}
                                       onClick={(event) => {
                                         event.preventDefault();
                                         goToPage(visiblePage);
@@ -1097,7 +1178,7 @@ export default function CustomerRecurrenceReport() {
                               ))}
                               <PaginationItem className="sm:hidden">
                                 <span className="px-2 text-xs text-muted-foreground">
-                                  {page} / {totalPages}
+                                  {displayedPage} / {totalPages}
                                 </span>
                               </PaginationItem>
                               <PaginationItem>
@@ -1106,8 +1187,8 @@ export default function CustomerRecurrenceReport() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-9 w-9"
-                                  disabled={page === totalPages || reportQuery.isFetching}
-                                  onClick={() => goToPage(page + 1)}
+                                  disabled={displayedPage === totalPages || reportQuery.isFetching}
+                                  onClick={() => goToPage(displayedPage + 1)}
                                   aria-label="Ir para próxima página"
                                 >
                                   <ChevronRight className="h-4 w-4" aria-hidden="true" />

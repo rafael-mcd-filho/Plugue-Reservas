@@ -63,6 +63,7 @@ export interface CustomerRecurrenceMeta {
   page_size: number;
   customers_total: number;
   filtered_customers_total: number;
+  min_total_visits: number | null;
   generated_at: string;
 }
 
@@ -84,7 +85,79 @@ export interface UseCustomerRecurrenceReportParams {
   page?: number;
   pageSize?: number;
   search?: string;
+  minTotalVisits?: number;
   enabled?: boolean;
+}
+
+export function normalizeMinimumTotalVisits(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+
+  const normalized = Math.floor(value);
+  return normalized >= 1 ? normalized : null;
+}
+
+export function buildCustomerRecurrenceRpcParams({
+  companyId,
+  periodStart,
+  periodEnd,
+  comparisonMode = 'previous_period',
+  includeCompanions = false,
+  page = 1,
+  pageSize = 12,
+  search = '',
+  minTotalVisits,
+}: UseCustomerRecurrenceReportParams) {
+  return {
+    _company_id: companyId,
+    _period_start: periodStart,
+    _period_end: periodEnd,
+    _comparison_mode: comparisonMode,
+    _include_companions: includeCompanions,
+    _page: page,
+    _page_size: pageSize,
+    _search: search.trim() || null,
+    _min_total_visits: normalizeMinimumTotalVisits(minTotalVisits),
+  };
+}
+
+export function buildCustomerRecurrenceQueryKey(params: UseCustomerRecurrenceReportParams) {
+  const rpcParams = buildCustomerRecurrenceRpcParams(params);
+
+  return [
+    'customer-recurrence-report',
+    rpcParams._company_id,
+    rpcParams._period_start,
+    rpcParams._period_end,
+    rpcParams._comparison_mode,
+    rpcParams._include_companions,
+    rpcParams._page,
+    rpcParams._page_size,
+    rpcParams._search ?? '',
+    rpcParams._min_total_visits,
+  ] as const;
+}
+
+export function isSameCustomerRecurrenceDataset(
+  previousKey: readonly unknown[] | undefined,
+  currentKey: readonly unknown[],
+): boolean {
+  if (!previousKey) return false;
+
+  return previousKey[1] === currentKey[1]
+    && previousKey[2] === currentKey[2]
+    && previousKey[3] === currentKey[3]
+    && previousKey[4] === currentKey[4]
+    && previousKey[5] === currentKey[5]
+    && previousKey[7] === currentKey[7]
+    && previousKey[8] === currentKey[8]
+    && previousKey[9] === currentKey[9];
+}
+
+export function resolveCustomerRecurrenceDisplayedPage(requestedPage: number, responsePage?: number): number {
+  const normalizedResponsePage = Math.floor(responsePage ?? 0);
+  if (normalizedResponsePage >= 1) return normalizedResponsePage;
+
+  return Math.max(1, Math.floor(requestedPage));
 }
 
 const SUMMARY_KEYS = [
@@ -233,6 +306,7 @@ export function normalizeCustomerRecurrenceReport(
       page_size: Math.max(1, toNumber(metaSource.page_size) || fallback.pageSize),
       customers_total: Math.max(0, toNumber(metaSource.customers_total)),
       filtered_customers_total: Math.max(0, toNumber(metaSource.filtered_customers_total)),
+      min_total_visits: normalizeMinimumTotalVisits(toNumber(metaSource.min_total_visits)),
       generated_at: toStringValue(metaSource.generated_at),
     },
   };
@@ -247,33 +321,40 @@ export function useCustomerRecurrenceReport({
   page = 1,
   pageSize = 12,
   search = '',
+  minTotalVisits,
   enabled = true,
 }: UseCustomerRecurrenceReportParams) {
   const normalizedSearch = search.trim();
+  const normalizedMinTotalVisits = normalizeMinimumTotalVisits(minTotalVisits);
+  const queryKey = buildCustomerRecurrenceQueryKey({
+    companyId,
+    periodStart,
+    periodEnd,
+    comparisonMode,
+    includeCompanions,
+    page,
+    pageSize,
+    search: normalizedSearch,
+    minTotalVisits: normalizedMinTotalVisits ?? undefined,
+  });
 
   return useQuery({
-    queryKey: [
-      'customer-recurrence-report',
-      companyId,
-      periodStart,
-      periodEnd,
-      comparisonMode,
-      includeCompanions,
-      page,
-      pageSize,
-      normalizedSearch,
-    ],
+    queryKey,
     queryFn: async ({ signal }) => {
-      const request = (supabase as any).rpc('get_customer_recurrence_report', {
-        _company_id: companyId,
-        _period_start: periodStart,
-        _period_end: periodEnd,
-        _comparison_mode: comparisonMode,
-        _include_companions: includeCompanions,
-        _page: page,
-        _page_size: pageSize,
-        _search: normalizedSearch || null,
-      });
+      const request = (supabase as any).rpc(
+        'get_customer_recurrence_report',
+        buildCustomerRecurrenceRpcParams({
+          companyId,
+          periodStart,
+          periodEnd,
+          comparisonMode,
+          includeCompanions,
+          page,
+          pageSize,
+          search: normalizedSearch,
+          minTotalVisits: normalizedMinTotalVisits ?? undefined,
+        }),
+      );
       if (typeof request.abortSignal === 'function') request.abortSignal(signal);
 
       const { data, error } = await request;
@@ -290,15 +371,9 @@ export function useCustomerRecurrenceReport({
     },
     enabled: enabled && !!companyId && !!periodStart && !!periodEnd,
     placeholderData: (previousData, previousQuery) => {
-      const previousKey = previousQuery?.queryKey;
-      const isSameDataset = Array.isArray(previousKey)
-        && previousKey[1] === companyId
-        && previousKey[2] === periodStart
-        && previousKey[3] === periodEnd
-        && previousKey[4] === comparisonMode
-        && previousKey[5] === includeCompanions;
-
-      return isSameDataset ? previousData : undefined;
+      return isSameCustomerRecurrenceDataset(previousQuery?.queryKey, queryKey)
+        ? previousData
+        : undefined;
     },
     staleTime: 30_000,
     retry: 1,
