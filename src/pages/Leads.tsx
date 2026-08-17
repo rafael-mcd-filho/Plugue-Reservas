@@ -1,6 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { endOfDay, format, parseISO, startOfDay } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   CalendarDays,
@@ -43,105 +43,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   downloadCsv,
   downloadSpreadsheet,
-  formatDateRangeLabel,
-  matchesLocalDateRange,
-  matchesTimestampRange,
   type SpreadsheetColumn,
 } from '@/lib/export-utils';
 import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
-import {
-  getPresenceLinkedWaitlistIds,
-  matchesLeadPhoneDigits,
-  normalizeLeadPhoneKey,
-  selectCanonicalLeadPresenceEvents,
-  shouldIncludeCanonicalLeadVisit,
-} from '@/lib/lead-consistency';
+import { normalizeLeadPhoneKey } from '@/lib/lead-consistency';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
-import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone, normalizeEmail } from '@/lib/validation';
+import { formatBrazilPhone } from '@/lib/validation';
+import {
+  useCrmLeadPresenceHistory,
+  useCrmLeadsCanonicalExport,
+  useCrmLeadsPage,
+  type CrmLeadMatchedSource,
+  type CrmLeadPresenceVisit,
+  type CrmLeadRecordSource,
+  type CrmLeadRow,
+  type CrmLeadSource,
+} from '@/hooks/useCrmLeads';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
-type LeadVisitSource =
-  | 'reservation_holder'
-  | 'companion'
-  | 'waitlist_holder'
-  | 'waitlist_companion';
-type LeadVisitOrigin = 'reservation' | 'waitlist';
+type LeadVisitSource = CrmLeadRecordSource;
 
-interface LeadVisitRecord {
-  id: string;
-  visit_id: string;
-  created_at: string;
-  date: string;
-  guest_birthdate: string | null;
-  guest_email: string | null;
-  guest_name: string;
-  guest_phone: string;
-  occasion: string | null;
-  party_size: number;
-  status: string;
-  time: string;
-  lead_source: LeadVisitSource;
-  visit_origin: LeadVisitOrigin;
-  origin_waitlist_id: string | null;
-  reservation_holder_name: string | null;
-}
-
-interface ReservationCompanionRecord {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  birthdate: string | null;
-  created_at: string;
-  reservation_id: string;
-  reservation: {
-    id: string;
-    guest_name: string;
-    date: string;
-    time: string;
-    party_size: number;
-    status: string;
-    occasion: string | null;
-    created_at: string;
-    source: string | null;
-    origin_waitlist_id: string | null;
-  } | null;
-}
-
-interface WaitlistRecord {
-  id: string;
-  guest_name: string;
-  guest_phone: string;
-  guest_email: string | null;
-  guest_birthdate: string | null;
-  party_size: number;
-  seated_party_size: number | null;
-  status: string;
-  created_at: string;
-  seated_at: string | null;
-}
-
-interface WaitlistCompanionRecord {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  birthdate: string | null;
-  created_at: string;
-  waitlist_id: string;
-  waitlist: {
-    id: string;
-    guest_name: string;
-    party_size: number;
-    seated_party_size: number | null;
-    status: string;
-    created_at: string;
-    seated_at: string | null;
-  } | null;
-}
+type LeadVisitRecord = CrmLeadPresenceVisit;
 
 interface ImportedLeadRecord {
   id: string;
@@ -160,13 +84,21 @@ interface ImportedLeadRecord {
   updated_at: string;
 }
 
-type LeadSource = LeadVisitSource | 'mixed' | 'imported';
+type LeadSource = CrmLeadSource;
 type LeadImportMode = 'fill_missing' | 'overwrite';
+
+interface CanonicalExportRequest {
+  createdFrom: string | null;
+  createdTo: string | null;
+  stateCode: string | null;
+  birthdayMonth: number | null;
+  visitFrom: string | null;
+  visitTo: string | null;
+}
 
 interface Lead {
   key: string;
   guest_phone: string;
-  phone_digits: string;
   guest_name: string;
   guest_email: string | null;
   guest_birthdate: string | null;
@@ -177,7 +109,6 @@ interface Lead {
   stateCode: string | null;
   stateName: string | null;
   source: LeadSource;
-  reservations: LeadVisitRecord[];
   importedLeadId: string | null;
   importedNotes: string | null;
   importedAt: string | null;
@@ -186,132 +117,6 @@ interface Lead {
 }
 
 const LEADS_PAGE_SIZE_OPTIONS = ['25', '50', '100'] as const;
-const LEAD_EXPORT_STATUS_OPTIONS = [
-  { value: 'confirmed', label: 'Confirmada' },
-  { value: 'checked_in', label: 'Check-in realizado' },
-  { value: 'cancelled', label: 'Cancelada' },
-  { value: 'no-show', label: 'No Show' },
-] as const;
-
-const DDD_TO_STATE: Record<string, { code: string; name: string }> = {
-  '11': { code: 'SP', name: 'São Paulo' },
-  '12': { code: 'SP', name: 'São Paulo' },
-  '13': { code: 'SP', name: 'São Paulo' },
-  '14': { code: 'SP', name: 'São Paulo' },
-  '15': { code: 'SP', name: 'São Paulo' },
-  '16': { code: 'SP', name: 'São Paulo' },
-  '17': { code: 'SP', name: 'São Paulo' },
-  '18': { code: 'SP', name: 'São Paulo' },
-  '19': { code: 'SP', name: 'São Paulo' },
-  '21': { code: 'RJ', name: 'Rio de Janeiro' },
-  '22': { code: 'RJ', name: 'Rio de Janeiro' },
-  '24': { code: 'RJ', name: 'Rio de Janeiro' },
-  '27': { code: 'ES', name: 'Espírito Santo' },
-  '28': { code: 'ES', name: 'Espírito Santo' },
-  '31': { code: 'MG', name: 'Minas Gerais' },
-  '32': { code: 'MG', name: 'Minas Gerais' },
-  '33': { code: 'MG', name: 'Minas Gerais' },
-  '34': { code: 'MG', name: 'Minas Gerais' },
-  '35': { code: 'MG', name: 'Minas Gerais' },
-  '37': { code: 'MG', name: 'Minas Gerais' },
-  '38': { code: 'MG', name: 'Minas Gerais' },
-  '41': { code: 'PR', name: 'Paraná' },
-  '42': { code: 'PR', name: 'Paraná' },
-  '43': { code: 'PR', name: 'Paraná' },
-  '44': { code: 'PR', name: 'Paraná' },
-  '45': { code: 'PR', name: 'Paraná' },
-  '46': { code: 'PR', name: 'Paraná' },
-  '47': { code: 'SC', name: 'Santa Catarina' },
-  '48': { code: 'SC', name: 'Santa Catarina' },
-  '49': { code: 'SC', name: 'Santa Catarina' },
-  '51': { code: 'RS', name: 'Rio Grande do Sul' },
-  '53': { code: 'RS', name: 'Rio Grande do Sul' },
-  '54': { code: 'RS', name: 'Rio Grande do Sul' },
-  '55': { code: 'RS', name: 'Rio Grande do Sul' },
-  '61': { code: 'DF', name: 'Distrito Federal' },
-  '62': { code: 'GO', name: 'Goiás' },
-  '63': { code: 'TO', name: 'Tocantins' },
-  '64': { code: 'GO', name: 'Goiás' },
-  '65': { code: 'MT', name: 'Mato Grosso' },
-  '66': { code: 'MT', name: 'Mato Grosso' },
-  '67': { code: 'MS', name: 'Mato Grosso do Sul' },
-  '68': { code: 'AC', name: 'Acre' },
-  '69': { code: 'RO', name: 'Rondônia' },
-  '71': { code: 'BA', name: 'Bahia' },
-  '73': { code: 'BA', name: 'Bahia' },
-  '74': { code: 'BA', name: 'Bahia' },
-  '75': { code: 'BA', name: 'Bahia' },
-  '77': { code: 'BA', name: 'Bahia' },
-  '79': { code: 'SE', name: 'Sergipe' },
-  '81': { code: 'PE', name: 'Pernambuco' },
-  '82': { code: 'AL', name: 'Alagoas' },
-  '83': { code: 'PB', name: 'Paraíba' },
-  '84': { code: 'RN', name: 'Rio Grande do Norte' },
-  '85': { code: 'CE', name: 'Ceará' },
-  '86': { code: 'PI', name: 'Piauí' },
-  '87': { code: 'PE', name: 'Pernambuco' },
-  '88': { code: 'CE', name: 'Ceará' },
-  '89': { code: 'PI', name: 'Piauí' },
-  '91': { code: 'PA', name: 'Pará' },
-  '92': { code: 'AM', name: 'Amazonas' },
-  '93': { code: 'PA', name: 'Pará' },
-  '94': { code: 'PA', name: 'Pará' },
-  '95': { code: 'RR', name: 'Roraima' },
-  '96': { code: 'AP', name: 'Amapá' },
-  '97': { code: 'AM', name: 'Amazonas' },
-  '98': { code: 'MA', name: 'Maranhão' },
-  '99': { code: 'MA', name: 'Maranhão' },
-};
-
-function normalizePhone(phone: string | null | undefined) {
-  return (phone ?? '').replace(/\D/g, '');
-}
-
-function getLeadLookupKey(values: {
-  phone?: string | null;
-  phoneDigits?: string | null;
-  email?: string | null;
-  fallback: string;
-}) {
-  const normalizedPhone = normalizeLeadPhoneKey(values.phoneDigits || values.phone);
-  const normalizedEmail = normalizeEmail(values.email);
-
-  return normalizedPhone || normalizedEmail || values.fallback;
-}
-
-function getDddFromPhone(phone: string | null | undefined) {
-  const digits = normalizePhone(phone);
-
-  if (digits.length >= 12 && digits.startsWith('55')) {
-    return digits.slice(2, 4);
-  }
-
-  if (digits.length >= 10) {
-    return digits.slice(0, 2);
-  }
-
-  return null;
-}
-
-function getStateFromPhone(phone: string | null | undefined) {
-  const ddd = getDddFromPhone(phone);
-  return ddd ? DDD_TO_STATE[ddd] ?? null : null;
-}
-
-function compareReservationDateTime(
-  dateA: string,
-  timeA: string,
-  dateB: string,
-  timeB: string,
-) {
-  const dateComparison = dateA.localeCompare(dateB);
-
-  if (dateComparison !== 0) {
-    return dateComparison;
-  }
-
-  return timeA.localeCompare(timeB);
-}
 
 function normalizeVisitStatus(status: string) {
   if (status === 'seated') {
@@ -329,49 +134,22 @@ function formatLeadState(lead: Pick<Lead, 'guest_phone' | 'stateCode' | 'stateNa
   return lead.stateCode && lead.stateName ? `${lead.stateName} (${lead.stateCode})` : 'DDD não identificado';
 }
 
-function isCompanionVisitSource(source: LeadVisitSource) {
-  return source === 'companion' || source === 'waitlist_companion';
+function isCompanionVisitSource(source: CrmLeadMatchedSource) {
+  return source === 'companion'
+    || source === 'reservation_companion'
+    || source === 'waitlist_companion';
 }
 
-function isHolderVisitSource(source: LeadVisitSource) {
-  return source === 'reservation_holder' || source === 'waitlist_holder';
-}
-
-function compareLeadVisitsChronologically(a: LeadVisitRecord, b: LeadVisitRecord) {
-  const momentComparison = compareReservationDateTime(a.date, a.time, b.date, b.time);
-  if (momentComparison !== 0) return momentComparison;
-
-  const contactPriorityComparison = Number(isHolderVisitSource(a.lead_source))
-    - Number(isHolderVisitSource(b.lead_source));
-  if (contactPriorityComparison !== 0) return contactPriorityComparison;
-
-  const eventKeyComparison = `${a.visit_origin}:${a.visit_id}`.localeCompare(`${b.visit_origin}:${b.visit_id}`);
-  if (eventKeyComparison !== 0) return eventKeyComparison;
-
-  return a.id.localeCompare(b.id);
-}
-
-function formatLeadSource(source: LeadSource) {
+function formatLeadSource(source: CrmLeadMatchedSource) {
   if (source === 'imported') {
     return 'Importado';
   }
 
   if (source === 'mixed') {
-    return 'Multiplos papeis';
+    return 'Múltiplos papéis';
   }
 
   return isCompanionVisitSource(source) ? 'Acompanhante' : 'Titular';
-}
-
-function getLeadSourceFromVisits(visits: LeadVisitRecord[]): LeadSource {
-  const hasHolder = visits.some((visit) => isHolderVisitSource(visit.lead_source));
-  const hasCompanion = visits.some((visit) => isCompanionVisitSource(visit.lead_source));
-
-  if (hasHolder && hasCompanion) {
-    return 'mixed';
-  }
-
-  return hasCompanion ? 'companion' : 'reservation_holder';
 }
 
 function formatReservationStatus(status: string) {
@@ -381,24 +159,6 @@ function formatReservationStatus(status: string) {
   }
 
   return getReservationStatusLabel(normalizedStatus);
-
-  switch (normalizeVisitStatus(status)) {
-    case 'confirmed':
-      return 'Confirmada';
-    case 'checked_in':
-      return 'Check-in realizado';
-    case 'cancelled':
-      return 'Cancelada';
-    case 'completed':
-      return 'Check-in realizado';
-    case 'no-show':
-    case 'no_show':
-      return 'No Show';
-    case 'seated':
-      return 'Sentado';
-    default:
-      return status;
-  }
 }
 
 function formatLeadVisitContext(visit: LeadVisitRecord) {
@@ -417,20 +177,8 @@ function formatLeadVisitContext(visit: LeadVisitRecord) {
     : ' · Titular da reserva';
 }
 
-function formatLeadDateRangeLabel(range: DateRange | undefined) {
-  return formatDateRangeLabel(range, 'Criado em');
-}
-
 function formatLeadPhoneText(phone: string | null | undefined) {
   return formatBrazilPhone(phone) || 'Não informado';
-}
-
-function isBirthdayInMonth(birthdate: string | null | undefined, month: number) {
-  const match = birthdate?.match(/^\d{4}-(\d{2})-\d{2}/);
-  if (!match) return false;
-
-  const birthMonth = Number(match[1]);
-  return birthMonth >= 1 && birthMonth <= 12 && birthMonth === month;
 }
 
 function mergeImportedNotes(currentNotes: string | null, nextNotes: string | null) {
@@ -544,20 +292,48 @@ function consolidateImportPreviewRows(rows: ParsedLeadImportRow[]) {
   return { rows: mergedRows, duplicateCount };
 }
 
-function shouldIncludeImportedLeadInExport(
-  lead: Lead,
-  exportVisitRange: DateRange | undefined,
-  exportStatuses: string[],
-) {
-  if (!lead.importedLeadId || lead.total_reservations > 0) {
-    return false;
+async function findImportedLeadMatches(companyId: string, rows: ParsedLeadImportRow[]) {
+  const phoneValues = new Set<string>();
+  const emailValues = new Set<string>();
+
+  for (const row of rows) {
+    if (row.phoneNormalized) {
+      phoneValues.add(row.phoneNormalized);
+      phoneValues.add(normalizeLeadPhoneKey(row.phoneNormalized));
+    }
+
+    if (row.emailNormalized) {
+      emailValues.add(row.emailNormalized);
+    }
   }
 
-  if (exportVisitRange?.from) {
-    return false;
-  }
+  const selectFields = 'id, full_name, phone, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at';
+  const matches = new Map<string, ImportedLeadRecord>();
+  const chunkSize = 100;
 
-  return exportStatuses.length === 0;
+  const loadMatches = async (column: 'phone_normalized' | 'email_normalized', values: string[]) => {
+    for (let index = 0; index < values.length; index += chunkSize) {
+      const chunk = values.slice(index, index + chunkSize);
+      const { data, error } = await supabase
+        .from('crm_leads' as never)
+        .select(selectFields)
+        .eq('company_id', companyId)
+        .in(column, chunk);
+
+      if (error) throw error;
+
+      for (const lead of (data ?? []) as ImportedLeadRecord[]) {
+        matches.set(lead.id, lead);
+      }
+    }
+  };
+
+  await Promise.all([
+    loadMatches('phone_normalized', Array.from(phoneValues)),
+    loadMatches('email_normalized', Array.from(emailValues)),
+  ]);
+
+  return Array.from(matches.values());
 }
 
 function getVisiblePages(currentPage: number, totalPages: number) {
@@ -594,12 +370,37 @@ function getLeadSourceBadgeClassName(source: LeadSource) {
     : 'border-success/20 bg-success-soft text-success';
 }
 
+function mapCrmLeadRowToLead(row: CrmLeadRow): Lead {
+  const phone = row.display_phone ?? row.phone_normalized ?? '';
+
+  return {
+    key: row.customer_key,
+    guest_phone: phone,
+    guest_name: row.latest_name || 'Lead sem nome',
+    guest_email: row.latest_email,
+    guest_birthdate: row.latest_birthdate,
+    total_reservations: row.canonical_visit_count,
+    lead_created_at: row.first_seen_at,
+    last_reservation_date: row.last_visit_date ?? '',
+    last_reservation_time: row.last_visit_time ?? '',
+    stateCode: row.state_code,
+    stateName: row.state_name,
+    source: row.source,
+    importedLeadId: row.crm_lead?.id ?? null,
+    importedNotes: row.crm_lead?.notes ?? null,
+    importedAt: row.crm_lead?.imported_at ?? null,
+    importedByUserId: row.crm_lead?.imported_by_user_id ?? null,
+    importFilename: row.crm_lead?.import_filename ?? null,
+  };
+}
+
 export default function Leads() {
   const { companyId, slug } = useCompanySlug();
   const { user } = useAuth();
   const qc = useQueryClient();
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [createdRange, setCreatedRange] = useState<DateRange | undefined>();
   const [createdFrom, setCreatedFrom] = useState<Date | undefined>();
   const [createdTo, setCreatedTo] = useState<Date | undefined>();
@@ -622,9 +423,8 @@ export default function Leads() {
   const [exportLeadCreatedRange, setExportLeadCreatedRange] = useState<DateRange | undefined>();
   const [exportVisitRange, setExportVisitRange] = useState<DateRange | undefined>();
   const [exportStateFilter, setExportStateFilter] = useState('all');
-  const [exportStatuses, setExportStatuses] = useState<string[]>([]);
   const [exportBirthdaysThisMonthOnly, setExportBirthdaysThisMonthOnly] = useState(false);
-  const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
+  const [exportRequest, setExportRequest] = useState<CanonicalExportRequest | null>(null);
   const [exportSpreadsheetPending, setExportSpreadsheetPending] = useState(false);
   const currentMonth = new Date().getMonth() + 1;
   const currentMonthLabel = format(new Date(), 'MMMM', { locale: ptBR });
@@ -633,6 +433,15 @@ export default function Leads() {
     setCreatedFrom(createdRange?.from);
     setCreatedTo(createdRange?.to);
   }, [createdRange]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setCurrentPage(1);
+      setDebouncedSearch(search.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [search]);
 
   useEffect(() => {
     if (!selectedLead) {
@@ -678,205 +487,39 @@ export default function Leads() {
     setSelectedReservationId(null);
   }, [selectedReservationError, selectedReservationId]);
 
-  const {
-    data: importedLeads = [],
-    isLoading: importedLeadsLoading,
-    isError: importedLeadsError,
-    refetch: refetchImportedLeads,
-  } = useQuery({
-    queryKey: ['leads-imported', companyId],
-    queryFn: async () => {
-      return fetchAllSupabasePages<ImportedLeadRecord>((from, to) => supabase
-        .from('crm_leads' as never)
-        .select(
-          'id, full_name, phone, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at',
-        )
-        .eq('company_id', companyId!)
-        .order('imported_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to));
-    },
-    enabled: !!companyId,
+  const parsedMinReservations = minReservations ? Number(minReservations) : null;
+  const parsedMaxReservations = maxReservations ? Number(maxReservations) : null;
+  const leadsQuery = useCrmLeadsPage({
+    companyId,
+    page: currentPage,
+    pageSize: Number(pageSize),
+    search: debouncedSearch,
+    createdFrom: createdFrom ? format(createdFrom, 'yyyy-MM-dd') : null,
+    createdTo: createdTo ? format(createdTo, 'yyyy-MM-dd') : null,
+    stateCode: stateFilter === 'all' ? null : stateFilter,
+    birthdayMonth: birthdaysThisMonthOnly ? currentMonth : null,
+    minVisits: parsedMinReservations !== null && Number.isFinite(parsedMinReservations)
+      ? parsedMinReservations
+      : null,
+    maxVisits: parsedMaxReservations !== null && Number.isFinite(parsedMaxReservations)
+      ? parsedMaxReservations
+      : null,
   });
-
-  const {
-    data: reservations = [],
-    isLoading: reservationsLoading,
-    isError: reservationsError,
-    refetch: refetchReservations,
-  } = useQuery({
-    queryKey: ['leads-reservations', companyId],
-    queryFn: async () => {
-      const data = await fetchAllSupabasePages<any>((from, to) => supabase
-        .from('reservations' as never)
-        .select(
-          'id, guest_name, guest_phone, guest_email, guest_birthdate, date, time, party_size, status, occasion, created_at, source, origin_waitlist_id',
-        )
-        .eq('company_id', companyId!)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to));
-
-      return data.map((reservation) => ({
-          ...reservation,
-          visit_id: reservation.id,
-          lead_source: 'reservation_holder' as const,
-          visit_origin: 'reservation' as const,
-          origin_waitlist_id: reservation.origin_waitlist_id ?? null,
-          reservation_holder_name: reservation.guest_name,
-        })) as LeadVisitRecord[];
-    },
-    enabled: !!companyId,
+  const selectedLeadHistoryQuery = useCrmLeadPresenceHistory({
+    companyId,
+    customerKey: selectedLead?.key,
+    expectedVisitCount: selectedLead?.total_reservations,
+    enabled: !!selectedLead,
   });
-
-  const {
-    data: companionVisits = [],
-    isLoading: companionsLoading,
-    isError: companionsError,
-    refetch: refetchCompanions,
-  } = useQuery({
-    queryKey: ['leads-companions', companyId],
-    queryFn: async () => {
-      const data = await fetchAllSupabasePages<any>((from, to) => supabase
-        .from('reservation_companions' as never)
-        .select(
-          'id, name, phone, email, birthdate, created_at, reservation_id, reservation:reservations!inner(id, guest_name, date, time, party_size, status, occasion, created_at, source, origin_waitlist_id)',
-        )
-        .eq('company_id', companyId!)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to));
-
-      return data.flatMap((companion) => {
-        const reservation = (
-          Array.isArray(companion.reservation)
-            ? companion.reservation[0]
-            : companion.reservation
-        ) as ReservationCompanionRecord['reservation'];
-
-        if (!reservation) {
-          return [];
-        }
-
-        return [{
-          id: `companion-${companion.id}`,
-          visit_id: companion.reservation_id,
-          created_at: companion.created_at ?? reservation.created_at,
-          date: reservation.date,
-          guest_birthdate: companion.birthdate ?? null,
-          guest_email: companion.email ?? null,
-          guest_name: companion.name,
-          guest_phone: companion.phone ?? '',
-          occasion: reservation.occasion ?? null,
-          party_size: reservation.party_size,
-          status: reservation.status,
-          time: reservation.time,
-          lead_source: 'companion' as const,
-          visit_origin: 'reservation' as const,
-          origin_waitlist_id: reservation.origin_waitlist_id ?? null,
-          reservation_holder_name: reservation.guest_name ?? null,
-        }] satisfies LeadVisitRecord[];
-      });
-    },
-    enabled: !!companyId,
-  });
-
-  const {
-    data: waitlistVisits = [],
-    isLoading: waitlistLoading,
-    isError: waitlistError,
-    refetch: refetchWaitlist,
-  } = useQuery({
-    queryKey: ['leads-waitlist', companyId],
-    queryFn: async () => {
-      const data = await fetchAllSupabasePages<WaitlistRecord>((from, to) => supabase
-        .from('waitlist' as never)
-        .select(
-          'id, guest_name, guest_phone, guest_email, guest_birthdate, party_size, seated_party_size, status, created_at, seated_at',
-        )
-        .eq('company_id', companyId!)
-        .eq('status', 'seated')
-        .order('seated_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to));
-
-      return data.map((entry) => {
-        const seatedAt = entry.seated_at ?? entry.created_at;
-        return {
-          id: `waitlist-${entry.id}`,
-          visit_id: entry.id,
-          created_at: entry.created_at,
-          date: seatedAt.slice(0, 10),
-          guest_birthdate: entry.guest_birthdate ?? null,
-          guest_email: entry.guest_email ?? null,
-          guest_name: entry.guest_name,
-          guest_phone: entry.guest_phone,
-          occasion: null,
-          party_size: entry.seated_party_size ?? entry.party_size,
-          status: entry.status,
-          time: seatedAt.slice(11, 19),
-          lead_source: 'waitlist_holder' as const,
-          visit_origin: 'waitlist' as const,
-          origin_waitlist_id: null,
-          reservation_holder_name: entry.guest_name,
-        };
-      }) as LeadVisitRecord[];
-    },
-    enabled: !!companyId,
-  });
-
-  const {
-    data: waitlistCompanionVisits = [],
-    isLoading: waitlistCompanionsLoading,
-    isError: waitlistCompanionsError,
-    refetch: refetchWaitlistCompanions,
-  } = useQuery({
-    queryKey: ['leads-waitlist-companions', companyId],
-    queryFn: async () => {
-      const data = await fetchAllSupabasePages<any>((from, to) => supabase
-        .from('waitlist_companions' as never)
-        .select(
-          'id, name, phone, email, birthdate, created_at, waitlist_id, waitlist:waitlist!inner(id, guest_name, party_size, seated_party_size, status, created_at, seated_at)',
-        )
-        .eq('company_id', companyId!)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to));
-
-      return data.flatMap((companion) => {
-        const waitlist = (
-          Array.isArray(companion.waitlist)
-            ? companion.waitlist[0]
-            : companion.waitlist
-        ) as WaitlistCompanionRecord['waitlist'];
-
-        if (!waitlist) {
-          return [];
-        }
-
-        const seatedAt = waitlist.seated_at ?? waitlist.created_at;
-
-        return [{
-          id: `waitlist-companion-${companion.id}`,
-          visit_id: companion.waitlist_id,
-          created_at: companion.created_at ?? waitlist.created_at,
-          date: seatedAt.slice(0, 10),
-          guest_birthdate: companion.birthdate ?? null,
-          guest_email: companion.email ?? null,
-          guest_name: companion.name,
-          guest_phone: companion.phone ?? '',
-          occasion: null,
-          party_size: waitlist.seated_party_size ?? waitlist.party_size,
-          status: waitlist.status,
-          time: seatedAt.slice(11, 19),
-          lead_source: 'waitlist_companion' as const,
-          visit_origin: 'waitlist' as const,
-          origin_waitlist_id: null,
-          reservation_holder_name: waitlist.guest_name ?? null,
-        }] satisfies LeadVisitRecord[];
-      });
-    },
-    enabled: !!companyId,
+  const exportQuery = useCrmLeadsCanonicalExport({
+    companyId,
+    createdFrom: exportRequest?.createdFrom,
+    createdTo: exportRequest?.createdTo,
+    stateCode: exportRequest?.stateCode,
+    birthdayMonth: exportRequest?.birthdayMonth,
+    visitFrom: exportRequest?.visitFrom,
+    visitTo: exportRequest?.visitTo,
+    enabled: exportDialogOpen && !!exportRequest,
   });
 
   const resetImportState = () => {
@@ -904,8 +547,9 @@ export default function Leads() {
 
       const existingByPhone = new Map<string, ImportedLeadRecord>();
       const existingByEmail = new Map<string, ImportedLeadRecord>();
+      const existingLeads = await findImportedLeadMatches(companyId, importRows);
 
-      for (const lead of importedLeads) {
+      for (const lead of existingLeads) {
         const phoneKey = normalizeLeadPhoneKey(lead.phone_normalized ?? lead.phone);
         if (phoneKey && !existingByPhone.has(phoneKey)) {
           existingByPhone.set(phoneKey, lead);
@@ -979,7 +623,10 @@ export default function Leads() {
       return { inserted, updated, skipped };
     },
     onSuccess: async ({ inserted, updated, skipped }) => {
-      await qc.invalidateQueries({ queryKey: ['leads-imported', companyId] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['crm-leads-page', companyId] }),
+        qc.invalidateQueries({ queryKey: ['crm-leads-export', companyId] }),
+      ]);
 
       const pieces = [
         inserted > 0 ? `${inserted} novos` : null,
@@ -1047,27 +694,25 @@ export default function Leads() {
     );
   };
 
-  const isLoading =
-    reservationsLoading ||
-    companionsLoading ||
-    waitlistLoading ||
-    waitlistCompanionsLoading ||
-    importedLeadsLoading;
-  const hasLoadError =
-    reservationsError ||
-    companionsError ||
-    waitlistError ||
-    waitlistCompanionsError ||
-    importedLeadsError;
+  const isLoading = leadsQuery.isLoading;
+  const hasLoadError = leadsQuery.isError;
 
   const refetchLeadData = () => {
-    void Promise.all([
-      refetchImportedLeads(),
-      refetchReservations(),
-      refetchCompanions(),
-      refetchWaitlist(),
-      refetchWaitlistCompanions(),
-    ]);
+    void leadsQuery.refetch();
+  };
+
+  const retrySelectedLeadHistory = async () => {
+    if (!selectedLead) return;
+
+    const refreshedList = await leadsQuery.refetch();
+    const refreshedRow = refreshedList.data?.leads.find((lead) => lead.customer_key === selectedLead.key);
+
+    if (refreshedRow && refreshedRow.canonical_visit_count !== selectedLead.total_reservations) {
+      setSelectedLead(mapCrmLeadRowToLead(refreshedRow));
+      return;
+    }
+
+    await selectedLeadHistoryQuery.refetch();
   };
 
   const openReservationDetails = (visit: LeadVisitRecord) => {
@@ -1078,296 +723,32 @@ export default function Leads() {
     setSelectedReservationId(visit.visit_id);
   };
 
-  const linkedWaitlistIds = useMemo(
-    () => getPresenceLinkedWaitlistIds(reservations),
-    [reservations],
+  const leads = useMemo(
+    () => (leadsQuery.data?.leads ?? []).map(mapCrmLeadRowToLead),
+    [leadsQuery.data?.leads],
   );
-
-  const canonicalVisits = useMemo(() => (
-    [...reservations, ...companionVisits, ...waitlistVisits, ...waitlistCompanionVisits]
-      .filter((visit) => shouldIncludeCanonicalLeadVisit(
-        visit.visit_origin,
-        visit.visit_id,
-        linkedWaitlistIds,
-      ))
-      .sort(compareLeadVisitsChronologically)
-  ), [companionVisits, linkedWaitlistIds, reservations, waitlistCompanionVisits, waitlistVisits]);
-
-  const leads = useMemo(() => {
-    const map = new Map<string, Lead>();
-
-    for (const visit of canonicalVisits) {
-      const phoneDigits = normalizePhone(visit.guest_phone);
-      const key = getLeadLookupKey({
-        phone: visit.guest_phone,
-        phoneDigits,
-        email: visit.guest_email,
-        fallback: visit.id,
-      });
-
-      if (!map.has(key)) {
-        const state = getStateFromPhone(visit.guest_phone);
-
-        map.set(key, {
-          key,
-          guest_phone: visit.guest_phone,
-          phone_digits: phoneDigits,
-          guest_name: visit.guest_name,
-          guest_email: visit.guest_email,
-          guest_birthdate: visit.guest_birthdate,
-          total_reservations: 0,
-          lead_created_at: visit.created_at,
-          last_reservation_date: visit.date,
-          last_reservation_time: visit.time,
-          stateCode: state?.code ?? null,
-          stateName: state?.name ?? null,
-          source: visit.lead_source,
-          reservations: [],
-          importedLeadId: null,
-          importedNotes: null,
-          importedAt: null,
-          importedByUserId: null,
-          importFilename: null,
-        });
-      }
-
-      const lead = map.get(key)!;
-      const state = getStateFromPhone(visit.guest_phone);
-
-      lead.reservations.push(visit);
-
-      if (visit.guest_name) {
-        lead.guest_name = visit.guest_name;
-      }
-
-      if (visit.guest_email) {
-        lead.guest_email = visit.guest_email;
-      }
-
-      if (visit.guest_birthdate) {
-        lead.guest_birthdate = visit.guest_birthdate;
-      }
-
-      if (visit.guest_phone) {
-        lead.guest_phone = visit.guest_phone;
-        lead.phone_digits = phoneDigits;
-        lead.stateCode = state?.code ?? null;
-        lead.stateName = state?.name ?? null;
-      }
-
-      if (visit.created_at.localeCompare(lead.lead_created_at) < 0) {
-        lead.lead_created_at = visit.created_at;
-      }
-
-      if (
-        compareReservationDateTime(
-          visit.date,
-          visit.time,
-          lead.last_reservation_date,
-          lead.last_reservation_time,
-        ) > 0
-      ) {
-        lead.last_reservation_date = visit.date;
-        lead.last_reservation_time = visit.time;
-      }
-
-      if (lead.source !== visit.lead_source) {
-        lead.source = 'mixed';
-      }
-    }
-
-    for (const importedLead of importedLeads) {
-      const phoneDigits = normalizePhone(importedLead.phone ?? importedLead.phone_normalized);
-      const key = getLeadLookupKey({
-        phone: importedLead.phone,
-        phoneDigits,
-        email: importedLead.email ?? importedLead.email_normalized,
-        fallback: `crm-${importedLead.id}`,
-      });
-
-      const state = getStateFromPhone(importedLead.phone ?? importedLead.phone_normalized);
-      const current = map.get(key);
-
-      if (!current) {
-        map.set(key, {
-          key,
-          guest_phone: importedLead.phone ?? importedLead.phone_normalized ?? '',
-          phone_digits: phoneDigits,
-          guest_name: importedLead.full_name,
-          guest_email: importedLead.email ?? null,
-          guest_birthdate: importedLead.birthdate ?? null,
-          total_reservations: 0,
-          lead_created_at: importedLead.imported_at ?? importedLead.created_at,
-          last_reservation_date: '',
-          last_reservation_time: '',
-          stateCode: state?.code ?? null,
-          stateName: state?.name ?? null,
-          source: 'imported',
-          reservations: [],
-          importedLeadId: importedLead.id,
-          importedNotes: importedLead.notes ?? null,
-          importedAt: importedLead.imported_at ?? null,
-          importedByUserId: importedLead.imported_by_user_id ?? null,
-          importFilename: importedLead.import_filename ?? null,
-        });
-        continue;
-      }
-
-      if (!current.guest_email && importedLead.email) {
-        current.guest_email = importedLead.email;
-      }
-
-      if (!current.guest_birthdate && importedLead.birthdate) {
-        current.guest_birthdate = importedLead.birthdate;
-      }
-
-      if (!current.guest_phone && (importedLead.phone || importedLead.phone_normalized)) {
-        current.guest_phone = importedLead.phone ?? importedLead.phone_normalized ?? '';
-        current.phone_digits = phoneDigits;
-        current.stateCode = state?.code ?? null;
-        current.stateName = state?.name ?? null;
-      }
-
-      if (current.guest_name === 'Lead sem nome' && importedLead.full_name) {
-        current.guest_name = importedLead.full_name;
-      }
-
-      if ((importedLead.imported_at ?? importedLead.created_at).localeCompare(current.lead_created_at) < 0) {
-        current.lead_created_at = importedLead.imported_at ?? importedLead.created_at;
-      }
-
-      current.importedLeadId = importedLead.id;
-      current.importedNotes = mergeImportedNotes(current.importedNotes, importedLead.notes ?? null);
-      current.importedAt = importedLead.imported_at ?? current.importedAt;
-      current.importedByUserId = importedLead.imported_by_user_id ?? current.importedByUserId;
-      current.importFilename = importedLead.import_filename ?? current.importFilename;
-    }
-
-    return Array.from(map.values())
-      .map((lead) => {
-        const sortedReservations = [...lead.reservations].sort((a, b) =>
-          compareLeadVisitsChronologically(b, a),
-        );
-
-        return {
-          ...lead,
-          total_reservations: selectCanonicalLeadPresenceEvents(sortedReservations).length,
-          reservations: sortedReservations,
-        };
-      })
-      .sort((a, b) => {
-        const reservationDiff = b.total_reservations - a.total_reservations;
-
-        if (reservationDiff !== 0) {
-          return reservationDiff;
-        }
-
-        return b.lead_created_at.localeCompare(a.lead_created_at);
-      });
-  }, [canonicalVisits, importedLeads]);
-
-  const selectedLeadPresenceEvents = useMemo(
-    () => selectedLead ? selectCanonicalLeadPresenceEvents(selectedLead.reservations) : [],
-    [selectedLead],
-  );
-
-  const stateOptions = useMemo(() => {
-    const uniqueStates = new Map<string, string>();
-
-    for (const lead of leads) {
-      if (lead.stateCode && lead.stateName) {
-        uniqueStates.set(lead.stateCode, lead.stateName);
-      }
-    }
-
-    return Array.from(uniqueStates.entries())
-      .map(([code, name]) => ({ code, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [leads]);
-
-  const filteredLeads = useMemo(() => {
-    const searchTerm = search.trim().toLowerCase();
-    const searchDigits = normalizePhone(search);
-    const parsedMinReservations = minReservations ? Number(minReservations) : null;
-    const parsedMaxReservations = maxReservations ? Number(maxReservations) : null;
-
-    return leads.filter((lead) => {
-      if (searchTerm) {
-        const matchesText =
-          lead.guest_name.toLowerCase().includes(searchTerm) ||
-          lead.guest_email?.toLowerCase().includes(searchTerm) ||
-          lead.guest_phone.toLowerCase().includes(searchTerm);
-
-        const matchesPhoneDigits = matchesLeadPhoneDigits(lead.phone_digits, searchDigits);
-
-        if (!matchesText && !matchesPhoneDigits) {
-          return false;
-        }
-      }
-
-      const leadCreatedAt = parseISO(lead.lead_created_at);
-
-      if (createdFrom && leadCreatedAt < startOfDay(createdFrom)) {
-        return false;
-      }
-
-      if (createdTo && leadCreatedAt > endOfDay(createdTo)) {
-        return false;
-      }
-
-      if (stateFilter === 'unknown' && lead.stateCode) {
-        return false;
-      }
-
-      if (stateFilter !== 'all' && stateFilter !== 'unknown' && lead.stateCode !== stateFilter) {
-        return false;
-      }
-
-      if (birthdaysThisMonthOnly && !isBirthdayInMonth(lead.guest_birthdate, currentMonth)) {
-        return false;
-      }
-
-      if (parsedMinReservations !== null && !Number.isNaN(parsedMinReservations) && lead.total_reservations < parsedMinReservations) {
-        return false;
-      }
-
-      if (parsedMaxReservations !== null && !Number.isNaN(parsedMaxReservations) && lead.total_reservations > parsedMaxReservations) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [birthdaysThisMonthOnly, createdFrom, createdTo, currentMonth, leads, maxReservations, minReservations, search, stateFilter]);
-
-  const filteredLeadRecordsCount = useMemo(
-    () =>
-      filteredLeads.reduce(
-        (total, lead) => total + (lead.total_reservations > 0 ? lead.total_reservations : lead.importedLeadId ? 1 : 0),
-        0,
-      ),
-    [filteredLeads],
-  );
-  const totalLeadRecords = canonicalVisits.length + importedLeads.length;
-
-  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / Number(pageSize)));
-
-  const paginatedLeads = useMemo(() => {
-    const size = Number(pageSize);
-    const startIndex = (currentPage - 1) * size;
-    return filteredLeads.slice(startIndex, startIndex + size);
-  }, [currentPage, filteredLeads, pageSize]);
+  const selectedLeadPresenceEvents = selectedLeadHistoryQuery.data?.visits ?? [];
+  const stateOptions = leadsQuery.data?.states ?? [];
+  const filteredLeads = leads;
+  const paginatedLeads = leads;
+  const listMeta = leadsQuery.data?.meta;
+  const filteredLeadsCount = listMeta?.filtered_leads ?? 0;
+  const totalLeadsCount = listMeta?.total_leads ?? 0;
+  const filteredCanonicalVisits = listMeta?.filtered_canonical_visits ?? 0;
+  const totalCanonicalVisits = listMeta?.total_canonical_visits ?? 0;
+  const totalPages = Math.max(1, Math.ceil(filteredLeadsCount / Number(pageSize)));
 
   const pageSummary = useMemo(() => {
-    if (filteredLeads.length === 0) {
+    if (filteredLeadsCount === 0) {
       return 'Exibindo 0 de 0 leads';
     }
 
     const size = Number(pageSize);
     const start = (currentPage - 1) * size + 1;
-    const end = Math.min(currentPage * size, filteredLeads.length);
+    const end = Math.min(currentPage * size, filteredLeadsCount);
 
-    return `Exibindo ${start}-${end} de ${filteredLeads.length} leads`;
-  }, [currentPage, filteredLeads.length, pageSize]);
+    return `Exibindo ${start}-${end} de ${filteredLeadsCount} leads`;
+  }, [currentPage, filteredLeadsCount, pageSize]);
 
   const visiblePages = useMemo(() => getVisiblePages(currentPage, totalPages), [currentPage, totalPages]);
 
@@ -1382,7 +763,7 @@ export default function Leads() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, createdFrom, createdTo, stateFilter, minReservations, maxReservations, birthdaysThisMonthOnly, pageSize]);
+  }, [createdFrom, createdTo, stateFilter, minReservations, maxReservations, birthdaysThisMonthOnly, pageSize]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -1391,56 +772,12 @@ export default function Leads() {
   }, [currentPage, totalPages]);
 
   const exportedLeads = useMemo(() => {
-    return leads
-      .map((lead) => {
-        if (!matchesTimestampRange(lead.lead_created_at, exportLeadCreatedRange)) {
-          return null;
-        }
-
-        if (exportStateFilter === 'unknown' && lead.stateCode) {
-          return null;
-        }
-
-        if (exportStateFilter !== 'all' && exportStateFilter !== 'unknown' && lead.stateCode !== exportStateFilter) {
-          return null;
-        }
-
-        if (exportBirthdaysThisMonthOnly && !isBirthdayInMonth(lead.guest_birthdate, currentMonth)) {
-          return null;
-        }
-
-        if (shouldIncludeImportedLeadInExport(lead, exportVisitRange, exportStatuses)) {
-          return {
-            lead,
-            matchedVisits: [] as LeadVisitRecord[],
-            matchedSource: 'imported' as const,
-          };
-        }
-
-        const matchedVisits = lead.reservations.filter((visit) => {
-          if (!matchesLocalDateRange(visit.date, exportVisitRange)) {
-            return false;
-          }
-
-          if (exportStatuses.length > 0 && !exportStatuses.includes(normalizeVisitStatus(visit.status))) {
-            return false;
-          }
-
-          return true;
-        });
-
-        if (matchedVisits.length === 0) {
-          return null;
-        }
-
-        return {
-          lead,
-          matchedVisits,
-          matchedSource: getLeadSourceFromVisits(matchedVisits),
-        };
-      })
-      .filter((item): item is { lead: Lead; matchedVisits: LeadVisitRecord[]; matchedSource: LeadSource } => item !== null);
-  }, [currentMonth, exportBirthdaysThisMonthOnly, exportLeadCreatedRange, exportStateFilter, exportStatuses, exportVisitRange, leads]);
+    return (exportQuery.data?.items ?? []).map(({ lead: row, visits, matchedSource }) => ({
+      lead: mapCrmLeadRowToLead(row),
+      matchedVisits: visits,
+      matchedSource,
+    }));
+  }, [exportQuery.data?.items]);
 
   const exportedLeadsSummary = useMemo(() => {
     return {
@@ -1450,6 +787,7 @@ export default function Leads() {
 
   const clearFilters = () => {
     setSearch('');
+    setDebouncedSearch('');
     setCreatedRange(undefined);
     setCreatedFrom(undefined);
     setCreatedTo(undefined);
@@ -1464,15 +802,26 @@ export default function Leads() {
     setExportLeadCreatedRange(undefined);
     setExportVisitRange(undefined);
     setExportStateFilter('all');
-    setExportStatuses([]);
     setExportBirthdaysThisMonthOnly(false);
-    setExportSearchTriggered(false);
+    setExportRequest(null);
   };
 
-  const toggleExportStatus = (status: string, checked: boolean) => {
-    setExportStatuses((current) =>
-      checked ? [...current, status] : current.filter((value) => value !== status),
-    );
+  const applyExportFilters = () => {
+    const nextRequest: CanonicalExportRequest = {
+      createdFrom: exportLeadCreatedRange?.from ? format(exportLeadCreatedRange.from, 'yyyy-MM-dd') : null,
+      createdTo: exportLeadCreatedRange?.to ? format(exportLeadCreatedRange.to, 'yyyy-MM-dd') : null,
+      stateCode: exportStateFilter === 'all' ? null : exportStateFilter,
+      birthdayMonth: exportBirthdaysThisMonthOnly ? currentMonth : null,
+      visitFrom: exportVisitRange?.from ? format(exportVisitRange.from, 'yyyy-MM-dd') : null,
+      visitTo: exportVisitRange?.to ? format(exportVisitRange.to, 'yyyy-MM-dd') : null,
+    };
+
+    if (exportRequest && JSON.stringify(exportRequest) === JSON.stringify(nextRequest)) {
+      void exportQuery.refetch();
+      return;
+    }
+
+    setExportRequest(nextRequest);
   };
 
   const exportLeadsSpreadsheet = async () => {
@@ -1497,7 +846,7 @@ export default function Leads() {
             return `${visitMoment} - ${visitStatus}${formatLeadVisitContext(visit)}${visit.occasion ? ` - ${visit.occasion}` : ''}`;
           })
           .join(' | ')
-        : 'Lead importado sem reservas',
+        : 'Contato sem presenças registradas (check-in, atendimento concluído ou fila sentada)',
     ]);
     const columns: SpreadsheetColumn[] = [
       { header: 'Nome', width: 30 },
@@ -1507,10 +856,10 @@ export default function Leads() {
       { header: 'Nascimento', width: 15, align: 'center', format: 'dd/mm/yyyy' },
       { header: 'Lead criado em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
       { header: 'Papel filtrado', width: 20 },
-      { header: 'Visitas filtradas', width: 16, align: 'center', format: '0' },
+      { header: 'Presenças filtradas', width: 18, align: 'center', format: '0' },
       { header: 'Visitas totais', width: 14, align: 'center', format: '0' },
-      { header: 'Última visita filtrada', width: 23, align: 'center', format: 'dd/mm/yyyy hh:mm' },
-      { header: 'Histórico filtrado', width: 64, wrap: true },
+      { header: 'Última presença filtrada', width: 25, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Histórico de presenças', width: 64, wrap: true },
     ];
 
     setExportSpreadsheetPending(true);
@@ -1555,8 +904,8 @@ export default function Leads() {
   };
 
   const summaryText = hasActiveFilters
-    ? `${filteredLeads.length} de ${leads.length} clientes · ${filteredLeadRecordsCount} de ${totalLeadRecords} registros`
-    : `${leads.length} clientes · ${totalLeadRecords} registros`;
+    ? `${filteredLeadsCount} de ${totalLeadsCount} clientes · ${filteredCanonicalVisits} de ${totalCanonicalVisits} visitas`
+    : `${totalLeadsCount} clientes · ${totalCanonicalVisits} visitas`;
 
   return (
     <div className="space-y-6">
@@ -1591,7 +940,7 @@ export default function Leads() {
               variant="outline"
               size="sm"
               className="w-full gap-2 bg-card sm:w-auto"
-              disabled={leads.length === 0}
+              disabled={totalLeadsCount === 0}
             >
               <Download className="h-4 w-4" />
               Exportar
@@ -1637,6 +986,7 @@ export default function Leads() {
               <Input
                 placeholder="Buscar por nome, telefone ou email..."
                 value={search}
+                maxLength={200}
                 onChange={(event) => setSearch(event.target.value)}
                 className="h-10 rounded-md bg-background pl-10"
               />
@@ -1666,7 +1016,7 @@ export default function Leads() {
 
             <Input
               type="number"
-              min="1"
+              min="0"
               inputMode="numeric"
               placeholder="Visitas min."
               value={minReservations}
@@ -1676,7 +1026,7 @@ export default function Leads() {
 
             <Input
               type="number"
-              min="1"
+              min="0"
               inputMode="numeric"
               placeholder="Visitas max."
               value={maxReservations}
@@ -1696,7 +1046,7 @@ export default function Leads() {
         <Card className="border-destructive/25 bg-destructive/5 shadow-none">
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center" role="alert">
             <div>
-              <p className="font-medium text-foreground">Não foi possível carregar todo o histórico</p>
+              <p className="font-medium text-foreground">Não foi possível carregar a base de leads</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Nenhuma contagem parcial será exibida. Tente carregar os dados novamente.
               </p>
@@ -1708,7 +1058,7 @@ export default function Leads() {
         </Card>
       ) : isLoading ? (
         <p className="py-12 text-center text-muted-foreground">Carregando...</p>
-      ) : filteredLeads.length === 0 ? (
+      ) : filteredLeadsCount === 0 ? (
         <p className="py-12 text-center text-muted-foreground">
           {hasActiveFilters ? 'Nenhum lead encontrado com os filtros atuais' : 'Nenhum lead encontrado'}
         </p>
@@ -1716,7 +1066,14 @@ export default function Leads() {
         <div className="space-y-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-foreground">Clientes encontrados</h2>
+              <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+                Clientes encontrados
+                <InfoTooltip
+                  content="Quando há telefone, ele identifica o cliente: nomes diferentes no mesmo número são unidos e exibimos o nome mais recente. Sem telefone, usamos o email; sem ambos, cada registro permanece separado. Contatos de reservas sem presença também aparecem, com 0 visitas."
+                  ariaLabel="Entender como os clientes são identificados"
+                  interaction="popover"
+                />
+              </h2>
               <p className="text-sm text-muted-foreground">{pageSummary}</p>
             </div>
             <span className="text-xs font-medium text-muted-foreground">Página {currentPage} de {totalPages}</span>
@@ -1733,7 +1090,7 @@ export default function Leads() {
                     <span className="flex items-center justify-end gap-1">
                       Visitas
                       <InfoTooltip
-                        content="Conta presenças confirmadas de titulares e acompanhantes identificados em reservas ou na fila. Quando uma entrada da fila é convertida em reserva, ela conta apenas uma vez. O número considera todo o histórico disponível."
+                        content="Conta presenças registradas de titulares e acompanhantes identificados: check-in, atendimento concluído ou fila sentada. Quando uma fila vira reserva, ela conta apenas uma vez. O número considera todo o histórico disponível."
                         ariaLabel="Entender a contagem de visitas"
                         interaction="popover"
                       />
@@ -1967,7 +1324,7 @@ export default function Leads() {
                             <p>Telefone: {formatLeadPhoneText(row.phone)}</p>
                             <p>Email: {row.email || 'Não informado'}</p>
                             {row.birthdate && <p>Nascimento: {row.birthdate}</p>}
-                            {row.notes && <p className="whitespace-pre-wrap">Observacoes: {row.notes}</p>}
+                            {row.notes && <p className="whitespace-pre-wrap">Observações: {row.notes}</p>}
                           </div>
                         </div>
                       ))}
@@ -1998,7 +1355,7 @@ export default function Leads() {
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
-                    Leads importados aparecem na tela mesmo sem reservas e passam a se juntar ao histórico quando o mesmo telefone ou email voltar a reservar.
+                    Leads importados aparecem mesmo sem reservas e se juntam ao histórico pelo telefone; quando não houver telefone, pelo email.
                   </p>
                   <Button
                     type="button"
@@ -2025,7 +1382,7 @@ export default function Leads() {
         onOpenChange={(open) => {
           setExportDialogOpen(open);
           if (!open) {
-            setExportSearchTriggered(false);
+            setExportRequest(null);
           }
         }}
       >
@@ -2046,7 +1403,7 @@ export default function Leads() {
               </div>
 
               <div className="space-y-2">
-                <Label>Período das visitas</Label>
+                <Label>Período das presenças</Label>
                 <DateRangePicker
                   value={exportVisitRange}
                   onChange={setExportVisitRange}
@@ -2097,39 +1454,35 @@ export default function Leads() {
 
             </div>
 
-            <div className="space-y-3">
-              <Label>Status da visita</Label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {LEAD_EXPORT_STATUS_OPTIONS.map((status) => (
-                  <label
-                    key={status.value}
-                    className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm"
-                  >
-                    <Checkbox
-                      checked={exportStatuses.includes(status.value)}
-                      onCheckedChange={(checked) => toggleExportStatus(status.value, checked === true)}
-                    />
-                    <span>{status.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-muted-foreground">
-                Os filtros sao combinados. O resumo usa apenas as visitas que baterem com o recorte escolhido.
+                Os filtros são combinados. A exportação inclui somente presenças registradas (check-in, atendimento concluído ou fila sentada); reservas apenas confirmadas, canceladas e no-show não são visitas.
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="ghost" onClick={clearExportFilters}>
                   Limpar filtros
                 </Button>
-                <Button onClick={() => setExportSearchTriggered(true)}>
-                  Buscar
+                <Button onClick={applyExportFilters} disabled={exportQuery.isFetching} className="gap-2">
+                  {exportQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {exportQuery.isFetching ? 'Buscando...' : 'Buscar'}
                 </Button>
               </div>
             </div>
 
-            {exportSearchTriggered && (
+            {exportRequest && (exportQuery.isLoading || (exportQuery.isFetching && !exportQuery.data)) ? (
+              <div className="flex items-center gap-3 rounded-3xl border border-border bg-muted/20 p-5 text-sm text-muted-foreground" role="status" aria-live="polite">
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden="true" />
+                Carregando todas as páginas e presenças do recorte. Em bases maiores, isso pode levar alguns instantes.
+              </div>
+            ) : exportRequest && exportQuery.isError ? (
+              <div className="rounded-3xl border border-destructive/25 bg-destructive/5 p-5" role="alert">
+                <p className="text-sm font-medium text-foreground">Não foi possível preparar a exportação completa.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Nenhuma planilha parcial será gerada.</p>
+                <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void exportQuery.refetch()}>
+                  Tentar novamente
+                </Button>
+              </div>
+            ) : exportRequest && exportQuery.data ? (
               <div className="space-y-4 rounded-3xl border border-border bg-muted/20 p-5">
                 <div className="rounded-2xl border border-border bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Leads encontrados</p>
@@ -2140,19 +1493,19 @@ export default function Leads() {
                   <p className="text-sm text-muted-foreground">
                     {exportedLeads.length === 0
                       ? 'Nenhum lead encontrado com os filtros informados.'
-                      : 'A planilha vai sair com os dados do lead e um histórico resumido somente das visitas filtradas.'}
+                      : 'A planilha terá os dados do lead e somente as presenças registradas (check-in, atendimento concluído ou fila sentada) no recorte escolhido.'}
                   </p>
                   <Button
                     className="gap-2"
                     onClick={exportLeadsSpreadsheet}
-                    disabled={exportedLeads.length === 0 || exportSpreadsheetPending}
+                    disabled={exportedLeads.length === 0 || exportSpreadsheetPending || exportQuery.isFetching}
                   >
                     {exportSpreadsheetPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     {exportSpreadsheetPending ? 'Gerando planilha...' : 'Exportar planilha'}
                   </Button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
@@ -2236,11 +1589,29 @@ export default function Leads() {
 
               <div className="pt-4">
                 <h4 className="mb-3 text-sm font-semibold text-foreground">
-                  Histórico de Presenças ({selectedLeadPresenceEvents.length})
+                  Histórico de Presenças ({selectedLead.total_reservations})
                 </h4>
-                {selectedLeadPresenceEvents.length === 0 ? (
+                {selectedLeadHistoryQuery.isLoading ? (
+                  <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Carregando histórico completo...
+                  </div>
+                ) : selectedLeadHistoryQuery.isError ? (
+                  <div className="rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm" role="alert">
+                    <p className="text-foreground">Não foi possível carregar o histórico de presenças.</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void retrySelectedLeadHistory()}
+                    >
+                      Tentar novamente
+                    </Button>
+                  </div>
+                ) : selectedLeadPresenceEvents.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
-                    Este lead ainda não possui presenças confirmadas.
+                    Este contato ainda não possui presenças registradas. Reservas apenas confirmadas, canceladas ou marcadas como no-show não entram nesta contagem.
                   </div>
                 ) : (
                 <div className="max-h-60 space-y-2 overflow-y-auto">
