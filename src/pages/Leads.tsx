@@ -5,6 +5,8 @@ import { ptBR } from 'date-fns/locale';
 import {
   CalendarDays,
   CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   Filter,
@@ -34,9 +36,6 @@ import {
   PaginationContent,
   PaginationEllipsis,
   PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -51,6 +50,11 @@ import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/res
 import { cn } from '@/lib/utils';
 import { formatBrazilPhone } from '@/lib/validation';
 import {
+  CRM_VISITS_FILTER_MAX,
+  collectCrmImportedLeadMatchPages,
+  getCrmVisitsFilterRangeError,
+  normalizeCrmVisitsFilterInput,
+  resolveCrmLeadsDisplayedPage,
   useCrmLeadPresenceHistory,
   useCrmLeadsCanonicalExport,
   useCrmLeadsPage,
@@ -310,19 +314,36 @@ async function findImportedLeadMatches(companyId: string, rows: ParsedLeadImport
   const selectFields = 'id, full_name, phone, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at';
   const matches = new Map<string, ImportedLeadRecord>();
   const chunkSize = 100;
+  const queryPageSize = 500;
 
   const loadMatches = async (column: 'phone_normalized' | 'email_normalized', values: string[]) => {
     for (let index = 0; index < values.length; index += chunkSize) {
       const chunk = values.slice(index, index + chunkSize);
-      const { data, error } = await supabase
-        .from('crm_leads' as never)
-        .select(selectFields)
-        .eq('company_id', companyId)
-        .in(column, chunk);
+      const matchedRows = await collectCrmImportedLeadMatchPages(
+        async (rangeStart, rangeEnd) => {
+          const { data, error, count } = await supabase
+            .from('crm_leads' as never)
+            .select(selectFields, { count: 'exact' })
+            .eq('company_id', companyId)
+            .in(column, chunk)
+            .order('id', { ascending: true })
+            .range(rangeStart, rangeEnd);
 
-      if (error) throw error;
+          if (error) throw error;
+          if (count === null) {
+            throw new Error('Não foi possível confirmar o total de leads existentes.');
+          }
 
-      for (const lead of (data ?? []) as ImportedLeadRecord[]) {
+          return {
+            rows: (data ?? []) as ImportedLeadRecord[],
+            total: count,
+          };
+        },
+        (lead) => lead.id,
+        queryPageSize,
+      );
+
+      for (const lead of matchedRows) {
         matches.set(lead.id, lead);
       }
     }
@@ -489,6 +510,10 @@ export default function Leads() {
 
   const parsedMinReservations = minReservations ? Number(minReservations) : null;
   const parsedMaxReservations = maxReservations ? Number(maxReservations) : null;
+  const visitFilterRangeError = getCrmVisitsFilterRangeError(
+    parsedMinReservations,
+    parsedMaxReservations,
+  );
   const leadsQuery = useCrmLeadsPage({
     companyId,
     page: currentPage,
@@ -504,6 +529,7 @@ export default function Leads() {
     maxVisits: parsedMaxReservations !== null && Number.isFinite(parsedMaxReservations)
       ? parsedMaxReservations
       : null,
+    enabled: !visitFilterRangeError,
   });
   const selectedLeadHistoryQuery = useCrmLeadPresenceHistory({
     companyId,
@@ -736,21 +762,26 @@ export default function Leads() {
   const totalLeadsCount = listMeta?.total_leads ?? 0;
   const filteredCanonicalVisits = listMeta?.filtered_canonical_visits ?? 0;
   const totalCanonicalVisits = listMeta?.total_canonical_visits ?? 0;
-  const totalPages = Math.max(1, Math.ceil(filteredLeadsCount / Number(pageSize)));
+  const totalPages = Math.max(1, Math.ceil(filteredLeadsCount / (listMeta?.page_size ?? Number(pageSize))));
+  const displayedPage = resolveCrmLeadsDisplayedPage(currentPage, listMeta?.page);
+  const isChangingPage = !!listMeta
+    && leadsQuery.isPlaceholderData
+    && leadsQuery.isFetching
+    && currentPage !== listMeta.page;
 
   const pageSummary = useMemo(() => {
     if (filteredLeadsCount === 0) {
       return 'Exibindo 0 de 0 leads';
     }
 
-    const size = Number(pageSize);
-    const start = (currentPage - 1) * size + 1;
-    const end = Math.min(currentPage * size, filteredLeadsCount);
+    const size = listMeta?.page_size ?? Number(pageSize);
+    const start = (displayedPage - 1) * size + 1;
+    const end = Math.min(displayedPage * size, filteredLeadsCount);
 
     return `Exibindo ${start}-${end} de ${filteredLeadsCount} leads`;
-  }, [currentPage, filteredLeadsCount, pageSize]);
+  }, [displayedPage, filteredLeadsCount, listMeta?.page_size, pageSize]);
 
-  const visiblePages = useMemo(() => getVisiblePages(currentPage, totalPages), [currentPage, totalPages]);
+  const visiblePages = useMemo(() => getVisiblePages(displayedPage, totalPages), [displayedPage, totalPages]);
 
   const hasActiveFilters =
     search.trim().length > 0 ||
@@ -766,10 +797,10 @@ export default function Leads() {
   }, [createdFrom, createdTo, stateFilter, minReservations, maxReservations, birthdaysThisMonthOnly, pageSize]);
 
   useEffect(() => {
-    if (currentPage > totalPages) {
+    if (listMeta && currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
-  }, [currentPage, totalPages]);
+  }, [currentPage, listMeta, totalPages]);
 
   const exportedLeads = useMemo(() => {
     return (exportQuery.data?.items ?? []).map(({ lead: row, visits, matchedSource }) => ({
@@ -908,7 +939,7 @@ export default function Leads() {
     : `${totalLeadsCount} clientes · ${totalCanonicalVisits} visitas`;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={leadsQuery.isFetching}>
       <div className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -920,7 +951,7 @@ export default function Leads() {
 
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
             <Select value={pageSize} onValueChange={(value) => setPageSize(value as (typeof LEADS_PAGE_SIZE_OPTIONS)[number])}>
-              <SelectTrigger className="h-9 w-full rounded-md bg-card shadow-sm sm:w-[150px]">
+              <SelectTrigger className="h-9 w-full rounded-md bg-card shadow-sm sm:w-[150px]" aria-label="Resultados por página">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -984,16 +1015,17 @@ export default function Leads() {
             <div className="relative md:col-span-2 xl:col-span-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Buscar por nome, telefone ou email..."
+                placeholder="Buscar por nome, telefone ou email…"
                 value={search}
                 maxLength={200}
                 onChange={(event) => setSearch(event.target.value)}
                 className="h-10 rounded-md bg-background pl-10"
+                aria-label="Buscar leads por nome, telefone ou email"
               />
             </div>
 
             <Select value={stateFilter} onValueChange={setStateFilter}>
-              <SelectTrigger className="h-10 rounded-md bg-background">
+              <SelectTrigger className="h-10 rounded-md bg-background" aria-label="Filtrar leads por estado">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
@@ -1017,21 +1049,31 @@ export default function Leads() {
             <Input
               type="number"
               min="0"
+              max={CRM_VISITS_FILTER_MAX}
+              step="1"
               inputMode="numeric"
               placeholder="Visitas min."
               value={minReservations}
-              onChange={(event) => setMinReservations(event.target.value)}
+              onChange={(event) => setMinReservations(normalizeCrmVisitsFilterInput(event.target.value))}
               className="h-10 rounded-md bg-background"
+              aria-label="Mínimo de visitas"
+              aria-invalid={!!visitFilterRangeError}
+              aria-describedby={visitFilterRangeError ? 'lead-visits-filter-error' : undefined}
             />
 
             <Input
               type="number"
               min="0"
+              max={CRM_VISITS_FILTER_MAX}
+              step="1"
               inputMode="numeric"
               placeholder="Visitas max."
               value={maxReservations}
-              onChange={(event) => setMaxReservations(event.target.value)}
+              onChange={(event) => setMaxReservations(normalizeCrmVisitsFilterInput(event.target.value))}
               className="h-10 rounded-md bg-background"
+              aria-label="Máximo de visitas"
+              aria-invalid={!!visitFilterRangeError}
+              aria-describedby={visitFilterRangeError ? 'lead-visits-filter-error' : undefined}
             />
 
             <Button variant="ghost" className="h-10 gap-2 px-3" disabled={!hasActiveFilters} onClick={clearFilters}>
@@ -1039,10 +1081,21 @@ export default function Leads() {
               Limpar
             </Button>
           </div>
+          {visitFilterRangeError && (
+            <p id="lead-visits-filter-error" className="text-xs font-medium text-destructive" role="alert">
+              {visitFilterRangeError}
+            </p>
+          )}
         </CardContent>
       </Card>
 
-      {hasLoadError ? (
+      {visitFilterRangeError ? (
+        <Card className="border-destructive/25 bg-destructive/5 shadow-none">
+          <CardContent className="py-8 text-center text-sm text-foreground">
+            Corrija o intervalo de visitas para atualizar a lista.
+          </CardContent>
+        </Card>
+      ) : hasLoadError ? (
         <Card className="border-destructive/25 bg-destructive/5 shadow-none">
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center" role="alert">
             <div>
@@ -1057,7 +1110,7 @@ export default function Leads() {
           </CardContent>
         </Card>
       ) : isLoading ? (
-        <p className="py-12 text-center text-muted-foreground">Carregando...</p>
+        <p className="py-12 text-center text-muted-foreground">Carregando…</p>
       ) : filteredLeadsCount === 0 ? (
         <p className="py-12 text-center text-muted-foreground">
           {hasActiveFilters ? 'Nenhum lead encontrado com os filtros atuais' : 'Nenhum lead encontrado'}
@@ -1076,10 +1129,22 @@ export default function Leads() {
               </h2>
               <p className="text-sm text-muted-foreground">{pageSummary}</p>
             </div>
-            <span className="text-xs font-medium text-muted-foreground">Página {currentPage} de {totalPages}</span>
+            <span className="text-xs font-medium text-muted-foreground">Página {displayedPage} de {totalPages}</span>
           </div>
 
-          <Card className="overflow-hidden border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+          <Card className="relative overflow-hidden border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+            {isChangingPage && (
+              <div
+                className="absolute inset-0 z-20 flex min-h-48 items-center justify-center bg-card/80 backdrop-blur-[1px]"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground shadow-sm">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+                  Carregando página {currentPage}…
+                </div>
+              </div>
+            )}
             <Table className="min-w-[760px] text-xs">
               <TableHeader className="bg-muted/25">
                 <TableRow className="hover:bg-transparent">
@@ -1158,19 +1223,21 @@ export default function Leads() {
           </Card>
 
           {totalPages > 1 && (
-            <Pagination>
+            <Pagination aria-label="Paginação dos leads">
               <PaginationContent>
                 <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      if (currentPage > 1) {
-                        setCurrentPage(currentPage - 1);
-                      }
-                    }}
-                    className={cn(currentPage === 1 && 'pointer-events-none opacity-50')}
-                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1"
+                    aria-label="Ir para a página anterior"
+                    disabled={displayedPage === 1 || leadsQuery.isFetching}
+                    onClick={() => setCurrentPage(displayedPage - 1)}
+                  >
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                    Anterior
+                  </Button>
                 </PaginationItem>
 
                 {visiblePages.map((page, index) => (
@@ -1178,31 +1245,34 @@ export default function Leads() {
                     {page === 'ellipsis' ? (
                       <PaginationEllipsis />
                     ) : (
-                      <PaginationLink
-                        href="#"
-                        isActive={page === currentPage}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          setCurrentPage(page);
-                        }}
+                      <Button
+                        type="button"
+                        variant={page === displayedPage ? 'outline' : 'ghost'}
+                        size="icon"
+                        aria-label={`Ir para a página ${page}`}
+                        aria-current={page === displayedPage ? 'page' : undefined}
+                        disabled={leadsQuery.isFetching}
+                        onClick={() => setCurrentPage(page)}
                       >
                         {page}
-                      </PaginationLink>
+                      </Button>
                     )}
                   </PaginationItem>
                 ))}
 
                 <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      if (currentPage < totalPages) {
-                        setCurrentPage(currentPage + 1);
-                      }
-                    }}
-                    className={cn(currentPage === totalPages && 'pointer-events-none opacity-50')}
-                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1"
+                    aria-label="Ir para a próxima página"
+                    disabled={displayedPage === totalPages || leadsQuery.isFetching}
+                    onClick={() => setCurrentPage(displayedPage + 1)}
+                  >
+                    Próxima
+                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
                 </PaginationItem>
               </PaginationContent>
             </Pagination>
@@ -1252,7 +1322,7 @@ export default function Leads() {
                   disabled={importReading || importMutation.isPending}
                 >
                   {importReading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  {importReading ? 'Lendo arquivo...' : 'Selecionar CSV'}
+                  {importReading ? 'Lendo arquivo…' : 'Selecionar CSV'}
                 </Button>
                 <Button type="button" variant="ghost" onClick={downloadImportTemplate} disabled={importMutation.isPending}>
                   Baixar modelo
@@ -1364,7 +1434,7 @@ export default function Leads() {
                     disabled={importRows.length === 0 || importReading || importMutation.isPending}
                   >
                     {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                    {importMutation.isPending ? 'Importando...' : `Importar ${importRows.length} leads`}
+                    {importMutation.isPending ? 'Importando…' : `Importar ${importRows.length} leads`}
                   </Button>
                 </div>
               </>
@@ -1464,7 +1534,7 @@ export default function Leads() {
                 </Button>
                 <Button onClick={applyExportFilters} disabled={exportQuery.isFetching} className="gap-2">
                   {exportQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                  {exportQuery.isFetching ? 'Buscando...' : 'Buscar'}
+                  {exportQuery.isFetching ? 'Buscando…' : 'Buscar'}
                 </Button>
               </div>
             </div>
@@ -1501,7 +1571,7 @@ export default function Leads() {
                     disabled={exportedLeads.length === 0 || exportSpreadsheetPending || exportQuery.isFetching}
                   >
                     {exportSpreadsheetPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {exportSpreadsheetPending ? 'Gerando planilha...' : 'Exportar planilha'}
+                    {exportSpreadsheetPending ? 'Gerando planilha…' : 'Exportar planilha'}
                   </Button>
                 </div>
               </div>
@@ -1594,7 +1664,7 @@ export default function Leads() {
                 {selectedLeadHistoryQuery.isLoading ? (
                   <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Carregando histórico completo...
+                    Carregando histórico completo…
                   </div>
                 ) : selectedLeadHistoryQuery.isError ? (
                   <div className="rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm" role="alert">

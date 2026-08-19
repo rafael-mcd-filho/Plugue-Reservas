@@ -6,6 +6,8 @@ import {
   isAuthorizedInternalJob,
 } from "../_shared/internal-auth.ts";
 import {
+  getPlatformAsaasPayment,
+  getPlatformAsaasPaymentPixQrCode,
   getPlatformAsaasCustomer,
   listPlatformAsaasCustomers,
   listAllPlatformAsaasCustomerPayments,
@@ -19,6 +21,13 @@ import {
   safePlatformBillingError,
   toCompanyBillingInvoiceRow,
 } from "../_shared/platform-billing.ts";
+import {
+  normalizePlatformAsaasPaymentId,
+  normalizePlatformBillingInvoiceId,
+  normalizePlatformBillingPixQrCode,
+  PlatformBillingPixValidationError,
+  validatePlatformBillingPaymentForPix,
+} from "../_shared/platform-billing-pix.ts";
 
 const LINK_COLUMNS = [
   "company_id",
@@ -79,7 +88,9 @@ class SyncCooldownError extends Error {
   retryAfterSeconds: number;
 
   constructor(retryAfterSeconds: number) {
-    super(`Aguarde ${retryAfterSeconds} segundos antes de sincronizar novamente`);
+    super(
+      `Aguarde ${retryAfterSeconds} ${retryAfterSeconds === 1 ? "segundo" : "segundos"} antes de sincronizar novamente`,
+    );
     this.name = "SyncCooldownError";
     this.retryAfterSeconds = retryAfterSeconds;
   }
@@ -87,15 +98,55 @@ class SyncCooldownError extends Error {
 
 class StaleBillingSnapshotError extends Error {
   constructor() {
-    super("A configuracao financeira mudou durante a operacao; recarregue e tente novamente");
+    super("A configuração financeira mudou durante a operação; recarregue e tente novamente");
     this.name = "StaleBillingSnapshotError";
+  }
+}
+
+class BillingInvoiceNotFoundError extends Error {
+  constructor() {
+    super("Fatura não encontrada");
+    this.name = "BillingInvoiceNotFoundError";
+  }
+}
+
+class InvoicePixUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvoicePixUnavailableError";
+  }
+}
+
+class PlatformPixProviderError extends Error {
+  constructor() {
+    super("O Asaas não conseguiu gerar o Pix agora; tente novamente em instantes");
+    this.name = "PlatformPixProviderError";
+  }
+}
+
+class PlatformPixRateLimitError extends Error {
+  constructor() {
+    super("O Asaas limitou temporariamente as solicitações de Pix; tente novamente em instantes");
+    this.name = "PlatformPixRateLimitError";
+  }
+}
+
+class PixRequestCooldownError extends Error {
+  retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super(
+      `Aguarde ${retryAfterSeconds} ${retryAfterSeconds === 1 ? "segundo" : "segundos"} antes de gerar outro Pix`,
+    );
+    this.name = "PixRequestCooldownError";
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
 function normalizeCompanyId(value: unknown) {
   const companyId = typeof value === "string" ? value.trim() : "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(companyId)) {
-    throw new Error("Empresa invalida");
+    throw new Error("Empresa inválida");
   }
   return companyId;
 }
@@ -103,7 +154,7 @@ function normalizeCompanyId(value: unknown) {
 function normalizeRevision(value: unknown, label: string) {
   const revision = typeof value === "string" ? value.trim() : "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(revision)) {
-    throw new Error(`${label} invalida`);
+    throw new Error(`${label} inválida`);
   }
   return revision;
 }
@@ -148,7 +199,7 @@ function normalizeCustomerSearchFilter(value: unknown): CustomerSearchFilter {
     || value === "cpf_cnpj"
     || value === "external_reference"
   ) return value;
-  throw new Error("Filtro de clientes Asaas invalido");
+  throw new Error("Filtro de clientes Asaas inválido");
 }
 
 function normalizeBoundedInteger(
@@ -160,7 +211,7 @@ function normalizeBoundedInteger(
   if (value === undefined || value === null || value === "") return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new Error("Paginacao de clientes Asaas invalida");
+    throw new Error("Paginação de clientes Asaas inválida");
   }
   return parsed;
 }
@@ -206,7 +257,7 @@ function resolveCustomerSearch(
   if (filter === "cpf_cnpj") {
     const digits = query.replace(/\D/g, "");
     if (digits.length !== 11 && digits.length !== 14) {
-      throw new Error("CPF ou CNPJ invalido para busca no Asaas");
+      throw new Error("CPF ou CNPJ inválido para busca no Asaas");
     }
     return { filter, providerFilters: { cpfCnpj: digits } };
   }
@@ -279,6 +330,120 @@ async function loadModuleEnabled(supabaseAdmin: any) {
     && !data?.token_last_error;
 }
 
+async function loadCompanyBillingInvoice(
+  supabaseAdmin: any,
+  companyId: string,
+  invoiceId: string,
+) {
+  const { data, error } = await supabaseAdmin
+    .from("company_billing_invoices")
+    .select(INVOICE_COLUMNS)
+    .eq("company_id", companyId)
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as Record<string, any> | null;
+}
+
+async function claimPlatformBillingPixRequest(
+  supabaseAdmin: any,
+  companyId: string,
+  userId: string,
+) {
+  const { data, error } = await supabaseAdmin.rpc(
+    "claim_platform_billing_pix_request",
+    {
+      _company_id: companyId,
+      _user_id: userId,
+      _claimed_at: new Date().toISOString(),
+    },
+  );
+  if (error) throw new Error(error.message);
+
+  const claim = data && typeof data === "object"
+    ? data as Record<string, unknown>
+    : {};
+  if (claim.claimed !== true) {
+    const retryAfterSeconds = Number(claim.retry_after_seconds ?? 1);
+    throw new PixRequestCooldownError(
+      Number.isFinite(retryAfterSeconds)
+        ? Math.max(1, Math.min(60, Math.ceil(retryAfterSeconds)))
+        : 1,
+    );
+  }
+}
+
+type PlatformBillingPixSnapshot = {
+  companyId: string;
+  invoiceId: string;
+  sourceRevision: string;
+  linkRevision: string;
+  paymentId: string;
+  customerId: string;
+  requireBillingEnabled: boolean;
+};
+
+async function assertPlatformBillingPixSnapshotCurrent(
+  supabaseAdmin: any,
+  snapshot: PlatformBillingPixSnapshot,
+) {
+  const { data, error } = await supabaseAdmin.rpc(
+    "assert_platform_billing_pix_snapshot",
+    {
+      _company_id: snapshot.companyId,
+      _invoice_id: snapshot.invoiceId,
+      _expected_source_revision: snapshot.sourceRevision,
+      _expected_link_revision: snapshot.linkRevision,
+      _expected_payment_id: snapshot.paymentId,
+      _expected_customer_id: snapshot.customerId,
+      _require_billing_enabled: snapshot.requireBillingEnabled,
+    },
+  );
+  if (error) {
+    if (safePlatformBillingError(error).includes("Pix snapshot changed")) {
+      throw new StaleBillingSnapshotError();
+    }
+    throw new Error(error.message);
+  }
+
+  const current = data && typeof data === "object"
+    ? data as Record<string, unknown>
+    : {};
+  try {
+    validatePlatformBillingPaymentForPix({
+      id: current.asaas_payment_id,
+      customer: current.asaas_customer_id,
+      description: current.description,
+      status: current.status,
+      billingType: current.billing_type,
+      value: current.value,
+      dueDate: current.due_date,
+    }, {
+      paymentId: snapshot.paymentId,
+      customerId: snapshot.customerId,
+      descriptionMarker: typeof current.description_marker === "string"
+        ? current.description_marker
+        : "",
+    });
+  } catch (error) {
+    if (error instanceof PlatformBillingPixValidationError) {
+      throw new StaleBillingSnapshotError();
+    }
+    throw error;
+  }
+}
+
+function mapPixProviderError(error: unknown) {
+  if (!(error instanceof PlatformAsaasApiError)) return error;
+  if (error.status === 404 || error.status === 400 || error.status === 422) {
+    return new InvoicePixUnavailableError(
+      "Não foi possível gerar um Pix para esta fatura; sincronize o Financeiro e tente novamente",
+    );
+  }
+  if (error.status === 429) return new PlatformPixRateLimitError();
+  return new PlatformPixProviderError();
+}
+
 async function loadAllCompanyInvoices(supabaseAdmin: any, companyId: string) {
   const pageSize = 1000;
   const rows: Array<Record<string, any>> = [];
@@ -298,7 +463,7 @@ async function loadAllCompanyInvoices(supabaseAdmin: any, companyId: string) {
     if (page.length < pageSize) return rows;
   }
 
-  throw new Error("Cache financeiro excedeu 10.000 cobrancas para uma empresa");
+  throw new Error("O cache financeiro excedeu 10.000 cobranças para uma empresa");
 }
 
 function dateOnlyInFortaleza() {
@@ -469,18 +634,18 @@ async function syncCompanyInvoices(
   options: SyncCompanyOptions,
 ) {
   const link = await loadLink(supabaseAdmin, companyId, true);
-  if (!link) throw new Error("Vinculo financeiro nao configurado");
+  if (!link) throw new Error("Vínculo financeiro não configurado");
   if (options.requireBillingEnabled && link.billing_enabled !== true) {
-    throw new Error("Financeiro ainda nao foi liberado para esta empresa");
+    throw new Error("Financeiro ainda não foi liberado para esta empresa");
   }
-  if (link.status === "disabled") throw new Error("Vinculo financeiro desativado");
+  if (link.status === "disabled") throw new Error("Vínculo financeiro desativado");
   if (link.status === "pending_validation" && !options.allowPendingValidation) {
-    throw new Error("Vinculo financeiro requer revalidacao pelo superadmin");
+    throw new Error("Vínculo financeiro requer revalidação pelo superadmin");
   }
 
   const config = await loadStoredPlatformBillingConfig(supabaseAdmin);
   if (options.requireGlobalModuleEnabled && !config.moduleEnabled) {
-    throw new Error("Modulo financeiro ainda nao esta habilitado");
+    throw new Error("Módulo financeiro ainda não está habilitado");
   }
   if (
     (options.expectedSourceRevision
@@ -608,42 +773,55 @@ async function getLinkResponse(supabaseAdmin: any, companyId: string, invoiceLim
 }
 
 function statusForError(error: unknown, message: string) {
+  const comparableMessage = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
   if (error instanceof SyncCooldownError) return 429;
+  if (error instanceof PixRequestCooldownError) return 429;
+  if (error instanceof PlatformPixRateLimitError) return 429;
+  if (error instanceof PlatformPixProviderError) return 502;
+  if (error instanceof BillingInvoiceNotFoundError) return 404;
+  if (error instanceof InvoicePixUnavailableError) return 409;
   if (error instanceof StaleBillingSnapshotError) return 409;
   if (error instanceof PlatformAsaasApiError) {
     if (error.status === 404) return 404;
     if ([400, 401, 403, 422, 429].includes(error.status)) return 400;
     return 502;
   }
-  if (message === "Nao autorizado") return 401;
-  if (message.includes("Sem permissao")) return 403;
+  if (comparableMessage === "nao autorizado") return 401;
+  if (comparableMessage.includes("sem permissao")) return 403;
   if (
-    message.includes("duplicate key")
-    || message.includes("already linked")
-    || message.includes("ja esta vinculado")
-  ) return 409;
-  if (message.includes("nao encontrado") || message.includes("nao configurado")) return 404;
-  if (
-    message.includes("requer revalidacao")
-    || message.includes("requires superadmin revalidation")
-    || message.includes("revision changed")
-    || message.includes("superseded")
-    || message.includes("ainda nao foi liberado")
-    || message.includes("source is not configured or valid")
-    || message.includes("link must be active and validated")
+    comparableMessage.includes("duplicate key")
+    || comparableMessage.includes("already linked")
+    || comparableMessage.includes("ja esta vinculado")
   ) return 409;
   if (
-    message.includes("invalida")
-    || message.includes("invalido")
-    || message.includes("obrigatorio")
-    || message.includes("desativado")
-    || message.includes("is disabled")
-    || message.includes("marcador deve ser")
-    || message.includes("excede 120 caracteres")
-    || message.includes("Digite ao menos")
-    || message.includes("enabled state is required")
+    comparableMessage.includes("nao encontrado")
+    || comparableMessage.includes("nao configurado")
+  ) return 404;
+  if (
+    comparableMessage.includes("requer revalidacao")
+    || comparableMessage.includes("requires superadmin revalidation")
+    || comparableMessage.includes("revision changed")
+    || comparableMessage.includes("superseded")
+    || comparableMessage.includes("ainda nao foi liberado")
+    || comparableMessage.includes("source is not configured or valid")
+    || comparableMessage.includes("link must be active and validated")
+  ) return 409;
+  if (
+    comparableMessage.includes("invalida")
+    || comparableMessage.includes("invalido")
+    || comparableMessage.includes("obrigatorio")
+    || comparableMessage.includes("desativado")
+    || comparableMessage.includes("is disabled")
+    || comparableMessage.includes("marcador deve ser")
+    || comparableMessage.includes("excede 120 caracteres")
+    || comparableMessage.includes("digite ao menos")
+    || comparableMessage.includes("enabled state is required")
   ) return 400;
-  if (message.includes("link not found")) return 404;
+  if (comparableMessage.includes("link not found")) return 404;
   return 500;
 }
 
@@ -652,7 +830,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: platformBillingCorsHeaders });
   }
   if (req.method !== "POST") {
-    return platformBillingJsonResponse({ ok: false, error: "Method not allowed" }, 405);
+    return platformBillingJsonResponse({ ok: false, error: "Método não permitido" }, 405);
   }
 
   try {
@@ -844,14 +1022,14 @@ Deno.serve(async (req) => {
         if (!(await loadModuleEnabled(context.supabaseAdmin))) {
           return platformBillingJsonResponse({
             ok: false,
-            error: "Modulo financeiro ainda nao esta habilitado",
+            error: "Módulo financeiro ainda não está habilitado",
           }, 409);
         }
         const companyLink = await loadLink(context.supabaseAdmin, companyId);
         if (companyLink?.billing_enabled !== true) {
           return platformBillingJsonResponse({
             ok: false,
-            error: "Financeiro ainda nao foi liberado para esta empresa",
+            error: "Financeiro ainda não foi liberado para esta empresa",
             company_billing_enabled: false,
           }, 409);
         }
@@ -862,6 +1040,189 @@ Deno.serve(async (req) => {
         : 100;
       const payload = await getLinkResponse(context.supabaseAdmin, companyId, invoiceLimit);
       return platformBillingJsonResponse({ ok: true, ...payload });
+    }
+
+    if (action === "get_invoice_pix_qr_code") {
+      const context = await assertUserCanAccessCompany(req, companyId, ["admin"]);
+      const invoiceId = normalizePlatformBillingInvoiceId(body.invoice_id);
+      let auditedPaymentId: string | null = null;
+
+      try {
+        const [link, invoice] = await Promise.all([
+          loadLink(context.supabaseAdmin, companyId, true),
+          loadCompanyBillingInvoice(context.supabaseAdmin, companyId, invoiceId),
+        ]);
+
+        if (!invoice || !link || invoice.asaas_customer_id !== link.asaas_customer_id) {
+          throw new BillingInvoiceNotFoundError();
+        }
+        if (link.status !== "active") {
+          throw new InvoicePixUnavailableError(
+            "O vínculo financeiro precisa estar ativo para gerar o Pix",
+          );
+        }
+        if (!context.isSuperadmin) {
+          if (!(await loadModuleEnabled(context.supabaseAdmin))) {
+            throw new InvoicePixUnavailableError(
+              "Módulo financeiro ainda não está habilitado",
+            );
+          }
+          if (link.billing_enabled !== true) {
+            throw new InvoicePixUnavailableError(
+              "Financeiro ainda não foi liberado para esta empresa",
+            );
+          }
+        }
+
+        let paymentId: string;
+        try {
+          paymentId = normalizePlatformAsaasPaymentId(invoice.asaas_payment_id);
+          validatePlatformBillingPaymentForPix({
+            id: paymentId,
+            customer: invoice.asaas_customer_id,
+            description: invoice.description,
+            status: invoice.status,
+            billingType: invoice.billing_type,
+            value: invoice.value,
+            dueDate: invoice.due_date,
+          }, {
+            paymentId,
+            customerId: link.asaas_customer_id,
+            descriptionMarker: link.description_marker,
+          });
+        } catch (error) {
+          if (error instanceof PlatformBillingPixValidationError) {
+            throw new InvoicePixUnavailableError(error.message);
+          }
+          throw error;
+        }
+        auditedPaymentId = paymentId;
+
+        // The database claim atomically approves global, company and user Pix
+        // generation buckets. A rejected bucket consumes none of the others.
+        await claimPlatformBillingPixRequest(
+          context.supabaseAdmin,
+          companyId,
+          context.user.id,
+        );
+
+        const config = await loadStoredPlatformBillingConfig(context.supabaseAdmin);
+        if (!context.isSuperadmin && !config.moduleEnabled) {
+          throw new InvoicePixUnavailableError(
+            "Módulo financeiro ainda não está habilitado",
+          );
+        }
+
+        const livePayment = await getPlatformAsaasPayment(
+          config.apiToken,
+          config.environment,
+          paymentId,
+        );
+        let validatedPayment;
+        try {
+          validatedPayment = validatePlatformBillingPaymentForPix(livePayment, {
+            paymentId,
+            customerId: link.asaas_customer_id,
+            descriptionMarker: link.description_marker,
+          });
+        } catch (error) {
+          if (error instanceof PlatformBillingPixValidationError) {
+            throw new InvoicePixUnavailableError(error.message);
+          }
+          throw error;
+        }
+
+        const pixSnapshot: PlatformBillingPixSnapshot = {
+          companyId,
+          invoiceId,
+          sourceRevision: config.sourceRevision,
+          linkRevision: normalizeRevision(link.link_revision, "Revisão do vínculo financeiro"),
+          paymentId,
+          customerId: link.asaas_customer_id,
+          requireBillingEnabled: !context.isSuperadmin,
+        };
+
+        const providerPix = await getPlatformAsaasPaymentPixQrCode(
+          config.apiToken,
+          config.environment,
+          paymentId,
+        );
+        let pix;
+        try {
+          pix = normalizePlatformBillingPixQrCode(providerPix);
+        } catch (error) {
+          if (error instanceof PlatformBillingPixValidationError) {
+            throw new PlatformPixProviderError();
+          }
+          throw error;
+        }
+
+        // First post-provider fence catches changes made while either Asaas GET
+        // was in flight.
+        await assertPlatformBillingPixSnapshotCurrent(
+          context.supabaseAdmin,
+          pixSnapshot,
+        );
+
+        await auditBillingAction(
+          context.supabaseAdmin,
+          req,
+          context.user.id,
+          "get_company_billing_invoice_pix_qr_code",
+          companyId,
+          {
+            success: true,
+            invoice_id: invoiceId,
+            asaas_payment_id: paymentId,
+            billing_type: validatedPayment.billingType,
+            payment_status: validatedPayment.status,
+          },
+        );
+
+        // This must remain the final await on the success path. Database state
+        // can still change after this statement's snapshot and before the HTTP
+        // bytes leave the process; no non-transactional provider flow can
+        // eliminate that final interval, but a second fence minimizes it.
+        await assertPlatformBillingPixSnapshotCurrent(
+          context.supabaseAdmin,
+          pixSnapshot,
+        );
+
+        return platformBillingJsonResponse({
+          ok: true,
+          invoice_id: invoiceId,
+          asaas_payment_id: paymentId,
+          payment: {
+            value: validatedPayment.value,
+            due_date: validatedPayment.dueDate,
+          },
+          pix: {
+            encoded_image: pix.encodedImage,
+            payload: pix.payload,
+            expiration_date: pix.expirationDate,
+          },
+        });
+      } catch (error) {
+        const providerHttpStatus = error instanceof PlatformAsaasApiError
+          ? error.status
+          : null;
+        const mappedError = mapPixProviderError(error);
+        await auditBillingAction(
+          context.supabaseAdmin,
+          req,
+          context.user.id,
+          "get_company_billing_invoice_pix_qr_code",
+          companyId,
+          {
+            success: false,
+            invoice_id: invoiceId,
+            asaas_payment_id: auditedPaymentId,
+            provider_http_status: providerHttpStatus,
+            error: safePlatformBillingError(mappedError),
+          },
+        );
+        throw mappedError;
+      }
     }
 
     if (action === "save_link") {
@@ -875,7 +1236,7 @@ Deno.serve(async (req) => {
         .eq("id", companyId)
         .maybeSingle();
       if (companyError) throw new Error(companyError.message);
-      if (!company) throw new Error("Empresa nao encontrada");
+      if (!company) throw new Error("Empresa não encontrada");
 
       const { data: duplicate, error: duplicateError } = await supabaseAdmin
         .from("company_billing_links")
@@ -884,7 +1245,7 @@ Deno.serve(async (req) => {
         .neq("company_id", companyId)
         .maybeSingle();
       if (duplicateError) throw new Error(duplicateError.message);
-      if (duplicate) throw new Error("Este Customer ID do Asaas ja esta vinculado a outra empresa");
+      if (duplicate) throw new Error("Este Customer ID do Asaas já está vinculado a outra empresa");
 
       const config = await loadStoredPlatformBillingConfig(supabaseAdmin);
       const customer = await getPlatformAsaasCustomer(
@@ -984,14 +1345,14 @@ Deno.serve(async (req) => {
     if (action === "set_company_enabled") {
       const { supabaseAdmin, user } = await assertSuperadmin(req);
       if (typeof body.enabled !== "boolean") {
-        throw new Error("Estado de liberacao financeira invalido");
+        throw new Error("Estado de liberação financeira inválido");
       }
 
       const currentLink = await loadLink(supabaseAdmin, companyId, true);
-      if (!currentLink) throw new Error("Vinculo financeiro nao configurado");
+      if (!currentLink) throw new Error("Vínculo financeiro não configurado");
       const expectedBillingRevision = body.expected_billing_revision === undefined
-        ? normalizeRevision(currentLink.billing_revision, "Revisao financeira")
-        : normalizeRevision(body.expected_billing_revision, "Revisao financeira");
+        ? normalizeRevision(currentLink.billing_revision, "Revisão financeira")
+        : normalizeRevision(body.expected_billing_revision, "Revisão financeira");
 
       const { data: toggleData, error: toggleError } = await supabaseAdmin.rpc(
         "set_company_billing_enabled",
@@ -1027,7 +1388,7 @@ Deno.serve(async (req) => {
         ? toggleData as Record<string, unknown>
         : {};
       const updatedLink = await loadLink(supabaseAdmin, companyId);
-      if (!updatedLink) throw new Error("Vinculo financeiro nao configurado");
+      if (!updatedLink) throw new Error("Vínculo financeiro não configurado");
 
       await auditBillingAction(
         supabaseAdmin,
@@ -1066,7 +1427,7 @@ Deno.serve(async (req) => {
       if (!link) return platformBillingJsonResponse({ ok: true, removed: false });
       const sourceRevision = configResult.data?.source_revision;
       if (typeof sourceRevision !== "string" || !sourceRevision) {
-        throw new Error("Revisao da fonte Asaas nao configurada");
+        throw new Error("Revisão da fonte Asaas não configurada");
       }
 
       const { data: removalData, error: removalError } = await supabaseAdmin.rpc(
@@ -1112,14 +1473,14 @@ Deno.serve(async (req) => {
         if (!(await loadModuleEnabled(context.supabaseAdmin))) {
           return platformBillingJsonResponse({
             ok: false,
-            error: "Modulo financeiro ainda nao esta habilitado",
+            error: "Módulo financeiro ainda não está habilitado",
           }, 409);
         }
         const companyLink = await loadLink(context.supabaseAdmin, companyId);
         if (companyLink?.billing_enabled !== true) {
           return platformBillingJsonResponse({
             ok: false,
-            error: "Financeiro ainda nao foi liberado para esta empresa",
+            error: "Financeiro ainda não foi liberado para esta empresa",
             company_billing_enabled: false,
           }, 409);
         }
@@ -1155,11 +1516,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    return platformBillingJsonResponse({ ok: false, error: "Acao invalida" }, 400);
+    return platformBillingJsonResponse({ ok: false, error: "Ação inválida" }, 400);
   } catch (error) {
     const message = safePlatformBillingError(error);
     const response: Record<string, unknown> = { ok: false, error: message };
     if (error instanceof SyncCooldownError) {
+      response.retry_after_seconds = error.retryAfterSeconds;
+    }
+    if (error instanceof PixRequestCooldownError) {
       response.retry_after_seconds = error.retryAfterSeconds;
     }
     return platformBillingJsonResponse(response, statusForError(error, message));

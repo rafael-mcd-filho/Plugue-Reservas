@@ -2,11 +2,15 @@
 -- Runner order:
 --   1. execute bootstrap before @apply-old-recurrence
 --   2. apply 20260814120000_fix_customer_recurrence_waitlist_fallback.sql
---   3. execute fixtures before @apply-core-migration and capture old recurrence JSON
+--   3. execute fixtures before @apply-core-migration
 --   4. apply 20260814130000_add_server_side_crm_leads_read_model.sql
---   5. apply 20260817120000_add_recurrence_minimum_visits_filter.sql at
+--   5. apply 20260814140000_add_crm_leads_canonical_export.sql at
+--      @apply-export-migration
+--   6. apply 20260817120000_add_recurrence_minimum_visits_filter.sql at
 --      @apply-recurrence-pagination-filter-migration
---   6. execute assertions and compare the pre-core recurrence JSON
+--   7. apply 20260817130000_remove_crm_report_pagination_ceiling.sql at
+--      @apply-unbounded-pagination-migration
+--   8. execute assertions, including recurrence compatibility checks
 
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
@@ -583,7 +587,11 @@ FROM generate_series(1, 1005) AS series(value);
 
 -- @apply-core-migration
 
+-- @apply-export-migration
+
 -- @apply-recurrence-pagination-filter-migration
+
+-- @apply-unbounded-pagination-migration
 
 DO $regression$
 DECLARE
@@ -597,6 +605,7 @@ DECLARE
   _recurrence_filtered jsonb;
   _recurrence_compat jsonb;
   _recurrence_base jsonb;
+  _export_page jsonb;
 BEGIN
   PERFORM set_config('request.jwt.claim.role', 'service_role', false);
   PERFORM set_config('request.jwt.claim.sub', '', false);
@@ -756,6 +765,110 @@ BEGIN
       'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)'
     ) IS NULL THEN
     RAISE EXCEPTION 'recurrence report overload rollout is ambiguous';
+  END IF;
+
+  -- The server-side Leads page also crosses PostgREST's usual 1,000-row
+  -- boundary. Page 11 must expose positions 1,001-1,012 from the complete
+  -- 1,012-profile dataset instead of truncating the source query.
+  _page_two := public.get_crm_leads_page(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    10, 100, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  );
+  _page := public.get_crm_leads_page(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    11, 100, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  );
+
+  IF (_page #>> '{meta,total_leads}')::integer <> 1012
+    OR (_page #>> '{meta,filtered_leads}')::integer <> 1012
+    OR (_page #>> '{meta,total_canonical_visits}')::integer <> 2017
+    OR (_page #>> '{meta,page}')::integer <> 11
+    OR jsonb_array_length(_page -> 'leads') <> 12
+    OR (
+      SELECT count(*)
+      FROM jsonb_array_elements(_page -> 'leads') AS lead
+      WHERE (lead ->> 'canonical_visit_count')::integer = 2
+    ) <> 5
+    OR (
+      SELECT count(*)
+      FROM jsonb_array_elements(_page -> 'leads') AS lead
+      WHERE (lead ->> 'canonical_visit_count')::integer = 1
+    ) <> 7
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(_page_two -> 'leads') AS page_10
+      JOIN jsonb_array_elements(_page -> 'leads') AS page_11
+        ON page_10 ->> 'customer_key' = page_11 ->> 'customer_key'
+    ) THEN
+    RAISE EXCEPTION 'leads page crossing row 1,000 mismatch: %', _page -> 'meta';
+  END IF;
+
+  -- Export pagination is independently server-side. Its page 11 crosses the
+  -- same boundary while preserving all 2,017 canonical presence rows.
+  _export_page := public.get_crm_leads_export_page(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    11, 100, NULL, NULL, NULL, NULL, NULL, NULL
+  );
+  IF (_export_page #>> '{meta,page}')::integer <> 11
+    OR (_export_page #>> '{meta,total_rows}')::integer <> 2017
+    OR (_export_page #>> '{meta,total_pages}')::integer <> 21
+    OR (_export_page #>> '{meta,filtered_leads}')::integer <> 1012
+    OR (_export_page #>> '{meta,matched_visits}')::integer <> 2017
+    OR (_export_page #>> '{meta,has_more}')::boolean IS DISTINCT FROM true
+    OR jsonb_array_length(_export_page -> 'rows') <> 100
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(_export_page -> 'rows') AS export_row
+      WHERE export_row ->> 'row_kind' <> 'presence'
+    ) THEN
+    RAISE EXCEPTION 'export page crossing row 1,000 mismatch: %',
+      _export_page -> 'meta';
+  END IF;
+
+  -- Page 10,001 used to be rejected even though it is a valid empty page.
+  -- A much larger page also verifies that offset multiplication uses bigint.
+  _page := public.get_crm_leads_page(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    30000000, 100, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  );
+  IF _page #>> '{meta,page}' <> '30000000'
+    OR (_page #>> '{meta,total_leads}')::integer <> 1012
+    OR jsonb_array_length(_page -> 'leads') <> 0 THEN
+    RAISE EXCEPTION 'large Leads page was truncated or rejected: %', _page -> 'meta';
+  END IF;
+
+  _key := _page_two #>> '{leads,0,customer_key}';
+  _history := public.get_crm_lead_presence_history(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc', _key, 30000000, 100
+  );
+  IF _history #>> '{meta,page}' <> '30000000'
+    OR (_history #>> '{meta,total_visits}')::integer <> 2
+    OR jsonb_array_length(_history -> 'visits') <> 0 THEN
+    RAISE EXCEPTION 'large presence-history page was truncated or rejected: %', _history -> 'meta';
+  END IF;
+
+  _recurrence_page := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    30000000, 12, NULL, 'previous_period', NULL
+  );
+  IF _recurrence_page #>> '{meta,page}' <> '30000000'
+    OR (_recurrence_page #>> '{meta,customers_total}')::integer <> 1012
+    OR jsonb_array_length(_recurrence_page -> 'customers') <> 0 THEN
+    RAISE EXCEPTION 'large recurrence page was truncated or rejected: %',
+      _recurrence_page -> 'meta';
+  END IF;
+
+  _recurrence_filtered := public.get_customer_recurrence_report(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    30000000, 12, NULL, 'previous_period', 2
+  );
+  IF _recurrence_filtered #>> '{meta,page}' <> '30000000'
+    OR (_recurrence_filtered #>> '{meta,filtered_customers_total}')::integer <> 1005
+    OR jsonb_array_length(_recurrence_filtered -> 'customers') <> 0 THEN
+    RAISE EXCEPTION 'large filtered recurrence page was truncated or rejected: %',
+      _recurrence_filtered -> 'meta';
   END IF;
 
   IF public._crm_state_name('PB') <> 'Paraíba'

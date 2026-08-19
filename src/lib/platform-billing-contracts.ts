@@ -202,6 +202,33 @@ export interface CompanyBillingInvoice {
   updatedAt: string;
 }
 
+export interface CompanyBillingInvoicePixQrCodeRow {
+  encoded_image: string;
+  payload: string;
+  expiration_date: string;
+}
+
+export interface PlatformBillingGetInvoicePixQrCodeResponse {
+  ok: true;
+  invoice_id: string;
+  asaas_payment_id: string;
+  payment: {
+    value: number | string;
+    due_date: string;
+  };
+  pix: CompanyBillingInvoicePixQrCodeRow;
+}
+
+export interface CompanyBillingInvoicePixQrCode {
+  invoiceId: string;
+  asaasPaymentId: string;
+  value: number;
+  dueDate: string;
+  encodedImage: string;
+  payload: string;
+  expirationDate: string;
+}
+
 export interface CompanyBillingSummaryRpcRow {
   module_enabled: boolean | null;
   company_billing_enabled?: boolean | null;
@@ -494,6 +521,59 @@ export function normalizeCompanyBillingInvoice(row: CompanyBillingInvoiceRow): C
     lastSyncedAt: row.last_synced_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function normalizeCompanyBillingInvoicePixQrCode(
+  response: PlatformBillingGetInvoicePixQrCodeResponse,
+  expectedInvoiceId?: string,
+): CompanyBillingInvoicePixQrCode {
+  const encodedImage = typeof response?.pix?.encoded_image === 'string'
+    ? response.pix.encoded_image.trim()
+    : '';
+  const payload = typeof response?.pix?.payload === 'string'
+    ? response.pix.payload.trim()
+    : '';
+  const expirationDate = typeof response?.pix?.expiration_date === 'string'
+    ? response.pix.expiration_date.trim()
+    : '';
+  const value = Number(response?.payment?.value);
+  const dueDate = typeof response?.payment?.due_date === 'string'
+    ? response.payment.due_date.trim()
+    : '';
+  const dueDateParts = dueDate.split('-').map(Number);
+  const parsedDueDate = dueDateParts.length === 3
+    ? new Date(Date.UTC(dueDateParts[0], dueDateParts[1] - 1, dueDateParts[2]))
+    : null;
+  const hasValidDueDate = /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
+    && !!parsedDueDate
+    && parsedDueDate.getUTCFullYear() === dueDateParts[0]
+    && parsedDueDate.getUTCMonth() === dueDateParts[1] - 1
+    && parsedDueDate.getUTCDate() === dueDateParts[2];
+  if (
+    response?.ok !== true
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(response?.invoice_id ?? '')
+    || (!!expectedInvoiceId && response.invoice_id !== expectedInvoiceId)
+    || !/^[A-Za-z0-9_-]{4,100}$/.test(response?.asaas_payment_id ?? '')
+    || !Number.isFinite(value)
+    || value <= 0
+    || value > 999_999_999.99
+    || !hasValidDueDate
+    || !encodedImage
+    || !payload
+    || !expirationDate
+  ) {
+    throw new Error('O backend retornou dados incompletos para o Pix.');
+  }
+
+  return {
+    invoiceId: response.invoice_id,
+    asaasPaymentId: response.asaas_payment_id,
+    value,
+    dueDate,
+    encodedImage,
+    payload,
+    expirationDate,
   };
 }
 

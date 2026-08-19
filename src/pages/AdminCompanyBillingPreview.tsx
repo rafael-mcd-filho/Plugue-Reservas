@@ -72,6 +72,7 @@ export default function AdminCompanyBillingPreview() {
         </Link>
       </Button>
       <CompanyBillingView
+        key={company.companyId}
         companyId={company.companyId}
         companyName={company.companyName}
         allowWhenDisabled

@@ -198,7 +198,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'superadmin'],
           requiredPermission: 'leads_view',
           requiredFeature: 'advanced_reports',
-          statusLabel: 'Em desenvolvimento',
         },
       ]
     : [];

@@ -34,7 +34,6 @@ undecryptable until the token is entered again.
 Optional, normally unset:
 
 ```powershell
-supabase secrets set PLATFORM_ASAAS_API_BASE_URL="https://api-sandbox.asaas.com/v3"
 supabase secrets set PLATFORM_ASAAS_USER_AGENT="PlugueGuestPlatformBilling/1.0"
 ```
 
@@ -45,8 +44,24 @@ override is unset, the selected config environment resolves to:
 - Sandbox: `https://api-sandbox.asaas.com/v3`
 - Production: `https://api.asaas.com/v3`
 
-Do not set the base URL override in production unless a controlled proxy is
-being used; an override takes precedence over the selected environment.
+Production accepts only the exact official HTTPS origin and `/v3` base path.
+An invalid override fails before `fetch`, so the global `access_token` is never
+sent to HTTP, another Asaas environment, or an arbitrary host.
+
+Only a controlled Sandbox proxy may override the default. It requires both an
+explicit gate and an exact HTTPS origin allowlist (origins have no path):
+
+```powershell
+supabase secrets set PLATFORM_ASAAS_ALLOW_BASE_URL_OVERRIDE="true"
+supabase secrets set PLATFORM_ASAAS_ALLOWED_BASE_URL_ORIGINS="https://asaas-proxy.example.com"
+supabase secrets set PLATFORM_ASAAS_API_BASE_URL="https://asaas-proxy.example.com/asaas/v3"
+```
+
+The override origin must match the allowlist exactly, including a non-default
+port. Credentials, query strings, fragments, HTTP, localhost, IP literals and
+`.local` hosts are rejected. Never enable this gate merely to bypass a URL
+validation error, and remove all three override secrets after the Sandbox proxy
+test is complete.
 
 The cron reads its `x-job-secret` from `public.system_settings`. Confirm that
 the stored `internal_job_secret` value exactly matches the Edge secret:
@@ -119,6 +134,28 @@ Use `platform-billing` as a superadmin:
 - `sync_all`: is a no-op while the module is disabled and otherwise processes
   only companies whose `billing_enabled` switch is true.
 - `remove_link`: deletes only the local link/cache; it changes nothing in Asaas.
+- `get_invoice_pix_qr_code`: resolves an internal invoice ID inside the caller's
+  company, validates the cached and live payment, then reads
+  `GET /payments/{id}/pixQrCode`. It never accepts an arbitrary Asaas payment ID
+  from the browser and never stores or audits the QR image or copy-and-paste
+  payload.
+
+Apply `20260817140000_add_platform_billing_pix_rate_limit.sql` before deploying
+the Edge Function that exposes Pix. Requests fail closed if either internal RPC
+is missing. One transaction claims all three Pix-generation buckets: shared
+token (1 generation/second and 30/minute), company (1 generation/2 seconds and
+30/minute), and user (1 generation/10 seconds and 6/minute). Each generation
+performs at most two Asaas GETs, so this flow is capped at 60 provider reads per
+minute. If any bucket rejects the request, none of their counters is consumed
+and the API returns `retry_after_seconds`.
+
+The Pix response is fenced against source rotation, relinking, rollout changes
+and cache replacement after the provider reads and again after the audit. The
+second database check is deliberately the final awaited operation on the
+successful path. State can still change after that database snapshot and before
+the HTTP bytes leave the Edge process; this final non-transactional interval is
+unavoidable because the Asaas reads and the local database cannot share one
+transaction.
 
 The only accepted marker is exactly `[PLUGUEGUEST]`; custom or broader markers
 are rejected by both the Edge Function and a database constraint. A payment is

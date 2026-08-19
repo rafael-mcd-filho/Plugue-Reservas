@@ -49,6 +49,7 @@ import {
   useValidateAsaasCustomer,
 } from '@/hooks/usePlatformBilling';
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
+import type { CompanyBillingTarget } from '@/lib/company-billing-dialog';
 import {
   PLATFORM_BILLING_DESCRIPTION_MARKER,
   type ValidatedAsaasCustomer,
@@ -74,6 +75,7 @@ interface CompanyDialogProps {
   open: boolean;
   company: Company | null;
   initialFeatures?: CompanyFeatureState | null;
+  billingTarget?: CompanyBillingTarget | null;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -239,14 +241,17 @@ export default function CompanyDialog({
   open,
   company,
   initialFeatures,
+  billingTarget,
   onOpenChange,
 }: CompanyDialogProps) {
   const isEditing = !!company;
+  const billingOnly = !!billingTarget;
+  const billingCompanyId = billingTarget?.id ?? company?.id;
   const createCompany = useCreateCompany();
   const updateCompany = useUpdateCompany();
   const saveCompanyFeatures = useSaveCompanyFeatures();
   const billingModuleQuery = usePlatformBillingModuleStatus({ enabled: open });
-  const billingLinkQuery = useCompanyBillingLink(company?.id, { enabled: open && !!company?.id });
+  const billingLinkQuery = useCompanyBillingLink(billingCompanyId, { enabled: open && !!billingCompanyId });
   const validateBillingCustomer = useValidateAsaasCustomer();
   const saveBillingLink = useSaveCompanyBillingLink();
   const removeBillingLink = useRemoveCompanyBillingLink();
@@ -264,7 +269,7 @@ export default function CompanyDialog({
   useEffect(() => {
     if (!open) return;
 
-    setActiveTab('geral');
+    setActiveTab(billingTarget ? 'financeiro' : 'geral');
     setForm(company ? buildFormFromCompany(company) : createEmptyForm());
     setFeatureForm(getInitialFeatures(company, initialFeatures));
     setBillingCustomerId('');
@@ -272,10 +277,10 @@ export default function CompanyDialog({
     setBillingEnabled(false);
     setBillingEnabledDirty(false);
     setValidatedBillingCustomer(null);
-  }, [open, company, initialFeatures]);
+  }, [open, company, initialFeatures, billingTarget]);
 
   useEffect(() => {
-    if (!open || !company || billingCustomerDirty || billingEnabledDirty || !billingLinkQuery.isSuccess) return;
+    if (!open || !billingCompanyId || billingCustomerDirty || billingEnabledDirty || !billingLinkQuery.isSuccess) return;
     const link = billingLinkQuery.data;
     if (!link) {
       setBillingCustomerId('');
@@ -302,7 +307,7 @@ export default function CompanyDialog({
     billingEnabledDirty,
     billingLinkQuery.data,
     billingLinkQuery.isSuccess,
-    company,
+    billingCompanyId,
     open,
   ]);
 
@@ -377,7 +382,8 @@ export default function CompanyDialog({
     || saveBillingLink.isPending
     || setCompanyBillingEnabled.isPending
     || removeBillingLink.isPending;
-  const headerStatus = company ? statusConfig[company.status] : null;
+  const targetStatus = billingTarget?.status ?? company?.status;
+  const headerStatus = targetStatus ? statusConfig[targetStatus] : null;
   const hours = normalizeOpeningHours(form.opening_hours);
   const payments = normalizePaymentMethods(form.payment_methods);
   const publicCustomizationLocked = !featureForm.custom_public_page;
@@ -442,7 +448,7 @@ export default function CompanyDialog({
 
     try {
       const customer = await validateBillingCustomer.mutateAsync({
-        companyId: company?.id,
+        companyId: billingCompanyId,
         customerId,
       });
       setValidatedBillingCustomer(customer);
@@ -485,6 +491,20 @@ export default function CompanyDialog({
         enabled: billingEnabled,
         expectedBillingRevision: savedLink.billingRevision,
       });
+    }
+  };
+
+  const handleBillingSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!billingCompanyId || billingLinkQuery.isLoading || billingLinkQuery.isError) return;
+
+    try {
+      await persistBillingLink(billingCompanyId);
+      toast.success(`Configuração financeira de ${billingTarget?.name ?? 'empresa'} salva.`);
+      onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error?.message || 'Não foi possível salvar a configuração financeira desta empresa.');
     }
   };
 
@@ -647,10 +667,18 @@ export default function CompanyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] w-full flex-col overflow-hidden sm:max-w-[90vw] sm:w-[90vw]">
+      <DialogContent className={`flex h-[90vh] w-full flex-col overflow-hidden ${
+        billingOnly ? 'sm:max-w-4xl' : 'sm:max-w-[90vw] sm:w-[90vw]'
+      }`}>
         <DialogHeader className="pr-8">
           <div className="flex items-center gap-3">
-            <DialogTitle>{company ? company.name : 'Nova Empresa'}</DialogTitle>
+            <DialogTitle>
+              {billingOnly
+                ? `Configuração financeira · ${billingTarget.name}`
+                : company
+                  ? company.name
+                  : 'Nova Empresa'}
+            </DialogTitle>
             {headerStatus && (
               <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${headerStatus.className}`}>
                 <Circle className="h-2 w-2 fill-current" />
@@ -659,23 +687,34 @@ export default function CompanyDialog({
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {isEditing
-              ? 'Todas as configurações da empresa em um único modal.'
-              : 'Cadastre a empresa e defina as configurações iniciais no mesmo fluxo.'}
+            {billingOnly
+              ? 'Gerencie o vínculo com o Asaas e a liberação do Financeiro desta empresa.'
+              : isEditing
+                ? 'Todas as configurações da empresa em um único modal.'
+                : 'Cadastre a empresa e defina as configurações iniciais no mesmo fluxo.'}
           </p>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="mt-4 flex min-h-0 flex-1 flex-col">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-            <TabsList className={`grid w-full ${isEditing ? 'grid-cols-4' : 'grid-cols-3'}`}>
-              <TabsTrigger value="geral">Geral</TabsTrigger>
-              <TabsTrigger value="features">Features</TabsTrigger>
-              <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
-              {isEditing && <TabsTrigger value="historico">Histórico</TabsTrigger>}
-            </TabsList>
+        <form
+          onSubmit={billingOnly ? handleBillingSubmit : handleSubmit}
+          className="mt-4 flex min-h-0 flex-1 flex-col"
+        >
+          <Tabs
+            value={billingOnly ? 'financeiro' : activeTab}
+            onValueChange={setActiveTab}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            {!billingOnly && (
+              <TabsList className={`grid w-full ${isEditing ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                <TabsTrigger value="geral">Geral</TabsTrigger>
+                <TabsTrigger value="features">Features</TabsTrigger>
+                <TabsTrigger value="financeiro">Financeiro</TabsTrigger>
+                {isEditing && <TabsTrigger value="historico">Histórico</TabsTrigger>}
+              </TabsList>
+            )}
 
-            <div className="mt-4 flex-1 overflow-y-auto pr-1">
-              <TabsContent value="geral" className="mt-0 space-y-6">
+            <div className={`${billingOnly ? '' : 'mt-4'} flex-1 overflow-y-auto pr-1`}>
+              {!billingOnly && <TabsContent value="geral" className="mt-0 space-y-6">
                 <Card className="border-none shadow-sm">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Dados da Empresa</CardTitle>
@@ -866,9 +905,9 @@ export default function CompanyDialog({
                     </div>
                   </CardContent>
                 </Card>
-              </TabsContent>
+              </TabsContent>}
 
-              <TabsContent value="operacao" className="mt-0 space-y-6">
+              {!billingOnly && <TabsContent value="operacao" className="mt-0 space-y-6">
                 <Card className="border-none shadow-sm">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -970,7 +1009,7 @@ export default function CompanyDialog({
                     </CardContent>
                   </Card>
                 )}
-              </TabsContent>
+              </TabsContent>}
 
               <TabsContent value="financeiro" className="mt-0 space-y-6">
                 <Card className="overflow-hidden border-primary/15 shadow-sm">
@@ -1005,12 +1044,12 @@ export default function CompanyDialog({
                       <div className="rounded-lg border border-warning/25 bg-warning-soft p-4 text-sm leading-relaxed text-amber-900">
                         Configure e valide primeiro o token global do Asaas na página de Integrações. Depois disso, este campo será liberado para vínculo.
                       </div>
-                    ) : billingLinkQuery.isLoading && company ? (
+                    ) : billingLinkQuery.isLoading && billingCompanyId ? (
                       <div className="space-y-3">
                         <Skeleton className="h-10 w-full max-w-xl" />
                         <Skeleton className="h-20 w-full max-w-xl" />
                       </div>
-                    ) : billingLinkQuery.isError && company ? (
+                    ) : billingLinkQuery.isError && billingCompanyId ? (
                       <div className="flex max-w-2xl flex-col items-start gap-3 rounded-lg border border-destructive/25 bg-destructive-soft/50 p-4">
                         <div className="flex items-start gap-2.5">
                           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
@@ -1089,7 +1128,7 @@ export default function CompanyDialog({
                         </div>
 
                         <AsaasCustomerFinder
-                          companyId={company?.id}
+                          companyId={billingCompanyId}
                           selectedCustomerId={billingCustomerId.trim()}
                           disabled={pending}
                           onSelect={handleBillingCustomerSelect}
@@ -1169,7 +1208,7 @@ export default function CompanyDialog({
                             <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                               <p>Última sincronização: {new Date(billingLinkQuery.data.lastSyncedAt).toLocaleString('pt-BR')}.</p>
                               <p>
-                                {billingLinkQuery.data.lastMatchedCount} importadas de {billingLinkQuery.data.lastFetchedCount} cobranças encontradas
+                                {billingLinkQuery.data.lastMatchedCount} {billingLinkQuery.data.lastMatchedCount === 1 ? 'importada' : 'importadas'} de {billingLinkQuery.data.lastFetchedCount} {billingLinkQuery.data.lastFetchedCount === 1 ? 'cobrança encontrada' : 'cobranças encontradas'}
                                 {billingLinkQuery.data.lastIgnoredCount > 0 ? ` · ${billingLinkQuery.data.lastIgnoredCount} sem o marcador` : ''}.
                               </p>
                             </div>
@@ -1181,7 +1220,7 @@ export default function CompanyDialog({
                 </Card>
               </TabsContent>
 
-              <TabsContent value="features" className="mt-0">
+              {!billingOnly && <TabsContent value="features" className="mt-0">
                 <Card className="border-none shadow-sm">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -1199,9 +1238,9 @@ export default function CompanyDialog({
                     />
                   </CardContent>
                 </Card>
-              </TabsContent>
+              </TabsContent>}
 
-              {company && (
+              {!billingOnly && company && (
                 <TabsContent value="historico" className="mt-0 space-y-6">
                   <Card className="border-none shadow-sm">
                     <CardHeader className="pb-3">
@@ -1337,9 +1376,12 @@ export default function CompanyDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={pending}>
+            <Button
+              type="submit"
+              disabled={pending || (billingOnly && (billingLinkQuery.isLoading || billingLinkQuery.isError))}
+            >
               {pending && <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-              {isEditing ? 'Salvar alterações' : 'Criar empresa'}
+              {billingOnly ? 'Salvar Financeiro' : isEditing ? 'Salvar alterações' : 'Criar empresa'}
             </Button>
           </div>
         </form>

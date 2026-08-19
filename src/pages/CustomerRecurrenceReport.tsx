@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  differenceInCalendarDays,
   endOfMonth,
   format,
   isValid,
@@ -50,7 +51,6 @@ import {
   PaginationContent,
   PaginationEllipsis,
   PaginationItem,
-  PaginationLink,
 } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -59,8 +59,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
+  CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
+  CUSTOMER_RECURRENCE_SEARCH_MAX_LENGTH,
   type CustomerFrequencyBandKey,
   type CustomerRecurrenceRow,
+  normalizeCustomerRecurrenceSearch,
+  normalizeMinimumTotalVisits,
   resolveCustomerRecurrenceDisplayedPage,
   useCustomerRecurrenceReport,
 } from '@/hooks/useCustomerRecurrenceReport';
@@ -419,12 +423,16 @@ export default function CustomerRecurrenceReport() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    const normalizedSearch = normalizeCustomerRecurrenceSearch(searchInput);
+    if (normalizedSearch === debouncedSearch) return undefined;
+
     const timeoutId = window.setTimeout(() => {
-      setDebouncedSearch(searchInput.trim());
+      setDebouncedSearch(normalizedSearch);
+      setPage(1);
     }, 350);
 
     return () => window.clearTimeout(timeoutId);
-  }, [searchInput]);
+  }, [debouncedSearch, searchInput]);
 
   const effectiveRange = useMemo(
     () => getPeriodRange(periodMode, customRange),
@@ -432,6 +440,10 @@ export default function CustomerRecurrenceReport() {
   );
   const periodStart = format(effectiveRange.from!, 'yyyy-MM-dd');
   const periodEnd = format(effectiveRange.to!, 'yyyy-MM-dd');
+  const periodLengthDays = differenceInCalendarDays(effectiveRange.to!, effectiveRange.from!) + 1;
+  const customPeriodError = periodMode === 'custom' && periodLengthDays > 366
+    ? `O intervalo selecionado tem ${formatInteger(periodLengthDays)} dias. Escolha um período de no máximo 366 dias.`
+    : null;
 
   const reportQuery = useCustomerRecurrenceReport({
     companyId,
@@ -443,11 +455,8 @@ export default function CustomerRecurrenceReport() {
     pageSize: PAGE_SIZE,
     search: debouncedSearch,
     minTotalVisits: minimumTotalVisits,
+    enabled: !customPeriodError,
   });
-
-  useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch]);
 
   const report = reportQuery.data;
   const totalPages = Math.max(
@@ -459,6 +468,8 @@ export default function CustomerRecurrenceReport() {
     && reportQuery.isPlaceholderData
     && reportQuery.isFetching
     && page !== report.meta.page;
+  const isSearchPending = normalizeCustomerRecurrenceSearch(searchInput) !== debouncedSearch;
+  const isUpdatingCustomerBase = isChangingPage || isSearchPending;
 
   useEffect(() => {
     if (report && page > totalPages) setPage(totalPages);
@@ -488,7 +499,11 @@ export default function CustomerRecurrenceReport() {
     [report?.frequency_bands],
   );
   const hasFrequencyData = frequencyData.some((band) => band.customers > 0);
-  const hasCustomerFilters = !!searchInput.trim() || !!minimumTotalVisits;
+  const hasCustomerFilters = !!debouncedSearch || !!minimumTotalVisits;
+  const reportErrorMessage = reportQuery.error instanceof Error
+    && reportQuery.error.message.startsWith('O relatório de recorrência')
+    ? reportQuery.error.message
+    : 'Confira sua conexão e tente novamente. Se o problema continuar, contate o suporte.';
 
   const handlePeriodModeChange = (value: PeriodMode) => {
     setPeriodMode(value);
@@ -560,6 +575,11 @@ export default function CustomerRecurrenceReport() {
                   className="h-11 w-full"
                   align="start"
                 />
+                {customPeriodError && (
+                  <p className="text-xs leading-relaxed text-destructive" role="alert">
+                    {customPeriodError}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -604,11 +624,14 @@ export default function CustomerRecurrenceReport() {
               size="icon"
               className="shrink-0 self-end"
               onClick={() => reportQuery.refetch()}
-              disabled={reportQuery.isFetching}
+              disabled={reportQuery.isFetching || isSearchPending || !!customPeriodError}
               aria-label="Atualizar relatório"
               title="Atualizar relatório"
             >
-              <RefreshCcw className={cn('h-4 w-4', reportQuery.isFetching && 'animate-spin')} aria-hidden="true" />
+              <RefreshCcw
+                className={cn('h-4 w-4', reportQuery.isFetching && 'animate-spin motion-reduce:animate-none')}
+                aria-hidden="true"
+              />
             </Button>
           </div>
         </div>
@@ -617,7 +640,10 @@ export default function CustomerRecurrenceReport() {
   );
 
   return (
-    <div className="min-w-0 space-y-6 overflow-x-hidden" aria-busy={reportQuery.isFetching}>
+    <div
+      className="min-w-0 space-y-6 overflow-x-hidden"
+      aria-busy={reportQuery.isFetching || isSearchPending}
+    >
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -630,10 +656,10 @@ export default function CustomerRecurrenceReport() {
             Entenda quem voltou, quem está começando um relacionamento e quais clientes já criaram hábito.
           </p>
         </div>
-        {reportQuery.isFetching && !reportQuery.isLoading && (
+        {(isSearchPending || (reportQuery.isFetching && !reportQuery.isLoading)) && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            Atualizando dados
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            {isSearchPending ? 'Aplicando busca…' : 'Atualizando dados…'}
           </div>
         )}
       </header>
@@ -645,7 +671,7 @@ export default function CustomerRecurrenceReport() {
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Não foi possível carregar o relatório</AlertTitle>
           <AlertDescription className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span>Confira sua conexão e tente novamente. Se o problema continuar, contate o suporte.</span>
+            <span>{reportErrorMessage}</span>
             <Button type="button" size="sm" variant="outline" onClick={() => reportQuery.refetch()}>
               Tentar novamente
             </Button>
@@ -661,7 +687,9 @@ export default function CustomerRecurrenceReport() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" aria-hidden="true" />
               <AlertTitle>Os dados não puderam ser atualizados</AlertTitle>
-              <AlertDescription>Os últimos dados carregados continuam visíveis abaixo.</AlertDescription>
+              <AlertDescription>
+                Os últimos dados carregados continuam visíveis abaixo. {reportErrorMessage}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -767,13 +795,13 @@ export default function CustomerRecurrenceReport() {
                         <div className="flex items-center gap-1.5">
                           <CardTitle id="monthly-composition-title">Novos × recorrentes</CardTitle>
                           <InfoTooltip
-                            content="Em cada mês, é recorrente quem já tinha uma visita antes do primeiro dia daquele mês. Os demais são classificados como novos."
+                            content="Em cada mês, é recorrente quem já tinha uma visita antes do primeiro dia daquele mês. A janela termina no mês do fim do período selecionado, que pode ser diferente do mês atual."
                             ariaLabel="Entender o gráfico de novos e recorrentes"
                             interaction="popover"
                           />
                         </div>
                         <CardDescription className="mt-1">
-                          Nos últimos 6 meses: novo começa no mês; recorrente já tinha histórico antes dele
+                          Janela de 6 meses encerrada em {formatMonth(report.meta.period_end)}
                         </CardDescription>
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground sm:text-right">
@@ -950,7 +978,7 @@ export default function CustomerRecurrenceReport() {
                       <div className="flex items-center gap-1.5">
                         <CardTitle id="customer-base-title">Base de clientes do período</CardTitle>
                         <InfoTooltip
-                          content="Uma linha por telefone identificado. “Antes” mostra as visitas anteriores ao intervalo; “No período”, as visitas dentro dele; e “Total”, todo o histórico até o fim do período."
+                          content="Uma linha por telefone identificado. “Antes” mostra as visitas anteriores ao intervalo; “No período”, as visitas dentro dele; e “Total”, o histórico somente até o fim do intervalo. Na página de Leads, “Visitas” considera todo o histórico disponível do contato, inclusive depois desse corte. A opção “Incluir acompanhantes” também pode mudar a base; por isso os totais das duas telas podem diferir."
                           ariaLabel="Entender a base de clientes"
                           interaction="popover"
                         />
@@ -974,18 +1002,18 @@ export default function CustomerRecurrenceReport() {
                             type="search"
                             name="customer-search"
                             autoComplete="off"
+                            maxLength={CUSTOMER_RECURRENCE_SEARCH_MAX_LENGTH}
                             value={searchInput}
                             onChange={(event) => {
                               setSearchInput(event.target.value);
-                              setPage(1);
                             }}
                             placeholder="Nome ou telefone…"
                             className="h-10 pl-9 pr-9"
                             aria-label="Buscar cliente por nome ou telefone"
                           />
-                          {reportQuery.isFetching && debouncedSearch && (
+                          {(isSearchPending || (reportQuery.isFetching && !!debouncedSearch)) && (
                             <Loader2
-                              className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+                              className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground motion-reduce:animate-none"
                               aria-hidden="true"
                             />
                           )}
@@ -1007,17 +1035,15 @@ export default function CustomerRecurrenceReport() {
                           id="minimum-total-visits"
                           type="number"
                           min={1}
+                          max={CUSTOMER_RECURRENCE_MIN_VISITS_MAX}
                           step={1}
                           inputMode="numeric"
                           value={minimumTotalVisits ?? ''}
                           onChange={(event) => {
                             const rawValue = event.target.value;
                             const parsedValue = Number(rawValue);
-                            setMinimumTotalVisits(
-                              rawValue === '' || !Number.isFinite(parsedValue)
-                                ? undefined
-                                : Math.max(1, Math.floor(parsedValue)),
-                            );
+                            const normalizedValue = normalizeMinimumTotalVisits(parsedValue);
+                            setMinimumTotalVisits(rawValue === '' ? undefined : normalizedValue ?? undefined);
                             setPage(1);
                           }}
                           placeholder="Ex.: 2"
@@ -1029,15 +1055,15 @@ export default function CustomerRecurrenceReport() {
                   </CardHeader>
 
                   <CardContent className="relative p-0">
-                    {isChangingPage && (
+                    {isUpdatingCustomerBase && (
                       <div
                         className="absolute inset-0 z-20 flex min-h-[250px] items-center justify-center bg-card/80 backdrop-blur-[1px]"
                         role="status"
                         aria-live="polite"
                       >
                         <div className="flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground shadow-sm">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
-                          Carregando página {page}
+                          <Loader2 className="h-4 w-4 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+                          {isSearchPending ? 'Aplicando busca…' : `Carregando página ${page}…`}
                         </div>
                       </div>
                     )}
@@ -1139,7 +1165,10 @@ export default function CustomerRecurrenceReport() {
                         </p>
 
                         {totalPages > 1 && (
-                          <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+                          <Pagination
+                            className="mx-0 w-auto justify-start sm:justify-end"
+                            aria-label="Paginação da base de clientes"
+                          >
                             <PaginationContent>
                               <PaginationItem>
                                 <Button
@@ -1147,7 +1176,7 @@ export default function CustomerRecurrenceReport() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-9 w-9"
-                                  disabled={displayedPage === 1 || reportQuery.isFetching}
+                                  disabled={displayedPage === 1 || reportQuery.isFetching || isSearchPending}
                                   onClick={() => goToPage(displayedPage - 1)}
                                   aria-label="Ir para página anterior"
                                 >
@@ -1159,20 +1188,18 @@ export default function CustomerRecurrenceReport() {
                                   {visiblePage === 'ellipsis' ? (
                                     <PaginationEllipsis />
                                   ) : (
-                                    <PaginationLink
-                                      href="#"
-                                      isActive={visiblePage === displayedPage}
+                                    <Button
+                                      type="button"
+                                      variant={visiblePage === displayedPage ? 'outline' : 'ghost'}
+                                      size="icon"
+                                      className="h-9 w-9"
                                       aria-label={`Ir para página ${visiblePage}`}
                                       aria-current={visiblePage === displayedPage ? 'page' : undefined}
-                                      aria-disabled={reportQuery.isFetching}
-                                      className={cn(reportQuery.isFetching && 'pointer-events-none opacity-50')}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        goToPage(visiblePage);
-                                      }}
+                                      disabled={reportQuery.isFetching || isSearchPending}
+                                      onClick={() => goToPage(visiblePage)}
                                     >
                                       {visiblePage}
-                                    </PaginationLink>
+                                    </Button>
                                   )}
                                 </PaginationItem>
                               ))}
@@ -1187,7 +1214,7 @@ export default function CustomerRecurrenceReport() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-9 w-9"
-                                  disabled={displayedPage === totalPages || reportQuery.isFetching}
+                                  disabled={displayedPage === totalPages || reportQuery.isFetching || isSearchPending}
                                   onClick={() => goToPage(displayedPage + 1)}
                                   aria-label="Ir para próxima página"
                                 >

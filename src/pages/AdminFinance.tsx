@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AsaasCustomerLookupDialog from '@/components/billing/AsaasCustomerLookupDialog';
+import CompanyDialog from '@/components/company/CompanyDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +45,10 @@ import {
   useSyncAllCompanyBilling,
 } from '@/hooks/usePlatformBilling';
 import type { PlatformBillingCompanyOverview } from '@/lib/platform-billing-contracts';
+import {
+  toCompanyBillingTarget,
+  type CompanyBillingTarget,
+} from '@/lib/company-billing-dialog';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -74,6 +79,7 @@ export default function AdminFinance() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<CompanyFilter>('all');
   const [customerLookupOpen, setCustomerLookupOpen] = useState(false);
+  const [billingTarget, setBillingTarget] = useState<CompanyBillingTarget | null>(null);
   const moduleQuery = usePlatformBillingModuleStatus();
   const configQuery = usePlatformAsaasConfig();
   const overviewQuery = useSuperadminBillingOverview();
@@ -134,10 +140,10 @@ export default function AdminFinance() {
         toast.warning('A sincronização não foi iniciada porque o Financeiro está desativado.');
       } else if (result.stoppedEarly) {
         toast.error(
-          `Sincronização interrompida: ${synced} concluídas, ${failed} com erro e ${result.remainingCount} empresas ainda não processadas. Revise o token do Asaas.`,
+          `Sincronização interrompida: ${synced} ${synced === 1 ? 'empresa concluída' : 'empresas concluídas'}, ${failed} com erro e ${result.remainingCount} ${result.remainingCount === 1 ? 'empresa ainda não processada' : 'empresas ainda não processadas'}. Revise o token do Asaas.`,
         );
       } else if (failed > 0) {
-        toast.warning(`${synced} empresas sincronizadas e ${failed} com erro.`);
+        toast.warning(`${synced} ${synced === 1 ? 'empresa sincronizada' : 'empresas sincronizadas'} e ${failed} com erro.`);
       } else {
         toast.success(`${synced} ${synced === 1 ? 'empresa sincronizada' : 'empresas sincronizadas'}.`);
       }
@@ -283,19 +289,19 @@ export default function AdminFinance() {
           icon={Building2}
           label="Empresas vinculadas"
           value={`${totals?.configuredCompanyCount ?? 0}`}
-          detail={`${enabledCompanyCount} liberadas de ${totals?.companyCount ?? 0} empresas`}
+          detail={`${enabledCompanyCount} ${enabledCompanyCount === 1 ? 'liberada' : 'liberadas'} de ${totals?.companyCount ?? 0} ${(totals?.companyCount ?? 0) === 1 ? 'empresa' : 'empresas'}`}
         />
         <MetricCard
           icon={Clock3}
           label="Total em aberto"
           value={currencyFormatter.format(totals?.openTotal ?? 0)}
-          detail={`${totals?.openCount ?? 0} cobranças`}
+          detail={`${totals?.openCount ?? 0} ${(totals?.openCount ?? 0) === 1 ? 'cobrança' : 'cobranças'}`}
         />
         <MetricCard
           icon={AlertTriangle}
           label="Total vencido"
           value={currencyFormatter.format(totals?.overdueTotal ?? 0)}
-          detail={`${totals?.overdueCount ?? 0} cobranças vencidas`}
+          detail={`${totals?.overdueCount ?? 0} ${(totals?.overdueCount ?? 0) === 1 ? 'cobrança vencida' : 'cobranças vencidas'}`}
           danger={(totals?.overdueCount ?? 0) > 0}
         />
         <MetricCard
@@ -303,7 +309,7 @@ export default function AdminFinance() {
           label="Sem vínculo"
           value={`${totals?.unconfiguredCompanyCount ?? 0}`}
           detail={attentionCount > 0
-            ? `${pendingValidationCount} para revalidar · ${totals?.errorCompanyCount ?? 0} com erro${disabledLinkCount > 0 ? ` · ${disabledLinkCount} desativados` : ''}`
+            ? `${pendingValidationCount} para revalidar · ${totals?.errorCompanyCount ?? 0} com erro${disabledLinkCount > 0 ? ` · ${disabledLinkCount} ${disabledLinkCount === 1 ? 'vínculo desativado' : 'vínculos desativados'}` : ''}`
             : 'Todos os vínculos configurados'}
           warning={(totals?.unconfiguredCompanyCount ?? 0) > 0 || attentionCount > 0}
         />
@@ -387,6 +393,7 @@ export default function AdminFinance() {
                       company={company}
                       configReady={!!config?.configured}
                       globalEnabled={!!moduleStatus?.enabled}
+                      onConfigure={() => setBillingTarget(toCompanyBillingTarget(company))}
                     />
                   ))}
                 </TableBody>
@@ -401,6 +408,15 @@ export default function AdminFinance() {
         onOpenChange={setCustomerLookupOpen}
         companies={companies ?? []}
       />
+
+      <CompanyDialog
+        open={billingTarget !== null}
+        company={null}
+        billingTarget={billingTarget}
+        onOpenChange={(open) => {
+          if (!open) setBillingTarget(null);
+        }}
+      />
     </div>
   );
 }
@@ -409,10 +425,12 @@ function CompanyOverviewRow({
   company,
   configReady,
   globalEnabled,
+  onConfigure,
 }: {
   company: PlatformBillingCompanyOverview;
   configReady: boolean;
   globalEnabled: boolean;
+  onConfigure: () => void;
 }) {
   const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null);
   const setCompanyEnabled = useSetCompanyBillingEnabled();
@@ -507,14 +525,18 @@ function CompanyOverviewRow({
       </TableCell>
       <TableCell>
         <p className="font-medium tabular-nums">{currencyFormatter.format(company.openTotal)}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{company.openCount} cobranças</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {company.openCount} {company.openCount === 1 ? 'cobrança' : 'cobranças'}
+        </p>
       </TableCell>
       <TableCell>
         <p className={company.overdueCount > 0 ? 'font-semibold tabular-nums text-destructive' : 'font-medium tabular-nums'}>
           {currencyFormatter.format(company.overdueTotal)}
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {company.overdueCount > 0 ? `${company.overdueCount} vencidas · ${company.oldestOverdueDays}d` : 'Em dia'}
+          {company.overdueCount > 0
+            ? `${company.overdueCount} ${company.overdueCount === 1 ? 'vencida' : 'vencidas'} · ${company.oldestOverdueDays}d`
+            : 'Em dia'}
         </p>
       </TableCell>
       <TableCell>
@@ -523,8 +545,10 @@ function CompanyOverviewRow({
         </p>
         {company.lastSyncedAt && company.linkStatus === 'active' && !hasError && (
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {company.lastMatchedCount} importadas
-            {company.lastIgnoredCount > 0 ? ` · ${company.lastIgnoredCount} ignoradas` : ''}
+            {company.lastMatchedCount} {company.lastMatchedCount === 1 ? 'importada' : 'importadas'}
+            {company.lastIgnoredCount > 0
+              ? ` · ${company.lastIgnoredCount} ${company.lastIgnoredCount === 1 ? 'ignorada' : 'ignoradas'}`
+              : ''}
           </p>
         )}
       </TableCell>
@@ -536,11 +560,9 @@ function CompanyOverviewRow({
               Prévia
             </Link>
           </Button>
-          <Button asChild variant="ghost" size="sm" className="gap-1.5">
-            <Link to={`/empresas/${company.companyId}`}>
-              Configurar
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+          <Button type="button" variant="ghost" size="sm" className="gap-1.5" onClick={onConfigure}>
+            Configurar
+            <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       </TableCell>

@@ -56,14 +56,22 @@ async function auditConfigAction(
 }
 
 function statusForError(message: string) {
-  if (message === "Nao autorizado") return 401;
-  if (message === "Sem permissao") return 403;
-  if (message.includes("source revision changed") || message.includes("recarregue")) return 409;
+  const comparableMessage = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (comparableMessage === "nao autorizado") return 401;
+  if (comparableMessage === "sem permissao") return 403;
   if (
-    message.includes("obrigatorio")
-    || message.includes("invalido")
-    || message.includes("nao configurado")
-    || message.includes("antes de ativar")
+    comparableMessage.includes("source revision changed")
+    || comparableMessage.includes("recarregue")
+  ) return 409;
+  if (
+    comparableMessage.includes("obrigatorio")
+    || comparableMessage.includes("invalido")
+    || comparableMessage.includes("nao configurado")
+    || comparableMessage.includes("antes de ativar")
   ) return 400;
   return 500;
 }
@@ -74,7 +82,7 @@ Deno.serve(async (req) => {
   }
 
   if (req.method !== "POST") {
-    return platformBillingJsonResponse({ ok: false, error: "Method not allowed" }, 405);
+    return platformBillingJsonResponse({ ok: false, error: "Método não permitido" }, 405);
   }
 
   try {
@@ -102,7 +110,7 @@ Deno.serve(async (req) => {
 
       if (!providedToken && environment !== savedEnvironment) {
         const message =
-          "O token salvo so pode ser testado no ambiente em que foi configurado";
+          "O token salvo só pode ser testado no ambiente em que foi configurado";
         await auditConfigAction(
           supabaseAdmin,
           req,
@@ -135,13 +143,13 @@ Deno.serve(async (req) => {
               environment,
               success: false,
               used_saved_token: true,
-              error: "Token global Asaas nao configurado",
+              error: "Token global do Asaas não configurado",
             },
           );
           return platformBillingJsonResponse({
             ok: false,
             valid: false,
-            error: "Token global Asaas nao configurado",
+            error: "Token global do Asaas não configurado",
           }, 400);
         }
       }
@@ -168,7 +176,7 @@ Deno.serve(async (req) => {
             .maybeSingle();
           if (error) throw new Error(error.message);
           if (!updated) {
-            throw new Error("A configuracao Asaas mudou; recarregue antes de testar novamente");
+            throw new Error("A configuração do Asaas mudou; recarregue antes de testar novamente");
           }
         }
 
@@ -216,7 +224,7 @@ Deno.serve(async (req) => {
             .maybeSingle();
           if (disableError) throw new Error(disableError.message);
           if (!disabled) {
-            const staleMessage = "A configuracao Asaas mudou; recarregue antes de testar novamente";
+            const staleMessage = "A configuração do Asaas mudou; recarregue antes de testar novamente";
             await auditConfigAction(
               supabaseAdmin,
               req,
@@ -259,10 +267,10 @@ Deno.serve(async (req) => {
     if (action === "save") {
       const apiToken = typeof body.api_token === "string" ? body.api_token.trim() : "";
       if (!apiToken) {
-        return platformBillingJsonResponse({ ok: false, error: "Token Asaas obrigatorio" }, 400);
+        return platformBillingJsonResponse({ ok: false, error: "Token do Asaas obrigatório" }, 400);
       }
       if (apiToken.length > 2048) {
-        return platformBillingJsonResponse({ ok: false, error: "Token Asaas invalido" }, 400);
+        return platformBillingJsonResponse({ ok: false, error: "Token do Asaas inválido" }, 400);
       }
 
       const currentEnvironment = existing?.api_environment === "sandbox" ? "sandbox" : "production";
@@ -284,7 +292,7 @@ Deno.serve(async (req) => {
 
       const now = new Date().toISOString();
       if (typeof existing?.source_revision !== "string") {
-        throw new Error("Revisao da fonte Asaas nao configurada");
+        throw new Error("Revisão da fonte Asaas não configurada");
       }
       let encryptedToken: string;
       try {
@@ -359,7 +367,10 @@ Deno.serve(async (req) => {
 
     if (action === "set_enabled") {
       if (typeof body.enabled !== "boolean") {
-        return platformBillingJsonResponse({ ok: false, error: "enabled deve ser boolean" }, 400);
+        return platformBillingJsonResponse({
+          ok: false,
+          error: 'O campo "enabled" deve ser booleano',
+        }, 400);
       }
 
       const configured = Boolean(
@@ -370,13 +381,13 @@ Deno.serve(async (req) => {
       if (body.enabled && !configured) {
         return platformBillingJsonResponse({
           ok: false,
-          error: "Valide e salve o token global Asaas antes de ativar o modulo",
+          error: "Valide e salve o token global do Asaas antes de ativar o módulo",
         }, 400);
       }
 
       const now = new Date().toISOString();
       if (typeof existing?.source_revision !== "string") {
-        throw new Error("Revisao da fonte Asaas nao configurada");
+        throw new Error("Revisão da fonte Asaas não configurada");
       }
       let enableQuery = supabaseAdmin
         .from("platform_billing_config")
@@ -398,7 +409,7 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!updated) {
-        const message = "A configuracao Asaas mudou; recarregue antes de alterar o modulo";
+        const message = "A configuração do Asaas mudou; recarregue antes de alterar o módulo";
         await auditConfigAction(
           supabaseAdmin,
           req,
@@ -427,7 +438,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    return platformBillingJsonResponse({ ok: false, error: "Acao invalida" }, 400);
+    return platformBillingJsonResponse({ ok: false, error: "Ação inválida" }, 400);
   } catch (error) {
     const message = safePlatformBillingError(error);
     return platformBillingJsonResponse({ ok: false, error: message }, statusForError(message));

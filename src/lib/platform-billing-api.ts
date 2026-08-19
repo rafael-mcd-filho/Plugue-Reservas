@@ -5,6 +5,7 @@ import {
   DEFAULT_PLATFORM_ASAAS_CONFIG,
   PLATFORM_BILLING_DESCRIPTION_MARKER,
   type CompanyBillingInvoice,
+  type CompanyBillingInvoicePixQrCode,
   type CompanyBillingInvoiceRow,
   type CompanyBillingLink,
   type CompanyBillingLinkRow,
@@ -16,6 +17,7 @@ import {
   type PlatformAsaasTestResult,
   type PlatformBillingEnvironment,
   type PlatformBillingGetLinkResponse,
+  type PlatformBillingGetInvoicePixQrCodeResponse,
   type PlatformBillingModuleStatus,
   type PlatformBillingModuleStatusRpcRow,
   type PlatformBillingOverview,
@@ -36,6 +38,7 @@ import {
   createEmptyCompanyBillingSummary,
   normalizeAsaasCustomer,
   normalizeCompanyBillingInvoice,
+  normalizeCompanyBillingInvoicePixQrCode,
   normalizeCompanyBillingLink,
   normalizeCompanyBillingSummary,
   normalizeCompanyBillingSync,
@@ -49,7 +52,60 @@ export const PLATFORM_BILLING_FUNCTION = 'platform-billing' as const;
 type FunctionErrorPayload = {
   error?: string;
   message?: string;
+  retry_after_seconds?: number | string | null;
 };
+
+export class PlatformBillingFunctionError extends Error {
+  readonly status: number | null;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(
+    message: string,
+    options: { status?: number | null; retryAfterSeconds?: number | null } = {},
+  ) {
+    super(message);
+    this.name = 'PlatformBillingFunctionError';
+    this.status = options.status ?? null;
+    this.retryAfterSeconds = options.retryAfterSeconds ?? null;
+  }
+}
+
+function normalizeRetryAfterSeconds(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.max(1, Math.min(3600, Math.ceil(parsed)));
+}
+
+function retryAfterHeaderSeconds(value: string | null | undefined) {
+  const numericSeconds = normalizeRetryAfterSeconds(value);
+  if (numericSeconds) return numericSeconds;
+  if (!value) return null;
+
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return null;
+  return normalizeRetryAfterSeconds((retryAt - Date.now()) / 1000);
+}
+
+async function readFunctionErrorPayload(error: any): Promise<FunctionErrorPayload | null> {
+  const response = error?.context;
+  if (!response || typeof response.clone !== 'function') return null;
+
+  try {
+    const payload = await response.clone().json();
+    return payload && typeof payload === 'object'
+      ? payload as FunctionErrorPayload
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getPlatformBillingRetryAfterSeconds(error: unknown) {
+  if (!error || typeof error !== 'object') return null;
+  return normalizeRetryAfterSeconds(
+    (error as { retryAfterSeconds?: unknown }).retryAfterSeconds,
+  );
+}
 
 async function invokePlatformBillingFunction<T>(
   functionName: typeof PLATFORM_BILLING_CONFIG_FUNCTION | typeof PLATFORM_BILLING_FUNCTION,
@@ -61,10 +117,19 @@ async function invokePlatformBillingFunction<T>(
   });
 
   if (error || !data || data.error) {
+    const responsePayload = error ? await readFunctionErrorPayload(error) : null;
+    const response = error?.context;
+    const status = Number.isFinite(Number(response?.status)) ? Number(response.status) : null;
+    const headerRetryAfter = typeof response?.headers?.get === 'function'
+      ? retryAfterHeaderSeconds(response.headers.get('Retry-After'))
+      : null;
+    const payload = responsePayload ?? data;
     const message = error
       ? await getFunctionErrorMessage(error)
-      : data?.error || data?.message || fallbackError;
-    throw new Error(message);
+      : payload?.error || payload?.message || fallbackError;
+    const retryAfterSeconds = normalizeRetryAfterSeconds(payload?.retry_after_seconds)
+      ?? headerRetryAfter;
+    throw new PlatformBillingFunctionError(message, { status, retryAfterSeconds });
   }
 
   return data as T;
@@ -98,7 +163,7 @@ export async function getPlatformAsaasConfig(): Promise<PlatformAsaasConfig> {
   const response = await invokePlatformBillingFunction<PlatformAsaasConfigResponse>(
     PLATFORM_BILLING_CONFIG_FUNCTION,
     { action: 'get' },
-    'Nao foi possivel carregar a configuracao do Asaas da plataforma.',
+    'Não foi possível carregar a configuração do Asaas da plataforma.',
   );
   return normalizePlatformAsaasConfig(response.config);
 }
@@ -115,7 +180,7 @@ export async function savePlatformAsaasConfig(input: {
       environment: input.environment,
       api_token: token,
     },
-    'Nao foi possivel salvar a configuracao do Asaas da plataforma.',
+    'Não foi possível salvar a configuração do Asaas da plataforma.',
   );
   return normalizePlatformAsaasConfig(response.config);
 }
@@ -132,7 +197,7 @@ export async function testPlatformAsaasConfig(input: {
       ...(token ? { api_token: token } : {}),
       ...(input.environment ? { environment: input.environment } : {}),
     },
-    'Nao foi possivel validar o token do Asaas.',
+    'Não foi possível validar o token do Asaas.',
   );
 
   return {
@@ -146,7 +211,7 @@ export async function setPlatformBillingEnabled(enabled: boolean): Promise<Platf
   const response = await invokePlatformBillingFunction<PlatformAsaasConfigResponse>(
     PLATFORM_BILLING_CONFIG_FUNCTION,
     { action: 'set_enabled', enabled },
-    `Nao foi possivel ${enabled ? 'ativar' : 'desativar'} o Financeiro.`,
+    `Não foi possível ${enabled ? 'ativar' : 'desativar'} o Financeiro.`,
   );
   return normalizePlatformAsaasConfig(response.config);
 }
@@ -162,7 +227,7 @@ export async function getCompanyBillingSnapshot(companyId: string): Promise<Comp
   const response = await invokePlatformBillingFunction<PlatformBillingGetLinkResponse>(
     PLATFORM_BILLING_FUNCTION,
     { action: 'get_link', company_id: companyId },
-    'Nao foi possivel carregar o vinculo financeiro da empresa.',
+    'Não foi possível carregar o vínculo financeiro da empresa.',
   );
 
   return {
@@ -186,7 +251,7 @@ export async function validateAsaasCustomer(input: {
       asaas_customer_id: input.customerId.trim(),
       ...(input.companyId ? { company_id: input.companyId } : {}),
     },
-    'Nao foi possivel validar o cliente no Asaas.',
+    'Não foi possível validar o cliente no Asaas.',
   );
   return normalizeAsaasCustomer(response.customer);
 }
@@ -205,7 +270,7 @@ export async function searchAsaasCustomers(input: {
       offset: Math.max(0, input.offset ?? 0),
       limit: Math.min(50, Math.max(1, input.limit ?? 20)),
     },
-    'Nao foi possivel pesquisar os clientes no Asaas.',
+    'Não foi possível pesquisar os clientes no Asaas.',
   );
 
   return {
@@ -232,11 +297,11 @@ export async function saveCompanyBillingLink(input: {
       asaas_customer_id: input.customerId.trim(),
       description_marker: input.descriptionMarker?.trim() || PLATFORM_BILLING_DESCRIPTION_MARKER,
     },
-    'Nao foi possivel vincular o cliente Asaas a empresa.',
+    'Não foi possível vincular o cliente Asaas à empresa.',
   );
 
   const link = normalizeCompanyBillingLink(response.link);
-  if (!link) throw new Error('O Asaas nao retornou o vinculo financeiro salvo.');
+  if (!link) throw new Error('O Asaas não retornou o vínculo financeiro salvo.');
 
   return {
     link,
@@ -250,7 +315,7 @@ export async function removeCompanyBillingLink(companyId: string) {
   const response = await invokePlatformBillingFunction<PlatformBillingRemoveLinkResponse>(
     PLATFORM_BILLING_FUNCTION,
     { action: 'remove_link', company_id: companyId },
-    'Nao foi possivel remover o vinculo financeiro da empresa.',
+    'Não foi possível remover o vínculo financeiro da empresa.',
   );
   return response.removed;
 }
@@ -270,11 +335,11 @@ export async function setCompanyBillingEnabled(input: {
         ? { expected_billing_revision: input.expectedBillingRevision }
         : {}),
     },
-    `Nao foi possivel ${input.enabled ? 'ativar' : 'desativar'} o Financeiro desta empresa.`,
+    `Não foi possível ${input.enabled ? 'ativar' : 'desativar'} o Financeiro desta empresa.`,
   );
 
   const link = normalizeCompanyBillingLink(response.link);
-  if (!link) throw new Error('O backend nao retornou o vinculo financeiro atualizado.');
+  if (!link) throw new Error('O backend não retornou o vínculo financeiro atualizado.');
   return link;
 }
 
@@ -282,7 +347,7 @@ export async function syncCompanyBilling(companyId: string): Promise<PlatformBil
   const response = await invokePlatformBillingFunction<PlatformBillingSyncCompanyResponse>(
     PLATFORM_BILLING_FUNCTION,
     { action: 'sync_company', company_id: companyId },
-    'Nao foi possivel sincronizar as cobrancas da empresa.',
+    'Não foi possível sincronizar as cobranças da empresa.',
   );
   return normalizeCompanyBillingSync(response.sync);
 }
@@ -291,7 +356,7 @@ export async function syncAllCompanyBilling(): Promise<PlatformBillingSyncAllRes
   const response = await invokePlatformBillingFunction<PlatformBillingSyncAllResponse>(
     PLATFORM_BILLING_FUNCTION,
     { action: 'sync_all' },
-    'Nao foi possivel sincronizar as cobrancas das empresas.',
+    'Não foi possível sincronizar as cobranças das empresas.',
   );
 
   return {
@@ -335,6 +400,23 @@ export async function listCompanyBillingInvoices(companyId: string): Promise<Com
   ));
 
   return rows.map(normalizeCompanyBillingInvoice);
+}
+
+export async function getCompanyBillingInvoicePixQrCode(input: {
+  companyId: string;
+  invoiceId: string;
+}): Promise<CompanyBillingInvoicePixQrCode> {
+  const response = await invokePlatformBillingFunction<PlatformBillingGetInvoicePixQrCodeResponse>(
+    PLATFORM_BILLING_FUNCTION,
+    {
+      action: 'get_invoice_pix_qr_code',
+      company_id: input.companyId,
+      invoice_id: input.invoiceId,
+    },
+    'Não foi possível gerar o Pix desta fatura.',
+  );
+
+  return normalizeCompanyBillingInvoicePixQrCode(response, input.invoiceId);
 }
 
 export function unavailablePlatformAsaasConfig() {

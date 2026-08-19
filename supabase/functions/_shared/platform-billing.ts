@@ -1,3 +1,5 @@
+import { resolvePlatformAsaasBaseUrl } from "./platform-billing-base-url.ts";
+
 export type PlatformBillingEnvironment = "sandbox" | "production";
 
 export const platformBillingCorsHeaders = {
@@ -48,7 +50,7 @@ function base64ToBytes(value: string): Uint8Array {
 async function getPlatformBillingEncryptionKey(): Promise<CryptoKey> {
   const rawKey = Deno.env.get("PLATFORM_BILLING_TOKEN_ENCRYPTION_KEY");
   if (!rawKey) {
-    throw new Error("PLATFORM_BILLING_TOKEN_ENCRYPTION_KEY nao configurada");
+    throw new Error("PLATFORM_BILLING_TOKEN_ENCRYPTION_KEY não configurada");
   }
 
   let keyBytes: Uint8Array;
@@ -77,7 +79,7 @@ async function getPlatformBillingEncryptionKey(): Promise<CryptoKey> {
 
 export async function encryptPlatformAsaasToken(token: string): Promise<string> {
   const normalized = token.trim();
-  if (!normalized) throw new Error("Token Asaas obrigatorio");
+  if (!normalized) throw new Error("Token do Asaas obrigatório");
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await getPlatformBillingEncryptionKey();
@@ -94,12 +96,12 @@ export async function encryptPlatformAsaasToken(token: string): Promise<string> 
 
 export async function decryptPlatformAsaasToken(storedToken: string): Promise<string> {
   if (!storedToken.startsWith(`${TOKEN_CIPHER_PREFIX}:`)) {
-    throw new Error("Token global Asaas nao esta criptografado no formato esperado");
+    throw new Error("O token global do Asaas não está criptografado no formato esperado");
   }
 
   const [, ivValue, cipherTextValue] = storedToken.split(":");
   if (!ivValue || !cipherTextValue) {
-    throw new Error("Token global Asaas criptografado invalido");
+    throw new Error("Token global do Asaas criptografado inválido");
   }
 
   const key = await getPlatformBillingEncryptionKey();
@@ -127,12 +129,14 @@ export class PlatformAsaasApiError extends Error {
 function getPlatformAsaasBaseUrl(environment: PlatformBillingEnvironment) {
   // This intentionally does not read ASAAS_API_BASE_URL, which belongs to the
   // reservation prepayment integration.
-  const explicitBaseUrl = Deno.env.get("PLATFORM_ASAAS_API_BASE_URL")?.trim();
-  if (explicitBaseUrl) return explicitBaseUrl.replace(/\/+$/, "");
-
-  return environment === "sandbox"
-    ? "https://api-sandbox.asaas.com/v3"
-    : "https://api.asaas.com/v3";
+  return resolvePlatformAsaasBaseUrl({
+    environment,
+    override: Deno.env.get("PLATFORM_ASAAS_API_BASE_URL"),
+    allowSandboxOverride:
+      Deno.env.get("PLATFORM_ASAAS_ALLOW_BASE_URL_OVERRIDE") === "true",
+    allowedProxyOrigins:
+      Deno.env.get("PLATFORM_ASAAS_ALLOWED_BASE_URL_ORIGINS"),
+  });
 }
 
 function getProviderErrorMessage(payload: unknown, status: number) {
@@ -233,6 +237,31 @@ export interface PlatformAsaasPayment {
   bankSlipUrl?: string | null;
   externalReference?: string | null;
   dateCreated?: string | null;
+  deleted?: boolean;
+}
+
+export async function getPlatformAsaasPayment(
+  apiToken: string,
+  environment: PlatformBillingEnvironment,
+  paymentId: string,
+) {
+  return platformAsaasGet<PlatformAsaasPayment>(
+    apiToken,
+    environment,
+    `/payments/${encodeURIComponent(paymentId)}`,
+  );
+}
+
+export async function getPlatformAsaasPaymentPixQrCode(
+  apiToken: string,
+  environment: PlatformBillingEnvironment,
+  paymentId: string,
+) {
+  return platformAsaasGet<unknown>(
+    apiToken,
+    environment,
+    `/payments/${encodeURIComponent(paymentId)}/pixQrCode`,
+  );
 }
 
 interface PlatformAsaasListResponse<T> {
@@ -255,14 +284,14 @@ export async function validatePlatformAsaasToken(
     { limit: 1, offset: 0 },
   );
   if (!Array.isArray(response?.data)) {
-    throw new Error("Resposta invalida do Asaas ao validar o token");
+    throw new Error("Resposta inválida do Asaas ao validar o token");
   }
 }
 
 export function normalizeAsaasCustomerId(value: unknown): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!/^[A-Za-z0-9_-]{4,100}$/.test(normalized)) {
-    throw new Error("Customer ID do Asaas invalido");
+    throw new Error("Customer ID do Asaas inválido");
   }
   return normalized;
 }
@@ -280,7 +309,7 @@ export async function getPlatformAsaasCustomer(
   );
 
   if (!customer?.id || customer.deleted === true) {
-    throw new Error("Cliente Asaas nao encontrado ou removido");
+    throw new Error("Cliente Asaas não encontrado ou removido");
   }
 
   return customer;
@@ -322,7 +351,7 @@ export async function listPlatformAsaasCustomers(
       || !customer.id.trim()
     )
   ) {
-    throw new Error("Resposta invalida do Asaas ao listar clientes");
+    throw new Error("Resposta inválida do Asaas ao listar clientes");
   }
 
   const providerTotal = Number(response.totalCount);
@@ -356,7 +385,7 @@ export async function listAllPlatformAsaasCustomerPayments(
       { customer: normalizedId, limit, offset },
     );
     if (!Array.isArray(response?.data)) {
-      throw new Error("Resposta invalida do Asaas ao listar cobrancas");
+      throw new Error("Resposta inválida do Asaas ao listar cobranças");
     }
     const pageItems = response.data;
     if (
@@ -368,7 +397,7 @@ export async function listAllPlatformAsaasCustomerPayments(
         || !payment.id.trim()
       )
     ) {
-      throw new Error("Paginacao ou cobranca invalida retornada pelo Asaas");
+      throw new Error("Paginação ou cobrança inválida retornada pelo Asaas");
     }
     payments.push(...pageItems);
 
@@ -376,12 +405,12 @@ export async function listAllPlatformAsaasCustomerPayments(
     if (!hasMore) return payments;
 
     if (pageItems.length === 0) {
-      throw new Error("Paginacao do Asaas retornou hasMore sem novos registros");
+      throw new Error("A paginação do Asaas retornou hasMore sem novos registros");
     }
     offset += pageItems.length;
   }
 
-  throw new Error("Cliente possui mais de 10.000 cobrancas; sincronizacao interrompida por seguranca");
+  throw new Error("O cliente possui mais de 10.000 cobranças; sincronização interrompida por segurança");
 }
 
 export function paymentDescriptionContainsMarker(
@@ -428,7 +457,7 @@ export function toCompanyBillingInvoiceRow(
   syncedAt: string,
 ) {
   if (typeof payment?.id !== "string" || !payment.id.trim()) {
-    throw new Error("Cobranca Asaas sem identificador");
+    throw new Error("Cobrança do Asaas sem identificador");
   }
 
   return {
@@ -471,10 +500,10 @@ export async function loadStoredPlatformBillingConfig(
 
   if (error) throw new Error(error.message);
   if (!data?.api_token_encrypted) {
-    throw new Error("Token global Asaas nao configurado");
+    throw new Error("Token global do Asaas não configurado");
   }
   if (typeof data.source_revision !== "string" || !data.source_revision) {
-    throw new Error("Revisao da fonte Asaas nao configurada");
+    throw new Error("Revisão da fonte Asaas não configurada");
   }
 
   const environment = data.api_environment === "sandbox" ? "sandbox" : "production";
@@ -494,7 +523,7 @@ export function normalizePlatformBillingEnvironment(
 ): PlatformBillingEnvironment {
   if (value === undefined || value === null || value === "") return fallback;
   if (value === "sandbox" || value === "production") return value;
-  throw new Error("Ambiente Asaas invalido");
+  throw new Error("Ambiente Asaas inválido");
 }
 
 export function publicPlatformBillingConfig(data: Record<string, unknown> | null) {
@@ -520,5 +549,12 @@ export function safePlatformBillingError(error: unknown) {
       && typeof (error as { message?: unknown }).message === "string"
     ? (error as { message: string }).message
     : "Erro interno";
-  return message.replace(/\$aact_[A-Za-z0-9_-]+/g, "[TOKEN_REMOVIDO]").slice(0, 1000);
+  const sanitizedMessage = message.replace(/\$aact_[A-Za-z0-9_-]+/g, "[TOKEN_REMOVIDO]");
+  const localizedMessage = ({
+    "SUPABASE_ANON_KEY nao configurada": "SUPABASE_ANON_KEY não configurada",
+    "Nao autorizado": "Não autorizado",
+    "Sem permissao para esta empresa": "Sem permissão para esta empresa",
+    "Sem permissao": "Sem permissão",
+  } as Record<string, string>)[sanitizedMessage] ?? sanitizedMessage;
+  return localizedMessage.slice(0, 1000);
 }

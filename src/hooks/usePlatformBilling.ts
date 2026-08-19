@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getCompanyBillingSnapshot,
@@ -17,6 +18,10 @@ import {
   testPlatformAsaasConfig,
   validateAsaasCustomer,
 } from '@/lib/platform-billing-api';
+import {
+  CompanyBillingPixRequestCoordinator,
+  getCompanyBillingPixExpirationTimestamp,
+} from '@/lib/company-billing-pix-client';
 import {
   createEmptyCompanyBillingSummary,
   type PlatformBillingEnvironment,
@@ -280,6 +285,86 @@ export function useCompanyBillingInvoices(
     retry: false,
     refetchOnWindowFocus: false,
   });
+}
+
+export function useCompanyBillingInvoicePixQrCode() {
+  const coordinatorRef = useRef<CompanyBillingPixRequestCoordinator | null>(null);
+  const expiredInvoiceIdRef = useRef<string | null>(null);
+  const [expiredInvoiceId, setExpiredInvoiceId] = useState<string | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = new CompanyBillingPixRequestCoordinator();
+  }
+
+  const mutation = useMutation({
+    mutationFn: (input: { companyId: string; invoiceId: string }) => {
+      if (!coordinatorRef.current || coordinatorRef.current.isDisposed) {
+        coordinatorRef.current = new CompanyBillingPixRequestCoordinator();
+      }
+      return coordinatorRef.current.request(input);
+    },
+    onMutate: () => {
+      expiredInvoiceIdRef.current = null;
+      setExpiredInvoiceId(null);
+    },
+    onSuccess: () => {
+      expiredInvoiceIdRef.current = null;
+      setExpiredInvoiceId(null);
+    },
+    gcTime: 0,
+    retry: false,
+  });
+  const { data: mutationData, reset: resetMutation } = mutation;
+
+  const resetMutationRef = useRef(resetMutation);
+  resetMutationRef.current = resetMutation;
+
+  useEffect(() => {
+    if (!coordinatorRef.current || coordinatorRef.current.isDisposed) {
+      coordinatorRef.current = new CompanyBillingPixRequestCoordinator();
+    }
+    const coordinator = coordinatorRef.current;
+    return () => {
+      expiredInvoiceIdRef.current = null;
+      resetMutationRef.current();
+      coordinator.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mutationData) return undefined;
+
+    const expirationTimestamp = getCompanyBillingPixExpirationTimestamp(
+      mutationData.expirationDate,
+    );
+    let timer: number | null = null;
+    let cancelled = false;
+
+    const scheduleExpiration = () => {
+      if (cancelled) return;
+      const remaining = expirationTimestamp === null
+        ? 0
+        : expirationTimestamp - Date.now();
+      if (remaining <= 0) {
+        expiredInvoiceIdRef.current = mutationData.invoiceId;
+        setExpiredInvoiceId(mutationData.invoiceId);
+        resetMutation();
+        return;
+      }
+      timer = window.setTimeout(
+        scheduleExpiration,
+        Math.min(2_147_483_647, remaining + 1),
+      );
+    };
+
+    scheduleExpiration();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [mutationData, resetMutation]);
+
+  return { ...mutation, expiredInvoiceId };
 }
 
 export function useSuperadminBillingOverview(options: BillingQueryOptions = {}) {
