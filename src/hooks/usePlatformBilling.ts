@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getCompanyBillingSnapshot,
+  getCompanyBillingOverdueWarning,
   getCompanyBillingSummary,
   getPlatformAsaasConfig,
   getPlatformBillingModuleStatus,
@@ -37,6 +38,7 @@ export const platformBillingQueryKeys = {
   moduleStatus: () => ['platform-billing', 'module-status'] as const,
   config: () => ['platform-billing', 'config'] as const,
   link: (companyId: string | undefined) => ['platform-billing', 'link', companyId] as const,
+  overdueWarning: (companyId: string | undefined) => ['platform-billing', 'overdue-warning', companyId] as const,
   summary: (companyId: string | undefined) => ['platform-billing', 'summary', companyId] as const,
   invoices: (companyId: string | undefined) => ['platform-billing', 'invoices', companyId] as const,
   overview: () => ['platform-billing', 'overview'] as const,
@@ -92,6 +94,7 @@ export function useSavePlatformAsaasConfig() {
       queryClient.setQueryData(platformBillingQueryKeys.config(), config);
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.moduleStatus() });
       queryClient.invalidateQueries({ queryKey: ['platform-billing', 'link'] });
+      queryClient.invalidateQueries({ queryKey: ['platform-billing', 'overdue-warning'] });
       queryClient.invalidateQueries({ queryKey: ['platform-billing', 'summary'] });
       queryClient.invalidateQueries({ queryKey: ['platform-billing', 'invoices'] });
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.overview() });
@@ -107,6 +110,7 @@ export function useSetPlatformBillingEnabled() {
     onSuccess: (config) => {
       queryClient.setQueryData(platformBillingQueryKeys.config(), config);
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.moduleStatus() });
+      queryClient.invalidateQueries({ queryKey: ['platform-billing', 'overdue-warning'] });
       queryClient.invalidateQueries({ queryKey: ['platform-billing', 'summary'] });
       queryClient.invalidateQueries({ queryKey: ['platform-billing', 'invoices'] });
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.overview() });
@@ -125,6 +129,7 @@ export function useTestPlatformAsaasConfig() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.config() });
       queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.moduleStatus() });
+      queryClient.invalidateQueries({ queryKey: ['platform-billing', 'overdue-warning'] });
     },
   });
 }
@@ -166,6 +171,7 @@ function invalidateCompanyBillingQueries(
   companyId: string,
 ) {
   queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.link(companyId) });
+  queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.overdueWarning(companyId) });
   queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.summary(companyId) });
   queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.invoices(companyId) });
   queryClient.invalidateQueries({ queryKey: platformBillingQueryKeys.overview() });
@@ -261,6 +267,27 @@ export function useCompanyBillingSummary(
     refetchIntervalInBackground: false,
     retry: false,
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useCompanyBillingOverdueWarning(
+  companyId?: string,
+  options: Pick<BillingQueryOptions, 'enabled'> = {},
+) {
+  return useQuery({
+    queryKey: platformBillingQueryKeys.overdueWarning(companyId),
+    queryFn: () => companyId
+      ? getCompanyBillingOverdueWarning(companyId)
+      : Promise.reject(new Error('Empresa não informada.')),
+    enabled: (options.enabled ?? true) && !!companyId,
+    staleTime: BILLING_STALE_TIME,
+    gcTime: 30 * 60 * 1000,
+    refetchInterval: (options.enabled ?? true)
+      ? BILLING_SUMMARY_REFRESH_INTERVAL
+      : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    refetchOnWindowFocus: true,
   });
 }
 

@@ -9,6 +9,8 @@ import {
   type CompanyBillingInvoiceRow,
   type CompanyBillingLink,
   type CompanyBillingLinkRow,
+  type CompanyBillingOverdueWarning,
+  type CompanyBillingOverdueWarningRpcRow,
   type CompanyBillingSummary,
   type CompanyBillingSummaryRpcRow,
   type PlatformAsaasConfig,
@@ -40,6 +42,7 @@ import {
   normalizeCompanyBillingInvoice,
   normalizeCompanyBillingInvoicePixQrCode,
   normalizeCompanyBillingLink,
+  normalizeCompanyBillingOverdueWarning,
   normalizeCompanyBillingSummary,
   normalizeCompanyBillingSync,
   normalizePlatformAsaasConfig,
@@ -384,6 +387,25 @@ export async function getCompanyBillingSummary(companyId: string): Promise<Compa
 
   return normalizeCompanyBillingSummary(
     firstRpcRow(data as CompanyBillingSummaryRpcRow[] | CompanyBillingSummaryRpcRow | null),
+    companyId,
+  );
+}
+
+export async function getCompanyBillingOverdueWarning(
+  companyId: string,
+): Promise<CompanyBillingOverdueWarning> {
+  const { data, error } = await (supabase as any).rpc(
+    'get_company_billing_overdue_warning',
+    { _company_id: companyId },
+  );
+  if (error) throw error;
+
+  return normalizeCompanyBillingOverdueWarning(
+    firstRpcRow(
+      data as CompanyBillingOverdueWarningRpcRow[]
+        | CompanyBillingOverdueWarningRpcRow
+        | null,
+    ),
     companyId,
   );
 }

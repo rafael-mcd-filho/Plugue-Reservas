@@ -688,7 +688,7 @@ export default function CompanyDialog({
           </div>
           <p className="text-sm text-muted-foreground">
             {billingOnly
-              ? 'Gerencie o vínculo com o Asaas e a liberação do Financeiro desta empresa.'
+              ? 'Gerencie o vínculo com o Asaas e a ativação do Financeiro desta empresa.'
               : isEditing
                 ? 'Todas as configurações da empresa em um único modal.'
                 : 'Cadastre a empresa e defina as configurações iniciais no mesmo fluxo.'}
@@ -1042,7 +1042,7 @@ export default function CompanyDialog({
                       </div>
                     ) : !billingModuleQuery.data.configured ? (
                       <div className="rounded-lg border border-warning/25 bg-warning-soft p-4 text-sm leading-relaxed text-amber-900">
-                        Configure e valide primeiro o token global do Asaas na página de Integrações. Depois disso, este campo será liberado para vínculo.
+                        Configure e valide primeiro o token global do Asaas na página de Integrações. Depois disso, este campo ficará disponível para vínculo.
                       </div>
                     ) : billingLinkQuery.isLoading && billingCompanyId ? (
                       <div className="space-y-3">
@@ -1085,7 +1085,7 @@ export default function CompanyDialog({
                               </div>
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold">Financeiro desta empresa</p>
+                                  <p className="text-sm font-semibold">Ativar Financeiro</p>
                                   <Badge
                                     variant="outline"
                                     className={billingEnabled
@@ -1098,15 +1098,18 @@ export default function CompanyDialog({
                                 <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
                                   {billingEnabled
                                     ? billingModuleQuery.data.enabled
-                                      ? 'O admin da empresa verá as faturas, alertas de atraso e esta empresa participará da sincronização automática.'
-                                      : 'A empresa está preparada, mas só verá as faturas quando o Financeiro global também estiver ativo.'
-                                    : 'O admin da empresa não verá o Financeiro e ela ficará fora da sincronização automática. O superadmin ainda poderá abrir a prévia e sincronizar manualmente.'}
+                                      ? 'A aba Financeiro aparece para os administradores da empresa, e as faturas são sincronizadas automaticamente a cada quatro horas.'
+                                      : 'O Financeiro está ativo para esta empresa, mas a aba para os administradores e a sincronização automática só funcionarão quando o Financeiro global também estiver ativo.'
+                                    : 'A aba Financeiro não aparece para os administradores, e a empresa fica fora da sincronização automática. O superadmin ainda pode abrir a prévia e sincronizar manualmente.'}
+                                  <span className="mt-1 block">
+                                    Essa configuração não cria cobranças no Asaas nem suspende a conta automaticamente.
+                                  </span>
                                 </p>
                               </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-2 shadow-sm">
                               <Label htmlFor="company-platform-billing-enabled" className="cursor-pointer text-xs font-semibold">
-                                {billingEnabled ? 'Liberado' : 'Desativado'}
+                                {billingEnabled ? 'Ativo' : 'Desativado'}
                               </Label>
                               <Switch
                                 id="company-platform-billing-enabled"
@@ -1122,7 +1125,7 @@ export default function CompanyDialog({
                           </div>
                           {!billingEnabled && validatedBillingCustomer?.id !== billingCustomerId.trim() && (
                             <p className="mt-3 border-t border-border/70 pt-3 text-xs text-muted-foreground">
-                              Localize ou valide um cliente do Asaas antes de liberar as cobranças para esta empresa.
+                              Localize ou valide um cliente do Asaas antes de ativar o Financeiro para esta empresa.
                             </p>
                           )}
                         </div>

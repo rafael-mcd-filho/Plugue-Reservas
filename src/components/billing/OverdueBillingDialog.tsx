@@ -68,7 +68,7 @@ export default function OverdueBillingDialog({
             </span>
           </div>
           <p className="pt-1 text-xs leading-relaxed text-muted-foreground">
-            O aviso não bloqueia o uso do sistema. Consulte as cobranças para abrir a segunda via ou conferir a atualização do pagamento.
+            Regularize o pagamento para evitar a suspensão da conta. Consulte as cobranças para abrir a segunda via ou conferir a atualização do pagamento.
           </p>
         </div>
 

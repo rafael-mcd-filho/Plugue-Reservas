@@ -13,7 +13,9 @@ The module is safe-by-default:
 - No customer, subscription or payment is created, changed or deleted in Asaas.
 - Companies without a link or without explicit per-company release are ignored
   by the automatic job. Superadmins can still preview and manually sync them.
-- Operators have no table or RPC access.
+- Operators have no access to billing tables or financial-detail RPCs. Their
+  only billing RPC is `get_company_billing_overdue_warning`, which returns two
+  booleans for the persistent overdue warning and exposes no amount, count or date.
 - Company admins can only read invoices when both the global switch and their
   company's switch are enabled; superadmins retain access for a controlled pilot.
 
@@ -203,7 +205,8 @@ batch (at most the already-running batch of four requests can finish).
 2. Link one test company and confirm its cached payments match Asaas exactly.
 3. Verify a payment without `[PLUGUEGUEST]` is counted as ignored and not shown.
 4. Verify a marker removal deletes the cached invoice after a successful sync.
-5. Verify an operator cannot select billing tables or call billing RPCs.
+5. Verify an operator cannot select billing tables or call financial-detail
+   RPCs, and can only read the boolean overdue warning for their own company.
 6. Verify an admin from another company cannot access the pilot company.
 7. Exercise the manual-sync five-minute cooldown.
 8. Confirm amounts, due dates and paid statuses in the company panel.
@@ -213,7 +216,7 @@ batch (at most the already-running batch of four requests can finish).
 11. Revalidate Production Customer IDs, run manual pilot syncs and compare.
 12. Call global `set_enabled` only after the Production checks pass.
 13. Call `set_company_enabled` for a single pilot company, verify its admin UI,
-    badge, overdue popup and next automatic sync, then release other companies
+    badge, overdue popup, persistent warning and next automatic sync, then release other companies
     gradually.
 
 ## Emergency stop and rollback

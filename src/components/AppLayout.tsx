@@ -51,9 +51,11 @@ import {
 } from '@/lib/companyPermissions';
 import type { CompanyFeatureKey } from '@/lib/companyFeatures';
 import {
+  useCompanyBillingOverdueWarning,
   useCompanyBillingSummary,
   usePlatformBillingModuleStatus,
 } from '@/hooks/usePlatformBilling';
+import OverdueBillingBanner from '@/components/billing/OverdueBillingBanner';
 import OverdueBillingDialog from '@/components/billing/OverdueBillingDialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
@@ -126,7 +128,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { activeRoles, hasPermission, permissionsLoading } = useCompanyPermissions();
   const rolesLoaded = !loading && activeRoles.length > 0;
   const canViewCompanyBilling = !!slug && (activeRoles.includes('admin') || activeRoles.includes('superadmin'));
+  const canReadCompanyBillingWarning = !!companyContext?.companyId
+    && rolesLoaded
+    && activeRoles.some((role) => (
+      role === 'admin' || role === 'operator' || role === 'superadmin'
+    ));
   const billingModuleQuery = usePlatformBillingModuleStatus({ enabled: canViewCompanyBilling });
+  const companyBillingWarningQuery = useCompanyBillingOverdueWarning(
+    companyContext?.companyId,
+    { enabled: canReadCompanyBillingWarning },
+  );
   const companyBillingSummaryQuery = useCompanyBillingSummary(companyContext?.companyId, {
     enabled: canViewCompanyBilling,
   });
@@ -854,6 +865,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+
+        <OverdueBillingBanner
+          show={companyBillingWarningQuery.data?.showOverdueWarning === true}
+          invoicesPath={canViewCompanyBilling
+            && companyBillingSummary?.companyBillingEnabled
+            && slug
+            ? `/${slug}/admin/financeiro`
+            : undefined}
+        />
 
 
         {/* Notificações do superadmin — só para admin/operator com empresa ativa */}

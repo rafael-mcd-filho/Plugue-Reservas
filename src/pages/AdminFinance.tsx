@@ -270,7 +270,7 @@ export default function AdminFinance() {
                     ? 'A página está pronta, mas as tabelas e funções financeiras ainda não estão disponíveis neste ambiente.'
                     : !config?.configured
                       ? 'Cadastre e valide o token global. Nenhuma cobrança será criada ou alterada pelo Plug Guest.'
-                      : 'Os clientes ainda não veem o módulo. O superadmin pode revisar vínculos e abrir uma prévia por empresa antes da liberação.'}
+                      : 'Os clientes ainda não veem o módulo. O superadmin pode revisar vínculos e abrir uma prévia por empresa antes da ativação.'}
                 </p>
               </div>
             </div>
@@ -289,7 +289,7 @@ export default function AdminFinance() {
           icon={Building2}
           label="Empresas vinculadas"
           value={`${totals?.configuredCompanyCount ?? 0}`}
-          detail={`${enabledCompanyCount} ${enabledCompanyCount === 1 ? 'liberada' : 'liberadas'} de ${totals?.companyCount ?? 0} ${(totals?.companyCount ?? 0) === 1 ? 'empresa' : 'empresas'}`}
+          detail={`${enabledCompanyCount} ${enabledCompanyCount === 1 ? 'ativa' : 'ativas'} de ${totals?.companyCount ?? 0} ${(totals?.companyCount ?? 0) === 1 ? 'empresa' : 'empresas'}`}
         />
         <MetricCard
           icon={Clock3}
@@ -318,9 +318,9 @@ export default function AdminFinance() {
       <div className="flex items-start gap-3 rounded-xl border border-primary/15 bg-primary/[0.045] px-4 py-3.5">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>
-          <p className="text-sm font-semibold">O que significa “Financeiro liberado”?</p>
+          <p className="text-sm font-semibold">O que significa “Ativar Financeiro”?</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            O admin da empresa passa a ver as faturas, os avisos de atraso e o sistema sincroniza as cobranças a cada quatro horas. Isso não pausa nem bloqueia automaticamente a conta por inadimplência.
+            A aba Financeiro passa a aparecer para os administradores da empresa, e as faturas são sincronizadas automaticamente a cada quatro horas. Essa configuração não cria cobranças no Asaas nem suspende a conta automaticamente.
           </p>
         </div>
       </div>
@@ -354,7 +354,7 @@ export default function AdminFinance() {
                 <SelectContent>
                   <SelectItem value="all">Todas as empresas</SelectItem>
                   <SelectItem value="overdue">Com fatura vencida</SelectItem>
-                  <SelectItem value="enabled">Financeiro liberado</SelectItem>
+                  <SelectItem value="enabled">Financeiro ativo</SelectItem>
                   <SelectItem value="disabled">Financeiro desativado</SelectItem>
                   <SelectItem value="configured">Vinculadas</SelectItem>
                   <SelectItem value="unconfigured">Não vinculadas</SelectItem>
@@ -377,7 +377,7 @@ export default function AdminFinance() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Empresa</TableHead>
-                    <TableHead>Liberação</TableHead>
+                    <TableHead>Ativar Financeiro</TableHead>
                     <TableHead>Vínculo Asaas</TableHead>
                     <TableHead>Próximo vencimento</TableHead>
                     <TableHead>Em aberto</TableHead>
@@ -463,12 +463,12 @@ function CompanyOverviewRow({
       });
       toast.success(
         pendingEnabled
-          ? `Financeiro liberado para ${company.companyName}.`
+          ? `Financeiro ativado para ${company.companyName}.`
           : `Financeiro desativado para ${company.companyName}.`,
       );
       setPendingEnabled(null);
     } catch (error: any) {
-      toast.error(error?.message || 'Não foi possível alterar a liberação desta empresa.');
+      toast.error(error?.message || 'Não foi possível alterar o status do Financeiro desta empresa.');
     }
   };
 
@@ -488,13 +488,13 @@ function CompanyOverviewRow({
             aria-label={`${company.billingEnabled ? 'Desativar' : 'Ativar'} Financeiro para ${company.companyName}`}
           />
           <span className={company.billingEnabled ? 'text-xs font-semibold text-success' : 'text-xs font-medium text-muted-foreground'}>
-            {company.billingEnabled ? (globalEnabled ? 'Liberado' : 'Preparado') : 'Desativado'}
+            {company.billingEnabled ? 'Ativo' : 'Desativado'}
           </span>
         </div>
         <p className="mt-1 max-w-40 text-[11px] leading-snug text-muted-foreground">
           {company.billingEnabled
             ? globalEnabled
-              ? 'Admin + sincronização automática'
+              ? 'Aba para admins + sincronização automática'
               : 'Aguardando ativação global'
             : company.configured
               ? 'Somente prévia do superadmin'
@@ -576,15 +576,15 @@ function CompanyOverviewRow({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingEnabled ? 'Liberar Financeiro para esta empresa?' : 'Desativar Financeiro desta empresa?'}
+              {pendingEnabled ? 'Ativar Financeiro para esta empresa?' : 'Desativar Financeiro desta empresa?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
               <span className="block">
                 {pendingEnabled
                   ? globalEnabled
-                    ? `Os administradores de ${company.companyName} passarão a ver as faturas e alertas. A empresa também entrará na sincronização automática a cada quatro horas. Isso não pausa nem bloqueia automaticamente a conta por atraso.`
-                    : `${company.companyName} ficará preparada para o piloto. A visualização do admin e a sincronização automática começarão somente quando o Financeiro global for ativado.`
-                  : `Os administradores de ${company.companyName} deixarão de ver o Financeiro e a empresa sairá da sincronização automática.`}
+                    ? `A aba Financeiro passará a aparecer para os administradores de ${company.companyName}, e as faturas serão sincronizadas automaticamente a cada quatro horas. Essa ativação não cria cobranças no Asaas nem suspende a conta automaticamente.`
+                    : `O Financeiro ficará ativo para ${company.companyName}, mas a aba para os administradores e a sincronização automática só funcionarão quando o Financeiro global for ativado. Essa ativação não cria cobranças no Asaas nem suspende a conta automaticamente.`
+                  : `A aba Financeiro deixará de aparecer para os administradores de ${company.companyName}, e a empresa sairá da sincronização automática.`}
               </span>
               <span className="block font-medium text-foreground/80">
                 A cópia local das faturas será preservada. O superadmin continuará com acesso à prévia e à sincronização manual.
@@ -601,7 +601,7 @@ function CompanyOverviewRow({
               disabled={setCompanyEnabled.isPending}
             >
               {setCompanyEnabled.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {pendingEnabled ? 'Liberar empresa' : 'Desativar Financeiro'}
+              {pendingEnabled ? 'Ativar Financeiro' : 'Desativar Financeiro'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

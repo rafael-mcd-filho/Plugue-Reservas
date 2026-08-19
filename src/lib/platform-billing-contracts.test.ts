@@ -5,6 +5,7 @@ import {
   PLATFORM_BILLING_SYNC_INTERVAL_HOURS,
   isPlatformBillingOpenStatus,
   isPlatformBillingPaidStatus,
+  normalizeCompanyBillingOverdueWarning,
   normalizeCompanyBillingInvoice,
   normalizeCompanyBillingLink,
   normalizeCompanyBillingSummary,
@@ -95,6 +96,30 @@ describe('platform-billing-contracts', () => {
       oldestOverdueDays: 7,
       showOverduePopup: true,
       nextDueAmount: 150.5,
+    });
+  });
+
+  it('normalizes the restricted overdue warning and fails closed', () => {
+    expect(normalizeCompanyBillingOverdueWarning({
+      billing_enabled: true,
+      show_overdue_warning: true,
+    }, 'company-1')).toEqual({
+      companyId: 'company-1',
+      billingEnabled: true,
+      showOverdueWarning: true,
+    });
+
+    expect(normalizeCompanyBillingOverdueWarning({
+      billing_enabled: false,
+      show_overdue_warning: true,
+    }, 'company-1')).toMatchObject({
+      billingEnabled: false,
+      showOverdueWarning: false,
+    });
+
+    expect(normalizeCompanyBillingOverdueWarning(null, 'company-1')).toMatchObject({
+      billingEnabled: false,
+      showOverdueWarning: false,
     });
   });
 

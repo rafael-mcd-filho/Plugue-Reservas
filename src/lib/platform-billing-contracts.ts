@@ -267,6 +267,17 @@ export interface CompanyBillingSummary {
   nextDueAmount: number;
 }
 
+export interface CompanyBillingOverdueWarningRpcRow {
+  billing_enabled: boolean | null;
+  show_overdue_warning: boolean | null;
+}
+
+export interface CompanyBillingOverdueWarning {
+  companyId: string | null;
+  billingEnabled: boolean;
+  showOverdueWarning: boolean;
+}
+
 export interface CompanyBillingSyncRow {
   company_id: string;
   matched_count: number;
@@ -599,6 +610,30 @@ export function createEmptyCompanyBillingSummary(
     showOverduePopup: false,
     nextDueDate: null,
     nextDueAmount: 0,
+  };
+}
+
+export function createEmptyCompanyBillingOverdueWarning(
+  companyId: string | null = null,
+): CompanyBillingOverdueWarning {
+  return {
+    companyId,
+    billingEnabled: false,
+    showOverdueWarning: false,
+  };
+}
+
+export function normalizeCompanyBillingOverdueWarning(
+  row: CompanyBillingOverdueWarningRpcRow | null | undefined,
+  companyId: string | null,
+): CompanyBillingOverdueWarning {
+  if (!row) return createEmptyCompanyBillingOverdueWarning(companyId);
+
+  const billingEnabled = row.billing_enabled === true;
+  return {
+    companyId,
+    billingEnabled,
+    showOverdueWarning: billingEnabled && row.show_overdue_warning === true,
   };
 }
 
