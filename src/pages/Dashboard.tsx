@@ -451,7 +451,6 @@ export default function Dashboard() {
   const [period, setPeriod] = useState('this_month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const [uniqueFunnelOnly, setUniqueFunnelOnly] = useState(false);
-  const [adsFunnelOnly, setAdsFunnelOnly] = useState(false);
   const [expectedVsActualMetric, setExpectedVsActualMetric] = useState<'reservations' | 'people'>('reservations');
 
   const { data: companies = [] } = useQuery({
@@ -499,7 +498,7 @@ export default function Dashboard() {
     data: funnelResult,
     dataUpdatedAt: funnelUpdatedAt = 0,
     isFetching: funnelFetching,
-  } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly, adsFunnelOnly);
+  } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly);
   const funnelData = funnelResult?.points ?? [];
   const {
     data: liveFunnelPresence,
@@ -2027,16 +2026,7 @@ export default function Dashboard() {
               description={funnelDescription}
               measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}
               headerActions={(
-                <div className="flex flex-wrap items-center justify-end gap-3 text-sm text-muted-foreground">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={adsFunnelOnly}
-                      onChange={(event) => setAdsFunnelOnly(event.target.checked)}
-                      className="h-4 w-4 rounded-sm border border-primary text-primary accent-primary"
-                    />
-                    Mostrar apenas origem Ads
-                  </label>
+                <div className="flex items-center justify-end text-sm text-muted-foreground">
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
