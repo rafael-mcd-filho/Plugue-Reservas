@@ -10,7 +10,9 @@
 --      @apply-recurrence-pagination-filter-migration
 --   7. apply 20260817130000_remove_crm_report_pagination_ceiling.sql at
 --      @apply-unbounded-pagination-migration
---   8. execute assertions, including recurrence compatibility checks
+--   8. apply 20260819115000_add_recurrence_lead_profile_lookup.sql at
+--      @apply-recurrence-profile-migration
+--   9. execute assertions, including recurrence/profile compatibility checks
 
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
@@ -50,12 +52,18 @@ AS $$
     AND COALESCE(current_setting('test.permission', true), 'on') <> 'off';
 $$;
 
-CREATE OR REPLACE FUNCTION public.company_feature_enabled(uuid, text)
+CREATE OR REPLACE FUNCTION public.company_feature_enabled(
+  _company_id uuid,
+  _feature_key text
+)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 AS $$
-  SELECT true;
+  SELECT
+    _company_id IS NOT NULL
+    AND _feature_key = 'advanced_reports'
+    AND COALESCE(current_setting('test.feature', true), 'on') <> 'off';
 $$;
 
 CREATE OR REPLACE FUNCTION public.normalize_whatsapp_phone(_phone text)
@@ -150,6 +158,7 @@ CREATE TABLE public.crm_leads (
 SELECT set_config('request.jwt.claim.role', 'service_role', false);
 SELECT set_config('request.jwt.claim.sub', '', false);
 SELECT set_config('test.permission', 'on', false);
+SELECT set_config('test.feature', 'on', false);
 
 -- @apply-old-recurrence
 
@@ -593,6 +602,51 @@ FROM generate_series(1, 1005) AS series(value);
 
 -- @apply-unbounded-pagination-migration
 
+-- Capture exact pre-migration contracts for the focused profile-reference
+-- regression. That separate test proves the migration only appends profile_ref
+-- and preserves every pre-existing payload field and function property.
+CREATE TEMP TABLE recurrence_profile_definition_baseline AS
+SELECT
+  procedures.oid AS procedure_oid,
+  procedures.oid::regprocedure::text AS signature,
+  pg_get_functiondef(procedures.oid) AS definition,
+  procedures.proowner,
+  procedures.proacl::text AS proacl,
+  procedures.proconfig,
+  procedures.provolatile,
+  procedures.prosecdef
+FROM pg_proc AS procedures
+WHERE procedures.oid IN (
+  'public._get_customer_recurrence_report_without_min_filter(uuid,date,date,boolean,integer,integer,text,text)'::regprocedure,
+  'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)'::regprocedure
+);
+
+CREATE TEMP TABLE recurrence_profile_payload_baseline (
+  scenario text PRIMARY KEY,
+  payload jsonb NOT NULL
+);
+
+INSERT INTO recurrence_profile_payload_baseline (scenario, payload)
+VALUES
+  (
+    'minimum_null',
+    public.get_customer_recurrence_report(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      DATE '2026-08-01', DATE '2026-08-13', false,
+      84, 12, NULL, 'previous_period', NULL
+    )
+  ),
+  (
+    'minimum_active',
+    public.get_customer_recurrence_report(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      DATE '2026-08-01', DATE '2026-08-13', false,
+      84, 12, NULL, 'previous_period', 2
+    )
+  );
+
+-- @apply-recurrence-profile-migration
+
 DO $regression$
 DECLARE
   _page jsonb;
@@ -605,6 +659,12 @@ DECLARE
   _recurrence_filtered jsonb;
   _recurrence_compat jsonb;
   _recurrence_base jsonb;
+  _recurrence_companions jsonb;
+  _selected_customer jsonb;
+  _profile jsonb;
+  _expected_profile jsonb;
+  _profile_ref text;
+  _expected_customer_key text;
   _export_page jsonb;
 BEGIN
   PERFORM set_config('request.jwt.claim.role', 'service_role', false);
@@ -653,6 +713,109 @@ BEGIN
     OR _recurrence_page #>> '{customers,11,customer_key}' <> 'customer:1008' THEN
     RAISE EXCEPTION 'recurrence page crossing row 1,000 mismatch: %',
       _recurrence_page -> 'meta';
+  END IF;
+
+  -- The list still exposes only the final four phone digits. profile_ref is a
+  -- stable contact reference, not a phone/email/customer identity, and remains
+  -- resolvable even on a page that crossed source row 1,000.
+  IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(_recurrence_page -> 'customers') AS customer
+      WHERE customer ->> 'profile_ref' IS NULL
+        OR customer ->> 'profile_ref' !~
+          '^(reservation_holder|reservation_companion|waitlist_holder|waitlist_companion):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        OR customer ->> 'phone_normalized' !~ '^[0-9]{4}$'
+        OR customer ->> 'guest_phone' IS NOT NULL
+        OR customer ? 'crm_customer_key'
+        OR customer ->> 'customer_key' LIKE 'phone:%'
+    ) THEN
+    RAISE EXCEPTION 'recurrence page leaked identity or omitted opaque profile_ref: %',
+      _recurrence_page -> 'customers';
+  END IF;
+
+  _selected_customer := _recurrence_page #> '{customers,0}';
+  _profile_ref := _selected_customer ->> 'profile_ref';
+  _profile := public.get_customer_recurrence_lead_profile(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    _profile_ref
+  );
+
+  SELECT contact_records.customer_key
+  INTO STRICT _expected_customer_key
+  FROM public._get_crm_contact_records(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  ) AS contact_records
+  WHERE contact_records.contact_record_key = _profile_ref
+    AND contact_records.phone_normalized IS NOT NULL;
+
+  _page := public.get_crm_leads_page(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    1, 25, _expected_customer_key, NULL, NULL, NULL, NULL, NULL, NULL
+  );
+  _expected_profile := _page #> '{leads,0}';
+
+  IF _profile IS NULL
+    OR _profile ->> 'customer_key' <> _expected_customer_key
+    OR _profile IS DISTINCT FROM _expected_profile THEN
+    RAISE EXCEPTION 'opaque recurrence profile did not match the canonical CRM row: %, %',
+      _profile, _expected_profile;
+  END IF;
+
+  -- A valid reference belongs to exactly one company. Reusing it against
+  -- another tenant or forging a UUID must fail closed with SQL NULL.
+  IF public.get_customer_recurrence_lead_profile(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      _profile_ref
+    ) IS NOT NULL
+    OR public.get_customer_recurrence_lead_profile(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'reservation_holder:ffffffff-ffff-4fff-8fff-ffffffffffff'
+    ) IS NOT NULL THEN
+    RAISE EXCEPTION 'cross-company or forged profile_ref unexpectedly resolved';
+  END IF;
+
+  FOREACH _key IN ARRAY ARRAY[
+    'customer:1',
+    'phone:5583999991020',
+    'reservation_holder:not-a-uuid'
+  ]
+  LOOP
+    BEGIN
+      PERFORM public.get_customer_recurrence_lead_profile(
+        'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        _key
+      );
+      RAISE EXCEPTION 'invalid profile_ref unexpectedly accepted: %', _key;
+    EXCEPTION
+      WHEN SQLSTATE '22023' THEN NULL;
+    END;
+  END LOOP;
+
+  -- Companion rows use the companion contact UUID itself. With companions off,
+  -- the same search must not emit a row or a reference.
+  _recurrence_companions := public.get_customer_recurrence_report(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    DATE '2026-08-01', DATE '2026-08-13', true,
+    1, 12, 'Converted Companion', 'previous_period', NULL
+  );
+  IF (_recurrence_companions #>> '{meta,filtered_customers_total}')::integer <> 1
+    OR _recurrence_companions #>> '{customers,0,profile_ref}'
+      <> 'reservation_companion:30000000-0000-4000-8000-000000000004'
+    OR (public.get_customer_recurrence_lead_profile(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      _recurrence_companions #>> '{customers,0,profile_ref}'
+    )) #>> '{customer_key}' <> 'phone:5583999994001' THEN
+    RAISE EXCEPTION 'companion profile_ref mismatch: %', _recurrence_companions;
+  END IF;
+
+  _recurrence_companions := public.get_customer_recurrence_report(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    DATE '2026-08-01', DATE '2026-08-13', false,
+    1, 12, 'Converted Companion', 'previous_period', NULL
+  );
+  IF _recurrence_companions #>> '{meta,filtered_customers_total}' <> '0'
+    OR jsonb_array_length(_recurrence_companions -> 'customers') <> 0 THEN
+    RAISE EXCEPTION 'companion profile_ref leaked while companions were disabled';
   END IF;
 
   _recurrence_next_page := public.get_customer_recurrence_report(
@@ -1159,6 +1322,11 @@ BEGIN
       'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)',
       'EXECUTE'
     )
+    OR has_function_privilege(
+      'anon',
+      'public.get_customer_recurrence_lead_profile(uuid,text)',
+      'EXECUTE'
+    )
     OR NOT has_function_privilege(
       'authenticated',
       'public.get_crm_leads_page(uuid,integer,integer,text,date,date,text,integer,integer,integer)',
@@ -1175,6 +1343,11 @@ BEGIN
       'EXECUTE'
     )
     OR NOT has_function_privilege(
+      'authenticated',
+      'public.get_customer_recurrence_lead_profile(uuid,text)',
+      'EXECUTE'
+    )
+    OR NOT has_function_privilege(
       'service_role',
       'public.get_crm_leads_page(uuid,integer,integer,text,date,date,text,integer,integer,integer)',
       'EXECUTE'
@@ -1187,6 +1360,11 @@ BEGIN
     OR NOT has_function_privilege(
       'service_role',
       'public.get_customer_recurrence_report(uuid,date,date,boolean,integer,integer,text,text,integer)',
+      'EXECUTE'
+    )
+    OR NOT has_function_privilege(
+      'service_role',
+      'public.get_customer_recurrence_lead_profile(uuid,text)',
       'EXECUTE'
     ) THEN
     RAISE EXCEPTION 'public RPC grant matrix mismatch';
@@ -1215,6 +1393,13 @@ BEGIN
     WHEN SQLSTATE '42501' THEN NULL;
   END;
 
+  BEGIN
+    PERFORM public.get_customer_recurrence_lead_profile(NULL, 'customer:1');
+    RAISE EXCEPTION 'anon unexpectedly reached profile_ref validation';
+  EXCEPTION
+    WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
   PERFORM set_config('request.jwt.claim.role', 'authenticated', false);
   PERFORM set_config(
     'request.jwt.claim.sub',
@@ -1232,7 +1417,38 @@ BEGIN
     WHEN SQLSTATE '42501' THEN NULL;
   END;
 
+  BEGIN
+    PERFORM public.get_customer_recurrence_lead_profile(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'customer:1'
+    );
+    RAISE EXCEPTION 'user without leads_view reached profile_ref validation';
+  EXCEPTION
+    WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
   PERFORM set_config('test.permission', 'on', false);
+
+  PERFORM set_config('test.feature', 'off', false);
+  BEGIN
+    PERFORM public.get_customer_recurrence_lead_profile(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'customer:1'
+    );
+    RAISE EXCEPTION 'user without advanced_reports reached profile_ref validation';
+  EXCEPTION
+    WHEN SQLSTATE '42501' THEN NULL;
+  END;
+  PERFORM set_config('test.feature', 'on', false);
+
+  _profile := public.get_customer_recurrence_lead_profile(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'reservation_holder:20000000-0000-4000-8000-000000000001'
+  );
+  IF _profile #>> '{customer_key}' <> 'phone:5583999991020' THEN
+    RAISE EXCEPTION 'authorized recurrence profile lookup mismatch: %', _profile;
+  END IF;
+
   PERFORM public.get_crm_leads_page(
     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     1, 25, NULL, NULL, NULL, NULL, NULL, NULL, NULL

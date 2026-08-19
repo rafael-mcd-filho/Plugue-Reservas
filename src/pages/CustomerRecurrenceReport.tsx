@@ -29,6 +29,7 @@ import {
   CalendarSearch,
   ChevronLeft,
   ChevronRight,
+  Eye,
   Loader2,
   Minus,
   RefreshCcw,
@@ -36,7 +37,6 @@ import {
   Search,
   UserCheck,
   UserPlus,
-  UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -57,6 +57,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
@@ -66,8 +67,10 @@ import {
   normalizeCustomerRecurrenceSearch,
   normalizeMinimumTotalVisits,
   resolveCustomerRecurrenceDisplayedPage,
+  useCustomerRecurrenceLeadProfile,
   useCustomerRecurrenceReport,
 } from '@/hooks/useCustomerRecurrenceReport';
+import { mapCrmLeadRowToProfile } from '@/lib/crm-lead-profile';
 import { cn } from '@/lib/utils';
 
 type PeriodMode = 'current_month' | 'last_month' | 'custom';
@@ -254,6 +257,7 @@ function TrendIndicator({
 }
 
 function KpiCard({
+  className,
   label,
   value,
   helper,
@@ -265,6 +269,7 @@ function KpiCard({
   comparisonLabel,
   percentagePoints,
 }: {
+  className?: string;
   label: string;
   value: string;
   helper: string;
@@ -277,7 +282,10 @@ function KpiCard({
   percentagePoints?: boolean;
 }) {
   return (
-    <Card className="group min-w-0 border-border shadow-sm transition-[border-color,box-shadow] hover:border-primary/25 hover:shadow-md">
+    <Card className={cn(
+      'group min-w-0 border-border shadow-sm transition-[border-color,box-shadow] hover:border-primary/25 hover:shadow-md',
+      className,
+    )}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -313,9 +321,12 @@ function KpiCard({
 function ReportSkeleton() {
   return (
     <div className="space-y-6" aria-label="Carregando relatório" aria-busy="true">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Card key={index}>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Card
+            key={index}
+            className={index < 3 ? 'lg:col-span-2 xl:col-span-1' : 'lg:col-span-3 xl:col-span-1'}
+          >
             <CardContent className="space-y-3 p-4">
               <div className="flex justify-between gap-4">
                 <div className="space-y-3">
@@ -341,11 +352,11 @@ function ReportSkeleton() {
 
 function CustomerTypeBadge({ type }: { type: CustomerRecurrenceRow['customer_type'] }) {
   return type === 'returning' ? (
-    <Badge className="border-success/20 bg-success-soft text-success hover:bg-success-soft" variant="outline">
+    <Badge className="h-5 rounded px-1.5 py-0 text-[10px] border-success/20 bg-success-soft text-success hover:bg-success-soft" variant="outline">
       Recorrente
     </Badge>
   ) : (
-    <Badge className="border-primary/20 bg-primary-soft text-accent-foreground hover:bg-primary-soft" variant="outline">
+    <Badge className="h-5 rounded px-1.5 py-0 text-[10px] border-primary/20 bg-primary-soft text-accent-foreground hover:bg-primary-soft" variant="outline">
       Novo
     </Badge>
   );
@@ -354,66 +365,76 @@ function CustomerTypeBadge({ type }: { type: CustomerRecurrenceRow['customer_typ
 function FrequencyBadge({ band }: { band: CustomerFrequencyBandKey }) {
   const meta = FREQUENCY_META[band];
   return (
-    <Badge className={cn('whitespace-nowrap hover:bg-inherit', meta.badgeClassName)} variant="outline">
+    <Badge
+      className={cn('h-5 whitespace-nowrap rounded px-1.5 py-0 text-[10px] hover:bg-inherit', meta.badgeClassName)}
+      variant="outline"
+    >
       {meta.shortLabel}
     </Badge>
   );
 }
 
-function CustomerMobileCard({ customer }: { customer: CustomerRecurrenceRow }) {
+function CustomerMobileCard({
+  customer,
+  isSelected,
+  onSelect,
+}: {
+  customer: CustomerRecurrenceRow;
+  isSelected: boolean;
+  onSelect: (customer: CustomerRecurrenceRow) => void;
+}) {
   const name = customer.guest_name?.trim() || 'Cliente sem nome';
   return (
-    <article className="space-y-4 border-b border-border px-4 py-5 last:border-b-0">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-foreground">{name}</h3>
-          <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+    <button
+      type="button"
+      className="group w-full border-b border-border px-3 py-3 text-left transition-colors last:border-b-0 hover:bg-primary-soft/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=selected]:bg-primary-soft/35"
+      data-state={isSelected ? 'selected' : undefined}
+      onClick={() => onSelect(customer)}
+      aria-label={`Abrir perfil de ${name}`}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary-soft text-xs font-bold text-primary ring-1 ring-primary/15">
+          {(name.charAt(0) || '?').toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-xs font-semibold text-foreground">{name}</h3>
+          <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
             {maskPhone(customer.guest_phone, customer.phone_normalized)}
           </p>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs font-semibold tabular-nums text-foreground">
+            {formatInteger(customer.total_visits)} {customer.total_visits === 1 ? 'visita' : 'visitas'}
+          </span>
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-muted-foreground ring-1 ring-black/[0.06] transition-colors group-hover:bg-primary-soft group-hover:text-primary">
+            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-10">
         <CustomerTypeBadge type={customer.customer_type} />
+        <FrequencyBadge band={customer.frequency_band} />
+        <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
+          {formatInteger(customer.prior_visits)} antes ·{' '}
+          <strong className="font-semibold text-primary">{formatInteger(customer.period_visits)} no período</strong>
+        </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/35 p-3 text-center">
-        <div>
-          <p className="text-lg font-semibold tabular-nums">{formatInteger(customer.prior_visits)}</p>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">anteriores</p>
-        </div>
-        <div className="border-x border-border">
-          <p className="text-lg font-semibold tabular-nums text-primary">{formatInteger(customer.period_visits)}</p>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">no período</p>
-        </div>
-        <div>
-          <p className="text-lg font-semibold tabular-nums">{formatInteger(customer.total_visits)}</p>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">total</p>
-        </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-10 text-[11px] text-muted-foreground">
+        <span>Última visita: <strong className="font-medium tabular-nums text-foreground">{formatDate(customer.last_visit_date)}</strong></span>
+        {customer.next_reservation_date && (
+          <span>
+            Próxima: <strong className="font-medium tabular-nums text-success">{formatDate(customer.next_reservation_date)}</strong>
+          </span>
+        )}
       </div>
-
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-        <div>
-          <p className="text-muted-foreground">Primeira visita</p>
-          <p className="mt-0.5 font-medium tabular-nums">{formatDate(customer.first_visit_date)}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Última visita</p>
-          <p className="mt-0.5 font-medium tabular-nums">{formatDate(customer.last_visit_date)}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Próxima reserva</p>
-          <p className={cn('mt-0.5 font-medium tabular-nums', customer.next_reservation_date && 'text-success')}>
-            {formatDate(customer.next_reservation_date)}
-          </p>
-        </div>
-        <div className="flex items-end justify-end">
-          <FrequencyBadge band={customer.frequency_band} />
-        </div>
-      </div>
-    </article>
+    </button>
   );
 }
 
 export default function CustomerRecurrenceReport() {
-  const { companyId } = useCompanySlug();
+  const { companyId, slug } = useCompanySlug();
   const [periodMode, setPeriodMode] = useState<PeriodMode>('current_month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>(createCurrentMonthRange);
   const [includeCompanions, setIncludeCompanions] = useState(false);
@@ -421,6 +442,7 @@ export default function CustomerRecurrenceReport() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [minimumTotalVisits, setMinimumTotalVisits] = useState<number | undefined>();
   const [page, setPage] = useState(1);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecurrenceRow | null>(null);
 
   useEffect(() => {
     const normalizedSearch = normalizeCustomerRecurrenceSearch(searchInput);
@@ -457,8 +479,17 @@ export default function CustomerRecurrenceReport() {
     minTotalVisits: minimumTotalVisits,
     enabled: !customPeriodError,
   });
+  const selectedLeadProfileQuery = useCustomerRecurrenceLeadProfile({
+    companyId,
+    profileRef: selectedCustomer?.profile_ref,
+    expectedPhoneLast4: selectedCustomer?.phone_normalized,
+    enabled: !!selectedCustomer,
+  });
 
   const report = reportQuery.data;
+  const selectedLeadProfile = selectedLeadProfileQuery.data
+    ? mapCrmLeadRowToProfile(selectedLeadProfileQuery.data)
+    : null;
   const totalPages = Math.max(
     1,
     Math.ceil((report?.meta.filtered_customers_total ?? 0) / (report?.meta.page_size ?? PAGE_SIZE)),
@@ -716,19 +747,9 @@ export default function CustomerRecurrenceReport() {
                   <span className="font-semibold text-foreground">Como ler: </span>
                   <span><strong>recorrente</strong> já visitava antes do período; <strong>repetiu no período</strong> fez duas ou mais visitas dentro dele.</span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-5">
                   <KpiCard
-                    label="Identificados"
-                    value={formatInteger(report.summary.identified_customers)}
-                    helper="Clientes únicos que compareceram"
-                    explanation="Clientes únicos reconhecidos pelos dígitos do telefone informado, com presença confirmada no período. Sem telefone identificável, não entram no cálculo."
-                    icon={UsersRound}
-                    tone="neutral"
-                    current={report.summary.identified_customers}
-                    previous={report.comparison.identified_customers}
-                    comparisonLabel={comparisonLabel}
-                  />
-                  <KpiCard
+                    className="lg:col-span-2 xl:col-span-1"
                     label="Recorrentes"
                     value={formatInteger(report.summary.returning_customers)}
                     helper="Já tinham uma visita antes do período"
@@ -740,6 +761,7 @@ export default function CustomerRecurrenceReport() {
                     comparisonLabel={comparisonLabel}
                   />
                   <KpiCard
+                    className="lg:col-span-2 xl:col-span-1"
                     label="Taxa de recorrência"
                     value={formatPercent(report.summary.recurrence_rate)}
                     helper="Recorrentes entre todos os identificados"
@@ -752,6 +774,7 @@ export default function CustomerRecurrenceReport() {
                     percentagePoints
                   />
                   <KpiCard
+                    className="lg:col-span-2 xl:col-span-1"
                     label="Novos clientes"
                     value={formatInteger(report.summary.new_customers)}
                     helper="Primeira visita registrada no sistema"
@@ -763,6 +786,7 @@ export default function CustomerRecurrenceReport() {
                     comparisonLabel={comparisonLabel}
                   />
                   <KpiCard
+                    className="lg:col-span-3 xl:col-span-1"
                     label="Repetiram no período"
                     value={formatInteger(report.summary.repeated_in_period)}
                     helper={`${formatPercent(report.summary.repeat_rate)} fizeram 2 ou mais visitas`}
@@ -774,6 +798,7 @@ export default function CustomerRecurrenceReport() {
                     comparisonLabel={comparisonLabel}
                   />
                   <KpiCard
+                    className="lg:col-span-3 xl:col-span-1"
                     label="Visitas adicionais"
                     value={formatInteger(report.summary.additional_visits)}
                     helper="Visitas além da primeira no intervalo"
@@ -972,22 +997,22 @@ export default function CustomerRecurrenceReport() {
               </section>
 
               <section aria-labelledby="customer-base-title">
-                <Card className="min-w-0 border-border shadow-sm">
-                  <CardHeader className="gap-4 pb-3 lg:flex-row lg:items-end lg:justify-between">
+                <Card className="min-w-0 overflow-hidden border-0 bg-card/95 shadow-sm ring-1 ring-black/[0.05]">
+                  <CardHeader className="gap-3 px-4 pb-3 pt-4 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <CardTitle id="customer-base-title">Base de clientes do período</CardTitle>
+                        <CardTitle id="customer-base-title" className="text-base">Clientes do período</CardTitle>
                         <InfoTooltip
                           content="Uma linha por telefone identificado. “Antes” mostra as visitas anteriores ao intervalo; “No período”, as visitas dentro dele; e “Total”, o histórico somente até o fim do intervalo. Na página de Leads, “Visitas” considera todo o histórico disponível do contato, inclusive depois desse corte. A opção “Incluir acompanhantes” também pode mudar a base; por isso os totais das duas telas podem diferir."
                           ariaLabel="Entender a base de clientes"
                           interaction="popover"
                         />
                       </div>
-                      <CardDescription className="mt-1">
-                        Uma linha por telefone; nome mais recente e contato mascarado
+                      <CardDescription className="mt-0.5 text-xs">
+                        Selecione um cliente para consultar seu perfil e histórico
                       </CardDescription>
                     </div>
-                    <div className="grid w-full gap-3 sm:grid-cols-[minmax(220px,1fr)_180px] lg:w-auto lg:grid-cols-[320px_180px]">
+                    <div className="grid w-full gap-3 sm:grid-cols-[minmax(220px,1fr)_160px] lg:w-auto lg:grid-cols-[280px_160px]">
                       <div className="space-y-1.5">
                         <Label htmlFor="customer-search" className="text-xs text-muted-foreground">
                           Cliente
@@ -1008,7 +1033,7 @@ export default function CustomerRecurrenceReport() {
                               setSearchInput(event.target.value);
                             }}
                             placeholder="Nome ou telefone…"
-                            className="h-10 pl-9 pr-9"
+                            className="h-9 pl-9 pr-9 text-xs"
                             aria-label="Buscar cliente por nome ou telefone"
                           />
                           {(isSearchPending || (reportQuery.isFetching && !!debouncedSearch)) && (
@@ -1047,7 +1072,7 @@ export default function CustomerRecurrenceReport() {
                             setPage(1);
                           }}
                           placeholder="Ex.: 2"
-                          className="h-10 tabular-nums"
+                          className="h-9 tabular-nums text-xs"
                           aria-label="Quantidade mínima de visitas totais"
                         />
                       </div>
@@ -1076,7 +1101,7 @@ export default function CustomerRecurrenceReport() {
                         <p className="mt-1 max-w-sm text-xs text-muted-foreground">
                           {hasCustomerFilters
                             ? 'Tente outro nome, telefone ou reduza o mínimo de visitas.'
-                            : 'Não há clientes identificados para exibir nesta base.'}
+                            : 'Não há clientes para exibir neste período.'}
                         </p>
                         {hasCustomerFilters && (
                           <Button type="button" variant="outline" size="sm" className="mt-4" onClick={clearCustomerFilters}>
@@ -1086,69 +1111,99 @@ export default function CustomerRecurrenceReport() {
                       </div>
                     ) : (
                       <>
-                        <div className="hidden md:block">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/30 hover:bg-muted/30">
-                                <TableHead className="min-w-[190px]">Cliente</TableHead>
-                                <TableHead>Perfil</TableHead>
-                                <TableHead className="text-center">Antes</TableHead>
-                                <TableHead className="text-center">No período</TableHead>
-                                <TableHead className="text-center">Total</TableHead>
-                                <TableHead className="whitespace-nowrap">Primeira visita</TableHead>
-                                <TableHead className="whitespace-nowrap">Última visita</TableHead>
-                                <TableHead className="whitespace-nowrap">Próxima reserva</TableHead>
+                        <div className="hidden xl:block">
+                          <Table className="min-w-[840px] text-xs">
+                            <TableHeader className="bg-muted/25">
+                              <TableRow className="hover:bg-transparent">
+                                <TableHead className="h-8 min-w-[190px] px-3 text-[11px]">Cliente</TableHead>
+                                <TableHead className="h-8 px-2 text-[11px]">Perfil</TableHead>
+                                <TableHead className="h-8 px-2 text-center text-[11px]">Antes</TableHead>
+                                <TableHead className="h-8 px-2 text-center text-[11px]">No período</TableHead>
+                                <TableHead className="h-8 px-2 text-center text-[11px]">Total</TableHead>
+                                <TableHead className="h-8 whitespace-nowrap px-2 text-[11px]">Primeira → última</TableHead>
+                                <TableHead className="h-8 whitespace-nowrap px-2 text-[11px]">Próxima reserva</TableHead>
+                                <TableHead className="h-8 w-9 px-2" />
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {report.customers.map((customer) => (
-                                <TableRow key={customer.customer_key}>
-                                  <TableCell>
-                                    <div className="min-w-0">
-                                      <p className="max-w-[220px] truncate font-medium text-foreground">
-                                        {customer.guest_name?.trim() || 'Cliente sem nome'}
-                                      </p>
-                                      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-                                        {maskPhone(customer.guest_phone, customer.phone_normalized)}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex flex-col items-start gap-1.5">
-                                      <CustomerTypeBadge type={customer.customer_type} />
-                                      <FrequencyBadge band={customer.frequency_band} />
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="text-center tabular-nums text-muted-foreground">
-                                    {formatInteger(customer.prior_visits)}
-                                  </TableCell>
-                                  <TableCell className="text-center font-semibold tabular-nums text-primary">
-                                    {formatInteger(customer.period_visits)}
-                                  </TableCell>
-                                  <TableCell className="text-center font-semibold tabular-nums">
-                                    {formatInteger(customer.total_visits)}
-                                  </TableCell>
-                                  <TableCell className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                                    {formatDate(customer.first_visit_date)}
-                                  </TableCell>
-                                  <TableCell className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                                    {formatDate(customer.last_visit_date)}
-                                  </TableCell>
-                                  <TableCell className={cn(
-                                    'whitespace-nowrap text-xs tabular-nums',
-                                    customer.next_reservation_date ? 'font-medium text-success' : 'text-muted-foreground',
-                                  )}>
-                                    {formatDate(customer.next_reservation_date)}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
+                              {report.customers.map((customer) => {
+                                const customerName = customer.guest_name?.trim() || 'Cliente sem nome';
+                                const isSelected = selectedCustomer?.customer_key === customer.customer_key;
+
+                                return (
+                                  <TableRow
+                                    key={customer.customer_key}
+                                    data-state={isSelected ? 'selected' : undefined}
+                                    className="group cursor-pointer hover:bg-primary-soft/25"
+                                    onClick={() => setSelectedCustomer(customer)}
+                                  >
+                                    <TableCell className="px-3 py-1.5">
+                                      <div className="flex min-w-0 items-center gap-2">
+                                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary-soft text-[11px] font-bold text-primary ring-1 ring-primary/15">
+                                          {(customerName.charAt(0) || '?').toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="max-w-[190px] truncate font-medium text-foreground">{customerName}</p>
+                                          <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+                                            {maskPhone(customer.guest_phone, customer.phone_normalized)}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="px-2 py-1.5">
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <CustomerTypeBadge type={customer.customer_type} />
+                                        <FrequencyBadge band={customer.frequency_band} />
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="px-2 py-1.5 text-center tabular-nums text-muted-foreground">
+                                      {formatInteger(customer.prior_visits)}
+                                    </TableCell>
+                                    <TableCell className="px-2 py-1.5 text-center font-semibold tabular-nums text-primary">
+                                      {formatInteger(customer.period_visits)}
+                                    </TableCell>
+                                    <TableCell className="px-2 py-1.5 text-center font-semibold tabular-nums">
+                                      {formatInteger(customer.total_visits)}
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap px-2 py-1.5 text-[11px] tabular-nums text-muted-foreground">
+                                      {formatDate(customer.first_visit_date)} → {formatDate(customer.last_visit_date)}
+                                    </TableCell>
+                                    <TableCell className={cn(
+                                      'whitespace-nowrap px-2 py-1.5 text-[11px] tabular-nums',
+                                      customer.next_reservation_date ? 'font-medium text-success' : 'text-muted-foreground',
+                                    )}>
+                                      {formatDate(customer.next_reservation_date)}
+                                    </TableCell>
+                                    <TableCell className="px-2 py-1.5">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="ml-auto h-8 w-8 text-muted-foreground group-hover:bg-primary-soft group-hover:text-primary"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setSelectedCustomer(customer);
+                                        }}
+                                        aria-label={`Abrir perfil de ${customerName}`}
+                                      >
+                                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
                             </TableBody>
                           </Table>
                         </div>
 
-                        <div className="md:hidden">
+                        <div className="xl:hidden">
                           {report.customers.map((customer) => (
-                            <CustomerMobileCard key={customer.customer_key} customer={customer} />
+                            <CustomerMobileCard
+                              key={customer.customer_key}
+                              customer={customer}
+                              isSelected={selectedCustomer?.customer_key === customer.customer_key}
+                              onSelect={setSelectedCustomer}
+                            />
                           ))}
                         </div>
                       </>
@@ -1233,6 +1288,26 @@ export default function CustomerRecurrenceReport() {
           )}
         </>
       ) : null}
+
+      <LeadProfileDialog
+        open={!!selectedCustomer}
+        onOpenChange={(open) => {
+          if (!open) setSelectedCustomer(null);
+        }}
+        lead={selectedLeadProfile}
+        companyId={companyId}
+        slug={slug}
+        profileLoading={selectedLeadProfileQuery.isLoading || selectedLeadProfileQuery.isFetching}
+        profileError={selectedLeadProfileQuery.isError
+          ? 'Não foi possível carregar o perfil deste cliente. Atualize a base e tente novamente.'
+          : null}
+        onRetryProfile={() => selectedLeadProfileQuery.refetch()}
+        onRefreshLead={async (lead) => {
+          const refreshed = await selectedLeadProfileQuery.refetch();
+          return !!refreshed.data
+            && refreshed.data.canonical_visit_count !== lead.total_reservations;
+        }}
+      />
     </div>
   );
 }

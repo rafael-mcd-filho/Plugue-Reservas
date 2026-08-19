@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCustomerRecurrenceLeadProfileRpcParams,
   buildCustomerRecurrenceQueryKey,
   buildCustomerRecurrenceRpcParams,
   CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
   CUSTOMER_RECURRENCE_SEARCH_MAX_LENGTH,
   isSameCustomerRecurrenceDataset,
   normalizeCustomerRecurrenceSearch,
+  normalizeCustomerRecurrenceLeadProfile,
   normalizeCustomerRecurrenceReport,
   normalizeMinimumTotalVisits,
   resolveCustomerRecurrenceDisplayedPage,
@@ -72,6 +74,7 @@ function createValidPayload() {
     customers: [
       {
         customer_key: 'customer:company:5585999990000',
+        profile_ref: 'reservation_holder:00000000-0000-4000-8000-000000000001',
         phone_normalized: '0000',
         guest_name: 'Ana',
         guest_phone: '(85) 99999-0000',
@@ -135,6 +138,20 @@ describe('normalizeCustomerRecurrenceReport', () => {
       customers: [],
       meta: {},
     }, fallback)).toThrow('dados incompletos ou inválidos');
+  });
+
+  it('rejeita referência de perfil ausente, malformada ou capaz de carregar PII', () => {
+    const missingReference = createValidPayload();
+    delete (missingReference.customers[0] as { profile_ref?: string }).profile_ref;
+    const phoneReference = createValidPayload();
+    phoneReference.customers[0].profile_ref = 'phone:5583999990000';
+
+    expect(() => normalizeCustomerRecurrenceReport(missingReference, fallback)).toThrow(
+      'dados incompletos ou inválidos',
+    );
+    expect(() => normalizeCustomerRecurrenceReport(phoneReference, fallback)).toThrow(
+      'dados incompletos ou inválidos',
+    );
   });
 
   it('detecta página truncada em vez de esconder clientes da contagem', () => {
@@ -347,5 +364,56 @@ describe('consulta paginada de recorrência', () => {
       _page_size: 100,
       _min_total_visits: CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
     });
+  });
+});
+
+describe('perfil do lead aberto pela recorrência', () => {
+  const params = {
+    companyId: '00000000-0000-0000-0000-000000000001',
+    profileRef: 'waitlist_holder:00000000-0000-4000-8000-000000000028',
+    expectedPhoneLast4: '1020',
+  };
+
+  const profile = {
+    customer_key: 'phone:5583999991020',
+    identity_kind: 'phone',
+    phone_normalized: '5583999991020',
+    display_phone: '(83) 99999-1020',
+    latest_name: 'João Rocha',
+    latest_email: 'joao@example.com',
+    latest_birthdate: '1990-08-10',
+    first_seen_at: '2026-05-28T20:00:00Z',
+    last_visit_date: '2026-08-01',
+    last_visit_time: '20:25:00',
+    state_code: 'PB',
+    state_name: 'Paraíba',
+    source: 'mixed',
+    canonical_visit_count: 3,
+    is_import_only: false,
+    crm_lead: null,
+  };
+
+  it('resolve a referência opaca estável sem transportar telefone ou posição da lista', () => {
+    expect(buildCustomerRecurrenceLeadProfileRpcParams(params)).toEqual({
+      _company_id: params.companyId,
+      _profile_ref: params.profileRef,
+    });
+  });
+
+  it('aceita somente um perfil telefônico consistente retornado sob demanda', () => {
+    expect(normalizeCustomerRecurrenceLeadProfile(profile)).toMatchObject({
+      customer_key: 'phone:5583999991020',
+      phone_normalized: '5583999991020',
+      latest_name: 'João Rocha',
+      canonical_visit_count: 3,
+    });
+
+    expect(() => normalizeCustomerRecurrenceLeadProfile({
+      ...profile,
+      customer_key: 'phone:5583999999999',
+    })).toThrow('Não foi possível localizar o perfil');
+    expect(() => normalizeCustomerRecurrenceLeadProfile(null)).toThrow(
+      'Não foi possível localizar o perfil',
+    );
   });
 });

@@ -1,19 +1,15 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   CalendarDays,
-  CalendarIcon,
   ChevronLeft,
   ChevronRight,
   Download,
   Eye,
   Filter,
   Loader2,
-  Mail,
-  MapPin,
-  Phone,
   Search,
   Upload,
   X,
@@ -21,8 +17,8 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useAuth } from '@/contexts/AuthContext';
-import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
@@ -46,30 +42,28 @@ import {
 } from '@/lib/export-utils';
 import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
 import { normalizeLeadPhoneKey } from '@/lib/lead-consistency';
-import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
+import {
+  formatLeadPhoneText,
+  formatLeadSource,
+  formatLeadVisitContext,
+  formatReservationStatus,
+  isCompanionVisitSource,
+  mapCrmLeadRowToProfile,
+  type CrmLeadProfile,
+} from '@/lib/crm-lead-profile';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone } from '@/lib/validation';
 import {
   CRM_VISITS_FILTER_MAX,
   collectCrmImportedLeadMatchPages,
   getCrmVisitsFilterRangeError,
   normalizeCrmVisitsFilterInput,
   resolveCrmLeadsDisplayedPage,
-  useCrmLeadPresenceHistory,
   useCrmLeadsCanonicalExport,
   useCrmLeadsPage,
-  type CrmLeadMatchedSource,
-  type CrmLeadPresenceVisit,
-  type CrmLeadRecordSource,
-  type CrmLeadRow,
   type CrmLeadSource,
 } from '@/hooks/useCrmLeads';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
-
-type LeadVisitSource = CrmLeadRecordSource;
-
-type LeadVisitRecord = CrmLeadPresenceVisit;
 
 interface ImportedLeadRecord {
   id: string;
@@ -90,6 +84,7 @@ interface ImportedLeadRecord {
 
 type LeadSource = CrmLeadSource;
 type LeadImportMode = 'fill_missing' | 'overwrite';
+type Lead = CrmLeadProfile;
 
 interface CanonicalExportRequest {
   createdFrom: string | null;
@@ -100,90 +95,7 @@ interface CanonicalExportRequest {
   visitTo: string | null;
 }
 
-interface Lead {
-  key: string;
-  guest_phone: string;
-  guest_name: string;
-  guest_email: string | null;
-  guest_birthdate: string | null;
-  total_reservations: number;
-  lead_created_at: string;
-  last_reservation_date: string;
-  last_reservation_time: string;
-  stateCode: string | null;
-  stateName: string | null;
-  source: LeadSource;
-  importedLeadId: string | null;
-  importedNotes: string | null;
-  importedAt: string | null;
-  importedByUserId: string | null;
-  importFilename: string | null;
-}
-
 const LEADS_PAGE_SIZE_OPTIONS = ['25', '50', '100'] as const;
-
-function normalizeVisitStatus(status: string) {
-  if (status === 'seated') {
-    return 'seated';
-  }
-
-  return normalizeReservationStatus(status);
-}
-
-function formatLeadState(lead: Pick<Lead, 'guest_phone' | 'stateCode' | 'stateName'>) {
-  if (!lead.guest_phone) {
-    return 'Sem telefone informado';
-  }
-
-  return lead.stateCode && lead.stateName ? `${lead.stateName} (${lead.stateCode})` : 'DDD não identificado';
-}
-
-function isCompanionVisitSource(source: CrmLeadMatchedSource) {
-  return source === 'companion'
-    || source === 'reservation_companion'
-    || source === 'waitlist_companion';
-}
-
-function formatLeadSource(source: CrmLeadMatchedSource) {
-  if (source === 'imported') {
-    return 'Importado';
-  }
-
-  if (source === 'mixed') {
-    return 'Múltiplos papéis';
-  }
-
-  return isCompanionVisitSource(source) ? 'Acompanhante' : 'Titular';
-}
-
-function formatReservationStatus(status: string) {
-  const normalizedStatus = normalizeVisitStatus(status);
-  if (normalizedStatus === 'seated') {
-    return 'Sentado';
-  }
-
-  return getReservationStatusLabel(normalizedStatus);
-}
-
-function formatLeadVisitContext(visit: LeadVisitRecord) {
-  const cameFromWaitlist = visit.visit_origin === 'waitlist' || !!visit.origin_waitlist_id;
-
-  if (isCompanionVisitSource(visit.lead_source)) {
-    return visit.reservation_holder_name
-      ? ` · Acompanhou ${visit.reservation_holder_name}`
-      : cameFromWaitlist
-        ? ' · Acompanhante da fila'
-        : ' · Acompanhante da reserva';
-  }
-
-  return cameFromWaitlist
-    ? ' · Titular da fila'
-    : ' · Titular da reserva';
-}
-
-function formatLeadPhoneText(phone: string | null | undefined) {
-  return formatBrazilPhone(phone) || 'Não informado';
-}
 
 function mergeImportedNotes(currentNotes: string | null, nextNotes: string | null) {
   if (!currentNotes) return nextNotes;
@@ -391,30 +303,6 @@ function getLeadSourceBadgeClassName(source: LeadSource) {
     : 'border-success/20 bg-success-soft text-success';
 }
 
-function mapCrmLeadRowToLead(row: CrmLeadRow): Lead {
-  const phone = row.display_phone ?? row.phone_normalized ?? '';
-
-  return {
-    key: row.customer_key,
-    guest_phone: phone,
-    guest_name: row.latest_name || 'Lead sem nome',
-    guest_email: row.latest_email,
-    guest_birthdate: row.latest_birthdate,
-    total_reservations: row.canonical_visit_count,
-    lead_created_at: row.first_seen_at,
-    last_reservation_date: row.last_visit_date ?? '',
-    last_reservation_time: row.last_visit_time ?? '',
-    stateCode: row.state_code,
-    stateName: row.state_name,
-    source: row.source,
-    importedLeadId: row.crm_lead?.id ?? null,
-    importedNotes: row.crm_lead?.notes ?? null,
-    importedAt: row.crm_lead?.imported_at ?? null,
-    importedByUserId: row.crm_lead?.imported_by_user_id ?? null,
-    importFilename: row.crm_lead?.import_filename ?? null,
-  };
-}
-
 export default function Leads() {
   const { companyId, slug } = useCompanySlug();
   const { user } = useAuth();
@@ -432,7 +320,6 @@ export default function Leads() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof LEADS_PAGE_SIZE_OPTIONS)[number]>('25');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importFileName, setImportFileName] = useState('');
   const [importRows, setImportRows] = useState<ParsedLeadImportRow[]>([]);
@@ -464,50 +351,6 @@ export default function Leads() {
     return () => window.clearTimeout(timeoutId);
   }, [search]);
 
-  useEffect(() => {
-    if (!selectedLead) {
-      setSelectedReservationId(null);
-    }
-  }, [selectedLead]);
-
-  const {
-    data: selectedReservation,
-    isLoading: selectedReservationLoading,
-    error: selectedReservationError,
-  } = useQuery({
-    queryKey: ['lead-reservation-details', companyId, selectedReservationId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('reservations' as never)
-        .select(
-          'id, guest_name, guest_phone, guest_email, source, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at',
-        )
-        .eq('company_id', companyId!)
-        .eq('id', selectedReservationId!)
-        .maybeSingle();
-
-      if (error) {
-        throw error;
-      }
-
-      if (!data) {
-        throw new Error('Reservation not found');
-      }
-
-      return data as ReservationDetails;
-    },
-    enabled: !!companyId && !!selectedReservationId,
-  });
-
-  useEffect(() => {
-    if (!selectedReservationId || !selectedReservationError) {
-      return;
-    }
-
-    toast.error('Não foi possível carregar os detalhes da reserva.');
-    setSelectedReservationId(null);
-  }, [selectedReservationError, selectedReservationId]);
-
   const parsedMinReservations = minReservations ? Number(minReservations) : null;
   const parsedMaxReservations = maxReservations ? Number(maxReservations) : null;
   const visitFilterRangeError = getCrmVisitsFilterRangeError(
@@ -530,12 +373,6 @@ export default function Leads() {
       ? parsedMaxReservations
       : null,
     enabled: !visitFilterRangeError,
-  });
-  const selectedLeadHistoryQuery = useCrmLeadPresenceHistory({
-    companyId,
-    customerKey: selectedLead?.key,
-    expectedVisitCount: selectedLead?.total_reservations,
-    enabled: !!selectedLead,
   });
   const exportQuery = useCrmLeadsCanonicalExport({
     companyId,
@@ -727,33 +564,22 @@ export default function Leads() {
     void leadsQuery.refetch();
   };
 
-  const retrySelectedLeadHistory = async () => {
-    if (!selectedLead) return;
-
+  const refreshSelectedLead = async (lead: CrmLeadProfile) => {
     const refreshedList = await leadsQuery.refetch();
-    const refreshedRow = refreshedList.data?.leads.find((lead) => lead.customer_key === selectedLead.key);
+    const refreshedRow = refreshedList.data?.leads.find((row) => row.customer_key === lead.key);
 
-    if (refreshedRow && refreshedRow.canonical_visit_count !== selectedLead.total_reservations) {
-      setSelectedLead(mapCrmLeadRowToLead(refreshedRow));
-      return;
+    if (refreshedRow && refreshedRow.canonical_visit_count !== lead.total_reservations) {
+      setSelectedLead(mapCrmLeadRowToProfile(refreshedRow));
+      return true;
     }
 
-    await selectedLeadHistoryQuery.refetch();
-  };
-
-  const openReservationDetails = (visit: LeadVisitRecord) => {
-    if (visit.visit_origin !== 'reservation') {
-      return;
-    }
-
-    setSelectedReservationId(visit.visit_id);
+    return false;
   };
 
   const leads = useMemo(
-    () => (leadsQuery.data?.leads ?? []).map(mapCrmLeadRowToLead),
+    () => (leadsQuery.data?.leads ?? []).map(mapCrmLeadRowToProfile),
     [leadsQuery.data?.leads],
   );
-  const selectedLeadPresenceEvents = selectedLeadHistoryQuery.data?.visits ?? [];
   const stateOptions = leadsQuery.data?.states ?? [];
   const filteredLeads = leads;
   const paginatedLeads = leads;
@@ -804,7 +630,7 @@ export default function Leads() {
 
   const exportedLeads = useMemo(() => {
     return (exportQuery.data?.items ?? []).map(({ lead: row, visits, matchedSource }) => ({
-      lead: mapCrmLeadRowToLead(row),
+      lead: mapCrmLeadRowToProfile(row),
       matchedVisits: visits,
       matchedSource,
     }));
@@ -914,23 +740,6 @@ export default function Leads() {
       toast.error('Não foi possível gerar a planilha de leads.');
     } finally {
       setExportSpreadsheetPending(false);
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (normalizeVisitStatus(status)) {
-      case 'confirmed':
-        return 'bg-primary text-primary-foreground';
-      case 'checked_in':
-        return 'bg-info text-info-foreground';
-      case 'cancelled':
-        return 'bg-destructive text-destructive-foreground';
-      case 'no-show':
-        return 'bg-secondary text-secondary-foreground';
-      case 'seated':
-        return 'bg-success text-success-foreground';
-      default:
-        return 'bg-secondary text-secondary-foreground';
     }
   };
 
@@ -1168,16 +977,8 @@ export default function Leads() {
                 {paginatedLeads.map((lead) => (
                   <TableRow
                     key={lead.key}
-                    role="button"
-                    tabIndex={0}
                     className="group cursor-pointer hover:bg-primary-soft/25"
                     onClick={() => setSelectedLead(lead)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSelectedLead(lead);
-                      }
-                    }}
                   >
                     <TableCell className="px-2 py-1.5">
                       <div className="flex min-w-0 items-center gap-2">
@@ -1212,9 +1013,19 @@ export default function Leads() {
                       <span className="font-semibold text-foreground">{formatLeadVisitsText(lead.total_reservations)}</span>
                     </TableCell>
                     <TableCell className="px-2 py-1.5">
-                      <span className="ml-auto flex h-6 w-6 items-center justify-center rounded bg-background text-muted-foreground ring-1 ring-black/[0.05] transition group-hover:bg-primary-soft group-hover:text-primary">
-                        <Eye className="h-3.5 w-3.5" />
-                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="ml-auto h-8 w-8 text-muted-foreground group-hover:bg-primary-soft group-hover:text-primary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedLead(lead);
+                        }}
+                        aria-label={`Abrir perfil de ${lead.guest_name}`}
+                      >
+                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1580,178 +1391,17 @@ export default function Leads() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <LeadProfileDialog
         open={!!selectedLead}
         onOpenChange={(open) => {
           if (!open) {
             setSelectedLead(null);
-            setSelectedReservationId(null);
           }
         }}
-      >
-        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
-          {selectedLead && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">
-                    {(selectedLead.guest_name.charAt(0) || '?').toUpperCase()}
-                  </div>
-                  <div>
-                    <p>{selectedLead.guest_name}</p>
-                    <p className="text-sm font-normal text-muted-foreground">{formatLeadPhoneText(selectedLead.guest_phone)}</p>
-                  </div>
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="space-y-3 pt-2">
-                {selectedLead.guest_email && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-foreground">{selectedLead.guest_email}</span>
-                  </div>
-                )}
-
-                {selectedLead.guest_birthdate && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-foreground">
-                      {format(new Date(`${selectedLead.guest_birthdate}T12:00:00`), "dd 'de' MMMM", {
-                        locale: ptBR,
-                      })}
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 text-sm">
-                  <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground">
-                    Lead desde{' '}
-                    {format(parseISO(selectedLead.lead_created_at), "dd 'de' MMMM 'de' yyyy", {
-                      locale: ptBR,
-                    })}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 text-sm">
-                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground">{formatLeadState(selectedLead)}</span>
-                </div>
-
-                {selectedLead.importedLeadId && (
-                  <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem do lead</p>
-                    <p className="mt-1 font-medium text-foreground">
-                      Importado via CSV{selectedLead.importFilename ? ` · ${selectedLead.importFilename}` : ''}
-                    </p>
-                    {selectedLead.importedAt && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Última importação em {format(parseISO(selectedLead.importedAt), 'dd/MM/yyyy HH:mm')}
-                      </p>
-                    )}
-                    {selectedLead.importedNotes && (
-                      <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{selectedLead.importedNotes}</p>
-                    )}
-                  </div>
-                )}
-
-              </div>
-
-              <div className="pt-4">
-                <h4 className="mb-3 text-sm font-semibold text-foreground">
-                  Histórico de Presenças ({selectedLead.total_reservations})
-                </h4>
-                {selectedLeadHistoryQuery.isLoading ? (
-                  <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Carregando histórico completo…
-                  </div>
-                ) : selectedLeadHistoryQuery.isError ? (
-                  <div className="rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm" role="alert">
-                    <p className="text-foreground">Não foi possível carregar o histórico de presenças.</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => void retrySelectedLeadHistory()}
-                    >
-                      Tentar novamente
-                    </Button>
-                  </div>
-                ) : selectedLeadPresenceEvents.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
-                    Este contato ainda não possui presenças registradas. Reservas apenas confirmadas, canceladas ou marcadas como no-show não entram nesta contagem.
-                  </div>
-                ) : (
-                <div className="max-h-60 space-y-2 overflow-y-auto">
-                  {selectedLeadPresenceEvents.map((reservation) => {
-                    const canOpenReservation = reservation.visit_origin === 'reservation';
-                    const content = (
-                      <>
-                        <div>
-                        <p className="font-medium text-foreground">
-                          {format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })} às{' '}
-                          {reservation.time?.substring(0, 5)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {reservation.party_size} pessoas
-                          {formatLeadVisitContext(reservation)}
-                          {reservation.occasion ? ` · ${reservation.occasion}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className={getStatusColor(reservation.status)}>
-                          {formatReservationStatus(reservation.status)}
-                        </Badge>
-                        {canOpenReservation && <Eye className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                      </>
-                    );
-
-                    if (!canOpenReservation) {
-                      return (
-                        <div
-                          key={reservation.id}
-                          className="flex items-center justify-between rounded-md border border-border p-3 text-sm"
-                        >
-                          {content}
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <button
-                        type="button"
-                        key={reservation.id}
-                        className="flex w-full items-center justify-between rounded-md border border-border p-3 text-left text-sm transition hover:border-primary/40 hover:bg-muted/30"
-                        onClick={() => openReservationDetails(reservation)}
-                      >
-                        {content}
-                      </button>
-                    );
-                  })}
-                </div>
-                )}
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <ReservationDetailsDialog
-        open={!!selectedReservationId}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedReservationId(null);
-          }
-        }}
-        reservation={selectedReservation ?? null}
+        lead={selectedLead}
         slug={slug}
         companyId={companyId}
-        loading={selectedReservationLoading}
-        onBackToList={() => setSelectedReservationId(null)}
-        backLabel="Voltar para o lead"
+        onRefreshLead={refreshSelectedLead}
       />
     </div>
   );

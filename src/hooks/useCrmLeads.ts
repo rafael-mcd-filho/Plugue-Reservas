@@ -382,7 +382,7 @@ function normalizeCrmLeadImportMetadata(value: unknown): CrmLeadImportMetadata |
   };
 }
 
-function normalizeCrmLeadRow(value: unknown): CrmLeadRow | null {
+export function normalizeCrmLeadRow(value: unknown): CrmLeadRow | null {
   if (!isRecord(value)) return null;
 
   const customerKey = toStringValue(value.customer_key);

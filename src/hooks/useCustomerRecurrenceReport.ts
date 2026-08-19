@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { normalizeCrmLeadRow, type CrmLeadRow } from '@/hooks/useCrmLeads';
 
 export type CustomerFrequencyBandKey = 'one' | 'two' | 'three_four' | 'five_plus';
 export type RecurrenceCustomerType = 'new' | 'returning';
@@ -41,6 +42,7 @@ export interface CustomerMonthlyComposition {
 
 export interface CustomerRecurrenceRow {
   customer_key: string;
+  profile_ref: string;
   phone_normalized: string;
   guest_name: string | null;
   guest_phone: string | null;
@@ -87,6 +89,13 @@ export interface UseCustomerRecurrenceReportParams {
   pageSize?: number;
   search?: string;
   minTotalVisits?: number;
+  enabled?: boolean;
+}
+
+export interface UseCustomerRecurrenceLeadProfileParams {
+  companyId: string | undefined;
+  profileRef: string | null | undefined;
+  expectedPhoneLast4: string | null | undefined;
   enabled?: boolean;
 }
 
@@ -173,6 +182,16 @@ export function buildCustomerRecurrenceQueryKey(params: UseCustomerRecurrenceRep
     rpcParams._search ?? '',
     rpcParams._min_total_visits,
   ] as const;
+}
+
+export function buildCustomerRecurrenceLeadProfileRpcParams({
+  companyId,
+  profileRef,
+}: UseCustomerRecurrenceLeadProfileParams) {
+  return {
+    _company_id: companyId,
+    _profile_ref: profileRef,
+  };
 }
 
 export function isSameCustomerRecurrenceDataset(
@@ -428,6 +447,7 @@ function normalizeCustomer(value: unknown, index: number): CustomerRecurrenceRow
   if (
     !isRecord(value)
     || !toStringValue(value.customer_key)
+    || !/^(reservation_holder|reservation_companion|waitlist_holder|waitlist_companion):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(toStringValue(value.profile_ref))
     || typeof value.phone_normalized !== 'string'
     || !/^\d{4}$/.test(value.phone_normalized)
     || !isNullableString(value.guest_name)
@@ -477,6 +497,7 @@ function normalizeCustomer(value: unknown, index: number): CustomerRecurrenceRow
 
   return {
     customer_key: customerKey,
+    profile_ref: toStringValue(value.profile_ref),
     phone_normalized: phoneNormalized,
     guest_name: toNullableString(value.guest_name),
     // Defesa em profundidade: mesmo uma resposta antiga da RPC nao entra no cache
@@ -563,6 +584,7 @@ export function normalizeCustomerRecurrenceReport(
     filteredCustomersTotal > customersTotal
     || normalizedCustomers.length !== expectedPageLength
     || new Set(normalizedCustomers.map((customer) => customer.customer_key)).size !== normalizedCustomers.length
+    || new Set(normalizedCustomers.map((customer) => customer.profile_ref)).size !== normalizedCustomers.length
     || summary.new_customers + summary.returning_customers !== summary.identified_customers
     || comparison.new_customers + comparison.returning_customers !== comparison.identified_customers
     || customersTotal !== summary.identified_customers
@@ -671,6 +693,66 @@ export function useCustomerRecurrenceReport({
         : undefined;
     },
     staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+export function normalizeCustomerRecurrenceLeadProfile(value: unknown): CrmLeadRow {
+  const unwrapped = Array.isArray(value) && value.length === 1 ? value[0] : value;
+  const profile = normalizeCrmLeadRow(unwrapped);
+  const phoneFromKey = profile?.customer_key.match(/^phone:(\d+)$/)?.[1] ?? null;
+
+  if (
+    !profile
+    || !phoneFromKey
+    || profile.phone_normalized !== phoneFromKey
+    || profile.canonical_visit_count < 1
+  ) {
+    throw new Error('Não foi possível localizar o perfil deste cliente. Atualize a base e tente novamente.');
+  }
+
+  return profile;
+}
+
+export function useCustomerRecurrenceLeadProfile({
+  companyId,
+  profileRef,
+  expectedPhoneLast4,
+  enabled = true,
+}: UseCustomerRecurrenceLeadProfileParams) {
+  const rpcParams = buildCustomerRecurrenceLeadProfileRpcParams({
+    companyId,
+    profileRef,
+    expectedPhoneLast4,
+  });
+
+  return useQuery({
+    queryKey: [
+      'customer-recurrence-lead-profile',
+      rpcParams._company_id,
+      rpcParams._profile_ref,
+      expectedPhoneLast4,
+    ],
+    queryFn: async ({ signal }) => {
+      const request = (supabase as any).rpc('get_customer_recurrence_lead_profile', rpcParams);
+      if (typeof request.abortSignal === 'function') request.abortSignal(signal);
+
+      const { data, error } = await request;
+      if (error) throw error;
+
+      const profile = normalizeCustomerRecurrenceLeadProfile(data);
+      if (!profile.phone_normalized?.endsWith(expectedPhoneLast4 ?? '')) {
+        throw new Error('A base de clientes mudou. Atualize a lista e tente novamente.');
+      }
+
+      return profile;
+    },
+    enabled: enabled
+      && !!rpcParams._company_id
+      && !!rpcParams._profile_ref
+      && /^\d{4}$/.test(expectedPhoneLast4 ?? ''),
+    staleTime: 0,
+    gcTime: 0,
     retry: 1,
   });
 }
