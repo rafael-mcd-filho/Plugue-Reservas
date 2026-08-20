@@ -1,13 +1,10 @@
 import {
   getAttributionString,
-  hasMetaClickAttribution,
-  isPaidTrafficMarker,
   normalizeTrackingTextValue,
 } from '@/lib/trackingAttribution';
 
 export type ReservationOriginKey =
-  | 'direct_organic'
-  | 'ads'
+  | 'online'
   | 'affiliate'
   | 'manual'
   | 'waitlist';
@@ -30,24 +27,20 @@ export interface ReservationOriginAware {
 }
 
 export const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; color: string }> = {
-  direct_organic: {
-    label: 'Direta/Orgânica',
+  online: {
+    label: 'Online',
     color: 'hsl(202, 89%, 48%)',
   },
-  ads: {
-    label: 'Ads',
-    color: 'hsl(28, 85%, 55%)',
-  },
   affiliate: {
-    label: 'Filiado',
+    label: 'Filiados e parceiros',
     color: 'hsl(145, 63%, 42%)',
   },
   manual: {
-    label: 'Manual',
+    label: 'Criada no painel',
     color: 'hsl(0, 0%, 35%)',
   },
   waitlist: {
-    label: 'Fila de Espera',
+    label: 'Convertida da fila',
     color: 'hsl(338, 78%, 55%)',
   },
 };
@@ -62,41 +55,18 @@ export function isPublicReservation(reservation: ReservationOriginAware) {
   return getAttributionString(reservation.attribution_snapshot, 'tracking_source') === 'public_web';
 }
 
-export function getReservationPaidAttributionMedium(reservation: ReservationOriginAware) {
-  return getAttributionString(reservation.attribution_snapshot, 'utm_medium')
-    ?? normalizeTrackingTextValue(reservation.tracking_session?.utm_medium)
-    ?? normalizeTrackingTextValue(reservation.session_utm_medium)
-    ?? null;
-}
-
-export function hasReservationMetaClickAttribution(reservation: ReservationOriginAware) {
-  return hasMetaClickAttribution({
-    snapshot: reservation.attribution_snapshot,
-    fbclid: normalizeTrackingTextValue(reservation.tracking_session?.fbclid)
-      ?? normalizeTrackingTextValue(reservation.session_fbclid),
-    fbc: normalizeTrackingTextValue(reservation.origin_fbc)
-      ?? normalizeTrackingTextValue(reservation.tracking_session?.fbc)
-      ?? normalizeTrackingTextValue(reservation.session_fbc),
-  });
-}
-
 export function classifyReservationOrigin(reservation: ReservationOriginAware): ReservationOriginKey {
   if (normalizeReservationSource(reservation.source) === 'waitlist') {
     return 'waitlist';
-  }
-
-  if (!isPublicReservation(reservation)) {
-    return 'manual';
   }
 
   if (normalizeTrackingTextValue(reservation.origin_affiliate_link_id)) {
     return 'affiliate';
   }
 
-  const utmMedium = getReservationPaidAttributionMedium(reservation);
-  if (isPaidTrafficMarker(utmMedium) || hasReservationMetaClickAttribution(reservation)) {
-    return 'ads';
+  if (isPublicReservation(reservation)) {
+    return 'online';
   }
 
-  return 'direct_organic';
+  return 'manual';
 }

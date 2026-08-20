@@ -38,7 +38,6 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
-import AdsAttributionShadowComparison from '@/components/dashboard/AdsAttributionShadowComparison';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import type { DateRange } from 'react-day-picker';
@@ -521,7 +520,6 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-prev'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
-          queryClient.invalidateQueries({ queryKey: ['ads-attribution-shadow-comparison'] });
         },
       )
       .on(
@@ -1084,105 +1082,6 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           )}
-
-          <Card className="hidden border border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                <SectionTitle
-                  title="Origem das Reservas"
-                  tooltip="Classifica todas as reservas do período em uma única origem: Direta/Orgânica, Ads, Filiado, Manual ou Waitlist."
-                />
-              </CardTitle>
-              <CardDescription>
-                A soma das categorias fecha exatamente em {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas no período selecionado.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {reservationOriginBreakdown.total > 0 ? (
-                <div className="space-y-6">
-                  <div className="hidden relative h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={visibleReservationOriginItems}
-                          dataKey="value"
-                          nameKey="label"
-                          innerRadius={72}
-                          outerRadius={104}
-                          paddingAngle={2}
-                          stroke="hsl(var(--background))"
-                          strokeWidth={2}
-                        >
-                          {visibleReservationOriginItems.map((item) => (
-                            <Cell key={item.key} fill={item.color} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip
-                          contentStyle={{
-                            backgroundColor: 'hsl(0, 0%, 100%)',
-                            border: '1px solid hsl(0, 0%, 88%)',
-                            borderRadius: '0.5rem',
-                            fontSize: '0.875rem',
-                          }}
-                          formatter={(value, name, context) => [
-                            `${Number(value).toLocaleString('pt-BR')} reserva${Number(value) === 1 ? '' : 's'} (${Number(context?.payload?.percentage ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`,
-                            name,
-                          ]}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Total</span>
-                      <span className="text-3xl font-semibold text-foreground">
-                        {reservationOriginBreakdown.total.toLocaleString('pt-BR')}
-                      </span>
-                      <span className="text-xs text-muted-foreground">reservas</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {reservationOriginBreakdown.items.map((item) => (
-                        <div
-                          key={item.key}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 p-3"
-                        >
-                          <div className="flex min-w-0 items-center gap-3">
-                            <span
-                              className="h-3 w-3 shrink-0 rounded-full"
-                              style={{ backgroundColor: item.color }}
-                              aria-hidden="true"
-                            />
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {item.percentage.toLocaleString('pt-BR', {
-                                  minimumFractionDigits: 1,
-                                  maximumFractionDigits: 1,
-                                })}
-                                %
-                              </p>
-                            </div>
-                          </div>
-                          <p className="shrink-0 text-lg font-semibold text-foreground">
-                            {item.value.toLocaleString('pt-BR')}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <p className="text-xs text-muted-foreground">
-                      Ads entra quando existe UTM pago ou clique Meta identificado por fbclid/fbc. _fbp sozinho não classifica como Ads.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
-                  Sem reservas no período para classificar por origem.
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
           <Card className="border border-border shadow-sm">
             <CardHeader className="pb-3">
@@ -1836,12 +1735,12 @@ export default function Dashboard() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">
                 <SectionTitle
-                  title="Origem das Reservas"
-                  tooltip="Mostra de onde vieram as reservas do período: Direta/Orgânica, Ads, Filiado, Manual ou Fila de Espera. Filtrado pela data da reserva — quando o cliente está programado para visitar."
+                  title="Forma de entrada das reservas"
+                  tooltip="Mostra como cada reserva foi registrada no sistema: online, por filiado ou parceiro, criada no painel ou convertida da fila. Não representa atribuição de campanhas ou canais de marketing."
                 />
               </CardTitle>
               <CardDescription>
-                Considera a data da reserva. Cada reserva entra em uma única categoria — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
+                Considera a data da visita. Cada reserva entra em uma única forma — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1890,7 +1789,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {reservationOriginBreakdown.items.map((item) => (
                       <div
                         key={item.key}
@@ -1924,16 +1823,13 @@ export default function Dashboard() {
                   </div>
 
                   <div className="rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
-                    <div className="hidden mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div className="mb-3">
                       <div>
-                        <p className="text-sm font-medium text-foreground">Origem por dia</p>
+                        <p className="text-sm font-medium text-foreground">Forma de entrada por dia</p>
                         <p className="text-xs text-muted-foreground">
-                          Uma barra empilhada por data da reserva, mostrando a composição diária das reservas.
+                          Uma barra empilhada por data da visita, mostrando como as reservas foram registradas.
                         </p>
                       </div>
-                      <p className="max-w-xl text-right text-xs text-muted-foreground">
-                        Ads entra quando existe UTM pago ou clique Meta identificado por fbclid/fbc. _fbp sozinho não classifica como Ads.
-                      </p>
                     </div>
 
                     <div className="h-[320px]">
@@ -1943,7 +1839,7 @@ export default function Dashboard() {
                           <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                           <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
                           <RechartsTooltip
-                            cursor={{ fill: 'hsl(28, 85%, 55%, 0.08)' }}
+                            cursor={{ fill: 'hsl(var(--primary) / 0.08)' }}
                             content={({ active, payload }) => {
                               if (!active || !payload?.length) return null;
 
@@ -2005,18 +1901,11 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
-                  Sem reservas no período para classificar por origem.
+                  Sem reservas no período para agrupar por forma de entrada.
                 </div>
               )}
             </CardContent>
           </Card>
-          {!isCompanyContext && (
-            <AdsAttributionShadowComparison
-              companyId={effectiveCompanyId}
-              startDate={startDate}
-              endDate={endDate}
-            />
-          )}
           {advancedReportsEnabled ? (
             <>
           <div className="[&>*]:min-w-0">

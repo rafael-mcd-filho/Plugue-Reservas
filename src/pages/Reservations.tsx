@@ -80,7 +80,7 @@ import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/us
 
 type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
-type ReservationOriginFilterValue = 'all' | ReservationOriginKey;
+type ReservationEntryMethodFilterValue = 'all' | ReservationOriginKey;
 
 interface ReservationPaymentInfo {
   id: string;
@@ -98,15 +98,9 @@ interface Reservation {
   table_map_id: string | null;
   created_in_mode?: string | null;
   source: string | null;
-  tracking_session?: {
-    utm_medium?: string | null;
-    fbclid?: string | null;
-    fbc?: string | null;
-  } | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
-  origin_fbc?: string | null;
   attribution_snapshot?: Record<string, unknown> | null;
   guest_name: string;
   guest_phone: string;
@@ -236,7 +230,7 @@ export default function Reservations() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [operationalFilter, setOperationalFilter] = useState<ReservationOperationalFilter>('active');
-  const [originFilter, setOriginFilter] = useState<ReservationOriginFilterValue>('all');
+  const [entryMethodFilter, setEntryMethodFilter] = useState<ReservationEntryMethodFilterValue>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
   const [dateFilterMode, setDateFilterMode] = useState<'reservation' | 'created'>('reservation');
   const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
@@ -316,7 +310,7 @@ export default function Reservations() {
       const data = await fetchAllSupabasePages<Reservation>((from, to) =>
         supabase
           .from('reservations' as any)
-          .select('*, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc), reservation_payments(id,status,paid_at,billing_type,charged_amount,base_amount)')
+          .select('*, reservation_payments(id,status,paid_at,billing_type,charged_amount,base_amount)')
           .eq('company_id', companyId)
           .order('date', { ascending: true })
           .order('time', { ascending: true })
@@ -647,7 +641,9 @@ export default function Reservations() {
     const result = sortedReservations
       .filter((reservation) => matchesReservationOperationalFilter(reservation.status, operationalFilter))
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
-      .filter((reservation) => originFilter === 'all' || classifyReservationOrigin(reservation) === originFilter)
+      .filter((reservation) => (
+        entryMethodFilter === 'all' || classifyReservationOrigin(reservation) === entryMethodFilter
+      ))
       .filter((reservation) =>
         dateFilterMode === 'reservation'
           ? matchesLocalDateRange(reservation.date, reservationListRange)
@@ -663,7 +659,7 @@ export default function Reservations() {
         );
       });
     return result;
-  }, [dateFilterMode, operationalFilter, originFilter, reservationListRange, search, sortedReservations, statusFilter]);
+  }, [dateFilterMode, entryMethodFilter, operationalFilter, reservationListRange, search, sortedReservations, statusFilter]);
 
   const listSummary = useMemo(() => {
     // Em check-in, contamos quem realmente compareceu (checked_in_party_size); nos demais, o tamanho reservado.
@@ -691,7 +687,7 @@ export default function Reservations() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, statusFilter, operationalFilter, originFilter, reservationListRange, dateFilterMode]);
+  }, [search, statusFilter, operationalFilter, entryMethodFilter, reservationListRange, dateFilterMode]);
 
   const exportedReservations = useMemo(() => {
     return sortedReservations.filter((reservation) => {
@@ -907,7 +903,7 @@ export default function Reservations() {
 
       return [
         reservation.guest_name,
-        reservation.source === 'waitlist' ? 'Fila convertida' : 'Agendada',
+        RESERVATION_ORIGIN_CONFIG[classifyReservationOrigin(reservation)].label,
         formatBrazilPhone(reservation.guest_phone),
         reservation.guest_email ?? '',
         new Date(`${reservation.date}T12:00:00`),
@@ -924,7 +920,7 @@ export default function Reservations() {
     });
     const columns: SpreadsheetColumn[] = [
       { header: 'Cliente', width: 30 },
-      { header: 'Origem', width: 18 },
+      { header: 'Forma de entrada', width: 24 },
       { header: 'WhatsApp', width: 20 },
       { header: 'Email', width: 34 },
       { header: 'Data da reserva', width: 16, align: 'center', format: 'dd/mm/yyyy' },
@@ -1212,12 +1208,18 @@ export default function Reservations() {
                 </SelectContent>
               </Select>
 
-              <Select value={originFilter} onValueChange={(value) => setOriginFilter(value as ReservationOriginFilterValue)}>
-                <SelectTrigger className="h-10 w-full rounded-lg bg-card sm:w-[190px]" aria-label="Filtrar reservas por origem">
+              <Select
+                value={entryMethodFilter}
+                onValueChange={(value) => setEntryMethodFilter(value as ReservationEntryMethodFilterValue)}
+              >
+                <SelectTrigger
+                  className="h-10 w-full rounded-lg bg-card sm:w-[220px]"
+                  aria-label="Filtrar reservas por forma de entrada"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas as origens</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                   {(Object.keys(RESERVATION_ORIGIN_CONFIG) as ReservationOriginKey[]).map((originKey) => (
                     <SelectItem key={originKey} value={originKey}>
                       {RESERVATION_ORIGIN_CONFIG[originKey].label}

@@ -2,7 +2,12 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
-import { getAttributionString, hasMetaClickAttribution, isPaidTrafficMarker, normalizeTrackingTextValue } from '@/lib/trackingAttribution';
+import {
+  RESERVATION_ORIGIN_CONFIG,
+  classifyReservationOrigin,
+  normalizeReservationSource,
+  type ReservationOriginKey,
+} from '@/lib/reservation-origin';
 import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { differenceInCalendarDays, differenceInDays, eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -34,15 +39,9 @@ interface RawReservation {
   checked_in_party_size: number | null;
   created_at: string;
   source: string | null;
-  tracking_session?: {
-    utm_medium?: string | null;
-    fbclid?: string | null;
-    fbc?: string | null;
-  } | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
-  origin_fbc?: string | null;
   attribution_snapshot?: Record<string, unknown> | null;
 }
 
@@ -64,7 +63,7 @@ interface RawDailyCapacity {
 const EMPTY_RESERVATIONS: RawReservation[] = [];
 const EMPTY_WAITLIST: RawWaitlistEntry[] = [];
 const EMPTY_DAILY_CAPACITY: RawDailyCapacity[] = [];
-const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, origin_fbc, attribution_snapshot, tracking_session:origin_tracking_session_id(utm_medium,fbclid,fbc)';
+const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot';
 const DASHBOARD_WAITLIST_SELECT = 'id, status, created_at, seated_at, expired_at, removed_at';
 
 export interface CreatedReservationDailyStat {
@@ -141,79 +140,14 @@ export interface ReservationOriginDailyStat {
   label: string;
   totalReservations: number;
   totalPeople: number;
-  direct_organic: number;
-  ads: number;
+  online: number;
   affiliate: number;
   manual: number;
   waitlist: number;
-  direct_organicPeople: number;
-  adsPeople: number;
+  onlinePeople: number;
   affiliatePeople: number;
   manualPeople: number;
   waitlistPeople: number;
-}
-
-const RESERVATION_ORIGIN_CONFIG: Record<ReservationOriginKey, { label: string; color: string }> = {
-  direct_organic: {
-    label: 'Direta/Orgânica',
-    color: 'hsl(202, 89%, 48%)',
-  },
-  ads: {
-    label: 'Ads',
-    color: 'hsl(28, 85%, 55%)',
-  },
-  affiliate: {
-    label: 'Filiado',
-    color: 'hsl(145, 63%, 42%)',
-  },
-  manual: {
-    label: 'Manual',
-    color: 'hsl(0, 0%, 35%)',
-  },
-  waitlist: {
-    label: 'Fila de Espera',
-    color: 'hsl(338, 78%, 55%)',
-  },
-};
-
-function normalizeReservationSource(source: string | null | undefined) {
-  return source === 'waitlist' ? 'waitlist' : 'reservation';
-}
-
-function isPublicReservation(reservation: RawReservation) {
-  if (normalizeTrackingTextValue(reservation.origin_tracking_session_id)) return true;
-  if (normalizeTrackingTextValue(reservation.origin_anonymous_id)) return true;
-  return getAttributionString(reservation.attribution_snapshot, 'tracking_source') === 'public_web';
-}
-
-function classifyReservationOrigin(reservation: RawReservation): ReservationOriginKey {
-  if (normalizeReservationSource(reservation.source) === 'waitlist') {
-    return 'waitlist';
-  }
-
-  if (!isPublicReservation(reservation)) {
-    return 'manual';
-  }
-
-  if (normalizeTrackingTextValue(reservation.origin_affiliate_link_id)) {
-    return 'affiliate';
-  }
-
-  const utmMedium = getAttributionString(reservation.attribution_snapshot, 'utm_medium')
-    ?? normalizeTrackingTextValue(reservation.tracking_session?.utm_medium);
-  if (
-    isPaidTrafficMarker(utmMedium)
-    || hasMetaClickAttribution({
-      snapshot: reservation.attribution_snapshot,
-      fbclid: reservation.tracking_session?.fbclid,
-      fbc: normalizeTrackingTextValue(reservation.origin_fbc)
-        ?? normalizeTrackingTextValue(reservation.tracking_session?.fbc),
-    })
-  ) {
-    return 'ads';
-  }
-
-  return 'direct_organic';
 }
 
 export function useDashboardData(
@@ -512,10 +446,10 @@ export function useDashboardData(
 
   const reservationOriginBreakdown = useMemo(() => {
     const counts: Record<ReservationOriginKey, number> = {
-      direct_organic: 0, ads: 0, affiliate: 0, manual: 0, waitlist: 0,
+      online: 0, affiliate: 0, manual: 0, waitlist: 0,
     };
     const people: Record<ReservationOriginKey, number> = {
-      direct_organic: 0, ads: 0, affiliate: 0, manual: 0, waitlist: 0,
+      online: 0, affiliate: 0, manual: 0, waitlist: 0,
     };
 
     for (const reservation of rawReservations) {
@@ -556,13 +490,11 @@ export function useDashboardData(
           label: format(new Date(`${reservationDate}T12:00:00`), 'dd/MM', { locale: ptBR }),
           totalReservations: 0,
           totalPeople: 0,
-          direct_organic: 0,
-          ads: 0,
+          online: 0,
           affiliate: 0,
           manual: 0,
           waitlist: 0,
-          direct_organicPeople: 0,
-          adsPeople: 0,
+          onlinePeople: 0,
           affiliatePeople: 0,
           manualPeople: 0,
           waitlistPeople: 0,
@@ -585,13 +517,11 @@ export function useDashboardData(
         label: format(day, 'dd/MM', { locale: ptBR }),
         totalReservations: 0,
         totalPeople: 0,
-        direct_organic: 0,
-        ads: 0,
+        online: 0,
         affiliate: 0,
         manual: 0,
         waitlist: 0,
-        direct_organicPeople: 0,
-        adsPeople: 0,
+        onlinePeople: 0,
         affiliatePeople: 0,
         manualPeople: 0,
         waitlistPeople: 0,
