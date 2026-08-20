@@ -32,7 +32,14 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
-import { useFunnelData } from '@/hooks/useFunnelData';
+import {
+  getFunnelErrorMessage,
+  getFunnelAwareFreshnessLabel,
+  getFunnelPresentationState,
+  useFunnelData,
+  type FunnelCompanyScope,
+  type FunnelQueryParams,
+} from '@/hooks/useFunnelData';
 import { useLiveFunnelPresence } from '@/hooks/useLiveFunnelPresence';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
@@ -107,6 +114,19 @@ function formatComparisonPeriodRangeLabel(startDate: Date, endDate: Date) {
   }
 
   return `${format(startDate, 'dd/MM/yyyy')} - ${format(endDate, 'dd/MM/yyyy')}`;
+}
+
+function formatFunnelRequestPeriodLabel(request: FunnelQueryParams | undefined) {
+  if (!request) return undefined;
+
+  const parseCalendarDate = (value: string) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+  return formatComparisonPeriodRangeLabel(
+    parseCalendarDate(request.startDate),
+    parseCalendarDate(request.endDate),
+  );
 }
 
 function getPreviousEquivalentRange(startDate: Date, endDate: Date) {
@@ -473,6 +493,17 @@ export default function Dashboard() {
   }, [period, customRange]);
 
   const effectiveCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
+  const isInitialFeatureFlagsLoading = isCompanyContext && featureFlagsLoading && !featureFlags;
+  const advancedReportsEnabled = !isCompanyContext || (!featureFlagsLoading && !!featureFlags?.features.advanced_reports);
+  const funnelScope = useMemo<FunnelCompanyScope | null>(() => {
+    if (isCompanyContext) {
+      return companyContext?.companyId
+        ? { kind: 'company', companyId: companyContext.companyId }
+        : null;
+    }
+    if (companyId === 'all') return { kind: 'global' };
+    return companyId ? { kind: 'company', companyId } : null;
+  }, [companyContext?.companyId, companyId, isCompanyContext]);
 
   const {
     dailyStats,
@@ -492,13 +523,36 @@ export default function Dashboard() {
     lastUpdatedAt: dashboardUpdatedAt,
   } = useDashboardData(effectiveCompanyId, startDate, endDate, comparisonStartDate, comparisonEndDate);
 
-  const funnelCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
   const {
     data: funnelResult,
     dataUpdatedAt: funnelUpdatedAt = 0,
     isFetching: funnelFetching,
-  } = useFunnelData(funnelCompanyId, startDate, endDate, uniqueFunnelOnly);
+    isPending: funnelPending,
+    isError: funnelIsError,
+    error: funnelError,
+    isPlaceholderData: funnelIsPlaceholderData,
+    refetch: refetchFunnel,
+  } = useFunnelData({
+    scope: funnelScope,
+    startDate,
+    endDate,
+    uniqueOnly: uniqueFunnelOnly,
+    enabled: advancedReportsEnabled,
+  });
   const funnelData = funnelResult?.points ?? [];
+  const funnelPresentationState = getFunnelPresentationState({
+    data: funnelResult,
+    isPending: funnelPending,
+    isFetching: funnelFetching,
+    isError: funnelIsError,
+  });
+  const funnelErrorMessage = funnelIsError ? getFunnelErrorMessage(funnelError) : undefined;
+  const funnelPreviousDataLabel = funnelIsPlaceholderData
+    ? formatFunnelRequestPeriodLabel(funnelResult?.request)
+    : undefined;
+  const funnelHasVisibleError = advancedReportsEnabled
+    && (funnelPresentationState === 'error' || funnelPresentationState === 'stale-error');
+  const funnelCompanyId = funnelScope?.kind === 'company' ? funnelScope.companyId : undefined;
   const {
     data: liveFunnelPresence,
     dataUpdatedAt: liveFunnelUpdatedAt = 0,
@@ -543,21 +597,27 @@ export default function Dashboard() {
     };
   }, [queryClient, effectiveCompanyId]);
 
-  const advancedReportsEnabled = !isCompanyContext || !!featureFlags?.features.advanced_reports;
   const visibleReservationOriginItems = useMemo(
     () => reservationOriginBreakdown.items.filter((item) => item.value > 0),
     [reservationOriginBreakdown.items],
   );
-  const funnelDescription = isCompanyContext
-    ? 'Conversão por etapa considerando sessões e jornadas do processo de reserva'
-    : 'Conversão agregada de todas as unidades considerando sessões e jornadas';
+  const funnelDescription = uniqueFunnelOnly
+    ? isCompanyContext
+      ? 'Visitantes únicos que acessaram a página pública no período e avançaram no processo de reserva'
+      : 'Visitantes únicos de todas as unidades que acessaram a página pública no período'
+    : isCompanyContext
+      ? 'Sessões que acessaram a página pública no período e avançaram no processo de reserva'
+      : 'Sessões de todas as unidades que acessaram a página pública no período';
   const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0, liveFunnelUpdatedAt || 0);
   const hasFreshnessData = lastDataSyncAt > 0;
   const dataLagMs = hasFreshnessData ? Date.now() - lastDataSyncAt : 0;
   const dataIsStale = hasFreshnessData && dataLagMs > 45000;
   const dataIsSyncing = dashFetching || funnelFetching || liveFunnelFetching;
-  const freshnessLabel = dataIsSyncing ? 'Sincronizando' : dataIsStale ? 'Dados com atraso' : 'Tempo real';
-  const isInitialFeatureFlagsLoading = isCompanyContext && featureFlagsLoading && !featureFlags;
+  const freshnessLabel = getFunnelAwareFreshnessLabel({
+    hasFunnelError: funnelHasVisibleError,
+    isSyncing: dataIsSyncing,
+    isStale: dataIsStale,
+  });
 
   const periodLabel = comparisonLabel;
   const currentPeriodRangeLabel = formatComparisonPeriodRangeLabel(startDate, endDate);
@@ -675,7 +735,14 @@ export default function Dashboard() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge variant={dataIsStale ? 'destructive' : dataIsSyncing ? 'secondary' : 'outline'} className="gap-1.5">
+                  <Badge
+                    variant={funnelHasVisibleError || dataIsStale ? 'destructive' : dataIsSyncing ? 'secondary' : 'outline'}
+                    className="gap-1.5"
+                    tabIndex={0}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
                     <Info className="h-3.5 w-3.5" />
                     {freshnessLabel}
                   </Badge>
@@ -689,6 +756,7 @@ export default function Dashboard() {
                   <p className="mt-1">
                     O painel se atualiza sozinho e pode levar alguns segundos para refletir mudanças recentes.
                     {dataIsStale ? ' Neste momento existe um pequeno atraso na atualização.' : ''}
+                    {funnelHasVisibleError ? ' O funil de reservas não pôde ser atualizado; os demais indicadores continuam disponíveis.' : ''}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -1913,7 +1981,14 @@ export default function Dashboard() {
               data={funnelData}
               title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
               description={funnelDescription}
-              measurementLabel={uniqueFunnelOnly ? 'Únicos' : 'Sessões'}
+              measurementLabel={uniqueFunnelOnly ? 'Visitantes únicos' : 'Sessões'}
+              state={funnelPresentationState}
+              errorMessage={funnelErrorMessage}
+              isShowingPreviousData={funnelIsPlaceholderData}
+              previousDataLabel={funnelPreviousDataLabel}
+              onRetry={() => {
+                void refetchFunnel();
+              }}
               headerActions={(
                 <div className="flex items-center justify-end text-sm text-muted-foreground">
                   <label className="flex items-center gap-2">

@@ -445,7 +445,7 @@ export default function CompanyPublicPage() {
     enabled: slugIsValid && !company && !isLoading,
   });
 
-  const { trackStep, startJourney, getTrackingSnapshot, clearJourney } = useFunnelTracking(undefined, slug);
+  const { trackStep, startJourney, getTrackingSnapshot, clearJourney } = useFunnelTracking(company?.id, slug);
 
   const handleOpenReservation = () => {
     void startJourney();

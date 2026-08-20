@@ -7,6 +7,14 @@ import {
   recordAdsJourneyActivityBestEffort,
   resolvePrAd,
 } from "./ads-journey.ts";
+import {
+  buildStoredAdsReplayInput,
+  buildTrackingReplayResponse,
+  deterministicTrackingUuid,
+  validateTrackingEventReplay,
+  type StoredTrackingEventContext,
+  type TrackingReplayRequest,
+} from "./idempotent-replay.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +23,8 @@ const corsHeaders = {
 };
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_CLIENT_EVENT_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_CLIENT_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 interface TrackingBody {
   event_name?: string;
@@ -55,6 +65,10 @@ interface TrackingBody {
   } | null;
 }
 
+class TrackingContextCollisionError extends Error {
+  readonly status = 409;
+}
+
 function asTrimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -78,6 +92,17 @@ function deriveFbc(existingFbc: string | null, fbclid: string | null) {
   return `fb.1.${Date.now()}.${fbclid}`;
 }
 
+function resolveEffectiveOccurredAt(value: unknown, receivedAt: string) {
+  const receivedTime = Date.parse(receivedAt);
+  const occurredTime = Date.parse(nullableText(value) ?? "");
+  if (!Number.isFinite(occurredTime)
+    || occurredTime < receivedTime - MAX_CLIENT_EVENT_AGE_MS
+    || occurredTime > receivedTime + MAX_CLIENT_CLOCK_SKEW_MS) {
+    return receivedAt;
+  }
+  return new Date(occurredTime).toISOString();
+}
+
 function buildUserDataSnapshot(body: TrackingBody, anonymousId: string) {
   const userData = body.user_data ?? {};
 
@@ -93,6 +118,67 @@ function buildUserDataSnapshot(body: TrackingBody, anonymousId: string) {
     birthdate: nullableText(userData.birthdate),
     external_id: nullableText(userData.external_id) ?? anonymousId,
   };
+}
+
+const TRACKING_EVENT_CONTEXT_COLUMNS = [
+  "company_id",
+  "event_id",
+  "event_name",
+  "anonymous_id",
+  "session_id",
+  "journey_id",
+  "reservation_id",
+  "step",
+  "page_url",
+  "path",
+  "referrer",
+  "event_source_url",
+  "metadata",
+  "created_at",
+].join(",");
+
+async function findTrackingEventByEventId(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  eventId: string,
+) {
+  const { data, error } = await supabaseAdmin
+    .from("tracking_events")
+    .select(TRACKING_EVENT_CONTEXT_COLUMNS)
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data as StoredTrackingEventContext | null;
+}
+
+function replayRequestContext(
+  body: TrackingBody,
+  context: {
+    companyId: string;
+    eventId: string;
+    eventName: string;
+    anonymousId: string;
+    requestedSessionId: string | null;
+    requestedJourneyId: string | null;
+    reservationId: string | null;
+  },
+): TrackingReplayRequest {
+  return {
+    ...context,
+    step: nullableText(body.step),
+  };
+}
+
+function assertReplayContext(
+  request: TrackingReplayRequest,
+  stored: StoredTrackingEventContext,
+) {
+  const mismatch = validateTrackingEventReplay(request, stored);
+  if (mismatch) {
+    throw new TrackingContextCollisionError(
+      `event_id ja pertence a outro contexto de tracking (${mismatch})`,
+    );
+  }
 }
 
 async function resolveCompanyId(
@@ -126,10 +212,8 @@ async function resolveCompanyId(
   return data.id as string;
 }
 
-async function findValidSession(
+async function findSessionById(
   supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
-  companyId: string,
-  anonymousId: string,
   sessionId: string | null,
 ) {
   if (!sessionId) return null;
@@ -138,23 +222,88 @@ async function findValidSession(
     .from("tracking_sessions")
     .select("*")
     .eq("id", sessionId)
-    .eq("company_id", companyId)
     .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if (!data || data.anonymous_id !== anonymousId) {
-    return null;
-  }
+  return data as Record<string, unknown> | null;
+}
 
-  const lastSeenAt = data.last_seen_at ? Date.parse(data.last_seen_at) : NaN;
-  if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt > SESSION_TIMEOUT_MS) {
-    return null;
-  }
+function belongsToTrackingVisitor(
+  session: Record<string, unknown> | null,
+  companyId: string,
+  anonymousId: string,
+) {
+  return !!session
+    && session.company_id === companyId
+    && session.anonymous_id === anonymousId;
+}
 
-  return data as Record<string, unknown>;
+function canReuseSession(
+  session: Record<string, unknown> | null,
+  companyId: string,
+  anonymousId: string,
+  eventName: string,
+  effectiveOccurredAt: string,
+  receivedAt: string,
+) {
+  if (!belongsToTrackingVisitor(session, companyId, anonymousId)) return false;
+
+  const lastSeenAt = session.last_seen_at ? Date.parse(String(session.last_seen_at)) : NaN;
+  const receivedTime = Date.parse(receivedAt);
+  if (!Number.isFinite(lastSeenAt) || !Number.isFinite(receivedTime)) return false;
+
+  // Normal online traffic keeps the original 30-minute inactivity contract.
+  if (receivedTime - lastSeenAt <= SESSION_TIMEOUT_MS) return true;
+
+  // A durable event can arrive much later than it happened. Its bounded
+  // occurred_at recovers the original context and is also eligible for the
+  // funnel report's guarded effective_at calculation. The projection cursor
+  // remains authoritative on tracking_events.created_at.
+  if (eventName === "session_ping") return false;
+  const startedAt = session.started_at ? Date.parse(String(session.started_at)) : NaN;
+  const occurredAt = Date.parse(effectiveOccurredAt);
+  return Number.isFinite(startedAt)
+    && Number.isFinite(occurredAt)
+    && occurredAt >= startedAt
+    && occurredAt <= lastSeenAt + SESSION_TIMEOUT_MS;
+}
+
+function nextSessionLastSeenAt(
+  session: Record<string, unknown>,
+  eventName: string,
+  effectiveOccurredAt: string,
+  receivedAt: string,
+) {
+  if (eventName === "session_ping") return receivedAt;
+  const previous = Date.parse(String(session.last_seen_at ?? ""));
+  const occurred = Date.parse(effectiveOccurredAt);
+  if (!Number.isFinite(previous) || !Number.isFinite(occurred)) return receivedAt;
+  return new Date(Math.max(previous, occurred)).toISOString();
+}
+
+async function findValidSession(
+  supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  anonymousId: string,
+  sessionId: string | null,
+  eventName: string,
+  effectiveOccurredAt: string,
+  receivedAt: string,
+) {
+  const session = await findSessionById(supabaseAdmin, sessionId);
+  if (!canReuseSession(
+    session,
+    companyId,
+    anonymousId,
+    eventName,
+    effectiveOccurredAt,
+    receivedAt,
+  )) return null;
+
+  return session;
 }
 
 function buildSessionPatch(
@@ -162,6 +311,7 @@ function buildSessionPatch(
   ipAddress: string | null,
   userAgent: string | null,
   acceptLanguage: string | null,
+  lastSeenAt: string,
 ) {
   return {
     last_page_url: nullableText(body.page_url),
@@ -178,7 +328,7 @@ function buildSessionPatch(
     ip_address: ipAddress,
     user_agent: userAgent,
     accept_language: acceptLanguage,
-    last_seen_at: new Date().toISOString(),
+    last_seen_at: lastSeenAt,
   };
 }
 
@@ -213,7 +363,7 @@ function mergeAttributionSnapshot(
   };
 }
 
-Deno.serve(async (req) => {
+export async function handlePublicTrackingRequest(req: Request) {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -227,49 +377,163 @@ Deno.serve(async (req) => {
     const reservationId = nullableText(body.reservation_id);
     const eventId = nullableText(body.event_id) ?? crypto.randomUUID();
     const receivedAt = new Date().toISOString();
+    const effectiveOccurredAt = resolveEffectiveOccurredAt(body.occurred_at, receivedAt);
     const supabaseAdmin = createSupabaseAdminClient();
     const companyId = await resolveCompanyId(supabaseAdmin, body);
+    const replayRequest = replayRequestContext(body, {
+      companyId,
+      eventId,
+      eventName,
+      anonymousId,
+      requestedSessionId,
+      requestedJourneyId,
+      reservationId,
+    });
+
+    // Idempotency is checked before touching sessions, journeys or reservations.
+    // session_ping deliberately remains ephemeral. Its client-supplied session
+    // UUID makes a response-lost retry idempotent without adding raw tracking
+    // rows or touching the Meta queue.
+    if (eventName !== "session_ping") {
+      const replayedEvent = await findTrackingEventByEventId(supabaseAdmin, eventId);
+      if (replayedEvent) {
+        assertReplayContext(replayRequest, replayedEvent);
+        const replayResponse = buildTrackingReplayResponse(replayedEvent);
+        const adsJourneyRecorded = await recordAdsJourneyActivityBestEffort(
+          supabaseAdmin,
+          buildAdsJourneyRpcArgs(buildStoredAdsReplayInput(replayedEvent), {
+            companyId: replayResponse.company_id,
+            anonymousId: replayResponse.anonymous_id,
+            sessionId: replayResponse.session_id,
+            journeyId: replayResponse.journey_id,
+            reservationId: replayedEvent.reservation_id,
+            eventName: replayedEvent.event_name,
+            eventId: replayedEvent.event_id,
+            receivedAt: replayedEvent.created_at,
+          }),
+        );
+
+        if (!adsJourneyRecorded) {
+          throw new Error("Falha temporaria ao registrar a jornada de Ads");
+        }
+
+        return new Response(JSON.stringify(replayResponse), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const ipAddress = getClientIpAddress(req);
     const userAgent = nullableText(req.headers.get("user-agent"));
     const acceptLanguage = nullableText(req.headers.get("accept-language"));
-    const sessionPatch = buildSessionPatch(body, ipAddress, userAgent, acceptLanguage);
-
-    let session = await findValidSession(supabaseAdmin, companyId, anonymousId, requestedSessionId);
+    let session = await findValidSession(
+      supabaseAdmin,
+      companyId,
+      anonymousId,
+      requestedSessionId,
+      eventName,
+      effectiveOccurredAt,
+      receivedAt,
+    );
+    const sessionPatch = buildSessionPatch(
+      body,
+      ipAddress,
+      userAgent,
+      acceptLanguage,
+      session
+        ? nextSessionLastSeenAt(session, eventName, effectiveOccurredAt, receivedAt)
+        : receivedAt,
+    );
 
     if (!session) {
-      const { data, error } = await supabaseAdmin
+      const preferredSessionId = requestedSessionId
+        ?? await deterministicTrackingUuid(eventId, "session");
+      const sessionInsert = {
+        id: preferredSessionId,
+        company_id: companyId,
+        anonymous_id: anonymousId,
+        first_page_url: nullableText(body.page_url),
+        last_page_url: nullableText(body.page_url),
+        landing_path: nullableText(body.path),
+        referrer: nullableText(body.referrer),
+        utm_source: nullableText(body.utm_source),
+        utm_medium: nullableText(body.utm_medium),
+        utm_campaign: nullableText(body.utm_campaign),
+        utm_content: nullableText(body.utm_content),
+        utm_term: nullableText(body.utm_term),
+        pr_ad: resolvePrAd(body),
+        fbclid: nullableText(body.fbclid),
+        fbp: nullableText(body.fbp),
+        fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        accept_language: acceptLanguage,
+        started_at: receivedAt,
+        last_seen_at: receivedAt,
+      };
+      let { data, error } = await supabaseAdmin
         .from("tracking_sessions")
-        .insert({
-          company_id: companyId,
-          anonymous_id: anonymousId,
-          first_page_url: nullableText(body.page_url),
-          last_page_url: nullableText(body.page_url),
-          landing_path: nullableText(body.path),
-          referrer: nullableText(body.referrer),
-          utm_source: nullableText(body.utm_source),
-          utm_medium: nullableText(body.utm_medium),
-          utm_campaign: nullableText(body.utm_campaign),
-          utm_content: nullableText(body.utm_content),
-          utm_term: nullableText(body.utm_term),
-          pr_ad: resolvePrAd(body),
-          fbclid: nullableText(body.fbclid),
-          fbp: nullableText(body.fbp),
-          fbc: deriveFbc(nullableText(body.fbc), nullableText(body.fbclid)),
-          ip_address: ipAddress,
-          user_agent: userAgent,
-          accept_language: acceptLanguage,
-          started_at: new Date().toISOString(),
-          last_seen_at: new Date().toISOString(),
-        })
+        .insert(sessionInsert)
         .select("*")
         .single();
 
       if (error) {
-        throw new Error(error.message);
+        const isDuplicate = error.code === "23505"
+          || error.message.includes("duplicate key");
+        if (!isDuplicate) throw new Error(error.message);
+
+        // Two identical pings may race after both miss the lookup. The UUID
+        // supplied by the browser makes the winner reusable by the loser.
+        const concurrentSession = await findSessionById(supabaseAdmin, preferredSessionId);
+        if (canReuseSession(
+          concurrentSession,
+          companyId,
+          anonymousId,
+          eventName,
+          effectiveOccurredAt,
+          receivedAt,
+        )) {
+          session = concurrentSession;
+        } else if (concurrentSession
+          && concurrentSession.company_id === companyId
+          && concurrentSession.anonymous_id === anonymousId) {
+          // A genuinely expired session is rotated; it is not an idempotent
+          // replay and must not be revived merely because its UUID still exists.
+          const rotatedSessionId = await deterministicTrackingUuid(
+            requestedSessionId ?? eventId,
+            "session-rotation",
+          );
+          const rotatedSessionInsert = { ...sessionInsert, id: rotatedSessionId };
+          ({ data, error } = await supabaseAdmin
+            .from("tracking_sessions")
+            .insert(rotatedSessionInsert)
+            .select("*")
+            .single());
+          if (error) {
+            const rotationDuplicate = error.code === "23505"
+              || error.message.includes("duplicate key");
+            if (!rotationDuplicate) throw new Error(error.message);
+            const concurrentRotation = await findSessionById(supabaseAdmin, rotatedSessionId);
+            if (!concurrentRotation
+              || concurrentRotation.company_id !== companyId
+              || concurrentRotation.anonymous_id !== anonymousId) {
+              throw new TrackingContextCollisionError(
+                "session_id rotacionado pertence a outro contexto de tracking",
+              );
+            }
+            session = concurrentRotation;
+          } else {
+            session = data as Record<string, unknown>;
+          }
+        } else {
+          throw new TrackingContextCollisionError(
+            "session_id ja pertence a outro contexto de tracking",
+          );
+        }
       }
 
-      session = data as Record<string, unknown>;
+      if (!session) session = data as Record<string, unknown>;
     } else {
       const patch = {
         ...Object.fromEntries(
@@ -281,7 +545,8 @@ Deno.serve(async (req) => {
         const { error } = await supabaseAdmin
           .from("tracking_sessions")
           .update(patch)
-          .eq("id", session.id as string);
+          .eq("id", session.id as string)
+          .lte("last_seen_at", sessionPatch.last_seen_at);
 
         if (error) {
           throw new Error(error.message);
@@ -295,24 +560,42 @@ Deno.serve(async (req) => {
     if (journeyId) {
       const { data: existingJourney, error: journeyLookupError } = await supabaseAdmin
         .from("tracking_journeys")
-        .select("id, reservation_id, status")
+        .select("id, company_id, session_id, anonymous_id, reservation_id, status, last_event_at")
         .eq("id", journeyId)
-        .eq("company_id", companyId)
         .maybeSingle();
 
       if (journeyLookupError) {
         throw new Error(journeyLookupError.message);
       }
 
-      const shouldRotateJourney = !existingJourney
-        || existingJourney.status !== "active"
-        || (
-          !!existingJourney.reservation_id
-          && existingJourney.reservation_id !== reservationId
+      const ownerMatches = !existingJourney || (
+        existingJourney.company_id === companyId
+        && existingJourney.anonymous_id === anonymousId
+      );
+      const reservationMatches = !existingJourney
+        || !existingJourney.reservation_id
+        || !reservationId
+        || existingJourney.reservation_id === reservationId;
+      if (!ownerMatches || !reservationMatches) {
+        throw new TrackingContextCollisionError(
+          "journey_id já pertence a outro contexto de tracking",
         );
+      }
+
+      const shouldRotateJourney = !existingJourney
+        || (eventName === "booking_started" && existingJourney.status !== "active");
 
       if (shouldRotateJourney) {
-        journeyId = crypto.randomUUID();
+        // A new journey keeps the browser UUID. It is therefore stable across
+        // retries even if the first response is lost. Existing but invalid
+        // journeys rotate because their primary key cannot be reused.
+        const isNewRequestedJourney = !existingJourney;
+        journeyId = isNewRequestedJourney
+          ? journeyId
+          : await deterministicTrackingUuid(
+            `${requestedJourneyId}:${reservationId ?? ""}`,
+            "journey",
+          );
 
         const { error: journeyInsertError } = await supabaseAdmin
           .from("tracking_journeys")
@@ -328,13 +611,36 @@ Deno.serve(async (req) => {
           });
 
         if (journeyInsertError) {
-          throw new Error(journeyInsertError.message);
+          const isDuplicate = journeyInsertError.code === "23505"
+            || journeyInsertError.message.includes("duplicate key");
+          if (!isDuplicate) throw new Error(journeyInsertError.message);
+
+          const { data: concurrentJourney, error: concurrentJourneyError } = await supabaseAdmin
+            .from("tracking_journeys")
+            .select("id, company_id, session_id, anonymous_id, reservation_id, status, last_event_at")
+            .eq("id", journeyId)
+            .maybeSingle();
+          if (concurrentJourneyError) throw new Error(concurrentJourneyError.message);
+
+          const sameContext = concurrentJourney
+            && concurrentJourney.company_id === companyId
+            && concurrentJourney.anonymous_id === anonymousId
+            && concurrentJourney.session_id === sessionId
+            && concurrentJourney.status === "active"
+            && (
+              !concurrentJourney.reservation_id
+              || concurrentJourney.reservation_id === reservationId
+            );
+          if (!sameContext) {
+            throw new TrackingContextCollisionError(
+              "journey_id ja pertence a outro contexto de tracking",
+            );
+          }
         }
-      } else {
+      } else if (existingJourney.status === "active") {
         const patch = {
           session_id: sessionId,
           reservation_id: reservationId ?? existingJourney.reservation_id,
-          last_event_at: new Date().toISOString(),
         };
 
         const { error: journeyUpdateError } = await supabaseAdmin
@@ -344,6 +650,18 @@ Deno.serve(async (req) => {
 
         if (journeyUpdateError) {
           throw new Error(journeyUpdateError.message);
+        }
+
+        // The predicate makes the timestamp monotonic even when two delayed
+        // events are processed concurrently and complete out of order.
+        const { error: journeyTimestampError } = await supabaseAdmin
+          .from("tracking_journeys")
+          .update({ last_event_at: effectiveOccurredAt })
+          .eq("id", journeyId)
+          .lte("last_event_at", effectiveOccurredAt);
+
+        if (journeyTimestampError) {
+          throw new Error(journeyTimestampError.message);
         }
       }
     }
@@ -370,11 +688,13 @@ Deno.serve(async (req) => {
 
     let adsJourneyActivityAt = receivedAt;
     let requireAdsJourneyWrite = false;
+    let effectiveSessionId = sessionId;
+    let effectiveJourneyId = journeyId;
+    let effectiveReservationId = reservationId;
+    let adsJourneyInput: TrackingBody = body;
 
     if (eventName !== "session_ping") {
       const eventSourceUrl = nullableText(body.event_source_url) ?? nullableText(body.page_url);
-      const occurredAt = nullableText(body.occurred_at) ?? new Date().toISOString();
-
       const { data: insertedEvent, error: eventInsertError } = await supabaseAdmin
         .from("tracking_events")
         .insert({
@@ -391,7 +711,7 @@ Deno.serve(async (req) => {
           path: nullableText(body.path),
           referrer: nullableText(body.referrer),
           event_source_url: eventSourceUrl,
-          occurred_at: occurredAt,
+          occurred_at: effectiveOccurredAt,
           metadata: {
             ...asMetadata(body.metadata),
             tracking_source: "public_web",
@@ -404,11 +724,17 @@ Deno.serve(async (req) => {
               ?? nullableText(session.utm_medium),
             utm_campaign: nullableText(body.utm_campaign)
               ?? nullableText(session.utm_campaign),
+            utm_content: nullableText(body.utm_content)
+              ?? nullableText(session.utm_content),
+            utm_term: nullableText(body.utm_term)
+              ?? nullableText(session.utm_term),
             pr_ad: resolvePrAd(body) ?? nullableText(session.pr_ad),
+            tracking_requested_session_id: requestedSessionId,
+            tracking_requested_journey_id: requestedJourneyId,
           },
           user_data_snapshot: buildUserDataSnapshot(body, anonymousId),
         })
-        .select("created_at")
+        .select(TRACKING_EVENT_CONTEXT_COLUMNS)
         .single();
 
       if (eventInsertError) {
@@ -419,22 +745,15 @@ Deno.serve(async (req) => {
           throw new Error(eventInsertError.message);
         }
 
-        const { data: existingEvent, error: existingEventError } = await supabaseAdmin
-          .from("tracking_events")
-          .select("created_at")
-          .eq("event_id", eventId)
-          .eq("company_id", companyId)
-          .maybeSingle();
-
-        if (existingEventError) {
-          throw new Error(existingEventError.message);
-        }
-
-        if (!existingEvent?.created_at) {
-          throw new Error("event_id ja pertence a outro contexto de tracking");
-        }
-
-        adsJourneyActivityAt = existingEvent.created_at as string;
+        const existingEvent = await findTrackingEventByEventId(supabaseAdmin, eventId);
+        if (!existingEvent) throw new Error("Evento duplicado sem contexto persistido");
+        assertReplayContext(replayRequest, existingEvent);
+        const replayResponse = buildTrackingReplayResponse(existingEvent);
+        effectiveSessionId = replayResponse.session_id;
+        effectiveJourneyId = replayResponse.journey_id;
+        effectiveReservationId = existingEvent.reservation_id;
+        adsJourneyActivityAt = existingEvent.created_at;
+        adsJourneyInput = buildStoredAdsReplayInput(existingEvent);
       } else if (insertedEvent?.created_at) {
         adsJourneyActivityAt = insertedEvent.created_at as string;
       }
@@ -447,12 +766,12 @@ Deno.serve(async (req) => {
 
     const adsJourneyRecorded = await recordAdsJourneyActivityBestEffort(
       supabaseAdmin,
-      buildAdsJourneyRpcArgs(body, {
+      buildAdsJourneyRpcArgs(adsJourneyInput, {
         companyId,
         anonymousId,
-        sessionId,
-        journeyId,
-        reservationId,
+        sessionId: effectiveSessionId,
+        journeyId: effectiveJourneyId,
+        reservationId: effectiveReservationId,
         eventName,
         eventId,
         receivedAt: adsJourneyActivityAt,
@@ -467,16 +786,20 @@ Deno.serve(async (req) => {
       ok: true,
       company_id: companyId,
       anonymous_id: anonymousId,
-      session_id: sessionId,
-      journey_id: journeyId,
+      session_id: effectiveSessionId,
+      journey_id: effectiveJourneyId,
     }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message || "Erro interno" }), {
-      status: 500,
+      status: error instanceof TrackingContextCollisionError ? error.status : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-});
+}
+
+if (typeof Deno !== "undefined") {
+  Deno.serve(handlePublicTrackingRequest);
+}
