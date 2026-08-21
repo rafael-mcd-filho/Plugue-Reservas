@@ -137,7 +137,7 @@ const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
 const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
@@ -215,6 +215,8 @@ export default function CompanySettings() {
         {
           select: COMPANY_SETTINGS_SELECT,
           missingColumns: [
+            'hero_media_url',
+            'hero_media_type',
             'public_reservation_exit_prompt_primary_text',
             'public_reservation_exit_prompt_primary_text_size',
             'public_reservation_exit_prompt_secondary_text',
