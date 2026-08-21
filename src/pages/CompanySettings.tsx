@@ -58,18 +58,8 @@ import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
-import { removeTimeZoneDependentReportQueries } from '@/lib/report-query-cache';
 import { validateHeroMediaFile, type HeroMediaType } from '@/lib/hero-media';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
-
-const REPORT_TIME_ZONE_OPTIONS = [
-  { value: 'America/Sao_Paulo', label: 'Brasília — Centro-Sul' },
-  { value: 'America/Fortaleza', label: 'Brasília — Norte e Nordeste' },
-  { value: 'America/Manaus', label: 'Manaus' },
-  { value: 'America/Cuiaba', label: 'Cuiabá' },
-  { value: 'America/Rio_Branco', label: 'Rio Branco' },
-  { value: 'America/Noronha', label: 'Fernando de Noronha' },
-] as const;
 
 interface OpeningHour {
   day: string;
@@ -214,13 +204,7 @@ function normalizeOptionalHttpUrl(value: string) {
 }
 
 export default function CompanySettings() {
-  const {
-    companyId,
-    companyName,
-    companyTimeZone,
-    companyTimeZoneAvailable,
-    slug,
-  } = useCompanySlug();
+  const { companyId, companyName, slug } = useCompanySlug();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -337,7 +321,6 @@ export default function CompanySettings() {
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
   const [reservationLateToleranceMinutes, setReservationLateToleranceMinutes] = useState(10);
-  const [reportTimeZone, setReportTimeZone] = useState(companyTimeZone);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [heroMediaUrl, setHeroMediaUrl] = useState('');
   const [heroMediaType, setHeroMediaType] = useState<HeroMediaType | ''>('');
@@ -354,8 +337,7 @@ export default function CompanySettings() {
   useEffect(() => {
     setInitialized(false);
     setGoogleReviewUrl('');
-    setReportTimeZone(companyTimeZone);
-  }, [companyId, companyTimeZone]);
+  }, [companyId]);
 
   useEffect(() => {
     if (!company || initialized) return;
@@ -635,29 +617,9 @@ export default function CompanySettings() {
 
         if (noticeError) throw noticeError;
       }
-
-      // Keep the timezone write last. If any earlier settings operation fails,
-      // report caches remain aligned with the timezone that is still stored.
-      if (companyTimeZoneAvailable) {
-        const timeZoneResult = await supabase
-          .from('companies' as any)
-          .update({ time_zone: reportTimeZone } as any)
-          .eq('id', companyId)
-          .select('id')
-          .maybeSingle();
-
-        if (timeZoneResult.error) throw timeZoneResult.error;
-      }
     },
     onSuccess: () => {
-      if (companyTimeZoneAvailable && reportTimeZone !== companyTimeZone) {
-        // Date presets and server-side day boundaries depend on this value.
-        // Removing the inactive report queries prevents even a brief render of
-        // data generated with the previous timezone after navigation.
-        removeTimeZoneDependentReportQueries(qc, companyId);
-      }
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
-      qc.invalidateQueries({ queryKey: ['company-by-slug', slug] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
@@ -1655,37 +1617,6 @@ export default function CompanySettings() {
                     {publicCustomizationLocked && (
                       <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>
                     )}
-                  </div>
-
-                  <div className={settingsFieldGroupClassName}>
-                    <Label htmlFor="company-settings-report-time-zone" className={settingsLabelClassName}>
-                      <Clock className="h-4 w-4" aria-hidden="true" /> Fuso horário dos relatórios
-                    </Label>
-                    <Select
-                      value={reportTimeZone}
-                      onValueChange={setReportTimeZone}
-                      disabled={!companyTimeZoneAvailable}
-                    >
-                      <SelectTrigger
-                        id="company-settings-report-time-zone"
-                        className={settingsFieldClassName}
-                        aria-label="Fuso horário dos relatórios"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REPORT_TIME_ZONE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {companyTimeZoneAvailable
-                        ? 'Define os limites de dia e horário usados nos relatórios da unidade.'
-                        : 'O fuso poderá ser configurado depois que a nova base de relatórios for instalada.'}
-                    </p>
                   </div>
                 </div>
               </div>

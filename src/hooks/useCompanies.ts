@@ -77,28 +77,6 @@ function getCompanyMutationErrorMessage(err: any, fallbackPrefix: string) {
   return message ? `${fallbackPrefix}: ${message}` : fallbackPrefix;
 }
 
-export function getCompanyDeleteErrorMessage(err: unknown) {
-  const error = err as { code?: unknown; message?: unknown; details?: unknown } | null;
-  const code = String(error?.code || '');
-  const message = String(error?.message || '');
-  const details = String(error?.details || '');
-  const combined = `${message} ${details}`.toLowerCase();
-
-  if (code === '55P03' || combined.includes('lock not available')) {
-    return 'A empresa está sendo atualizada no momento. Aguarde alguns instantes e tente novamente.';
-  }
-
-  if (
-    code === '57014' ||
-    combined.includes('statement timeout') ||
-    combined.includes('canceling statement due to statement timeout')
-  ) {
-    return 'A exclusão demorou mais que o esperado. Aguarde alguns instantes e tente novamente.';
-  }
-
-  return message ? `Erro ao excluir empresa: ${message}` : 'Não foi possível excluir a empresa.';
-}
-
 export function useCompanies() {
   return useQuery({
     queryKey: ['companies'],
@@ -189,19 +167,18 @@ export function useDeleteCompany() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await (supabase as any).rpc('delete_company_permanently', {
-        _company_id: id,
-      });
+      const { error } = await supabase
+        .from('companies' as any)
+        .delete()
+        .eq('id', id);
       if (error) throw error;
-      return data;
     },
-    retry: false,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['companies'] });
       toast.success('Empresa removida!');
     },
-    onError: (err: unknown) => {
-      toast.error(getCompanyDeleteErrorMessage(err));
+    onError: (err: any) => {
+      toast.error(`Erro ao remover: ${err.message}`);
     },
   });
 }
