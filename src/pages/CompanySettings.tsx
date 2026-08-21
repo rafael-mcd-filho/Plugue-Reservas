@@ -16,6 +16,7 @@ import {
   Upload,
   Megaphone,
   ImageIcon,
+  Video,
   Users,
   Copy,
   Banknote,
@@ -57,7 +58,18 @@ import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
+import { removeTimeZoneDependentReportQueries } from '@/lib/report-query-cache';
+import { validateHeroMediaFile, type HeroMediaType } from '@/lib/hero-media';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
+
+const REPORT_TIME_ZONE_OPTIONS = [
+  { value: 'America/Sao_Paulo', label: 'Brasília — Centro-Sul' },
+  { value: 'America/Fortaleza', label: 'Brasília — Norte e Nordeste' },
+  { value: 'America/Manaus', label: 'Manaus' },
+  { value: 'America/Cuiaba', label: 'Cuiabá' },
+  { value: 'America/Rio_Branco', label: 'Rio Branco' },
+  { value: 'America/Noronha', label: 'Fernando de Noronha' },
+] as const;
 
 interface OpeningHour {
   day: string;
@@ -202,7 +214,13 @@ function normalizeOptionalHttpUrl(value: string) {
 }
 
 export default function CompanySettings() {
-  const { companyId, companyName, slug } = useCompanySlug();
+  const {
+    companyId,
+    companyName,
+    companyTimeZone,
+    companyTimeZoneAvailable,
+    slug,
+  } = useCompanySlug();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -319,7 +337,11 @@ export default function CompanySettings() {
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
   const [reservationLateToleranceMinutes, setReservationLateToleranceMinutes] = useState(10);
+  const [reportTimeZone, setReportTimeZone] = useState(companyTimeZone);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [heroMediaUrl, setHeroMediaUrl] = useState('');
+  const [heroMediaType, setHeroMediaType] = useState<HeroMediaType | ''>('');
+  const [uploadingHeroMedia, setUploadingHeroMedia] = useState(false);
   const [noticeText, setNoticeText] = useState('');
   const [noticeImageUrl, setNoticeImageUrl] = useState('');
   const [noticeActive, setNoticeActive] = useState(false);
@@ -332,7 +354,8 @@ export default function CompanySettings() {
   useEffect(() => {
     setInitialized(false);
     setGoogleReviewUrl('');
-  }, [companyId]);
+    setReportTimeZone(companyTimeZone);
+  }, [companyId, companyTimeZone]);
 
   useEffect(() => {
     if (!company || initialized) return;
@@ -341,6 +364,8 @@ export default function CompanySettings() {
     setPayments((company.payment_methods as Record<string, boolean>) || DEFAULT_PAYMENTS);
     setDescription(company.description || '');
     setLogoUrl(company.logo_url || '');
+    setHeroMediaUrl(company.hero_media_url || '');
+    setHeroMediaType((company.hero_media_type as HeroMediaType) || '');
     setAddress(company.address || '');
     setPhone(formatBrazilPhone(company.phone));
     setInstagram(normalizeInstagramHandle(company.instagram));
@@ -480,11 +505,16 @@ export default function CompanySettings() {
         large_party_whatsapp_threshold: normalizedLargePartyThreshold,
         reservation_late_tolerance_minutes: normalizedReservationLateToleranceMinutes,
       } as any;
+      const companyUpdateWithHeroMedia = {
+        ...companyUpdateWithLargePartyThreshold,
+        hero_media_url: publicCustomizationLocked ? (company.hero_media_url ?? null) : (heroMediaUrl || null),
+        hero_media_type: publicCustomizationLocked ? (company.hero_media_type ?? null) : (heroMediaType || null),
+      } as any;
 
       const updateAttempts = [
         {
           payload: {
-            ...companyUpdateWithLargePartyThreshold,
+            ...companyUpdateWithHeroMedia,
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
             show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
             public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
@@ -493,6 +523,8 @@ export default function CompanySettings() {
             public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
           } as any,
           missingColumns: [
+            'hero_media_url',
+            'hero_media_type',
             'public_reservation_exit_prompt_primary_text',
             'public_reservation_exit_prompt_primary_text_size',
             'public_reservation_exit_prompt_secondary_text',
@@ -603,9 +635,29 @@ export default function CompanySettings() {
 
         if (noticeError) throw noticeError;
       }
+
+      // Keep the timezone write last. If any earlier settings operation fails,
+      // report caches remain aligned with the timezone that is still stored.
+      if (companyTimeZoneAvailable) {
+        const timeZoneResult = await supabase
+          .from('companies' as any)
+          .update({ time_zone: reportTimeZone } as any)
+          .eq('id', companyId)
+          .select('id')
+          .maybeSingle();
+
+        if (timeZoneResult.error) throw timeZoneResult.error;
+      }
     },
     onSuccess: () => {
+      if (companyTimeZoneAvailable && reportTimeZone !== companyTimeZone) {
+        // Date presets and server-side day boundaries depend on this value.
+        // Removing the inactive report queries prevents even a brief render of
+        // data generated with the previous timezone after navigation.
+        removeTimeZoneDependentReportQueries(qc, companyId);
+      }
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
+      qc.invalidateQueries({ queryKey: ['company-by-slug', slug] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
@@ -844,6 +896,51 @@ export default function CompanySettings() {
       toast.error(`Erro ao enviar imagem: ${error.message}`);
     } finally {
       setUploadingNoticeImage(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleHeroMediaUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file || publicCustomizationLocked) {
+      event.target.value = '';
+      return;
+    }
+
+    const validation = validateHeroMediaFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error);
+      event.target.value = '';
+      return;
+    }
+
+    setUploadingHeroMedia(true);
+
+    try {
+      const extension = (file.name.split('.').pop() || (validation.type === 'video' ? 'mp4' : 'png')).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      const slugBase = slugify(slug || companyName || 'empresa');
+      const filePath = `company-hero-media/${companyId}/${slugBase || 'empresa'}-${Date.now()}.${extension}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('system-assets')
+        .upload(filePath, file, { upsert: false });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('system-assets')
+        .getPublicUrl(filePath);
+
+      setHeroMediaUrl(publicUrlData.publicUrl);
+      setHeroMediaType(validation.type);
+      toast.success('Mídia de fundo enviada com sucesso');
+    } catch (error: any) {
+      toast.error(`Erro ao enviar mídia de fundo: ${error.message}`);
+    } finally {
+      setUploadingHeroMedia(false);
       event.target.value = '';
     }
   };
@@ -1559,6 +1656,37 @@ export default function CompanySettings() {
                       <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>
                     )}
                   </div>
+
+                  <div className={settingsFieldGroupClassName}>
+                    <Label htmlFor="company-settings-report-time-zone" className={settingsLabelClassName}>
+                      <Clock className="h-4 w-4" aria-hidden="true" /> Fuso horário dos relatórios
+                    </Label>
+                    <Select
+                      value={reportTimeZone}
+                      onValueChange={setReportTimeZone}
+                      disabled={!companyTimeZoneAvailable}
+                    >
+                      <SelectTrigger
+                        id="company-settings-report-time-zone"
+                        className={settingsFieldClassName}
+                        aria-label="Fuso horário dos relatórios"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REPORT_TIME_ZONE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {companyTimeZoneAvailable
+                        ? 'Define os limites de dia e horário usados nos relatórios da unidade.'
+                        : 'O fuso poderá ser configurado depois que a nova base de relatórios for instalada.'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1574,6 +1702,92 @@ export default function CompanySettings() {
                 />
                 {publicCustomizationLocked && (
                   <p className="mt-1 text-xs text-muted-foreground">A descrição pública fica bloqueada quando a página pública customizada está desativada.</p>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
+                <div>
+                  <Label className="flex items-center gap-1.5 text-base font-semibold">
+                    <ImageIcon className="h-4 w-4 text-primary" />
+                    Mídia de fundo do banner
+                  </Label>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Foto ou vídeo exibido atrás do topo da página pública. Os botões de reserva, o título e o logo continuam sempre em destaque por cima da mídia.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept="image/*,video/mp4,video/webm"
+                      onChange={handleHeroMediaUpload}
+                      disabled={publicCustomizationLocked || uploadingHeroMedia}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={publicCustomizationLocked || uploadingHeroMedia}
+                      className="pointer-events-none gap-2 bg-white"
+                    >
+                      {uploadingHeroMedia ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : heroMediaType === 'video' ? (
+                        <Video className="h-4 w-4" />
+                      ) : (
+                        <ImageIcon className="h-4 w-4" />
+                      )}
+                      {uploadingHeroMedia ? 'Enviando...' : 'Enviar foto ou vídeo'}
+                    </Button>
+                  </div>
+
+                  {heroMediaUrl && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={publicCustomizationLocked || uploadingHeroMedia}
+                      onClick={() => {
+                        setHeroMediaUrl('');
+                        setHeroMediaType('');
+                      }}
+                      className="gap-2 text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Remover
+                    </Button>
+                  )}
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Foto: recomendado 1920×1080px, até 5MB. Vídeo: MP4, 1920×1080px, 6 a 12 segundos em loop e sem áudio, até 15MB.
+                </p>
+
+                <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
+                  {heroMediaUrl && heroMediaType === 'video' ? (
+                    <video
+                      src={heroMediaUrl}
+                      className="max-h-48 w-full rounded-lg object-contain"
+                      muted
+                      loop
+                      autoPlay
+                      playsInline
+                    />
+                  ) : heroMediaUrl ? (
+                    <img
+                      src={heroMediaUrl}
+                      alt="Prévia da mídia de fundo do banner"
+                      className="max-h-48 w-full rounded-lg object-contain"
+                    />
+                  ) : (
+                    <p className="text-center text-xs text-muted-foreground">Nenhuma mídia de fundo enviada ainda.</p>
+                  )}
+                </div>
+
+                {publicCustomizationLocked && (
+                  <p className="text-xs text-muted-foreground">
+                    A mídia de fundo do banner fica bloqueada quando a página pública customizada está desativada.
+                  </p>
                 )}
               </div>
 

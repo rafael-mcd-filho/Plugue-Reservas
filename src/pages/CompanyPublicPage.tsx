@@ -527,6 +527,8 @@ export default function CompanyPublicPage() {
   const publicReservationExitPromptSecondaryTextSize = (company as any)?.public_reservation_exit_prompt_secondary_text_size ?? null;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
+  const showHeroMedia = customPublicPageEnabled && !!(company as any)?.hero_media_url;
+  const heroMediaType = (company as any)?.hero_media_type === 'video' ? 'video' : 'image';
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
   const activePublicNotice = publicNotice && publicNotice.id !== dismissedNoticeId ? publicNotice : null;
   const getOpeningHourForDate = (date: Date) => {
@@ -746,6 +748,35 @@ export default function CompanyPublicPage() {
         className="relative overflow-hidden px-4 pb-8 pt-5 text-primary-foreground md:pb-14 md:pt-6"
         style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
       >
+        {showHeroMedia && (
+          <>
+            {heroMediaType === 'video' ? (
+              <video
+                key={(company as any)?.hero_media_url}
+                src={(company as any)?.hero_media_url}
+                className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+                autoPlay
+                loop
+                muted
+                playsInline
+              />
+            ) : (
+              <img
+                src={(company as any)?.hero_media_url}
+                alt=""
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+              />
+            )}
+            <div
+              className="pointer-events-none absolute inset-0 z-[1]"
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(10,7,3,0.78) 0%, rgba(10,7,3,0.5) 35%, rgba(10,7,3,0.58) 70%, rgba(10,7,3,0.88) 100%)',
+              }}
+            />
+          </>
+        )}
         <div
           className="pointer-events-none absolute inset-0"
           style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
