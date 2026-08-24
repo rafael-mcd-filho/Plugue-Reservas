@@ -202,6 +202,33 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const companyReportsNavItems: NavItem[] = slug
     ? [
         {
+          label: 'Demanda',
+          description: 'Procura, jornada e perfil dos grupos',
+          icon: Activity,
+          path: `/${slug}/admin/relatorios/demanda-conversao`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'dashboard_view',
+          requiredFeature: 'advanced_reports',
+        },
+        {
+          label: 'Perdas',
+          description: 'Check-ins, faltas e cancelamentos',
+          icon: ShieldAlert,
+          path: `/${slug}/admin/relatorios/comparecimento-perdas`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'dashboard_view',
+          requiredFeature: 'advanced_reports',
+        },
+        {
+          label: 'Capacidade',
+          description: 'Demanda planejada e pressão por horário',
+          icon: Grid3X3,
+          path: `/${slug}/admin/relatorios/ocupacao-capacidade`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'dashboard_view',
+          requiredFeature: 'advanced_reports',
+        },
+        {
           label: 'Recorr\u00EAncia',
           description: 'Retorno e frequ\u00EAncia dos clientes',
           icon: Repeat2,
@@ -557,6 +584,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         )}
       >
         <item.icon
+          aria-hidden="true"
           className={cn(
             'h-4 w-4 shrink-0 transition-colors',
             isActive ? 'text-primary-foreground' : 'text-sidebar-foreground/45 group-hover:text-sidebar-foreground/80',
@@ -618,6 +646,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             )}
           >
             <BarChart3
+              aria-hidden="true"
               className={cn(
                 'h-4 w-4 shrink-0 transition-colors',
                 isReportsNavActive

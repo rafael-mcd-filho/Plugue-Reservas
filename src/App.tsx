@@ -6,18 +6,21 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { CompanySlugProvider, useCompanySlug } from "@/contexts/CompanySlugContext";
+import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
+import CompanyFeatureRouteGate from "@/components/company/CompanyFeatureRouteGate";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyPermissions } from "@/hooks/useCompanyPermissions";
-import { useCompanyFeatureFlags } from "@/hooks/useCompanyFeatures";
 import type { AppRole, CompanyPanelPermission } from "@/lib/companyPermissions";
 import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
+const DemandConversionReport = lazyWithReload(() => import("@/pages/DemandConversionReport"));
+const AttendanceLossesReport = lazyWithReload(() => import("@/pages/AttendanceLossesReport"));
+const OccupancyCapacityReport = lazyWithReload(() => import("@/pages/OccupancyCapacityReport"));
 const CustomerRecurrenceReport = lazyWithReload(() => import("@/pages/CustomerRecurrenceReport"));
 const Reservations = lazyWithReload(() => import("@/pages/Reservations"));
 const TableMap = lazyWithReload(() => import("@/pages/TableMap"));
@@ -185,7 +188,10 @@ function CompanyAdminRoute({
     <ProtectedRoute allowedRoles={allowedRoles}>
       <CompanySlugProvider>
         <CompanyPermissionRouteGate requiredCompanyPermission={requiredCompanyPermission}>
-          <CompanyFeatureRouteGate requiredCompanyFeature={requiredCompanyFeature}>
+          <CompanyFeatureRouteGate
+            requiredCompanyFeature={requiredCompanyFeature}
+            loadingFallback={<PanelPageSkeleton />}
+          >
             {content}
           </CompanyFeatureRouteGate>
         </CompanyPermissionRouteGate>
@@ -209,27 +215,6 @@ function CompanyPermissionRouteGate({
   if (permissionsLoading) return <PanelPageSkeleton />;
   if (!hasPermission(requiredCompanyPermission)) {
     return <Navigate to={locationState?.fromLogin ? "/" : "/acesso-negado"} replace />;
-  }
-
-  return <>{children}</>;
-}
-
-function CompanyFeatureRouteGate({
-  requiredCompanyFeature,
-  children,
-}: {
-  requiredCompanyFeature?: CompanyFeatureKey;
-  children: ReactNode;
-}) {
-  const { companyId } = useCompanySlug();
-  const { data: featureFlags, isLoading } = useCompanyFeatureFlags(
-    requiredCompanyFeature ? companyId : undefined,
-  );
-
-  if (!requiredCompanyFeature) return <>{children}</>;
-  if (isLoading) return <PanelPageSkeleton />;
-  if (featureFlags?.features[requiredCompanyFeature] === false) {
-    return <Navigate to="/acesso-negado" replace />;
   }
 
   return <>{children}</>;
@@ -509,6 +494,42 @@ const App = () => (
                 element={
                   <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
                     <CompanyAdminHome />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/relatorios/demanda-conversao"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="dashboard_view"
+                    requiredCompanyFeature="advanced_reports"
+                  >
+                    <DemandConversionReport />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/relatorios/comparecimento-perdas"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="dashboard_view"
+                    requiredCompanyFeature="advanced_reports"
+                  >
+                    <AttendanceLossesReport />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/relatorios/ocupacao-capacidade"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "superadmin"]}
+                    requiredCompanyPermission="dashboard_view"
+                    requiredCompanyFeature="advanced_reports"
+                  >
+                    <OccupancyCapacityReport />
                   </CompanyAdminRoute>
                 }
               />

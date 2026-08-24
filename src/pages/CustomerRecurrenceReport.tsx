@@ -58,6 +58,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
+import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
@@ -564,138 +565,119 @@ export default function CustomerRecurrenceReport() {
   };
 
   const filterBar = (
-    <Card className="border-border bg-card/95 shadow-sm">
-      <CardContent className="p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:max-w-[620px]">
-            <div className="space-y-1.5">
-              <div className="flex h-6 items-center gap-1">
-                <Label htmlFor="recurrence-period">Período da análise</Label>
-                <InfoTooltip
-                  content="Nos períodos mensais, a comparação usa o mesmo recorte do mês anterior. No período personalizado, usa um intervalo anterior com a mesma duração."
-                  ariaLabel="Entender a comparação entre períodos"
-                  interaction="popover"
-                />
-              </div>
-              <Select value={periodMode} onValueChange={(value) => handlePeriodModeChange(value as PeriodMode)}>
-                <SelectTrigger id="recurrence-period" className="h-11" aria-label="Período da análise">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="current_month">Mês atual</SelectItem>
-                  <SelectItem value="last_month">Mês anterior</SelectItem>
-                  <SelectItem value="custom">Período personalizado</SelectItem>
-                </SelectContent>
-              </Select>
+    <Card className="border-border/80 bg-card shadow-sm">
+      <CardContent className="p-3">
+        <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(160px,180px)_minmax(200px,1fr)_minmax(240px,1.15fr)_36px] lg:items-start">
+          <div className="min-w-0 space-y-1">
+            <div className="flex h-4 items-center gap-1">
+              <Label htmlFor="recurrence-period" className="text-xs">Período da análise</Label>
+              <InfoTooltip
+                content="Nos períodos mensais, a comparação usa o mesmo recorte do mês anterior. No período personalizado, usa um intervalo anterior com a mesma duração."
+                ariaLabel="Entender a comparação entre períodos"
+                interaction="popover"
+              />
             </div>
-
-            {periodMode === 'custom' ? (
-              <div
-                className="space-y-1.5"
-                role="group"
-                aria-labelledby="recurrence-custom-range-label"
-              >
-                <div className="flex h-6 items-center">
-                  <p id="recurrence-custom-range-label" className="text-sm font-medium leading-none">
-                    Intervalo personalizado
-                  </p>
-                </div>
-                <DateRangePicker
-                  value={customRange}
-                  onChange={handleCustomRangeChange}
-                  className="h-11 w-full"
-                  align="start"
-                />
-                {customPeriodError && (
-                  <p className="text-xs leading-relaxed text-destructive" role="alert">
-                    {customPeriodError}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <div className="flex h-6 items-center">
-                  <Label>Intervalo considerado</Label>
-                </div>
-                <div className="flex h-11 items-center rounded-md border border-border bg-muted/25 px-3 text-sm tabular-nums text-muted-foreground">
-                  {format(effectiveRange.from!, 'dd/MM/yyyy')} – {format(effectiveRange.to!, 'dd/MM/yyyy')}
-                </div>
-              </div>
-            )}
+            <Select value={periodMode} onValueChange={(value) => handlePeriodModeChange(value as PeriodMode)}>
+              <SelectTrigger id="recurrence-period" className="h-9 w-full" aria-label="Período da análise">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="current_month">Mês atual</SelectItem>
+                <SelectItem value="last_month">Mês anterior</SelectItem>
+                <SelectItem value="custom">Período personalizado</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between xl:justify-end">
-            <div className="w-full space-y-1.5 sm:w-auto sm:min-w-[284px]">
-              <div className="flex h-6 items-center gap-1">
-                <Label htmlFor="include-companions" className="cursor-pointer text-sm">
-                  Incluir acompanhantes
-                </Label>
-                <InfoTooltip
-                  content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
-                  ariaLabel="Entender a inclusão de acompanhantes"
-                  interaction="popover"
-                />
-              </div>
-              <div className="flex h-11 items-center gap-3 rounded-md border border-border bg-muted/20 px-3">
-                <Switch
-                  id="include-companions"
-                  checked={includeCompanions}
-                  onCheckedChange={handleIncludeCompanionsChange}
-                  aria-describedby="include-companions-help"
-                />
-                <p id="include-companions-help" className="text-[11px] text-muted-foreground">
-                  Apenas os identificados por telefone
+          {periodMode === 'custom' ? (
+            <div
+              className="min-w-0 space-y-1"
+              role="group"
+              aria-labelledby="recurrence-custom-range-label"
+            >
+              <div className="flex h-4 items-center">
+                <p id="recurrence-custom-range-label" className="text-xs font-medium leading-none">
+                  Intervalo personalizado
                 </p>
               </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="shrink-0 self-end"
-              onClick={() => reportQuery.refetch()}
-              disabled={reportQuery.isFetching || isSearchPending || !!customPeriodError}
-              aria-label="Atualizar relatório"
-              title="Atualizar relatório"
-            >
-              <RefreshCcw
-                className={cn('h-4 w-4', reportQuery.isFetching && 'animate-spin motion-reduce:animate-none')}
-                aria-hidden="true"
+              <DateRangePicker
+                value={customRange}
+                onChange={handleCustomRangeChange}
+                className="h-9 w-full"
+                align="start"
               />
-            </Button>
+              {customPeriodError && (
+                <p className="text-xs leading-relaxed text-destructive" role="alert">
+                  {customPeriodError}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="min-w-0 space-y-1">
+              <div className="flex h-4 items-center">
+                <span className="text-xs font-medium">Intervalo considerado</span>
+              </div>
+              <div className="flex h-9 items-center rounded-md border border-border bg-muted/25 px-3 text-xs tabular-nums text-muted-foreground">
+                {format(effectiveRange.from!, 'dd/MM/yyyy')} – {format(effectiveRange.to!, 'dd/MM/yyyy')}
+              </div>
+            </div>
+          )}
+
+          <div className="min-w-0 space-y-1">
+            <div className="flex h-4 items-center gap-1">
+              <Label htmlFor="include-companions" className="cursor-pointer text-xs">
+                Incluir acompanhantes
+              </Label>
+              <InfoTooltip
+                content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
+                ariaLabel="Entender a inclusão de acompanhantes"
+                interaction="popover"
+              />
+            </div>
+            <div className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted/20 px-3">
+              <Switch
+                id="include-companions"
+                checked={includeCompanions}
+                onCheckedChange={handleIncludeCompanionsChange}
+                aria-describedby="include-companions-help"
+              />
+              <p id="include-companions-help" className="truncate text-[10px] text-muted-foreground">
+                Apenas os identificados por telefone
+              </p>
+            </div>
           </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-9 w-9 shrink-0 justify-self-end md:mt-5 md:self-start"
+            onClick={() => reportQuery.refetch()}
+            disabled={reportQuery.isFetching || isSearchPending || !!customPeriodError}
+            aria-label="Atualizar relatório"
+            title="Atualizar relatório"
+          >
+            <RefreshCcw
+              className={cn('h-4 w-4', reportQuery.isFetching && 'animate-spin motion-reduce:animate-none')}
+              aria-hidden="true"
+            />
+          </Button>
         </div>
       </CardContent>
     </Card>
   );
 
   return (
-    <div
-      className="min-w-0 space-y-6 overflow-x-hidden"
-      aria-busy={reportQuery.isFetching || isSearchPending}
+    <ReportShell
+      title="Recorrência de clientes"
+      description="Entenda quem voltou, quem está começando um relacionamento e quais clientes já criaram hábito."
+      icon={Repeat2}
+      eyebrow="CRM de retenção"
+      filters={filterBar}
+      updatedAt={report?.meta.generated_at}
+      isRefreshing={isSearchPending || (reportQuery.isFetching && !reportQuery.isLoading)}
+      ariaBusy={reportQuery.isFetching || isSearchPending}
     >
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">Recorrência de clientes</h1>
-            <Badge variant="outline" className="border-primary/20 bg-primary-soft text-accent-foreground">
-              CRM de retenção
-            </Badge>
-          </div>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Entenda quem voltou, quem está começando um relacionamento e quais clientes já criaram hábito.
-          </p>
-        </div>
-        {(isSearchPending || (reportQuery.isFetching && !reportQuery.isLoading)) && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            {isSearchPending ? 'Aplicando busca…' : 'Atualizando dados…'}
-          </div>
-        )}
-      </header>
-
-      {filterBar}
 
       {reportQuery.isError && !report && (
         <Alert variant="destructive">
@@ -1308,6 +1290,6 @@ export default function CustomerRecurrenceReport() {
             && refreshed.data.canonical_visit_count !== lead.total_reservations;
         }}
       />
-    </div>
+    </ReportShell>
   );
 }

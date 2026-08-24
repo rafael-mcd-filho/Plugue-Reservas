@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   MapPin,
+  Navigation,
   Phone,
   QrCode,
   Star,
@@ -23,7 +24,6 @@ import { RichTextContent } from '@/components/ui/rich-text-editor';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import { supabase } from '@/integrations/supabase/client';
-import { getGoogleMapsEmbedUrl } from '@/lib/maps';
 import {
   buildInstagramProfileUrl,
   formatInstagramHandleLabel,
@@ -153,7 +153,7 @@ const PAYMENT_LABELS: Record<string, { label: string; icon: typeof CreditCard }>
   credito: { label: 'Cr\u00E9dito', icon: CreditCard },
   debito: { label: 'D\u00E9bito', icon: CreditCard },
   pix: { label: 'Pix', icon: QrCode },
-  vale_refeicao: { label: 'Vale Refei\u00E7\u00E3o', icon: Wallet },
+  vale_refeicao: { label: 'Vale Refeiç\u00E3o', icon: Wallet },
 };
 
 const DAY_MAP: Record<string, number> = {
@@ -170,6 +170,24 @@ const DAY_NAMES_BY_INDEX = Object.entries(DAY_MAP).reduce<Record<number, string>
   acc[index] = day;
   return acc;
 }, {});
+
+const FULL_DAY_NAME_BY_ABBR: Record<string, string> = {
+  Seg: 'Segunda',
+  Ter: 'Terça',
+  Qua: 'Quarta',
+  Qui: 'Quinta',
+  Sex: 'Sexta',
+  'Sáb': 'Sábado',
+  Dom: 'Domingo',
+};
+
+interface OpeningHourGroup {
+  label: string;
+  closed: boolean;
+  open: string;
+  close: string;
+  isToday: boolean;
+}
 
 interface OpeningSlot {
   day: string;
@@ -238,31 +256,39 @@ function describeOpeningDay(slot: OpeningSlot, now: Date) {
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
 
-  if (isSameCalendarDate(slot.start, now)) return 'Aberto hoje';
   if (isSameCalendarDate(slot.start, tomorrow)) return 'Abre amanhã';
   return `Abre ${format(slot.start, "EEEE, dd/MM", { locale: ptBR })}`;
+}
+
+function hasUniformOpenHours(hours: OpeningHour[]) {
+  const openDays = hours.filter((hour) => !hour.closed);
+  if (openDays.length === 0) return false;
+
+  const [first, ...rest] = openDays;
+  return rest.every((hour) => hour.open === first.open && hour.close === first.close);
 }
 
 function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null {
   if (hours.length === 0) return null;
 
+  const uniformSuffix = hasUniformOpenHours(hours) ? ' · todos os dias' : '';
   const slots = buildOpeningSlots(hours, now);
   const currentSlot = slots.find((slot) => now >= slot.start && now < slot.end);
 
   if (currentSlot) {
     return {
-      title: 'Aberto hoje',
-      description: null,
+      title: 'Aberto agora',
+      description: `Fecha às ${currentSlot.close}${uniformSuffix}`,
       variant: 'open',
     };
   }
 
-  const todaySlot = slots.find((slot) => isSameCalendarDate(slot.start, now));
-  if (todaySlot) {
+  const upcomingTodaySlot = slots.find((slot) => slot.start > now && isSameCalendarDate(slot.start, now));
+  if (upcomingTodaySlot) {
     return {
-      title: 'Aberto hoje',
-      description: null,
-      variant: 'open',
+      title: 'Abre hoje',
+      description: `Abre às ${upcomingTodaySlot.open}${uniformSuffix}`,
+      variant: 'closed',
     };
   }
 
@@ -282,11 +308,70 @@ function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null
   };
 }
 
+function buildOpeningHourGroups(hours: OpeningHour[], now: Date): OpeningHourGroup[] {
+  const todayIndex = now.getDay();
+  const groups: { startDay: string; endDay: string; closed: boolean; open: string; close: string; isToday: boolean }[] = [];
+
+  for (const hour of hours) {
+    const isToday = getDayIndexFromName(hour.day) === todayIndex;
+    const last = groups[groups.length - 1];
+    const sameAsLast = last
+      && !isToday
+      && !last.isToday
+      && last.closed === hour.closed
+      && last.open === hour.open
+      && last.close === hour.close;
+
+    if (sameAsLast) {
+      last.endDay = hour.day;
+    } else {
+      groups.push({
+        startDay: hour.day,
+        endDay: hour.day,
+        closed: hour.closed,
+        open: hour.open,
+        close: hour.close,
+        isToday,
+      });
+    }
+  }
+
+  return groups.map((group) => {
+    if (group.isToday) {
+      return {
+        label: `${FULL_DAY_NAME_BY_ABBR[group.startDay] || group.startDay} · hoje`,
+        closed: group.closed,
+        open: group.open,
+        close: group.close,
+        isToday: true,
+      };
+    }
+
+    return {
+      label: group.startDay === group.endDay ? group.startDay : `${group.startDay} a ${group.endDay}`,
+      closed: group.closed,
+      open: group.open,
+      close: group.close,
+      isToday: false,
+    };
+  });
+}
+
+function flattenAddress(address: string | null | undefined) {
+  if (!address) return '';
+
+  return address
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
 function getGoogleMapsOpenUrl(company: Company | null) {
   if (!company) return null;
 
   if (company.address) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.address)}`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(flattenAddress(company.address))}`;
   }
 
   if (company.google_maps_url && !company.google_maps_url.includes('/embed')) {
@@ -295,6 +380,24 @@ function getGoogleMapsOpenUrl(company: Company | null) {
 
   if (company.name) {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(company.name)}`;
+  }
+
+  return null;
+}
+
+function getGoogleMapsDirectionsUrl(company: Company | null) {
+  if (!company) return null;
+
+  if (company.address) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(flattenAddress(company.address))}`;
+  }
+
+  if (company.google_maps_url && !company.google_maps_url.includes('/embed')) {
+    return company.google_maps_url;
+  }
+
+  if (company.name) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(company.name)}`;
   }
 
   return null;
@@ -410,6 +513,9 @@ export default function CompanyPublicPage() {
   const [showReservation, setShowReservation] = useState(false);
   const [statusNow, setStatusNow] = useState(() => new Date());
   const [dismissedNoticeId, setDismissedNoticeId] = useState<string | null>(null);
+  const [isHoursExpanded, setIsHoursExpanded] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= 768,
+  );
 
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
@@ -510,7 +616,10 @@ export default function CompanyPublicPage() {
   const instagramUrl = buildInstagramProfileUrl(company?.instagram);
   const instagramLabel = useMemo(() => formatInstagramHandleLabel(company?.instagram), [company?.instagram]);
   const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
-  const mapsEmbedUrl = getGoogleMapsEmbedUrl(company?.google_maps_url, company?.address || company?.name || null);
+  const googleMapsDirectionsUrl = getGoogleMapsDirectionsUrl(company);
+  const addressLines = (company?.address || '').split('\n');
+  const addressTitle = addressLines[0]?.trim() || '';
+  const addressSubtitle = addressLines.slice(1).join('\n').trim();
   const openingHours = useMemo(
     () => (((company?.opening_hours as any[]) || [])) as OpeningHour[],
     [company?.opening_hours],
@@ -542,6 +651,7 @@ export default function CompanyPublicPage() {
     return !hours || hours.closed || isAllDayBlocked(iso);
   };
   const openingStatus = useMemo(() => getOpeningStatus(openingHours, statusNow), [openingHours, statusNow]);
+  const openingHourGroups = useMemo(() => buildOpeningHourGroups(openingHours, statusNow), [openingHours, statusNow]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setStatusNow(new Date()), 60_000);
@@ -557,7 +667,7 @@ export default function CompanyPublicPage() {
     const seoDescription = truncateSeoText(
       descriptionText
         ? descriptionText
-        : `Página de reserva do ${company.name}${company.address ? ` em ${company.address}` : ''}. Consulte horários, localização e faça sua reserva online.`,
+        : `Página de reserva do ${company.name}${company.address ? ` em ${flattenAddress(company.address)}` : ''}. Consulte horários, localização e faça sua reserva online.`,
     );
     const seoImage = toAbsoluteUrl(company.logo_url);
     const sameAs = [instagramUrl, googleMapsSearchUrl].filter(Boolean) as string[];
@@ -617,7 +727,7 @@ export default function CompanyPublicPage() {
       address: company.address
         ? compactJsonLd({
           '@type': 'PostalAddress',
-          streetAddress: company.address,
+          streetAddress: flattenAddress(company.address),
         })
         : null,
       sameAs,
@@ -870,10 +980,10 @@ export default function CompanyPublicPage() {
       </div>
 
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
-        <div className="grid items-stretch gap-4 md:grid-cols-2 md:gap-6">
+        <div className="grid items-start gap-4 md:grid-cols-2 md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="h-full animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
-              <CardContent className="h-full pb-5 pt-5">
+            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
+              <CardContent className="pb-5 pt-5">
                 <div>
                   <div>
                     <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -881,108 +991,123 @@ export default function CompanyPublicPage() {
                       {'Hor\u00E1rio de Funcionamento'}
                     </h3>
                     {openingStatus && (
-                      <div
-                        className={cn(
-                          'mt-3 rounded-md border px-3 py-2.5',
-                          openingStatus.variant === 'open' && 'border-emerald-200 bg-emerald-50 text-emerald-950',
-                          openingStatus.variant === 'closed' && 'border-amber-200 bg-amber-50 text-amber-950',
-                        )}
-                        role="status"
-                      >
-                        <p className="text-sm font-semibold">{openingStatus.title}</p>
-                        {openingStatus.description && (
-                          <p
-                            className={cn(
-                              'mt-0.5 text-xs leading-relaxed',
-                              openingStatus.variant === 'open' && 'text-emerald-800',
-                              openingStatus.variant === 'closed' && 'text-amber-800',
-                            )}
+                      <div className="mt-3" role="status">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                'h-2 w-2 shrink-0 rounded-full',
+                                openingStatus.variant === 'open' && 'bg-emerald-500',
+                                openingStatus.variant === 'closed' && 'bg-amber-500',
+                              )}
+                              aria-hidden="true"
+                            />
+                            <p className="text-sm font-bold text-foreground">{openingStatus.title}</p>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsHoursExpanded((current) => !current)}
+                            className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                            aria-expanded={isHoursExpanded}
                           >
-                            {openingStatus.description}
-                          </p>
+                            {isHoursExpanded ? 'Recolher' : 'Ver hor\u00E1rios'}
+                          </button>
+                        </div>
+                        {openingStatus.description && (
+                          <p className="mt-1 pl-4 text-xs text-muted-foreground">{openingStatus.description}</p>
                         )}
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="mt-4 space-y-0">
-                  {openingHours.map((hour) => {
-                    const isToday = getDayIndexFromName(hour.day) === new Date().getDay();
-                    return (
-                    <div
-                      key={hour.day}
-                      className={`flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 ${isToday ? 'font-semibold text-foreground' : 'text-foreground'}`}
-                    >
-                      <span className={`text-sm ${isToday ? 'font-bold text-primary' : ''}`}>{hour.day}</span>
-                      <span className={`text-sm ${hour.closed ? 'text-muted-foreground' : ''}`}>
-                        {hour.closed ? 'Fechado' : `${hour.open} - ${hour.close}`}
-                      </span>
+                <div
+                  className={cn(
+                    'grid transition-[grid-template-rows] duration-300 ease-in-out',
+                    isHoursExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                  )}
+                  aria-hidden={!isHoursExpanded}
+                >
+                  <div className="overflow-hidden">
+                    <div className="mt-4 md:columns-2 md:gap-x-8">
+                      {openingHourGroups.map((group) => (
+                        <div
+                          key={group.label}
+                          className="flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 break-inside-avoid"
+                        >
+                          <span className={cn('text-sm', group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
+                            {group.label}
+                          </span>
+                          <span className={cn('text-sm', group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
+                            {group.closed ? 'Fechado' : `${group.open} \u2013 ${group.close}`}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                    );
-                  })}
+                  </div>
                 </div>
               </CardContent>
             </Card>
           )}
 
           {(company.phone || company.address) && (
-            <Card className="h-full animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
-              <CardContent className="flex h-full flex-col gap-4 pb-5 pt-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                      <MapPin className="h-4 w-4" />
-                      {'Localiza\u00E7\u00E3o e Contato'}
-                    </h3>
-                    {company.address && (
-                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{company.address}</p>
+            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md [animation-delay:60ms]">
+              <CardContent className="flex flex-col gap-4 pb-5 pt-5 md:gap-6 md:pb-4 md:pt-8">
+                {addressTitle && (
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-[21px] w-[21px] shrink-0 text-primary" />
+                    <div>
+                      <p className="text-[18px] font-semibold leading-snug text-foreground">{addressTitle}</p>
+                      {addressSubtitle && (
+                        <p className="whitespace-pre-line text-sm text-muted-foreground">{addressSubtitle}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(googleMapsDirectionsUrl || googleMapsSearchUrl) && (
+                  <div className="flex flex-wrap gap-2">
+                    {googleMapsDirectionsUrl && (
+                      <a
+                        href={googleMapsDirectionsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-1 items-center justify-center gap-2 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90"
+                      >
+                        <Navigation className="h-4 w-4" />
+                        <span className="whitespace-nowrap">Traçar rota</span>
+                      </a>
+                    )}
+                    {googleMapsSearchUrl && (
+                      <a
+                        href={googleMapsSearchUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-1 items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
+                      >
+                        Abrir no Maps
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
                     )}
                   </div>
-                  {company.phone && (
-                    <a href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`} className="shrink-0 text-sm font-medium text-primary hover:text-primary/80">
-                      Ligar
-                    </a>
-                  )}
-                </div>
+                )}
+
+                {company.address && company.phone && <div className="border-t border-border" />}
 
                 {company.phone && (
-                  <a href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`} className="flex items-center gap-3 text-foreground transition-colors hover:text-primary">
-                    <Phone className="h-5 w-5 text-primary" />
-                    <span className="text-base font-medium">{formatBrazilPhone(company.phone)}</span>
-                  </a>
-                )}
-
-                {mapsEmbedUrl && (
-                  <div className="min-h-[180px] flex-1 overflow-hidden rounded-md border border-border">
-                    <iframe
-                      src={mapsEmbedUrl}
-                      width="100%"
-                      height="100%"
-                      className="h-full min-h-[180px]"
-                      style={{ border: 0 }}
-                      allowFullScreen
-                      loading="lazy"
-                      referrerPolicy="no-referrer-when-downgrade"
-                      sandbox="allow-scripts allow-same-origin allow-popups"
-                      title={'Localiza\u00E7\u00E3o'}
-                    />
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Telefone</p>
+                      <p className="text-base font-semibold text-foreground">{formatBrazilPhone(company.phone)}</p>
+                    </div>
+                    <a
+                      href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`}
+                      className="flex shrink-0 items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
+                    >
+                      <Phone className="h-4 w-4" />
+                      Ligar
+                    </a>
                   </div>
-                )}
-
-                {googleMapsSearchUrl && (
-                  <a
-                    href={googleMapsSearchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50"
-                  >
-                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
-                      Abrir no Google Maps
-                    </span>
-                    <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                  </a>
                 )}
               </CardContent>
             </Card>
@@ -991,23 +1116,26 @@ export default function CompanyPublicPage() {
 
         {acceptedPayments.length > 0 && (
           <Card className="rounded-lg border-none shadow-sm">
-            <CardContent className="pb-5 pt-5 text-center">
-              <h3 className="mb-4 flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+            <CardContent className="pb-5 pt-5">
+              <h3 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
                 <CreditCard className="h-4 w-4" />
                 Formas de Pagamento
               </h3>
-              <div className="flex flex-wrap justify-center gap-2">
+              <div className="flex flex-nowrap justify-center gap-1.5 overflow-x-auto sm:gap-2">
                 {acceptedPayments.map(([key]) => {
                   const paymentMethod = PAYMENT_LABELS[key];
                   const Icon = paymentMethod?.icon || CreditCard;
                   return (
-                    <div key={key} className="flex items-center gap-2.5 rounded-md border border-border bg-background px-3 py-2.5 text-sm">
-                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    <div key={key} className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-xs sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm">
+                      <Icon className="h-3 w-3 shrink-0 text-primary sm:h-3.5 sm:w-3.5" />
                       <span className="text-foreground">{paymentMethod?.label || key}</span>
                     </div>
                   );
                 })}
               </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Cartões, Pix e dinheiro aceitos
+              </p>
             </CardContent>
           </Card>
         )}

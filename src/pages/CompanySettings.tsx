@@ -1638,92 +1638,6 @@ export default function CompanySettings() {
                 )}
               </div>
 
-              <div className="space-y-3 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
-                <div>
-                  <Label className="flex items-center gap-1.5 text-base font-semibold">
-                    <ImageIcon className="h-4 w-4 text-primary" />
-                    Mídia de fundo do banner
-                  </Label>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Foto ou vídeo exibido atrás do topo da página pública. Os botões de reserva, o título e o logo continuam sempre em destaque por cima da mídia.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept="image/*,video/mp4,video/webm"
-                      onChange={handleHeroMediaUpload}
-                      disabled={publicCustomizationLocked || uploadingHeroMedia}
-                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={publicCustomizationLocked || uploadingHeroMedia}
-                      className="pointer-events-none gap-2 bg-white"
-                    >
-                      {uploadingHeroMedia ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : heroMediaType === 'video' ? (
-                        <Video className="h-4 w-4" />
-                      ) : (
-                        <ImageIcon className="h-4 w-4" />
-                      )}
-                      {uploadingHeroMedia ? 'Enviando...' : 'Enviar foto ou vídeo'}
-                    </Button>
-                  </div>
-
-                  {heroMediaUrl && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={publicCustomizationLocked || uploadingHeroMedia}
-                      onClick={() => {
-                        setHeroMediaUrl('');
-                        setHeroMediaType('');
-                      }}
-                      className="gap-2 text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Remover
-                    </Button>
-                  )}
-                </div>
-
-                <p className="text-xs text-muted-foreground">
-                  Foto: recomendado 1920×1080px, até 5MB. Vídeo: MP4, 1920×1080px, 6 a 12 segundos em loop e sem áudio, até 15MB.
-                </p>
-
-                <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
-                  {heroMediaUrl && heroMediaType === 'video' ? (
-                    <video
-                      src={heroMediaUrl}
-                      className="max-h-48 w-full rounded-lg object-contain"
-                      muted
-                      loop
-                      autoPlay
-                      playsInline
-                    />
-                  ) : heroMediaUrl ? (
-                    <img
-                      src={heroMediaUrl}
-                      alt="Prévia da mídia de fundo do banner"
-                      className="max-h-48 w-full rounded-lg object-contain"
-                    />
-                  ) : (
-                    <p className="text-center text-xs text-muted-foreground">Nenhuma mídia de fundo enviada ainda.</p>
-                  )}
-                </div>
-
-                {publicCustomizationLocked && (
-                  <p className="text-xs text-muted-foreground">
-                    A mídia de fundo do banner fica bloqueada quando a página pública customizada está desativada.
-                  </p>
-                )}
-              </div>
-
               {SHOW_PUBLIC_WAITLIST_DIRECT_LINK_SETTINGS && (
                 <div className="border-t border-[rgba(0,0,0,0.08)] pt-4">
                   <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
@@ -1882,6 +1796,97 @@ export default function CompanySettings() {
         </TabsContent>
 
         <TabsContent value="public-page" className="space-y-4">
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <ImageIcon className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Mídia de fundo do banner</CardTitle>
+                  <CardDescription>
+                    Foto ou vídeo exibido atrás do topo da página pública. Os botões de reserva, o título e o logo continuam sempre em destaque por cima da mídia.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="image/*,video/mp4,video/webm"
+                    onChange={handleHeroMediaUpload}
+                    disabled={publicCustomizationLocked || uploadingHeroMedia}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={publicCustomizationLocked || uploadingHeroMedia}
+                    className="pointer-events-none gap-2 bg-white"
+                  >
+                    {uploadingHeroMedia ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : heroMediaType === 'video' ? (
+                      <Video className="h-4 w-4" />
+                    ) : (
+                      <ImageIcon className="h-4 w-4" />
+                    )}
+                    {uploadingHeroMedia ? 'Enviando...' : 'Enviar foto ou vídeo'}
+                  </Button>
+                </div>
+
+                {heroMediaUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={publicCustomizationLocked || uploadingHeroMedia}
+                    onClick={() => {
+                      setHeroMediaUrl('');
+                      setHeroMediaType('');
+                    }}
+                    className="gap-2 text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remover
+                  </Button>
+                )}
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Foto: recomendado 1920×1080px, até 5MB. Vídeo: MP4, 1920×1080px, 6 a 12 segundos em loop e sem áudio, até 15MB.
+              </p>
+
+              <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
+                {heroMediaUrl && heroMediaType === 'video' ? (
+                  <video
+                    src={heroMediaUrl}
+                    className="max-h-48 w-full rounded-lg object-contain"
+                    muted
+                    loop
+                    autoPlay
+                    playsInline
+                  />
+                ) : heroMediaUrl ? (
+                  <img
+                    src={heroMediaUrl}
+                    alt="Prévia da mídia de fundo do banner"
+                    className="max-h-48 w-full rounded-lg object-contain"
+                  />
+                ) : (
+                  <p className="text-center text-xs text-muted-foreground">Nenhuma mídia de fundo enviada ainda.</p>
+                )}
+              </div>
+
+              {publicCustomizationLocked && (
+                <p className="text-xs text-muted-foreground">
+                  A mídia de fundo do banner fica bloqueada quando a página pública customizada está desativada.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
@@ -2110,11 +2115,14 @@ export default function CompanySettings() {
                   name="address"
                   value={address}
                   onChange={(event) => setAddress(event.target.value)}
-                  placeholder="Rua, número, bairro, cidade - UF"
+                  placeholder={'Rua Exemplo, 123\nBairro, Cidade - UF, 00000-000'}
                   rows={3}
                   className={settingsTextAreaClassName}
                   autoComplete="street-address"
                 />
+                <p className="text-xs text-muted-foreground">
+                  A primeira linha aparece em destaque na página pública. Use uma quebra de linha para separar o restante (bairro, cidade, CEP).
+                </p>
               </div>
 
               <div className="space-y-2">

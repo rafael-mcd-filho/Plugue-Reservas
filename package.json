@@ -97,5 +97,21 @@
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
     "vitest": "^3.2.4"
-  }
+  },
+  "description": "Sistema multi-tenant de reservas para restaurantes com pagina publica por empresa, painel administrativo por unidade, painel global de superadmin e automacoes via WhatsApp integradas ao Supabase.",
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rafael-mcd-filho/Plugue-Reservas.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rafael-mcd-filho/Plugue-Reservas/issues"
+  },
+  "homepage": "https://github.com/rafael-mcd-filho/Plugue-Reservas#readme"
 }

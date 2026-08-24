@@ -9,6 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 
 interface DateRangePickerProps {
+  id?: string;
+  ariaLabel?: string;
   value: DateRange | undefined;
   onChange: (range: DateRange | undefined) => void;
   placeholder?: string;
@@ -24,6 +26,8 @@ function formatRangeLabel(range: DateRange | undefined, placeholder: string) {
 }
 
 export function DateRangePicker({
+  id,
+  ariaLabel,
   value,
   onChange,
   placeholder = 'Selecionar período',
@@ -69,6 +73,9 @@ export function DateRangePicker({
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
+          id={id}
+          type="button"
+          aria-label={ariaLabel}
           variant="outline"
           className={cn(
             'h-9 justify-between gap-2 text-left font-normal',
@@ -77,7 +84,7 @@ export function DateRangePicker({
           )}
         >
           <span className="truncate">{formatRangeLabel(displayedRange, placeholder)}</span>
-          <CalendarIcon className="h-4 w-4 shrink-0" />
+          <CalendarIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
