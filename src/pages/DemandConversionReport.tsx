@@ -271,8 +271,9 @@ export default function DemandConversionReport() {
   const partySizeHasData = !!report && report.party_size_bands.some((band) => band.reservations > 0);
 
   useEffect(() => {
+    if (reportQuery.isPlaceholderData) return;
     if (reportPage && reportPage !== page) updateParams({ page: reportPage === 1 ? null : String(reportPage) });
-  }, [reportPage, page, updateParams]);
+  }, [reportPage, page, updateParams, reportQuery.isPlaceholderData]);
 
   return (
     <ReportShell

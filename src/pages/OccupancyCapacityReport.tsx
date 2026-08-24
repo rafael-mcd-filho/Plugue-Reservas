@@ -378,8 +378,9 @@ export default function OccupancyCapacityReport() {
   const noShowHasData = !!report && report.no_show_by_hour.some((row) => row.eligible_reservations > 0);
 
   useEffect(() => {
+    if (reportQuery.isPlaceholderData) return;
     if (report && report.meta.page !== page) setPage(report.meta.page);
-  }, [page, report, setPage]);
+  }, [page, report, setPage, reportQuery.isPlaceholderData]);
 
   const setFilterParam = (key: string, value: string) => {
     setSearchParams((current) => {

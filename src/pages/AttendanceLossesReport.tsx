@@ -369,8 +369,9 @@ export default function AttendanceLossesReport() {
   const totalPages = Math.max(1, Math.ceil((report?.meta.filtered_reservations_total ?? 0) / PAGE_SIZE));
 
   useEffect(() => {
+    if (reportQuery.isPlaceholderData) return;
     if (report && report.meta.page !== page) setPage(report.meta.page);
-  }, [page, report, setPage]);
+  }, [page, report, setPage, reportQuery.isPlaceholderData]);
 
   const selectedSegmentRows = report?.segments[segmentDimension] ?? [];
   const segmentHasData = selectedSegmentRows.some((row) => row.reservations > 0);
