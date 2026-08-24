@@ -52,7 +52,7 @@ function Metric({
   tone?: 'legacy' | 'journey' | 'positive' | 'negative' | 'neutral';
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border/80 bg-background px-4 py-3.5">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-background px-4 py-3.5">
       <span
         className={cn(
           'absolute inset-y-0 left-0 w-1',
@@ -239,7 +239,7 @@ export default function AdsAttributionShadowComparison({
               />
             </div>
 
-            <div className="rounded-xl border border-border/80 bg-background p-3 sm:p-4">
+            <div className="rounded-xl border border-border bg-background p-3 sm:p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium text-foreground">Comparação diária</p>

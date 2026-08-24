@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DemandConversionReport from '@/pages/DemandConversionReport';
@@ -46,13 +46,8 @@ vi.mock('@/hooks/useReportFilters', () => ({
 }));
 
 vi.mock('@/components/reports/ReportFilterBar', () => ({
+  REPORT_FILTER_TOGGLE_CLASS: 'report-filter-toggle',
   default: ({ children }: { children?: ReactNode }) => <div data-testid="report-filters">{children}</div>,
-}));
-
-vi.mock('@/components/ReservationDetailsDialog', () => ({
-  default: ({ open, reservation }: { open: boolean; reservation?: { guest_name?: string } | null }) => (
-    <div data-testid="reservation-dialog">{open ? `Aberta: ${reservation?.guest_name}` : 'Fechada'}</div>
-  ),
 }));
 
 vi.mock('recharts', () => ({
@@ -129,23 +124,21 @@ describe('DemandConversionReport', () => {
     reportQueryState = { data: report, isPending: false, isError: false, isFetching: false, refetch };
   });
 
-  it('separates the total funnel from reservation-entry filters and opens details only through a button', () => {
+  it('separates the total funnel from reservation-entry filters', () => {
     render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.getByText('Funil web total; não muda com a forma de entrada')).toBeInTheDocument();
     expect(screen.getByText(/Os indicadores e etapas do funil web permanecem totais/)).toBeInTheDocument();
     expect(screen.getByText(/não depende de mesa ou seção/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '1–2 pessoas' })).toBeInTheDocument();
+  });
 
-    const customerRow = screen.getAllByRole('row').find((row) => within(row).queryByText('Cliente Teste'));
-    expect(customerRow).toBeDefined();
-    fireEvent.click(customerRow!);
-    expect(screen.getByTestId('reservation-dialog')).toHaveTextContent('Fechada');
+  it('does not expose the per-reservation listing', () => {
+    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
 
-    const openButton = screen.getAllByRole('button', { name: /Abrir detalhes da reserva de Cliente Teste/ })
-      .find((button) => button.textContent?.includes('Abrir'));
-    fireEvent.click(openButton!);
-    expect(screen.getByTestId('reservation-dialog')).toHaveTextContent('Aberta: Cliente Teste');
+    expect(screen.queryByText('Reservas criadas no período')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cliente Teste')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('renders explicit empty states instead of empty charts', () => {

@@ -16,6 +16,13 @@ import {
 } from '@/lib/report-filters';
 import { cn } from '@/lib/utils';
 
+/**
+ * Shared shape for the switch pills rendered inside the bar, so extra toggles
+ * provided by each report line up with the built-in comparison toggle.
+ */
+export const REPORT_FILTER_TOGGLE_CLASS =
+  'flex h-9 shrink-0 items-center gap-2 rounded-md border border-border bg-muted/20 px-3';
+
 interface ReportFilterBarProps {
   filters: ReportFilterState;
   children?: ReactNode;
@@ -30,10 +37,10 @@ export default function ReportFilterBar({
   onRefresh,
 }: ReportFilterBarProps) {
   return (
-    <Card className="overflow-hidden border-border/80 bg-card shadow-sm">
+    <Card className="border-border shadow-sm">
       <CardContent className="p-3">
-        <div className="flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-end">
-          <div className="min-w-0 space-y-1 md:w-44 md:flex-none">
+        <div className="flex min-w-0 flex-wrap items-end gap-2">
+          <div className="min-w-0 flex-1 space-y-1 sm:w-44 sm:flex-none">
             <Label htmlFor="report-period" className="text-xs">Período</Label>
             <Select
               value={filters.periodPreset}
@@ -50,7 +57,7 @@ export default function ReportFilterBar({
             </Select>
           </div>
 
-          <div className="min-w-0 space-y-1 md:w-60 md:flex-none">
+          <div className="min-w-0 flex-1 space-y-1 sm:w-60 sm:flex-none">
             <Label htmlFor="report-date-range" className="text-xs">Intervalo analisado</Label>
             <DateRangePicker
               id="report-date-range"
@@ -60,12 +67,9 @@ export default function ReportFilterBar({
               className="h-9 w-full"
               align="start"
             />
-            {filters.rangeError && (
-              <p className="text-xs leading-relaxed text-destructive" role="alert">{filters.rangeError}</p>
-            )}
           </div>
 
-          <div className="min-w-0 space-y-1 md:w-36 md:flex-none">
+          <div className="min-w-0 flex-1 space-y-1 sm:w-36 sm:flex-none">
             <Label htmlFor="report-granularity" className="text-xs">Granularidade</Label>
             <Select
               value={filters.granularity}
@@ -84,41 +88,41 @@ export default function ReportFilterBar({
             </Select>
           </div>
 
-          <div className="min-w-0 space-y-1 md:w-44 md:flex-none">
-            <span className="block text-xs font-medium text-foreground">Comparação</span>
-            <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3">
-              <Label htmlFor="report-comparison" className="cursor-pointer whitespace-nowrap text-xs">
-                Período anterior
-              </Label>
-              <Switch
-                id="report-comparison"
-                checked={filters.comparisonEnabled}
-                onCheckedChange={filters.setComparisonEnabled}
-              />
-            </div>
+          <div className={REPORT_FILTER_TOGGLE_CLASS}>
+            <Label htmlFor="report-comparison" className="cursor-pointer whitespace-nowrap text-xs">
+              Comparar período anterior
+            </Label>
+            <Switch
+              id="report-comparison"
+              checked={filters.comparisonEnabled}
+              onCheckedChange={filters.setComparisonEnabled}
+            />
           </div>
 
-          <div className="flex min-w-0 items-end gap-2 md:flex-1 md:justify-end">
-            {children}
-            {onRefresh && (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={onRefresh}
-                disabled={isRefreshing || !!filters.rangeError}
-                aria-label="Atualizar relatório"
-                title="Atualizar relatório"
-              >
-                <RefreshCcw
-                  className={cn('h-4 w-4', isRefreshing && 'animate-spin motion-reduce:animate-none')}
-                  aria-hidden="true"
-                />
-              </Button>
-            )}
-          </div>
+          {children}
+
+          {onRefresh && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="ml-auto h-9 w-9 shrink-0"
+              onClick={onRefresh}
+              disabled={isRefreshing || !!filters.rangeError}
+              aria-label="Atualizar relatório"
+              title="Atualizar relatório"
+            >
+              <RefreshCcw
+                className={cn('h-4 w-4', isRefreshing && 'animate-spin motion-reduce:animate-none')}
+                aria-hidden="true"
+              />
+            </Button>
+          )}
         </div>
+
+        {filters.rangeError && (
+          <p className="mt-2 text-xs leading-relaxed text-destructive" role="alert">{filters.rangeError}</p>
+        )}
       </CardContent>
     </Card>
   );

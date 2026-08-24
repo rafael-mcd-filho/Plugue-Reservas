@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -15,29 +15,22 @@ import {
 } from 'recharts';
 import {
   AlertCircle,
-  Armchair,
   CalendarRange,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
   Gauge,
   Grid3X3,
   Info,
   RefreshCcw,
-  Table2,
   Users,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import ReportFilterBar from '@/components/reports/ReportFilterBar';
 import ReportMetricCard from '@/components/reports/ReportMetricCard';
 import ReportShell from '@/components/reports/ReportShell';
@@ -50,12 +43,13 @@ import {
   type OccupancyCapacityHeatmapCell,
   type OccupancyCapacityModeFilter,
   type OccupancyCapacityOutcomeFilter,
-  type OccupancyCapacityReservationRow,
 } from '@/lib/occupancy-capacity-report';
-import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 
-const PAGE_SIZE = 20;
+// The report no longer lists individual reservations, but the RPC contract still
+// requires a valid page window. Asking for the smallest page keeps the response
+// free of personal data we do not render.
+const DETAILS_PAGE_SIZE = 1;
 const numberFormatter = new Intl.NumberFormat('pt-BR');
 const decimalFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -84,35 +78,16 @@ const UI = {
   waitlistHourDescription: 'Entradas, pessoas sentadas e sa\u00eddas sem sentar. O tempo m\u00e9dio considera somente quem foi sentado.',
   noShowHourTitle: 'No-show por hor\u00e1rio da reserva',
   noShowHourDescription: 'Taxa entre reservas v\u00e1lidas no hor\u00e1rio, sem depender de mesa atribu\u00edda.',
-  tablesTitle: 'Mesas e se\u00e7\u00f5es',
-  tablesDescription: 'Detalhamento somente de reservas em modo por mesas que possuem table_id registrado.',
-  noTables: 'N\u00e3o h\u00e1 reservas eleg\u00edveis com mesa atribu\u00edda neste per\u00edodo.',
-  detailsTitle: 'Reservas do per\u00edodo',
-  detailsDescription: 'Lista paginada no servidor com a base de capacidade associada a cada reserva.',
-  listOutcome: 'Resultado da lista',
-  emptyDetails: 'Nenhuma reserva corresponde aos filtros selecionados.',
   mode: 'Modo',
   allModes: 'Todos os modos',
   allOutcomes: 'Todos os resultados',
   modeFilter: 'Modo de capacidade',
   modeCapacity: 'Por capacidade',
   modeTables: 'Por mesas',
-  scheduled: 'Agendada',
-  checkedIn: 'Check-in',
-  cancelled: 'Cancelada',
-  guest: 'Cliente',
-  dateTime: 'Data e hor\u00e1rio',
-  people: 'Pessoas',
-  table: 'Mesa',
-  status: 'Status',
-  capacityBase: 'Base de capacidade',
   snapshot: 'Snapshot hist\u00f3rico',
   estimated: 'Configura\u00e7\u00e3o atual (estimativa)',
   noBase: 'Sem base publicada',
   mixed: 'Base mista',
-  assignmentCoverage: 'Cobertura de atribui\u00e7\u00e3o',
-  withoutTable: 'sem mesa',
-  of: 'de',
   previousPeriod: 'vs. per\u00edodo anterior',
   noComparison: 'Sem base anterior',
   comparisonOff: 'Comparação desativada',
@@ -120,6 +95,11 @@ const UI = {
   comparisonUnavailable: 'Comparação indisponível',
   comparisonLimited: 'Comparação limitada',
   waitlistScope: 'Fila de espera: os indicadores e o gráfico consideram todo o período selecionado e não mudam com “Modo de capacidade”.',
+  capacityHelp: 'Soma dos lugares publicados em cada horário do período. Como acumula todos os dias analisados, fica bem acima da lotação da casa em um único dia.',
+  pressureHelp: 'Pessoas reservadas divididas pela capacidade publicada, ambas somadas no mesmo período. Inclui reservas que terminaram em no-show.',
+  occupancyHelp: 'Pessoas que fizeram check-in divididas pela capacidade publicada do período.',
+  waitlistHelp: 'Entradas registradas na fila de espera no período. O tempo médio de espera considera apenas quem chegou a ser sentado.',
+  noShowHelp: 'Reservas válidas no horário que não compareceram. Canceladas e pagamentos expirados ficam fora da contagem.',
 };
 
 const MODE_LABELS: Record<OccupancyCapacityModeFilter, string> = {
@@ -127,19 +107,6 @@ const MODE_LABELS: Record<OccupancyCapacityModeFilter, string> = {
   capacity: UI.modeCapacity,
   tables: UI.modeTables,
 };
-
-const OUTCOME_LABELS: Record<OccupancyCapacityOutcomeFilter, string> = {
-  all: UI.allOutcomes,
-  scheduled: UI.scheduled,
-  checked_in: UI.checkedIn,
-  no_show: 'No-show',
-  cancelled: UI.cancelled,
-};
-
-function parsePositivePage(value: string | null): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : 1;
-}
 
 function formatInteger(value: number): string {
   return numberFormatter.format(Number.isFinite(value) ? value : 0);
@@ -169,11 +136,6 @@ function formatTime(value: string): string {
   return value.slice(0, 5);
 }
 
-function formatPhone(value: string): string {
-  const digits = value.replace(/\D/g, '');
-  return digits.length >= 4 ? `\u2022\u2022\u2022\u2022 ${digits.slice(-4)}` : value;
-}
-
 function qualityLabel(value: string | null): string {
   if (value === 'snapshot') return UI.snapshot;
   if (value === 'estimated_current_configuration') return UI.estimated;
@@ -198,24 +160,9 @@ function heatTone(rate: number): string {
   return 'border-border bg-muted/25 text-muted-foreground';
 }
 
-function DataQualityBadge({ quality }: { quality: string | null }) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        'whitespace-normal text-left text-[10px] font-medium',
-        quality === 'snapshot' && 'border-emerald-200 bg-emerald-50 text-emerald-800',
-        quality === 'estimated_current_configuration' && 'border-amber-200 bg-amber-50 text-amber-800',
-      )}
-    >
-      {qualityLabel(quality)}
-    </Badge>
-  );
-}
-
 function ReportLoading() {
   return (
-    <div className="space-y-5" aria-label={UI.loading} aria-busy="true">
+    <div className="space-y-4" aria-label={UI.loading} aria-busy="true">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-32 rounded-xl" />)}
       </div>
@@ -248,7 +195,7 @@ function Heatmap({ cells }: { cells: OccupancyCapacityHeatmapCell[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
       {weekdays.map((day) => (
-        <section key={day.weekday} className="rounded-xl border border-border/80 bg-background/70 p-3">
+        <section key={day.weekday} className="rounded-xl bg-muted/40 p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{day.label}</h3>
           <div className="space-y-1.5">
             {day.cells.map((cell) => (
@@ -271,27 +218,6 @@ function Heatmap({ cells }: { cells: OccupancyCapacityHeatmapCell[] }) {
   );
 }
 
-function MobileReservationCard({ row }: { row: OccupancyCapacityReservationRow }) {
-  return (
-    <article className="border-b border-border p-4 last:border-b-0">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold">{row.guest_name}</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{formatPhone(row.guest_phone)}</p>
-        </div>
-        <Badge variant="outline">{getReservationStatusLabel(row.status)}</Badge>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div><span className="text-muted-foreground">{UI.dateTime}</span><strong className="mt-0.5 block">{formatDate(row.date)} {formatTime(row.time)}</strong></div>
-        <div><span className="text-muted-foreground">{UI.people}</span><strong className="mt-0.5 block">{formatInteger(row.party_size)}</strong></div>
-        <div><span className="text-muted-foreground">{UI.mode}</span><strong className="mt-0.5 block">{MODE_LABELS[row.availability_mode]}</strong></div>
-        <div><span className="text-muted-foreground">{UI.table}</span><strong className="mt-0.5 block">{row.table_number ? `${UI.table} ${row.table_number}` : '\u2014'}</strong></div>
-      </div>
-      <div className="mt-3"><DataQualityBadge quality={row.data_quality} /></div>
-    </article>
-  );
-}
-
 export default function OccupancyCapacityReport() {
   const { companyId, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
   const filters = useReportFilters({
@@ -308,32 +234,14 @@ export default function OccupancyCapacityReport() {
   const outcome: OccupancyCapacityOutcomeFilter = OCCUPANCY_CAPACITY_OUTCOMES.includes(rawOutcome as OccupancyCapacityOutcomeFilter)
     ? rawOutcome as OccupancyCapacityOutcomeFilter
     : 'all';
-  const page = parsePositivePage(searchParams.get('capacity_page'));
-
-  const setPage = useCallback((nextPage: number) => {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      if (nextPage <= 1) next.delete('capacity_page');
-      else next.set('capacity_page', String(nextPage));
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
-
-  const reportRangeKey = `${filters.dateOnlyRange.from}:${filters.dateOnlyRange.to}`;
-  const previousRangeKey = useRef(reportRangeKey);
-  useEffect(() => {
-    if (previousRangeKey.current === reportRangeKey) return;
-    previousRangeKey.current = reportRangeKey;
-    setPage(1);
-  }, [reportRangeKey, setPage]);
 
   const reportQuery = useOccupancyCapacityReport({
     companyId,
     periodStart: filters.dateOnlyRange.from,
     periodEnd: filters.dateOnlyRange.to,
     granularity: filters.granularity,
-    page,
-    pageSize: PAGE_SIZE,
+    page: 1,
+    pageSize: DETAILS_PAGE_SIZE,
     availabilityMode,
     outcome,
     enabled: companyTimeZoneResolved && !filters.rangeError,
@@ -370,17 +278,11 @@ export default function OccupancyCapacityReport() {
                 true,
               )
             : `${UI.comparisonLimited} · período anterior: ${qualityLabel(comparisonReport.meta.capacity_history)}`;
-  const totalPages = Math.max(1, Math.ceil((report?.meta.details_total ?? 0) / PAGE_SIZE));
   const evolutionHasData = !!report && report.series.some((point) => (
     point.published_capacity > 0 || point.reserved_people > 0 || point.checked_in_people > 0
   ));
   const waitlistHasData = !!report && report.waitlist_by_hour.some((row) => row.entries > 0);
   const noShowHasData = !!report && report.no_show_by_hour.some((row) => row.eligible_reservations > 0);
-
-  useEffect(() => {
-    if (reportQuery.isPlaceholderData) return;
-    if (report && report.meta.page !== page) setPage(report.meta.page);
-  }, [page, report, setPage, reportQuery.isPlaceholderData]);
 
   const setFilterParam = (key: string, value: string) => {
     setSearchParams((current) => {
@@ -399,7 +301,7 @@ export default function OccupancyCapacityReport() {
 
   const filterBar = (
     <ReportFilterBar filters={filters} isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching} onRefresh={refresh}>
-      <div className="grid min-w-0 flex-1 grid-cols-1 gap-1 md:min-w-44">
+      <div className="min-w-0 flex-1 space-y-1 sm:w-44 sm:flex-none">
         <Label htmlFor="occupancy-capacity-mode" className="text-xs">{UI.modeFilter}</Label>
         <Select value={availabilityMode} onValueChange={(value) => setFilterParam('capacity_mode', value)}>
           <SelectTrigger id="occupancy-capacity-mode" className="h-9" aria-label={UI.modeFilter}><SelectValue /></SelectTrigger>
@@ -479,6 +381,7 @@ export default function OccupancyCapacityReport() {
               label={UI.capacity}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatInteger(report.summary.published_capacity)}
               detail={qualityLabel(report.meta.capacity_history)}
+              explanation={UI.capacityHelp}
               icon={CalendarRange}
               tone="primary"
             />
@@ -486,6 +389,7 @@ export default function OccupancyCapacityReport() {
               label={UI.pressure}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatPercent(report.summary.capacity_pressure_rate)}
               detail={report.meta.capacity_history === 'unavailable' ? UI.noBase : pressureComparisonDetail}
+              explanation={UI.pressureHelp}
               icon={Users}
               tone="warning"
             />
@@ -493,6 +397,7 @@ export default function OccupancyCapacityReport() {
               label={UI.occupancy}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatPercent(report.summary.check_in_capacity_rate)}
               detail={`${formatInteger(report.summary.checked_in_people)} ${UI.checkins}`}
+              explanation={UI.occupancyHelp}
               icon={CheckCircle2}
               tone="success"
             />
@@ -500,6 +405,7 @@ export default function OccupancyCapacityReport() {
               label={UI.waitlist}
               value={formatInteger(report.summary.waitlist_entries)}
               detail={`${formatMinutes(report.summary.average_wait_minutes)} ${UI.waitlistDetail}`}
+              explanation={UI.waitlistHelp}
               icon={Clock3}
               tone="info"
             />
@@ -507,12 +413,13 @@ export default function OccupancyCapacityReport() {
               label={UI.noShow}
               value={formatInteger(report.summary.no_show_reservations)}
               detail={`${formatInteger(report.summary.no_show_people)} pessoas \u00b7 ${UI.noShowDetail}`}
+              explanation={UI.noShowHelp}
               icon={AlertCircle}
               tone="danger"
             />
           </section>
 
-          <Card className="overflow-hidden border-border/80 shadow-sm">
+          <Card className="overflow-hidden border-border shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">{UI.evolutionTitle}</CardTitle>
               <CardDescription>{UI.evolutionDescription}</CardDescription>
@@ -548,7 +455,7 @@ export default function OccupancyCapacityReport() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/80 shadow-sm">
+          <Card className="border-border shadow-sm">
             <CardHeader>
               <div className="flex items-start gap-3">
                 <span className="rounded-lg bg-primary/10 p-2 text-primary"><Grid3X3 className="h-4 w-4" aria-hidden="true" /></span>
@@ -558,8 +465,8 @@ export default function OccupancyCapacityReport() {
             <CardContent><Heatmap cells={report.heatmap} /></CardContent>
           </Card>
 
-          <section className="grid gap-5 xl:grid-cols-2">
-            <Card className="border-border/80 shadow-sm">
+          <section className="grid gap-4 xl:grid-cols-2">
+            <Card className="border-border shadow-sm">
               <CardHeader><CardTitle className="text-base">{UI.waitlistHourTitle}</CardTitle><CardDescription>{UI.waitlistHourDescription}</CardDescription></CardHeader>
               <CardContent>
                 {waitlistHasData ? <>
@@ -592,7 +499,7 @@ export default function OccupancyCapacityReport() {
               </CardContent>
             </Card>
 
-            <Card className="border-border/80 shadow-sm">
+            <Card className="border-border shadow-sm">
               <CardHeader><CardTitle className="text-base">{UI.noShowHourTitle}</CardTitle><CardDescription>{UI.noShowHourDescription}</CardDescription></CardHeader>
               <CardContent>
                 {noShowHasData ? <>
@@ -625,76 +532,6 @@ export default function OccupancyCapacityReport() {
             </Card>
           </section>
 
-          <Card className="border-border/80 shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div><CardTitle className="text-base">{UI.tablesTitle}</CardTitle><CardDescription className="mt-1">{UI.tablesDescription}</CardDescription></div>
-                <div className="w-full max-w-xs rounded-lg border border-border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between gap-3 text-xs"><span>{UI.assignmentCoverage}</span><strong>{formatPercent(report.table_assignment.coverage_rate)}</strong></div>
-                  <Progress
-                    value={Math.min(report.table_assignment.coverage_rate, 100)}
-                    className="mt-2 h-1.5"
-                    aria-label={`${UI.assignmentCoverage}: ${formatPercent(report.table_assignment.coverage_rate)}`}
-                  />
-                  <p className="mt-1.5 text-[11px] text-muted-foreground">{formatInteger(report.table_assignment.unassigned_reservations)} {UI.withoutTable} {UI.of} {formatInteger(report.table_assignment.eligible_reservations)}</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {report.table_breakdown.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">{UI.noTables}</p> : (
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {report.table_breakdown.map((item) => (
-                    <article key={item.table_id} className="rounded-xl border border-border/80 bg-background p-3.5">
-                      <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs text-muted-foreground">{item.section_name}</p><h3 className="mt-0.5 font-semibold">{UI.table} {item.table_number}</h3></div><Armchair className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" /></div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div><span className="text-muted-foreground">Reservadas</span><strong className="mt-0.5 block text-base tabular-nums">{formatInteger(item.reserved_people)}</strong></div><div><span className="text-muted-foreground">Check-in</span><strong className="mt-0.5 block text-base tabular-nums">{formatInteger(item.checked_in_people)}</strong></div></div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden border-border/80 shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex items-start gap-3"><span className="rounded-lg bg-muted p-2 text-muted-foreground"><Table2 className="h-4 w-4" aria-hidden="true" /></span><div><CardTitle className="text-base">{UI.detailsTitle}</CardTitle><CardDescription className="mt-1">{UI.detailsDescription}</CardDescription></div></div>
-                <div className="w-full space-y-1 sm:w-52">
-                  <Label htmlFor="occupancy-list-outcome" className="text-xs">{UI.listOutcome}</Label>
-                  <Select value={outcome} onValueChange={(value) => setFilterParam('capacity_outcome', value)}>
-                    <SelectTrigger id="occupancy-list-outcome" className="h-9" aria-label={UI.listOutcome}><SelectValue /></SelectTrigger>
-                    <SelectContent>{OCCUPANCY_CAPACITY_OUTCOMES.map((item) => <SelectItem key={item} value={item}>{OUTCOME_LABELS[item]}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {report.details.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted-foreground">{UI.emptyDetails}</p> : (
-                <>
-                  <div className="divide-y divide-border md:hidden">{report.details.map((row) => <MobileReservationCard key={row.id} row={row} />)}</div>
-                  <div className="hidden md:block">
-                    <Table>
-                      <TableHeader><TableRow><TableHead>{UI.guest}</TableHead><TableHead>{UI.dateTime}</TableHead><TableHead className="text-center">{UI.people}</TableHead><TableHead>{UI.mode}</TableHead><TableHead>{UI.table}</TableHead><TableHead>{UI.capacityBase}</TableHead><TableHead>{UI.status}</TableHead></TableRow></TableHeader>
-                      <TableBody>{report.details.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell><div className="font-medium">{row.guest_name}</div><div className="text-xs text-muted-foreground">{formatPhone(row.guest_phone)}</div></TableCell>
-                          <TableCell className="tabular-nums"><div>{formatDate(row.date)}</div><div className="text-xs text-muted-foreground">{formatTime(row.time)}</div></TableCell>
-                          <TableCell className="text-center font-medium tabular-nums">{formatInteger(row.party_size)}</TableCell>
-                          <TableCell><Badge variant="secondary">{MODE_LABELS[row.availability_mode]}</Badge></TableCell>
-                          <TableCell>{row.table_number ? `${UI.table} ${row.table_number}` : '\u2014'}{row.section_name && <div className="text-xs text-muted-foreground">{row.section_name}</div>}</TableCell>
-                          <TableCell><DataQualityBadge quality={row.data_quality} /></TableCell>
-                          <TableCell><Badge variant="outline">{getReservationStatusLabel(row.status)}</Badge></TableCell>
-                        </TableRow>
-                      ))}</TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-              <footer className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-muted-foreground">{formatInteger(report.meta.details_total)} reservas \u00b7 p\u00e1gina {report.meta.page} {UI.of} {totalPages}</p>
-                <nav className="flex gap-2" aria-label="Paginação das reservas"><Button size="sm" variant="outline" onClick={() => setPage(Math.max(1, page - 1))} disabled={report.meta.page <= 1 || reportQuery.isFetching}><ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />Anterior</Button><Button size="sm" variant="outline" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={report.meta.page >= totalPages || reportQuery.isFetching}>Pr\u00f3xima<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Button></nav>
-              </footer>
-            </CardContent>
-          </Card>
         </div>
       ) : null}
     </ReportShell>

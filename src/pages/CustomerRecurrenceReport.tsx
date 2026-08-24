@@ -565,7 +565,7 @@ export default function CustomerRecurrenceReport() {
   };
 
   const filterBar = (
-    <Card className="border-border/80 bg-card shadow-sm">
+    <Card className="border-border bg-card shadow-sm">
       <CardContent className="p-3">
         <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(160px,180px)_minmax(200px,1fr)_minmax(240px,1.15fr)_36px] lg:items-start">
           <div className="min-w-0 space-y-1">

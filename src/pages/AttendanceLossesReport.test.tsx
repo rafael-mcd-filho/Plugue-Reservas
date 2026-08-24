@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AttendanceLossesReport from '@/pages/AttendanceLossesReport';
@@ -44,13 +44,8 @@ vi.mock('@/hooks/useReportFilters', () => ({
 }));
 
 vi.mock('@/components/reports/ReportFilterBar', () => ({
+  REPORT_FILTER_TOGGLE_CLASS: 'report-filter-toggle',
   default: ({ children }: { children?: ReactNode }) => <div data-testid="report-filters">{children}</div>,
-}));
-
-vi.mock('@/components/ReservationDetailsDialog', () => ({
-  default: ({ open, reservation }: { open: boolean; reservation?: { guest_name?: string } | null }) => (
-    <div data-testid="reservation-dialog">{open ? `Aberta: ${reservation?.guest_name}` : 'Fechada'}</div>
-  ),
 }));
 
 vi.mock('recharts', () => ({
@@ -133,21 +128,19 @@ describe('AttendanceLossesReport', () => {
     reportQueryState = { data: report, isLoading: false, isError: false, isFetching: false, refetch };
   });
 
-  it('labels associations as observational and opens details only through a real button', () => {
+  it('labels associations as observational', () => {
     render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText(/diferenças não comprovam que WhatsApp ou pré-pagamento causaram/)).toBeInTheDocument();
     expect(screen.getByText(/Pagamento recebido antes do horário e ainda em estado pago/)).toBeInTheDocument();
+  });
 
-    const customerRow = screen.getAllByRole('row').find((row) => within(row).queryByText('Cliente Teste'));
-    expect(customerRow).toBeDefined();
-    fireEvent.click(customerRow!);
-    expect(screen.getByTestId('reservation-dialog')).toHaveTextContent('Fechada');
+  it('does not expose the per-reservation listing', () => {
+    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
 
-    const openButton = screen.getAllByRole('button', { name: /Abrir reserva de Cliente Teste/ })
-      .find((button) => button.querySelector('svg'));
-    fireEvent.click(openButton!);
-    expect(screen.getByTestId('reservation-dialog')).toHaveTextContent('Aberta: Cliente Teste');
+    expect(screen.queryByText('Reservas do recorte')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cliente Teste')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('shows explicit empty states for charts and reservations', () => {
@@ -171,7 +164,6 @@ describe('AttendanceLossesReport', () => {
     render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText('Nenhuma reserva neste recorte')).toBeInTheDocument();
-    expect(screen.getByText('Nenhuma reserva encontrada')).toBeInTheDocument();
     expect(screen.getByText('Sem dados para esta dimensão.')).toBeInTheDocument();
   });
 
@@ -197,7 +189,7 @@ describe('AttendanceLossesReport', () => {
     render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText('Dados preservados')).toBeInTheDocument();
-    expect(screen.getAllByText('Cliente Teste').length).toBeGreaterThan(0);
+    expect(screen.getByText('Evolução diária dos resultados')).toBeInTheDocument();
     expect(screen.queryByText('Não foi possível carregar o relatório')).not.toBeInTheDocument();
   });
 });

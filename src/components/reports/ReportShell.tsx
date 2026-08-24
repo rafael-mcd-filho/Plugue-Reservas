@@ -45,7 +45,7 @@ export default function ReportShell({
       className={cn('min-w-0 space-y-4 overflow-x-hidden pb-8', className)}
       aria-busy={ariaBusy || undefined}
     >
-      <header className="flex min-w-0 flex-col gap-3 border-b border-border/80 pb-3 sm:flex-row sm:items-start sm:justify-between">
+      <header className="flex min-w-0 flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
               <Icon className="h-3.5 w-3.5" aria-hidden="true" />

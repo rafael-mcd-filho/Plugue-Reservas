@@ -44,6 +44,7 @@ vi.mock('@/hooks/useReportFilters', () => ({
 }));
 
 vi.mock('@/components/reports/ReportFilterBar', () => ({
+  REPORT_FILTER_TOGGLE_CLASS: 'report-filter-toggle',
   default: ({ children }: { children?: React.ReactNode }) => <div data-testid="filters">{children}</div>,
 }));
 
@@ -159,9 +160,14 @@ const report: OccupancyCapacityReportData = {
   },
 };
 
+// Both queries now request the smallest page, so they are told apart by the
+// period they cover. With the comparison off its result is never read, and
+// returning the main state for both calls keeps the mock harmless.
 vi.mock('@/hooks/useOccupancyCapacityReport', () => ({
-  useOccupancyCapacityReport: (params: { pageSize?: number }) => (
-    params.pageSize === 1 ? comparisonQueryState : reportQueryState
+  useOccupancyCapacityReport: (params: { periodStart?: string }) => (
+    comparisonDateOnlyRange && params.periodStart === comparisonDateOnlyRange.from
+      ? comparisonQueryState
+      : reportQueryState
   ),
 }));
 
@@ -185,20 +191,27 @@ describe('OccupancyCapacityReport', () => {
     };
   });
 
-  it('shows mixed capacity quality, heatmap, table coverage and server details', () => {
+  it('shows mixed capacity quality and the aggregated views', () => {
     render(<MemoryRouter><OccupancyCapacityReport /></MemoryRouter>);
 
     expect(screen.getByRole('heading', { name: 'Ocupa\u00e7\u00e3o & Capacidade' })).toBeInTheDocument();
     expect(screen.getByText('Parte do per\u00edodo usa estimativa.')).toBeInTheDocument();
     expect(screen.getByText('Check-ins sobre capacidade')).toBeInTheDocument();
-    expect(screen.getByText('Resultado da lista')).toBeInTheDocument();
     expect(screen.getAllByText('50,0%').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Cliente Teste').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Mesa 1').length).toBeGreaterThan(0);
     expect(screen.getByRole('note')).toHaveTextContent(
       'os indicadores e o gráfico consideram todo o período selecionado e não mudam com “Modo de capacidade”',
     );
     expect(screen.queryByText(/perman\u00eancia real/i)).not.toBeInTheDocument();
+  });
+
+  it('does not expose the per-reservation listing or the table breakdown', () => {
+    render(<MemoryRouter><OccupancyCapacityReport /></MemoryRouter>);
+
+    expect(screen.queryByText('Reservas do per\u00edodo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mesas e se\u00e7\u00f5es')).not.toBeInTheDocument();
+    expect(screen.queryByText('Resultado da lista')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cliente Teste')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('surfaces comparison quality and avoids a direct variation for non-equivalent bases', () => {
@@ -325,6 +338,6 @@ describe('OccupancyCapacityReport', () => {
     render(<MemoryRouter><OccupancyCapacityReport /></MemoryRouter>);
 
     expect(screen.getByText('Dados preservados')).toBeInTheDocument();
-    expect(screen.getAllByText('Cliente Teste').length).toBeGreaterThan(0);
+    expect(screen.getByText('Check-ins sobre capacidade')).toBeInTheDocument();
   });
 });

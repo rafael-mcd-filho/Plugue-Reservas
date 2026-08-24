@@ -1333,7 +1333,7 @@ export default function Reservations() {
                       <TableRow
                         key={reservation.id}
                         className={cn(
-                          'border-border/80 bg-card hover:bg-muted/25',
+                          'border-border bg-card hover:bg-muted/25',
                           isPastReservation && 'opacity-70',
                         )}
                       >
