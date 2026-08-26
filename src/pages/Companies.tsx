@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowUpDown,
   Building2,
   Circle,
+  Clock,
   ExternalLink,
   Loader2,
   MoreHorizontal,
@@ -13,28 +20,33 @@ import {
   Play,
   Plus,
   Search,
+  ShieldAlert,
+  SkipForward,
   Trash2,
+  Undo2,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useCompanies, useDeleteCompany, useUpdateCompany, type Company, type CompanyStatus } from '@/hooks/useCompanies';
+import {
+  COMPANY_DELETION_REQUEST_STATUS_LABEL,
+  useCancelCompanyDeletion,
+  useCompanies,
+  useCompanyDeletionRequests,
+  useForceSkipCompanyDeletionTeardown,
+  useRequestCompanyDeletion,
+  useUpdateCompany,
+  type Company,
+  type CompanyStatus,
+} from '@/hooks/useCompanies';
 import { useCompaniesFeatureMatrix, type CompanyFeatureState } from '@/hooks/useCompanyFeatures';
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
 import CompanyDialog from '@/components/company/CompanyDialog';
@@ -65,7 +77,10 @@ export default function Companies() {
   const { user: authUser, loading: authLoading } = useAuth();
   const { data: companies = [], isLoading } = useCompanies();
   const updateCompany = useUpdateCompany();
-  const deleteCompany = useDeleteCompany();
+  const requestDeletion = useRequestCompanyDeletion();
+  const cancelDeletion = useCancelCompanyDeletion();
+  const forceSkipTeardown = useForceSkipCompanyDeletionTeardown();
+  const { data: deletionRequests = [] } = useCompanyDeletionRequests();
   const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
   const { data: featureMatrix = {}, isLoading: featureMatrixLoading } = useCompaniesFeatureMatrix(companies);
   const handledRouteRef = useRef<string | null>(null);
@@ -80,8 +95,46 @@ export default function Companies() {
   const [dialogFeatures, setDialogFeatures] = useState<CompanyFeatureState | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [deleteReason, setDeleteReason] = useState('');
   const [impersonationDialogOpen, setImpersonationDialogOpen] = useState(false);
   const [companyToImpersonate, setCompanyToImpersonate] = useState<Company | null>(null);
+
+  const activeDeletionRequests = deletionRequests.filter((request) =>
+    ['grace_period', 'running', 'needs_attention'].includes(request.status));
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    if (!open && requestDeletion.isPending) return;
+
+    setDeleteDialogOpen(open);
+    if (!open) {
+      setCompanyToDelete(null);
+      setDeleteConfirmationText('');
+      setDeleteReason('');
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!companyToDelete || requestDeletion.isPending) return;
+
+    try {
+      await requestDeletion.mutateAsync({
+        companyId: companyToDelete.id,
+        confirmationText: deleteConfirmationText,
+        reason: deleteReason,
+      });
+      setDeleteDialogOpen(false);
+      setCompanyToDelete(null);
+      setDeleteConfirmationText('');
+      setDeleteReason('');
+    } catch {
+      // The mutation displays the translated error and the confirmation stays open.
+    }
+  };
+
+  const isDeleteConfirmationValid = !!companyToDelete
+    && (deleteConfirmationText === companyToDelete.name || deleteConfirmationText === companyToDelete.slug)
+    && deleteReason.trim().length > 0;
 
   const resolveFeatures = useCallback((company: Company) =>
     featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier)),
@@ -238,6 +291,7 @@ export default function Companies() {
   };
 
   const togglePause = (company: Company) => {
+    if (company.deletion_requested_at) return;
     const newStatus: CompanyStatus = company.status === 'paused' ? 'active' : 'paused';
     updateCompany.mutate({ id: company.id, status: newStatus });
   };
@@ -287,6 +341,61 @@ export default function Companies() {
           Nova Empresa
         </Button>
       </div>
+
+      {activeDeletionRequests.length > 0 && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="space-y-3 p-4">
+            <p className="flex items-center gap-2 text-sm font-medium text-destructive">
+              <ShieldAlert className="h-4 w-4" /> Exclusões em andamento
+            </p>
+            {activeDeletionRequests.map((request) => (
+              <div
+                key={request.id}
+                className="flex flex-col gap-2 rounded-lg border bg-background p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">{request.company_name_snapshot}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {COMPANY_DELETION_REQUEST_STATUS_LABEL[request.status]}
+                    {request.phase ? ` · fase atual: ${request.phase}` : ''}
+                    {request.status === 'grace_period'
+                      ? ` · termina ${formatDistanceToNow(new Date(request.grace_period_ends_at), { locale: ptBR, addSuffix: true })}`
+                      : ''}
+                  </p>
+                  {request.last_error && (
+                    <p className="mt-1 text-xs text-destructive">{request.last_error}</p>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {request.status === 'grace_period' && (
+                    <Button
+                      type="button" size="sm" variant="outline" className="gap-1.5"
+                      disabled={cancelDeletion.isPending}
+                      onClick={() => cancelDeletion.mutate(request.company_id)}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" /> Cancelar
+                    </Button>
+                  )}
+                  {request.status === 'needs_attention' && (
+                    <Button
+                      type="button" size="sm" variant="outline" className="gap-1.5"
+                      disabled={forceSkipTeardown.isPending}
+                      onClick={() => forceSkipTeardown.mutate(request.company_id)}
+                    >
+                      <SkipForward className="h-3.5 w-3.5" /> Pular etapa externa
+                    </Button>
+                  )}
+                  {request.status === 'running' && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" /> Em processamento
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative max-w-md flex-1">
@@ -366,10 +475,16 @@ export default function Companies() {
                       {company.cnpj ? formatCnpj(company.cnpj) : '-'}
                     </TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${companyStatus.className}`}>
-                        <Circle className="h-2 w-2 fill-current" />
-                        {companyStatus.label}
-                      </span>
+                      {company.deletion_requested_at ? (
+                        <Badge variant="destructive" className="gap-1.5">
+                          <ShieldAlert className="h-3 w-3" /> Exclusão em andamento
+                        </Badge>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${companyStatus.className}`}>
+                          <Circle className="h-2 w-2 fill-current" />
+                          {companyStatus.label}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <CompanyFeatureBadges features={featureMatrix[company.id]} />
@@ -389,10 +504,10 @@ export default function Companies() {
                             <DropdownMenuItem onClick={() => openImpersonationDialog(company)}>
                               <ExternalLink className="mr-2 h-4 w-4" /> Escolher impersonação
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openEdit(company)}>
+                            <DropdownMenuItem onClick={() => openEdit(company)} disabled={!!company.deletion_requested_at}>
                               <Pencil className="mr-2 h-4 w-4" /> Editar e configurar
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => togglePause(company)}>
+                            <DropdownMenuItem onClick={() => togglePause(company)} disabled={!!company.deletion_requested_at}>
                               {company.status === 'paused' ? (
                                 <><Play className="mr-2 h-4 w-4" /> Ativar</>
                               ) : (
@@ -402,6 +517,7 @@ export default function Companies() {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
+                              disabled={!!company.deletion_requested_at}
                               onClick={() => {
                                 setCompanyToDelete(company);
                                 setDeleteDialogOpen(true);
@@ -480,28 +596,60 @@ export default function Companies() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Isso removerá "{companyToDelete?.name}" e os dados associados. Esta ação não pode ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (companyToDelete) deleteCompany.mutate(companyToDelete.id);
-                setDeleteDialogOpen(false);
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+      <Dialog open={deleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Solicitar exclusão permanente</DialogTitle>
+            <DialogDescription>
+              "{companyToDelete?.name}" entra em um período de carência de 24h, cancelável. Depois disso, um processo
+              assíncrono remove os dados em lotes e desprovisiona a instância de WhatsApp e os arquivos no Storage.
+              Cobranças e integrações no Asaas <strong>não</strong> são tocadas automaticamente. A ação é irreversível
+              após a carência.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="delete-confirmation-text">
+                Digite o nome ou o identificador (slug) da empresa para confirmar
+              </label>
+              <Input
+                id="delete-confirmation-text"
+                value={deleteConfirmationText}
+                onChange={(event) => setDeleteConfirmationText(event.target.value)}
+                placeholder={companyToDelete?.name}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="delete-reason">Motivo da exclusão</label>
+              <Textarea
+                id="delete-reason"
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                placeholder="Ex.: encerramento de contrato, solicitação do cliente..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleDeleteDialogOpenChange(false)} disabled={requestDeletion.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={!isDeleteConfirmationValid || requestDeletion.isPending}
             >
-              Excluir permanentemente
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              {requestDeletion.isPending ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Solicitando...</>
+              ) : (
+                'Solicitar exclusão'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

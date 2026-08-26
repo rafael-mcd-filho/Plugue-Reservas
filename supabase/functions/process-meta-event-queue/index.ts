@@ -228,13 +228,31 @@ Deno.serve(async (req) => {
       });
     }
 
-    const queueQuery = supabaseAdmin
+    let queueQuery = supabaseAdmin
       .from("meta_event_queue")
       .select("*")
       .in("status", ["pending", "processing"])
       .lte("next_retry_at", new Date().toISOString())
       .order("created_at", { ascending: true })
       .limit(20);
+
+    if (!requestedCompanyId) {
+      // The async company-deletion pipeline drains this table itself in
+      // batches; skip companies it's actively working on so this cron tick
+      // doesn't race it or process rows about to be deleted anyway.
+      const { data: quarantinedCompanies } = await supabaseAdmin
+        .from("companies")
+        .select("id")
+        .not("deletion_requested_at", "is", null);
+
+      if (quarantinedCompanies && quarantinedCompanies.length > 0) {
+        queueQuery = queueQuery.not(
+          "company_id",
+          "in",
+          `(${quarantinedCompanies.map((c: { id: string }) => c.id).join(",")})`,
+        );
+      }
+    }
 
     const { data: queueRows, error: queueError } = requestedCompanyId
       ? await queueQuery.eq("company_id", requestedCompanyId)

@@ -167,7 +167,10 @@ Deno.serve(async (req) => {
       .from("companies")
       .select("id")
       .in("id", connectedCompanyIds)
-      .eq("whatsapp_automation_channel", "evolution");
+      .eq("whatsapp_automation_channel", "evolution")
+      // The async company-deletion pipeline drains this queue itself in
+      // batches; skip companies it's actively working on.
+      .is("deletion_requested_at", null);
 
     const activeEvolutionCompanyIds = new Set((evolutionCompanies ?? []).map((company) => company.id));
     const activeEvolutionInstances = instances.filter((instance) => activeEvolutionCompanyIds.has(instance.company_id));

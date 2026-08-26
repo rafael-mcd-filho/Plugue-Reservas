@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, Building2, Calendar, Circle, Clock3, Mail, MapPin,
-  Pause, Pencil, Phone, Play, ShieldCheck, Trash2, User, Users,
+  Loader2, Pause, Pencil, Phone, Play, ShieldAlert, ShieldCheck, SkipForward, Trash2, Undo2, User, Users,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -13,17 +13,22 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useCompanies, useUpdateCompany, useDeleteCompany, Company, CompanyStatus } from '@/hooks/useCompanies';
+import {
+  useCancelCompanyDeletion,
+  useCompanies,
+  useCompanyDeletionRequests,
+  useForceSkipCompanyDeletionTeardown,
+  useRequestCompanyDeletion,
+  useUpdateCompany,
+  Company,
+  CompanyStatus,
+} from '@/hooks/useCompanies';
 import {
   useCompanyFeatureFlags,
   useSaveCompanyFeatures,
@@ -84,9 +89,15 @@ export default function CompanyProfile() {
   const navigate = useNavigate();
   const { data: companies = [], isLoading } = useCompanies();
   const updateCompany = useUpdateCompany();
-  const deleteCompany = useDeleteCompany();
+  const requestDeletion = useRequestCompanyDeletion();
+  const cancelDeletion = useCancelCompanyDeletion();
+  const forceSkipTeardown = useForceSkipCompanyDeletionTeardown();
+  const { data: deletionRequests = [] } = useCompanyDeletionRequests();
   const saveCompanyFeatures = useSaveCompanyFeatures();
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [deleteReason, setDeleteReason] = useState('');
   const [modalFeatures, setModalFeatures] = useState<CompanyFeatureState | null>(null);
 
   const company = companies.find((item) => item.id === id);
@@ -231,16 +242,37 @@ export default function CompanyProfile() {
   };
 
   const togglePause = () => {
-    if (!company) return;
+    if (!company || company.deletion_requested_at) return;
     updateCompany.mutate({
       id: company.id,
       status: company.status === 'paused' ? 'active' : 'paused',
     });
   };
 
-  const handleDelete = () => {
-    if (!company) return;
-    deleteCompany.mutate(company.id, { onSuccess: () => navigate('/empresas') });
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    if (!open && requestDeletion.isPending) return;
+    setDeleteDialogOpen(open);
+    if (!open) {
+      setDeleteConfirmationText('');
+      setDeleteReason('');
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!company || requestDeletion.isPending) return;
+
+    try {
+      await requestDeletion.mutateAsync({
+        companyId: company.id,
+        confirmationText: deleteConfirmationText,
+        reason: deleteReason,
+      });
+      setDeleteDialogOpen(false);
+      setDeleteConfirmationText('');
+      setDeleteReason('');
+    } catch {
+      // The mutation displays the translated error and the confirmation stays open.
+    }
   };
 
   const handleFeatureToggle = async (features: CompanyFeatureState) => {
@@ -277,6 +309,11 @@ export default function CompanyProfile() {
 
   const sc = statusConfig[company.status];
   const effectiveFeatures = getCurrentFeatures(company, featureFlags?.features);
+  const activeDeletionRequest = deletionRequests.find((request) =>
+    request.company_id === company.id
+    && ['grace_period', 'running', 'needs_attention'].includes(request.status));
+  const isDeleteConfirmationValid = (deleteConfirmationText === company.name || deleteConfirmationText === company.slug)
+    && deleteReason.trim().length > 0;
 
   return (
     <div className="space-y-6">
@@ -287,48 +324,131 @@ export default function CompanyProfile() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight truncate">{company.name}</h1>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
-              <Circle className="h-2 w-2 fill-current" />
-              {sc.label}
-            </span>
+            {company.deletion_requested_at ? (
+              <Badge variant="destructive" className="gap-1.5">
+                <ShieldAlert className="h-3 w-3" /> Exclusão em andamento
+              </Badge>
+            ) : (
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sc.className}`}>
+                <Circle className="h-2 w-2 fill-current" />
+                {sc.label}
+              </span>
+            )}
           </div>
           {company.razao_social && (
             <p className="text-sm text-muted-foreground mt-0.5">{company.razao_social}</p>
           )}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={openEdit}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={openEdit} disabled={!!company.deletion_requested_at}>
             <Pencil className="h-4 w-4" /> Editar
           </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={togglePause}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={togglePause} disabled={!!company.deletion_requested_at}>
             {company.status === 'paused' ? <><Play className="h-4 w-4" /> Ativar</> : <><Pause className="h-4 w-4" /> Pausar</>}
           </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" size="sm" className="gap-2">
-                <Trash2 className="h-4 w-4" /> Excluir
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Excluir empresa permanentemente?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Isso remove "{company.name}" e os dados associados. Esta ação não pode ser desfeita.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={handleDelete}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  Excluir permanentemente
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <Button
+            variant="destructive" size="sm" className="gap-2"
+            disabled={!!company.deletion_requested_at}
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            <Trash2 className="h-4 w-4" /> Excluir
+          </Button>
         </div>
       </div>
+
+      {activeDeletionRequest && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="flex flex-col gap-3 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-destructive">
+                {COMPANY_DELETION_REQUEST_STATUS_LABEL[activeDeletionRequest.status]}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {activeDeletionRequest.phase ? `Fase atual: ${activeDeletionRequest.phase}` : 'Aguardando início'}
+                {activeDeletionRequest.status === 'grace_period'
+                  ? ` · termina ${formatDistanceToNow(new Date(activeDeletionRequest.grace_period_ends_at), { locale: ptBR, addSuffix: true })}`
+                  : ''}
+              </p>
+              {activeDeletionRequest.last_error && (
+                <p className="mt-1 text-xs text-destructive">{activeDeletionRequest.last_error}</p>
+              )}
+            </div>
+            {activeDeletionRequest.status === 'grace_period' && (
+              <Button
+                type="button" size="sm" variant="outline" className="gap-1.5"
+                disabled={cancelDeletion.isPending}
+                onClick={() => cancelDeletion.mutate(company.id)}
+              >
+                <Undo2 className="h-3.5 w-3.5" /> Cancelar exclusão
+              </Button>
+            )}
+            {activeDeletionRequest.status === 'needs_attention' && (
+              <Button
+                type="button" size="sm" variant="outline" className="gap-1.5"
+                disabled={forceSkipTeardown.isPending}
+                onClick={() => forceSkipTeardown.mutate(company.id)}
+              >
+                <SkipForward className="h-3.5 w-3.5" /> Pular etapa externa
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={deleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Solicitar exclusão permanente</DialogTitle>
+            <DialogDescription>
+              "{company.name}" entra em um período de carência de 24h, cancelável. Depois disso, um processo
+              assíncrono remove os dados em lotes e desprovisiona a instância de WhatsApp e os arquivos no Storage.
+              Cobranças e integrações no Asaas <strong>não</strong> são tocadas automaticamente. A ação é irreversível
+              após a carência.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-delete-confirmation">
+                Digite o nome ou o identificador (slug) da empresa para confirmar
+              </Label>
+              <Input
+                id="profile-delete-confirmation"
+                value={deleteConfirmationText}
+                onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                placeholder={company.name}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-delete-reason">Motivo da exclusão</Label>
+              <Textarea
+                id="profile-delete-reason"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Ex.: encerramento de contrato, solicitação do cliente..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleDeleteDialogOpenChange(false)} disabled={requestDeletion.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={!isDeleteConfirmationValid || requestDeletion.isPending}
+            >
+              {requestDeletion.isPending ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Solicitando...</>
+              ) : (
+                'Solicitar exclusão'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-none shadow-sm">

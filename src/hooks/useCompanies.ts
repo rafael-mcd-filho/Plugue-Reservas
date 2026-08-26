@@ -42,6 +42,46 @@ export interface Company {
   large_party_whatsapp_threshold?: number | null;
   reservation_late_tolerance_minutes?: number | null;
   status: CompanyStatus;
+  deletion_requested_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CompanyDeletionRequestStatus =
+  | 'grace_period' | 'running' | 'needs_attention' | 'completed' | 'failed' | 'canceled';
+
+export const COMPANY_DELETION_REQUEST_STATUS_LABEL: Record<CompanyDeletionRequestStatus, string> = {
+  grace_period: 'Em carência (cancelável)',
+  running: 'Excluindo em lotes...',
+  needs_attention: 'Precisa de atenção',
+  completed: 'Concluída',
+  failed: 'Falhou',
+  canceled: 'Cancelada',
+};
+
+export interface CompanyDeletionRequest {
+  id: string;
+  company_id: string;
+  company_name_snapshot: string;
+  company_slug_snapshot: string;
+  requested_by: string;
+  requested_reason: string;
+  confirmation_text: string;
+  requested_at: string;
+  status: CompanyDeletionRequestStatus;
+  grace_period_ends_at: string;
+  canceled_by: string | null;
+  canceled_at: string | null;
+  phase_index: number;
+  phase: string | null;
+  deleted_counts: Record<string, number>;
+  external_teardown_result: Record<string, unknown>;
+  impact_preview: Record<string, number>;
+  attempts: number;
+  consecutive_errors: number;
+  last_error: string | null;
+  started_processing_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -163,22 +203,97 @@ export function useUpdateCompany() {
   });
 }
 
-export function useDeleteCompany() {
+// Deletion no longer runs as a single synchronous DELETE from the browser --
+// that cascades through ~60 tables in one statement and blows the
+// authenticated role's 8s statement_timeout for any company with real
+// history (see docs/problema-exclusao-empresas.md). Instead, a superadmin
+// requests deletion; a cancelable grace period follows; then a service_role
+// worker drains the company's data in small batches (supabase/migrations/
+// 20260826162000_add_company_deletion_engine.sql) before removing the
+// company row itself.
+
+export function getCompanyDeletionRequestErrorMessage(err: any): string {
+  const code = String(err?.code || '');
+  const message = String(err?.message || '');
+
+  if (code === '55006') return 'Já existe uma solicitação de exclusão ativa para esta empresa.';
+  if (code === '55000') return 'A exclusão assíncrona de empresas está temporariamente desativada.';
+  if (code === '22023' && message.toLowerCase().includes('confirma')) {
+    return 'O texto digitado não corresponde ao nome ou identificador da empresa.';
+  }
+  if (code === '42501') return 'Somente superadministradores podem solicitar a exclusão de empresas.';
+
+  return message ? `Erro ao solicitar exclusão: ${message}` : 'Não foi possível solicitar a exclusão da empresa.';
+}
+
+export function useCompanyDeletionRequests() {
+  return useQuery({
+    queryKey: ['company-deletion-requests'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('list_company_deletion_requests' as any);
+      if (error) throw error;
+      return (data ?? []) as CompanyDeletionRequest[];
+    },
+    // Light polling so progress/status are visible without a manual refresh
+    // while a deletion is in its grace period or actively running.
+    refetchInterval: 15000,
+  });
+}
+
+export function useRequestCompanyDeletion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('companies' as any)
-        .delete()
-        .eq('id', id);
+    mutationFn: async ({
+      companyId, confirmationText, reason,
+    }: { companyId: string; confirmationText: string; reason: string }) => {
+      const { data, error } = await supabase.rpc('request_company_deletion' as any, {
+        _company_id: companyId,
+        _confirmation_text: confirmationText,
+        _reason: reason,
+      });
       if (error) throw error;
+      return data as { request_id: string; grace_period_ends_at: string; impact_preview: Record<string, number> };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['companies'] });
-      toast.success('Empresa removida!');
+      qc.invalidateQueries({ queryKey: ['company-deletion-requests'] });
+      toast.success('Exclusão solicitada. A empresa entrou em período de carência cancelável.');
     },
-    onError: (err: any) => {
-      toast.error(`Erro ao remover: ${err.message}`);
+    onError: (err: any) => toast.error(getCompanyDeletionRequestErrorMessage(err)),
+  });
+}
+
+export function useCancelCompanyDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (companyId: string) => {
+      const { data, error } = await supabase.rpc('cancel_company_deletion' as any, { _company_id: companyId });
+      if (error) throw error;
+      return data;
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['companies'] });
+      qc.invalidateQueries({ queryKey: ['company-deletion-requests'] });
+      toast.success('Exclusão cancelada.');
+    },
+    onError: (err: any) => toast.error(`Erro ao cancelar: ${err.message}`),
+  });
+}
+
+export function useForceSkipCompanyDeletionTeardown() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (companyId: string) => {
+      const { data, error } = await supabase.rpc('force_skip_company_deletion_teardown' as any, {
+        _company_id: companyId,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company-deletion-requests'] });
+      toast.success('Etapa externa pulada manualmente; a exclusão vai continuar.');
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
 }
