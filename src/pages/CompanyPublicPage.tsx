@@ -652,6 +652,12 @@ export default function CompanyPublicPage() {
   };
   const openingStatus = useMemo(() => getOpeningStatus(openingHours, statusNow), [openingHours, statusNow]);
   const openingHourGroups = useMemo(() => buildOpeningHourGroups(openingHours, statusNow), [openingHours, statusNow]);
+  const canMatchContactCardHeight = Boolean(company?.phone || company?.address);
+  const openingHoursDensity = openingHourGroups.length >= 6
+    ? 'tight'
+    : openingHourGroups.length >= 5
+      ? 'compact'
+      : 'comfortable';
 
   useEffect(() => {
     const interval = window.setInterval(() => setStatusNow(new Date()), 60_000);
@@ -982,72 +988,111 @@ export default function CompanyPublicPage() {
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
         <div className="grid items-start gap-4 md:grid-cols-2 md:gap-6">
           {openingHours.length > 0 && (
-            <Card className="animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md">
-              <CardContent className="pb-5 pt-5">
-                <div>
-                  <div>
-                    <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                      <Clock className="h-4 w-4" />
-                      {'Hor\u00E1rio de Funcionamento'}
-                    </h3>
-                    {openingStatus && (
-                      <div className="mt-3" role="status">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                'h-2 w-2 shrink-0 rounded-full',
-                                openingStatus.variant === 'open' && 'bg-emerald-500',
-                                openingStatus.variant === 'closed' && 'bg-amber-500',
-                              )}
-                              aria-hidden="true"
-                            />
-                            <p className="text-sm font-bold text-foreground">{openingStatus.title}</p>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setIsHoursExpanded((current) => !current)}
-                            className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-                            aria-expanded={isHoursExpanded}
-                          >
-                            {isHoursExpanded ? 'Recolher' : 'Ver hor\u00E1rios'}
-                          </button>
-                        </div>
-                        {openingStatus.description && (
-                          <p className="mt-1 pl-4 text-xs text-muted-foreground">{openingStatus.description}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div
+            <div
+              className={cn(
+                canMatchContactCardHeight && isHoursExpanded && 'md:relative md:self-stretch',
+              )}
+            >
+              {/* No desktop, o card de contato dita a altura da linha sem ser esticado pelos horários. */}
+              <Card
+                className={cn(
+                  'animate-fade-in rounded-lg border-none shadow-sm transition-shadow duration-200 hover:shadow-md',
+                  canMatchContactCardHeight && isHoursExpanded && 'md:absolute md:inset-0 md:overflow-hidden',
+                )}
+              >
+                <CardContent
                   className={cn(
-                    'grid transition-[grid-template-rows] duration-300 ease-in-out',
-                    isHoursExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                    'pb-5 pt-5',
+                    canMatchContactCardHeight && isHoursExpanded && 'md:flex md:h-full md:min-h-0 md:flex-col',
                   )}
-                  aria-hidden={!isHoursExpanded}
                 >
-                  <div className="overflow-hidden">
-                    <div className="mt-4 md:columns-2 md:gap-x-8">
-                      {openingHourGroups.map((group) => (
-                        <div
-                          key={group.label}
-                          className="flex items-center justify-between border-b border-border/50 py-2.5 last:border-b-0 break-inside-avoid"
-                        >
-                          <span className={cn('text-sm', group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
-                            {group.label}
-                          </span>
-                          <span className={cn('text-sm', group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
-                            {group.closed ? 'Fechado' : `${group.open} \u2013 ${group.close}`}
-                          </span>
+                  <div>
+                    <div>
+                      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                        <Clock className="h-4 w-4" />
+                        {'Hor\u00E1rio de Funcionamento'}
+                      </h3>
+                      {openingStatus && (
+                        <div className="mt-3" role="status">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  'h-2 w-2 shrink-0 rounded-full',
+                                  openingStatus.variant === 'open' && 'bg-emerald-500',
+                                  openingStatus.variant === 'closed' && 'bg-amber-500',
+                                )}
+                                aria-hidden="true"
+                              />
+                              <p className="text-sm font-bold text-foreground">{openingStatus.title}</p>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsHoursExpanded((current) => !current)}
+                              className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                              aria-expanded={isHoursExpanded}
+                            >
+                              {isHoursExpanded ? 'Recolher' : 'Ver hor\u00E1rios'}
+                            </button>
+                          </div>
+                          {openingStatus.description && (
+                            <p className="mt-1 pl-4 text-xs text-muted-foreground">{openingStatus.description}</p>
+                          )}
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+
+                  <div
+                    className={cn(
+                      'grid transition-[grid-template-rows] duration-300 ease-in-out',
+                      isHoursExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                      canMatchContactCardHeight && isHoursExpanded && 'md:min-h-0 md:flex-1',
+                    )}
+                    aria-hidden={!isHoursExpanded}
+                  >
+                    <div
+                      className={cn(
+                        'overflow-hidden',
+                        canMatchContactCardHeight && isHoursExpanded
+                          && 'md:h-full md:min-h-0 md:overflow-y-auto md:pr-1 scrollbar-thin',
+                      )}
+                      role="region"
+                      aria-label="Horários da semana"
+                      tabIndex={isHoursExpanded ? 0 : -1}
+                    >
+                      <div
+                        className={cn(
+                          'mt-4',
+                          canMatchContactCardHeight && isHoursExpanded && 'md:flex md:min-h-[calc(100%_-_1rem)] md:flex-col',
+                        )}
+                      >
+                        {openingHourGroups.map((group) => (
+                          <div
+                            key={group.label}
+                            className={cn(
+                              'flex items-center justify-between gap-3 border-b border-border/50 py-2.5 text-sm last:border-b-0',
+                              canMatchContactCardHeight && isHoursExpanded && 'md:grow md:shrink-0 md:py-1.5',
+                              canMatchContactCardHeight && isHoursExpanded && openingHoursDensity === 'compact'
+                                && 'md:py-1 md:text-xs md:leading-snug',
+                              canMatchContactCardHeight && isHoursExpanded && openingHoursDensity === 'tight'
+                                && 'md:py-0.5 md:text-xs md:leading-snug',
+                            )}
+                          >
+                            <span className={cn(group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
+                              {group.label}
+                            </span>
+                            <span className={cn('shrink-0 whitespace-nowrap text-right tabular-nums', group.isToday ? 'font-bold text-foreground' : 'text-muted-foreground')}>
+                              {group.closed ? 'Fechado' : `${group.open} \u2013 ${group.close}`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {(company.phone || company.address) && (
