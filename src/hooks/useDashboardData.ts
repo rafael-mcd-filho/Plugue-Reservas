@@ -3,6 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import {
+  isOperationalActiveReservationStatus,
+  isOperationalLostReservationStatus,
+} from '@/lib/reservation-operational-filter';
+import {
   RESERVATION_ORIGIN_CONFIG,
   classifyReservationOrigin,
   normalizeReservationSource,
@@ -16,6 +20,8 @@ export interface DailyStats {
   date: string;
   label: string;
   reservations: number;
+  activeReservations: number;
+  lostReservations: number;
   scheduledReservations: number;
   waitlistReservations: number;
   completed: number;
@@ -25,20 +31,25 @@ export interface DailyStats {
   cancellations: number;
   noShows: number;
   totalGuests: number;
+  activeGuests: number;
+  lostGuests: number;
   completedGuests: number;
   noShowGuests: number;
   cancelledGuests: number;
 }
 
-interface RawReservation {
-  id: string;
+export interface DashboardDailyReservationInput {
   date: string;
-  time: string | null;
   status: string | null;
   party_size: number | null;
   checked_in_party_size: number | null;
-  created_at: string;
   source: string | null;
+}
+
+interface RawReservation extends DashboardDailyReservationInput {
+  id: string;
+  time: string | null;
+  created_at: string;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
   origin_affiliate_link_id?: string | null;
@@ -63,8 +74,101 @@ interface RawDailyCapacity {
 const EMPTY_RESERVATIONS: RawReservation[] = [];
 const EMPTY_WAITLIST: RawWaitlistEntry[] = [];
 const EMPTY_DAILY_CAPACITY: RawDailyCapacity[] = [];
+const DASHBOARD_OPERATIONAL_RESERVATION_SELECT = 'id, date, status, party_size, checked_in_party_size, source';
 const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot';
 const DASHBOARD_WAITLIST_SELECT = 'id, status, created_at, seated_at, expired_at, removed_at';
+
+export interface DashboardDataOptions {
+  /**
+   * Carrega os conjuntos usados apenas pelo resumo das páginas de relatório:
+   * capacidade, demanda/origem/antecedência e fila de espera.
+   *
+   * O padrão permanece `true` para preservar os consumidores existentes.
+   */
+  includeReportOverview?: boolean;
+}
+
+function createEmptyDailyStats(): Omit<DailyStats, 'date' | 'label'> {
+  return {
+    reservations: 0,
+    activeReservations: 0,
+    lostReservations: 0,
+    scheduledReservations: 0,
+    waitlistReservations: 0,
+    completed: 0,
+    scheduledCompleted: 0,
+    waitlistCompleted: 0,
+    confirmed: 0,
+    cancellations: 0,
+    noShows: 0,
+    totalGuests: 0,
+    activeGuests: 0,
+    lostGuests: 0,
+    completedGuests: 0,
+    noShowGuests: 0,
+    cancelledGuests: 0,
+  };
+}
+
+export function buildDashboardDailyStats(
+  reservations: DashboardDailyReservationInput[],
+  startDate: Date,
+  endDate: Date,
+) {
+  const days = eachDayOfInterval({ start: startDate, end: endDate });
+  const byDate: Record<string, Omit<DailyStats, 'date' | 'label'>> = {};
+
+  for (const reservation of reservations) {
+    const normalizedStatus = normalizeReservationStatus(reservation.status);
+    const normalizedSource = normalizeReservationSource(reservation.source);
+    const dayStats = byDate[reservation.date] ?? createEmptyDailyStats();
+    byDate[reservation.date] = dayStats;
+
+    const partySize = reservation.party_size || 1;
+    const attendedSize = reservation.checked_in_party_size ?? partySize;
+    dayStats.reservations += 1;
+    dayStats.totalGuests += partySize;
+    if (isOperationalActiveReservationStatus(normalizedStatus)) {
+      dayStats.activeReservations += 1;
+      dayStats.activeGuests += partySize;
+    } else if (isOperationalLostReservationStatus(normalizedStatus)) {
+      dayStats.lostReservations += 1;
+      dayStats.lostGuests += partySize;
+    }
+    if (normalizedSource === 'waitlist') {
+      dayStats.waitlistReservations += 1;
+    } else {
+      dayStats.scheduledReservations += 1;
+    }
+
+    if (normalizedStatus === 'checked_in') {
+      dayStats.completed += 1;
+      dayStats.completedGuests += attendedSize;
+      if (normalizedSource === 'waitlist') {
+        dayStats.waitlistCompleted += 1;
+      } else {
+        dayStats.scheduledCompleted += 1;
+      }
+    } else if (normalizedStatus === 'cancelled') {
+      dayStats.cancellations += 1;
+      dayStats.cancelledGuests += partySize;
+    } else if (normalizedStatus === 'no-show') {
+      dayStats.noShows += 1;
+      dayStats.noShowGuests += partySize;
+    } else if (normalizedSource === 'reservation' && normalizedStatus === 'confirmed') {
+      dayStats.confirmed += 1;
+    }
+  }
+
+  return days.map((day): DailyStats => {
+    const date = format(day, 'yyyy-MM-dd');
+    return {
+      date,
+      label: format(day, 'dd/MM', { locale: ptBR }),
+      ...(byDate[date] ?? createEmptyDailyStats()),
+    };
+  });
+}
 
 export interface CreatedReservationDailyStat {
   date: string;
@@ -156,7 +260,9 @@ export function useDashboardData(
   endDate: Date,
   comparisonStartDate?: Date,
   comparisonEndDate?: Date,
+  options: DashboardDataOptions = {},
 ) {
+  const includeReportOverview = options.includeReportOverview ?? true;
   const startStr = format(startDate, 'yyyy-MM-dd');
   const endStr = format(endDate, 'yyyy-MM-dd');
   const rangeStartIso = startOfDay(startDate).toISOString();
@@ -169,12 +275,14 @@ export function useDashboardData(
   const prevEndStr = format(prevEndDate, 'yyyy-MM-dd');
 
   const reservationsQuery = useQuery({
-    queryKey: ['dashboard-reservations', companyId, startStr, endStr],
+    queryKey: includeReportOverview
+      ? ['dashboard-reservations', companyId, startStr, endStr]
+      : ['dashboard-reservations', companyId, startStr, endStr, 'operational'],
     queryFn: async () => {
       return fetchAllSupabasePages<RawReservation>((from, to) => {
         let query = supabase
           .from('reservations' as any)
-          .select(DASHBOARD_RESERVATION_SELECT)
+          .select(includeReportOverview ? DASHBOARD_RESERVATION_SELECT : DASHBOARD_OPERATIONAL_RESERVATION_SELECT)
           .gte('date', startStr)
           .lte('date', endStr)
           .order('date', { ascending: true })
@@ -192,6 +300,7 @@ export function useDashboardData(
 
   const waitlistQuery = useQuery({
     queryKey: ['dashboard-waitlist', companyId, startStr, endStr],
+    enabled: includeReportOverview,
     queryFn: async () => {
       return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
         let query = supabase
@@ -213,6 +322,7 @@ export function useDashboardData(
 
   const waitlistSeatedQuery = useQuery({
     queryKey: ['dashboard-waitlist-seated', companyId, startStr, endStr],
+    enabled: includeReportOverview,
     queryFn: async () => {
       return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
         let query = supabase
@@ -235,6 +345,7 @@ export function useDashboardData(
 
   const waitlistDroppedQuery = useQuery({
     queryKey: ['dashboard-waitlist-dropped', companyId, startStr, endStr],
+    enabled: includeReportOverview,
     queryFn: async () => {
       return fetchAllSupabasePages<RawWaitlistEntry>((from, to) => {
         let query = supabase
@@ -260,7 +371,7 @@ export function useDashboardData(
       return fetchAllSupabasePages<RawReservation>((from, to) => {
         let query = supabase
           .from('reservations' as any)
-          .select(DASHBOARD_RESERVATION_SELECT)
+          .select(DASHBOARD_OPERATIONAL_RESERVATION_SELECT)
           .gte('date', prevStartStr)
           .lte('date', prevEndStr)
           .order('date', { ascending: true })
@@ -278,6 +389,7 @@ export function useDashboardData(
 
   const createdReservationsQuery = useQuery({
     queryKey: ['dashboard-reservations-created', companyId, startStr, endStr],
+    enabled: includeReportOverview,
     queryFn: async () => {
       return fetchAllSupabasePages<RawReservation>((from, to) => {
         let query = supabase
@@ -299,6 +411,7 @@ export function useDashboardData(
 
   const dailyCapacityQuery = useQuery({
     queryKey: ['dashboard-daily-capacity', companyId ?? 'all', startStr, endStr],
+    enabled: includeReportOverview,
     queryFn: async () => {
       const { data, error } = await (supabase.rpc as any)('get_dashboard_daily_capacity', {
         _company_id: companyId ?? null,
@@ -314,93 +427,21 @@ export function useDashboardData(
   });
 
   const rawReservations = reservationsQuery.data ?? EMPTY_RESERVATIONS;
-  const rawWaitlist = waitlistQuery.data ?? EMPTY_WAITLIST;
-  const rawWaitlistSeated = waitlistSeatedQuery.data ?? EMPTY_WAITLIST;
-  const rawWaitlistDropped = waitlistDroppedQuery.data ?? EMPTY_WAITLIST;
+  const rawWaitlist = includeReportOverview ? waitlistQuery.data ?? EMPTY_WAITLIST : EMPTY_WAITLIST;
+  const rawWaitlistSeated = includeReportOverview ? waitlistSeatedQuery.data ?? EMPTY_WAITLIST : EMPTY_WAITLIST;
+  const rawWaitlistDropped = includeReportOverview ? waitlistDroppedQuery.data ?? EMPTY_WAITLIST : EMPTY_WAITLIST;
   const prevReservations = previousReservationsQuery.data ?? EMPTY_RESERVATIONS;
-  const createdReservations = createdReservationsQuery.data ?? EMPTY_RESERVATIONS;
-  const rawDailyCapacity = dailyCapacityQuery.data ?? EMPTY_DAILY_CAPACITY;
+  const createdReservations = includeReportOverview
+    ? createdReservationsQuery.data ?? EMPTY_RESERVATIONS
+    : EMPTY_RESERVATIONS;
+  const rawDailyCapacity = includeReportOverview
+    ? dailyCapacityQuery.data ?? EMPTY_DAILY_CAPACITY
+    : EMPTY_DAILY_CAPACITY;
 
-  const dailyStats = useMemo(() => {
-    const days = eachDayOfInterval({ start: startDate, end: endDate });
-    const byDate: Record<string, Omit<DailyStats, 'date' | 'label'>> = {};
-
-    for (const reservation of rawReservations) {
-      const normalizedStatus = normalizeReservationStatus(reservation.status);
-      const normalizedSource = normalizeReservationSource(reservation.source);
-      if (!byDate[reservation.date]) {
-        byDate[reservation.date] = {
-          reservations: 0,
-          scheduledReservations: 0,
-          waitlistReservations: 0,
-          completed: 0,
-          scheduledCompleted: 0,
-          waitlistCompleted: 0,
-          confirmed: 0,
-          cancellations: 0,
-          noShows: 0,
-          totalGuests: 0,
-          completedGuests: 0,
-          noShowGuests: 0,
-          cancelledGuests: 0,
-        };
-      }
-
-      const partySize = reservation.party_size || 1;
-      const attendedSize = reservation.checked_in_party_size ?? partySize;
-      const dayStats = byDate[reservation.date];
-      dayStats.reservations += 1;
-      dayStats.totalGuests += partySize;
-      if (normalizedSource === 'waitlist') {
-        dayStats.waitlistReservations += 1;
-      } else {
-        dayStats.scheduledReservations += 1;
-      }
-
-      if (normalizedStatus === 'checked_in') {
-        dayStats.completed += 1;
-        dayStats.completedGuests += attendedSize;
-        if (normalizedSource === 'waitlist') {
-          dayStats.waitlistCompleted += 1;
-        } else {
-          dayStats.scheduledCompleted += 1;
-        }
-      } else if (normalizedStatus === 'cancelled') {
-        dayStats.cancellations += 1;
-        dayStats.cancelledGuests += partySize;
-      } else if (normalizedStatus === 'no-show') {
-        dayStats.noShows += 1;
-        dayStats.noShowGuests += partySize;
-      } else if (normalizedSource === 'reservation') {
-        if (normalizedStatus === 'confirmed') dayStats.confirmed += 1;
-      }
-    }
-
-    return days.map((day): DailyStats => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      const dayStats = byDate[dateStr] ?? {
-        reservations: 0,
-        scheduledReservations: 0,
-        waitlistReservations: 0,
-        completed: 0,
-        scheduledCompleted: 0,
-        waitlistCompleted: 0,
-        confirmed: 0,
-        cancellations: 0,
-        noShows: 0,
-        totalGuests: 0,
-        completedGuests: 0,
-        noShowGuests: 0,
-        cancelledGuests: 0,
-      };
-
-      return {
-        date: dateStr,
-        label: format(day, 'dd/MM', { locale: ptBR }),
-        ...dayStats,
-      };
-    });
-  }, [rawReservations, startDate, endDate]);
+  const dailyStats = useMemo(
+    () => buildDashboardDailyStats(rawReservations, startDate, endDate),
+    [rawReservations, startDate, endDate],
+  );
 
   const totals = useMemo(() => {
     const base = dailyStats.reduce(
@@ -445,6 +486,10 @@ export function useDashboardData(
   }, [dailyStats, rawReservations]);
 
   const reservationOriginBreakdown = useMemo(() => {
+    if (!includeReportOverview) {
+      return { total: 0, totalPeople: 0, items: [] };
+    }
+
     const counts: Record<ReservationOriginKey, number> = {
       online: 0, affiliate: 0, manual: 0, waitlist: 0,
     };
@@ -473,9 +518,11 @@ export function useDashboardData(
     });
 
     return { total, totalPeople, items };
-  }, [rawReservations]);
+  }, [includeReportOverview, rawReservations]);
 
   const reservationOriginDailyStats = useMemo(() => {
+    if (!includeReportOverview) return [];
+
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const byDate: Record<string, ReservationOriginDailyStat> = {};
 
@@ -527,7 +574,7 @@ export function useDashboardData(
         waitlistPeople: 0,
       };
     });
-  }, [rawReservations, startDate, endDate]);
+  }, [includeReportOverview, rawReservations, startDate, endDate]);
 
   const prevTotals = useMemo(() => {
     const acc = {
@@ -605,6 +652,8 @@ export function useDashboardData(
   }, [rawWaitlist, rawWaitlistDropped.length, rawWaitlistSeated]);
 
   const waitlistDailyStats = useMemo(() => {
+    if (!includeReportOverview) return [];
+
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const entriesByDate: Record<string, number> = {};
     const seatedByDate: Record<string, number> = {};
@@ -646,9 +695,11 @@ export function useDashboardData(
           : null,
       };
     });
-  }, [endDate, rawWaitlist, rawWaitlistDropped, rawWaitlistSeated, startDate]);
+  }, [endDate, includeReportOverview, rawWaitlist, rawWaitlistDropped, rawWaitlistSeated, startDate]);
 
   const dailyCapacityStats = useMemo(() => {
+    if (!includeReportOverview) return [];
+
     const capacityByDate = new Map(
       rawDailyCapacity.map((row) => [
         row.capacity_date,
@@ -687,7 +738,7 @@ export function useDashboardData(
         status,
       };
     });
-  }, [dailyStats, rawDailyCapacity]);
+  }, [dailyStats, includeReportOverview, rawDailyCapacity]);
 
   const dailyCapacityTotals = useMemo<DailyCapacityTotals>(() => {
     const totals = dailyCapacityStats.reduce(
@@ -758,6 +809,8 @@ export function useDashboardData(
   }, [rawReservations]);
 
   const createdReservationDailyStats = useMemo(() => {
+    if (!includeReportOverview) return [];
+
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const byDate: Record<string, { total: number; scheduled: number; waitlist: number }> = {};
 
@@ -788,7 +841,7 @@ export function useDashboardData(
         waitlistCreatedReservations: dayStats.waitlist,
       };
     });
-  }, [createdReservations, startDate, endDate]);
+  }, [createdReservations, includeReportOverview, startDate, endDate]);
 
   const reservationGuestDailyStats = useMemo(() => {
     const days = eachDayOfInterval({ start: startDate, end: endDate });
@@ -809,6 +862,8 @@ export function useDashboardData(
   }, [endDate, rawReservations, startDate]);
 
   const reservationLeadTrend = useMemo(() => {
+    if (!includeReportOverview) return [];
+
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     const byDate: Record<string, { totalLeadDays: number; createdReservations: number; sameDayReservations: number }> = {};
 
@@ -850,7 +905,7 @@ export function useDashboardData(
         sameDayReservations: bucket?.sameDayReservations || 0,
       };
     });
-  }, [createdReservations, startDate, endDate]);
+  }, [createdReservations, includeReportOverview, startDate, endDate]);
 
   const createdReservationTotals = useMemo(() => {
     const scheduledCreatedReservations = createdReservations.filter(
@@ -891,6 +946,43 @@ export function useDashboardData(
     };
   }, [createdReservations]);
 
+  const operationalIsError = reservationsQuery.isError || previousReservationsQuery.isError;
+  const reportOverviewIsError = includeReportOverview && (
+    waitlistQuery.isError
+    || waitlistSeatedQuery.isError
+    || waitlistDroppedQuery.isError
+    || createdReservationsQuery.isError
+    || dailyCapacityQuery.isError
+  );
+  const error = reservationsQuery.error
+    ?? previousReservationsQuery.error
+    ?? (includeReportOverview
+      ? waitlistQuery.error
+        ?? waitlistSeatedQuery.error
+        ?? waitlistDroppedQuery.error
+        ?? createdReservationsQuery.error
+        ?? dailyCapacityQuery.error
+      : null);
+
+  const refetch = async () => {
+    const requests = [
+      reservationsQuery.refetch(),
+      previousReservationsQuery.refetch(),
+    ];
+
+    if (includeReportOverview) {
+      requests.push(
+        waitlistQuery.refetch(),
+        waitlistSeatedQuery.refetch(),
+        waitlistDroppedQuery.refetch(),
+        createdReservationsQuery.refetch(),
+        dailyCapacityQuery.refetch(),
+      );
+    }
+
+    await Promise.all(requests);
+  };
+
   return {
     dailyStats,
     dailyCapacityStats,
@@ -906,16 +998,36 @@ export function useDashboardData(
     prevTotals,
     waitlistTotals,
     heatmapData,
-    isLoading: reservationsQuery.isLoading || waitlistQuery.isLoading || waitlistSeatedQuery.isLoading || waitlistDroppedQuery.isLoading || previousReservationsQuery.isLoading || createdReservationsQuery.isLoading,
-    isFetching: reservationsQuery.isFetching || waitlistQuery.isFetching || waitlistSeatedQuery.isFetching || waitlistDroppedQuery.isFetching || previousReservationsQuery.isFetching || createdReservationsQuery.isFetching || dailyCapacityQuery.isFetching,
+    operationalIsError,
+    reportOverviewIsError,
+    error,
+    refetch,
+    isLoading: reservationsQuery.isLoading
+      || previousReservationsQuery.isLoading
+      || (includeReportOverview && (
+        waitlistQuery.isLoading
+        || waitlistSeatedQuery.isLoading
+        || waitlistDroppedQuery.isLoading
+        || createdReservationsQuery.isLoading
+        || dailyCapacityQuery.isLoading
+      )),
+    isFetching: reservationsQuery.isFetching
+      || previousReservationsQuery.isFetching
+      || (includeReportOverview && (
+        waitlistQuery.isFetching
+        || waitlistSeatedQuery.isFetching
+        || waitlistDroppedQuery.isFetching
+        || createdReservationsQuery.isFetching
+        || dailyCapacityQuery.isFetching
+      )),
     lastUpdatedAt: Math.max(
       reservationsQuery.dataUpdatedAt || 0,
-      waitlistQuery.dataUpdatedAt || 0,
-      waitlistSeatedQuery.dataUpdatedAt || 0,
-      waitlistDroppedQuery.dataUpdatedAt || 0,
       previousReservationsQuery.dataUpdatedAt || 0,
-      createdReservationsQuery.dataUpdatedAt || 0,
-      dailyCapacityQuery.dataUpdatedAt || 0,
+      includeReportOverview ? waitlistQuery.dataUpdatedAt || 0 : 0,
+      includeReportOverview ? waitlistSeatedQuery.dataUpdatedAt || 0 : 0,
+      includeReportOverview ? waitlistDroppedQuery.dataUpdatedAt || 0 : 0,
+      includeReportOverview ? createdReservationsQuery.dataUpdatedAt || 0 : 0,
+      includeReportOverview ? dailyCapacityQuery.dataUpdatedAt || 0 : 0,
     ),
   };
 }

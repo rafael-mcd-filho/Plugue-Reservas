@@ -1,21 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  differenceInCalendarDays,
-  endOfMonth,
-  format,
-  isValid,
-  parseISO,
-  startOfMonth,
-  subMonths,
-} from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import type { DateRange } from 'react-day-picker';
+import { useSearchParams } from 'react-router-dom';
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
+  Line,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -32,7 +26,6 @@ import {
   Eye,
   Loader2,
   Minus,
-  RefreshCcw,
   Repeat2,
   Search,
   UserCheck,
@@ -43,7 +36,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -52,12 +44,12 @@ import {
   PaginationEllipsis,
   PaginationItem,
 } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
+import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
 import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
@@ -71,10 +63,12 @@ import {
   useCustomerRecurrenceLeadProfile,
   useCustomerRecurrenceReport,
 } from '@/hooks/useCustomerRecurrenceReport';
+import { useCustomerRecurrenceVisitSeries } from '@/hooks/useCustomerRecurrenceVisitSeries';
+import { useReportFilters } from '@/hooks/useReportFilters';
+import type { ReportGranularity } from '@/lib/report-filters';
 import { mapCrmLeadRowToProfile } from '@/lib/crm-lead-profile';
 import { cn } from '@/lib/utils';
 
-type PeriodMode = 'current_month' | 'last_month' | 'custom';
 type KpiTone = 'primary' | 'success' | 'info' | 'warning' | 'neutral';
 
 const PAGE_SIZE = 12;
@@ -136,26 +130,6 @@ const KPI_TONE_CLASSES: Record<KpiTone, string> = {
   neutral: 'bg-muted text-muted-foreground',
 };
 
-function createCurrentMonthRange(): DateRange {
-  const today = new Date();
-  return { from: startOfMonth(today), to: today };
-}
-
-function getPeriodRange(mode: PeriodMode, customRange: DateRange | undefined): DateRange {
-  const today = new Date();
-
-  if (mode === 'last_month') {
-    const lastMonth = subMonths(today, 1);
-    return { from: startOfMonth(lastMonth), to: endOfMonth(lastMonth) };
-  }
-
-  if (mode === 'custom' && customRange?.from) {
-    return { from: customRange.from, to: customRange.to ?? customRange.from };
-  }
-
-  return { from: startOfMonth(today), to: today };
-}
-
 function formatInteger(value: number): string {
   return numberFormatter.format(Number.isFinite(value) ? value : 0);
 }
@@ -175,6 +149,13 @@ function formatMonth(value: string): string {
   if (!isValid(parsed)) return value;
   const label = format(parsed, 'MMM/yy', { locale: ptBR }).replace('.', '');
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function formatSeriesPeriod(value: string, granularity: ReportGranularity): string {
+  const parsed = parseISO(value);
+  if (!isValid(parsed)) return value;
+  if (granularity === 'month') return formatMonth(value);
+  return format(parsed, 'dd/MM', { locale: ptBR });
 }
 
 function formatRangeLabel(from: string, to: string): string {
@@ -269,6 +250,7 @@ function KpiCard({
   previous,
   comparisonLabel,
   percentagePoints,
+  comparisonEnabled = true,
 }: {
   className?: string;
   label: string;
@@ -281,6 +263,7 @@ function KpiCard({
   previous: number;
   comparisonLabel: string;
   percentagePoints?: boolean;
+  comparisonEnabled?: boolean;
 }) {
   return (
     <Card className={cn(
@@ -293,7 +276,7 @@ function KpiCard({
             <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
               <span>{label}</span>
               <InfoTooltip
-                content={`${explanation} A variação abaixo compara com ${comparisonLabel}.`}
+                content={comparisonEnabled ? `${explanation} A variação abaixo compara com ${comparisonLabel}.` : explanation}
                 ariaLabel={`Como é calculado: ${label}`}
                 className="shrink-0 normal-case tracking-normal"
                 interaction="popover"
@@ -305,14 +288,16 @@ function KpiCard({
             <Icon className="h-4 w-4" aria-hidden="true" />
           </div>
         </div>
-        <div className="mt-3">
-          <TrendIndicator
-            current={current}
-            previous={previous}
-            percentagePoints={percentagePoints}
-            comparisonLabel={comparisonLabel}
-          />
-        </div>
+        {comparisonEnabled && (
+          <div className="mt-3">
+            <TrendIndicator
+              current={current}
+              previous={previous}
+              percentagePoints={percentagePoints}
+              comparisonLabel={comparisonLabel}
+            />
+          </div>
+        )}
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{helper}</p>
       </CardContent>
     </Card>
@@ -435,10 +420,14 @@ function CustomerMobileCard({
 }
 
 export default function CustomerRecurrenceReport() {
-  const { companyId, slug } = useCompanySlug();
-  const [periodMode, setPeriodMode] = useState<PeriodMode>('current_month');
-  const [customRange, setCustomRange] = useState<DateRange | undefined>(createCurrentMonthRange);
-  const [includeCompanions, setIncludeCompanions] = useState(false);
+  const { companyId, slug, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reportFilters = useReportFilters({
+    defaultPreset: 'current_month',
+    defaultComparisonEnabled: true,
+    timeZone: companyTimeZone,
+  });
+  const includeCompanions = searchParams.get('companions') === '1';
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [minimumTotalVisits, setMinimumTotalVisits] = useState<number | undefined>();
@@ -457,28 +446,31 @@ export default function CustomerRecurrenceReport() {
     return () => window.clearTimeout(timeoutId);
   }, [debouncedSearch, searchInput]);
 
-  const effectiveRange = useMemo(
-    () => getPeriodRange(periodMode, customRange),
-    [customRange, periodMode],
-  );
-  const periodStart = format(effectiveRange.from!, 'yyyy-MM-dd');
-  const periodEnd = format(effectiveRange.to!, 'yyyy-MM-dd');
-  const periodLengthDays = differenceInCalendarDays(effectiveRange.to!, effectiveRange.from!) + 1;
-  const customPeriodError = periodMode === 'custom' && periodLengthDays > 366
-    ? `O intervalo selecionado tem ${formatInteger(periodLengthDays)} dias. Escolha um período de no máximo 366 dias.`
-    : null;
+  const periodStart = reportFilters.dateOnlyRange.from;
+  const periodEnd = reportFilters.dateOnlyRange.to;
+  const customPeriodError = reportFilters.rangeError;
+  const monthlyComparison = reportFilters.periodPreset === 'current_month'
+    || reportFilters.periodPreset === 'previous_month';
 
   const reportQuery = useCustomerRecurrenceReport({
     companyId,
     periodStart,
     periodEnd,
-    comparisonMode: periodMode === 'custom' ? 'previous_period' : 'month_to_date',
+    comparisonMode: monthlyComparison ? 'month_to_date' : 'previous_period',
     includeCompanions,
     page,
     pageSize: PAGE_SIZE,
     search: debouncedSearch,
     minTotalVisits: minimumTotalVisits,
-    enabled: !customPeriodError,
+    enabled: companyTimeZoneResolved && !customPeriodError,
+  });
+  const visitSeriesQuery = useCustomerRecurrenceVisitSeries({
+    companyId,
+    periodStart,
+    periodEnd,
+    granularity: reportFilters.granularity,
+    includeCompanions,
+    enabled: companyTimeZoneResolved && !customPeriodError,
   });
   const selectedLeadProfileQuery = useCustomerRecurrenceLeadProfile({
     companyId,
@@ -507,10 +499,23 @@ export default function CustomerRecurrenceReport() {
     if (report && page > totalPages) setPage(totalPages);
   }, [page, report, totalPages]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [includeCompanions, periodEnd, periodStart]);
+
   const comparisonLabel = report
     ? formatRangeLabel(report.comparison.period_start, report.comparison.period_end)
     : 'período anterior';
   const visiblePages = getVisiblePages(displayedPage, totalPages);
+
+  const visitSeriesData = useMemo(
+    () => (visitSeriesQuery.data?.series ?? []).map((point) => ({
+      ...point,
+      label: formatSeriesPeriod(point.period, reportFilters.granularity),
+    })),
+    [reportFilters.granularity, visitSeriesQuery.data?.series],
+  );
+  const hasVisitSeriesData = visitSeriesData.some((point) => point.total_visits > 0);
 
   const compositionData = useMemo(
     () => (report?.monthly_composition ?? []).map((row) => ({
@@ -537,19 +542,13 @@ export default function CustomerRecurrenceReport() {
     ? reportQuery.error.message
     : 'Confira sua conexão e tente novamente. Se o problema continuar, contate o suporte.';
 
-  const handlePeriodModeChange = (value: PeriodMode) => {
-    setPeriodMode(value);
-    setPage(1);
-  };
-
-  const handleCustomRangeChange = (range: DateRange | undefined) => {
-    if (!range?.from) return;
-    setCustomRange({ from: range.from, to: range.to ?? range.from });
-    setPage(1);
-  };
-
   const handleIncludeCompanionsChange = (checked: boolean) => {
-    setIncludeCompanions(checked);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (checked) next.set('companions', '1');
+      else next.delete('companions');
+      return next;
+    }, { replace: true });
     setPage(1);
   };
 
@@ -564,107 +563,33 @@ export default function CustomerRecurrenceReport() {
     setPage(Math.min(Math.max(nextPage, 1), totalPages));
   };
 
+  const refreshReport = () => {
+    void reportQuery.refetch();
+    void visitSeriesQuery.refetch();
+  };
+
   const filterBar = (
-    <Card className="border-border bg-card shadow-sm">
-      <CardContent className="p-3">
-        <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(160px,180px)_minmax(200px,1fr)_minmax(240px,1.15fr)_36px] lg:items-start">
-          <div className="min-w-0 space-y-1">
-            <div className="flex h-4 items-center gap-1">
-              <Label htmlFor="recurrence-period" className="text-xs">Período da análise</Label>
-              <InfoTooltip
-                content="Nos períodos mensais, a comparação usa o mesmo recorte do mês anterior. No período personalizado, usa um intervalo anterior com a mesma duração."
-                ariaLabel="Entender a comparação entre períodos"
-                interaction="popover"
-              />
-            </div>
-            <Select value={periodMode} onValueChange={(value) => handlePeriodModeChange(value as PeriodMode)}>
-              <SelectTrigger id="recurrence-period" className="h-9 w-full" aria-label="Período da análise">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="current_month">Mês atual</SelectItem>
-                <SelectItem value="last_month">Mês anterior</SelectItem>
-                <SelectItem value="custom">Período personalizado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {periodMode === 'custom' ? (
-            <div
-              className="min-w-0 space-y-1"
-              role="group"
-              aria-labelledby="recurrence-custom-range-label"
-            >
-              <div className="flex h-4 items-center">
-                <p id="recurrence-custom-range-label" className="text-xs font-medium leading-none">
-                  Intervalo personalizado
-                </p>
-              </div>
-              <DateRangePicker
-                value={customRange}
-                onChange={handleCustomRangeChange}
-                className="h-9 w-full"
-                align="start"
-              />
-              {customPeriodError && (
-                <p className="text-xs leading-relaxed text-destructive" role="alert">
-                  {customPeriodError}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="min-w-0 space-y-1">
-              <div className="flex h-4 items-center">
-                <span className="text-xs font-medium">Intervalo considerado</span>
-              </div>
-              <div className="flex h-9 items-center rounded-md border border-border bg-muted/25 px-3 text-xs tabular-nums text-muted-foreground">
-                {format(effectiveRange.from!, 'dd/MM/yyyy')} – {format(effectiveRange.to!, 'dd/MM/yyyy')}
-              </div>
-            </div>
-          )}
-
-          <div className="min-w-0 space-y-1">
-            <div className="flex h-4 items-center gap-1">
-              <Label htmlFor="include-companions" className="cursor-pointer text-xs">
-                Incluir acompanhantes
-              </Label>
-              <InfoTooltip
-                content="Quando ativado, acompanhantes com telefone informado também entram nos cálculos. Telefones repetidos no mesmo atendimento contam uma vez."
-                ariaLabel="Entender a inclusão de acompanhantes"
-                interaction="popover"
-              />
-            </div>
-            <div className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted/20 px-3">
-              <Switch
-                id="include-companions"
-                checked={includeCompanions}
-                onCheckedChange={handleIncludeCompanionsChange}
-                aria-describedby="include-companions-help"
-              />
-              <p id="include-companions-help" className="truncate text-[10px] text-muted-foreground">
-                Apenas os identificados por telefone
-              </p>
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-9 w-9 shrink-0 justify-self-end md:mt-5 md:self-start"
-            onClick={() => reportQuery.refetch()}
-            disabled={reportQuery.isFetching || isSearchPending || !!customPeriodError}
-            aria-label="Atualizar relatório"
-            title="Atualizar relatório"
-          >
-            <RefreshCcw
-              className={cn('h-4 w-4', reportQuery.isFetching && 'animate-spin motion-reduce:animate-none')}
-              aria-hidden="true"
-            />
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <ReportFilterBar
+      filters={reportFilters}
+      isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || visitSeriesQuery.isFetching || isSearchPending}
+      onRefresh={refreshReport}
+    >
+      <div className={REPORT_FILTER_TOGGLE_CLASS}>
+        <Switch
+          id="include-companions"
+          checked={includeCompanions}
+          onCheckedChange={handleIncludeCompanionsChange}
+        />
+        <Label htmlFor="include-companions" className="cursor-pointer whitespace-nowrap text-xs">
+          Incluir acompanhantes
+        </Label>
+        <InfoTooltip
+          content="Inclui acompanhantes com telefone informado. Telefones repetidos no mesmo atendimento contam uma vez."
+          ariaLabel="Entender a inclusão de acompanhantes"
+          interaction="popover"
+        />
+      </div>
+    </ReportFilterBar>
   );
 
   return (
@@ -675,11 +600,19 @@ export default function CustomerRecurrenceReport() {
       eyebrow="CRM de retenção"
       filters={filterBar}
       updatedAt={report?.meta.generated_at}
-      isRefreshing={isSearchPending || (reportQuery.isFetching && !reportQuery.isLoading)}
-      ariaBusy={reportQuery.isFetching || isSearchPending}
+      isRefreshing={isSearchPending || ((reportQuery.isFetching || visitSeriesQuery.isFetching) && !reportQuery.isLoading)}
+      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || visitSeriesQuery.isFetching || isSearchPending}
     >
 
-      {reportQuery.isError && !report && (
+      {customPeriodError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
+          <AlertTitle>Período inválido</AlertTitle>
+          <AlertDescription>{customPeriodError}</AlertDescription>
+        </Alert>
+      )}
+
+      {!customPeriodError && reportQuery.isError && !report && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Não foi possível carregar o relatório</AlertTitle>
@@ -692,9 +625,10 @@ export default function CustomerRecurrenceReport() {
         </Alert>
       )}
 
-      {reportQuery.isLoading ? (
-        <ReportSkeleton />
-      ) : report ? (
+      {!customPeriodError && (
+        !companyTimeZoneResolved || reportQuery.isLoading ? (
+          <ReportSkeleton />
+        ) : report ? (
         <>
           {reportQuery.isError && (
             <Alert variant="destructive">
@@ -723,7 +657,7 @@ export default function CustomerRecurrenceReport() {
               <section aria-labelledby="recurrence-summary-title">
                 <div className="sr-only">
                   <h2 id="recurrence-summary-title">Resumo da recorrência</h2>
-                  <p>Comparação com {comparisonLabel}.</p>
+                  {reportFilters.comparisonEnabled && <p>Comparação com {comparisonLabel}.</p>}
                 </div>
                 <div className="mb-3 rounded-lg border border-info/15 bg-info-soft/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
                   <span className="font-semibold text-foreground">Como ler: </span>
@@ -741,6 +675,7 @@ export default function CustomerRecurrenceReport() {
                     current={report.summary.returning_customers}
                     previous={report.comparison.returning_customers}
                     comparisonLabel={comparisonLabel}
+                    comparisonEnabled={reportFilters.comparisonEnabled}
                   />
                   <KpiCard
                     className="lg:col-span-2 xl:col-span-1"
@@ -754,6 +689,7 @@ export default function CustomerRecurrenceReport() {
                     previous={report.comparison.recurrence_rate}
                     comparisonLabel={comparisonLabel}
                     percentagePoints
+                    comparisonEnabled={reportFilters.comparisonEnabled}
                   />
                   <KpiCard
                     className="lg:col-span-2 xl:col-span-1"
@@ -766,6 +702,7 @@ export default function CustomerRecurrenceReport() {
                     current={report.summary.new_customers}
                     previous={report.comparison.new_customers}
                     comparisonLabel={comparisonLabel}
+                    comparisonEnabled={reportFilters.comparisonEnabled}
                   />
                   <KpiCard
                     className="lg:col-span-3 xl:col-span-1"
@@ -778,6 +715,7 @@ export default function CustomerRecurrenceReport() {
                     current={report.summary.repeated_in_period}
                     previous={report.comparison.repeated_in_period}
                     comparisonLabel={comparisonLabel}
+                    comparisonEnabled={reportFilters.comparisonEnabled}
                   />
                   <KpiCard
                     className="lg:col-span-3 xl:col-span-1"
@@ -790,9 +728,83 @@ export default function CustomerRecurrenceReport() {
                     current={report.summary.additional_visits}
                     previous={report.comparison.additional_visits}
                     comparisonLabel={comparisonLabel}
+                    comparisonEnabled={reportFilters.comparisonEnabled}
                   />
                 </div>
               </section>
+
+              <Card className="min-w-0 border-border shadow-sm">
+                <CardHeader className="gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle id="recurrence-visit-evolution-title" className="text-base">
+                        Primeiras visitas × visitas de retorno
+                      </CardTitle>
+                      <InfoTooltip
+                        content="Primeira visita é a primeira presença identificada no histórico disponível. Toda presença posterior da mesma pessoa é uma visita de retorno."
+                        ariaLabel="Entender a evolução das visitas"
+                        interaction="popover"
+                      />
+                    </div>
+                    <CardDescription className="mt-1">
+                      Evolução {reportFilters.granularity === 'day' ? 'diária' : reportFilters.granularity === 'week' ? 'semanal' : 'mensal'} dentro do período selecionado.
+                    </CardDescription>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Linha: retornos ÷ total de visitas
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {visitSeriesQuery.isError ? (
+                    <div className="flex min-h-[250px] flex-col items-center justify-center text-center">
+                      <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
+                      <p className="mt-3 text-sm font-medium">Não foi possível carregar a evolução</p>
+                      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => visitSeriesQuery.refetch()}>
+                        Tentar novamente
+                      </Button>
+                    </div>
+                  ) : hasVisitSeriesData ? (
+                    <>
+                      <div className="h-[310px] w-full" aria-labelledby="recurrence-visit-evolution-title">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={visitSeriesData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }} accessibilityLayer>
+                            <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: CHART_COLORS.axis, fontSize: 11 }} minTickGap={24} />
+                            <YAxis yAxisId="count" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: CHART_COLORS.axis, fontSize: 11 }} />
+                            <YAxis yAxisId="rate" orientation="right" domain={[0, 100]} axisLine={false} tickLine={false} tickFormatter={(value) => `${value}%`} tick={{ fill: CHART_COLORS.axis, fontSize: 11 }} />
+                            <RechartsTooltip
+                              labelFormatter={(_, payload) => formatDate(String(payload?.[0]?.payload?.period ?? ''))}
+                              formatter={(value, name) => [
+                                name === 'Taxa de retorno' ? formatPercent(Number(value)) : formatInteger(Number(value)),
+                                name,
+                              ]}
+                              contentStyle={{ borderRadius: 10, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+                            />
+                            <Legend iconType="circle" iconSize={8} />
+                            <Bar yAxisId="count" dataKey="first_visits" name="Primeiras visitas" stackId="visits" fill={CHART_COLORS.newCustomers} />
+                            <Bar yAxisId="count" dataKey="return_visits" name="Visitas de retorno" stackId="visits" fill={CHART_COLORS.returningCustomers} radius={[5, 5, 0, 0]} />
+                            <Line yAxisId="rate" type="monotone" dataKey="return_visit_rate" name="Taxa de retorno" stroke="hsl(var(--info))" strokeWidth={2.5} dot={{ r: 2.5 }} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <ul className="sr-only">
+                        {visitSeriesData.map((point) => (
+                          <li key={point.period}>
+                            {point.label}: {formatInteger(point.first_visits)} primeiras visitas,{' '}
+                            {formatInteger(point.return_visits)} retornos, taxa de {formatPercent(point.return_visit_rate)}.
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <div className="flex min-h-[250px] flex-col items-center justify-center text-center">
+                      <CalendarSearch className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
+                      <p className="mt-3 text-sm font-medium">Nenhuma visita identificada para evoluir</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Altere o período ou inclua acompanhantes identificados.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
               <section className="grid min-w-0 gap-6 xl:grid-cols-5" aria-label="Gráficos de recorrência">
                 <Card className="min-w-0 border-border shadow-sm xl:col-span-3">
@@ -800,10 +812,10 @@ export default function CustomerRecurrenceReport() {
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <div className="flex items-center gap-1.5">
-                          <CardTitle id="monthly-composition-title">Novos × recorrentes</CardTitle>
+                          <CardTitle id="monthly-composition-title">Histórico de 6 meses</CardTitle>
                           <InfoTooltip
                             content="Em cada mês, é recorrente quem já tinha uma visita antes do primeiro dia daquele mês. A janela termina no mês do fim do período selecionado, que pode ser diferente do mês atual."
-                            ariaLabel="Entender o gráfico de novos e recorrentes"
+                            ariaLabel="Entender o histórico de novos e recorrentes"
                             interaction="popover"
                           />
                         </div>
@@ -1269,7 +1281,8 @@ export default function CustomerRecurrenceReport() {
             </>
           )}
         </>
-      ) : null}
+        ) : null
+      )}
 
       <LeadProfileDialog
         open={!!selectedCustomer}

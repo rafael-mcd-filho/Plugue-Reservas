@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OccupancyCapacityReport from '@/pages/OccupancyCapacityReport';
 import type { OccupancyCapacityReport as OccupancyCapacityReportData } from '@/lib/occupancy-capacity-report';
+import type { OccupancyWaitlistSeries } from '@/hooks/useOccupancyWaitlistSeries';
 
 const refetch = vi.fn();
+const waitlistRefetch = vi.fn();
 let reportQueryState: {
   data?: OccupancyCapacityReportData;
   isLoading: boolean;
@@ -14,6 +16,12 @@ let reportQueryState: {
   refetch: typeof refetch;
 };
 let comparisonQueryState: typeof reportQueryState;
+let waitlistQueryState: {
+  data?: OccupancyWaitlistSeries;
+  isError: boolean;
+  isFetching: boolean;
+  refetch: typeof waitlistRefetch;
+};
 let comparisonEnabled = false;
 let comparisonDateOnlyRange: { from: string; to: string } | null = null;
 
@@ -52,13 +60,18 @@ vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   ComposedChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   Area: () => null,
-  Bar: () => null,
+  Bar: ({ dataKey }: { dataKey?: string }) => <i data-testid={`bar-${dataKey}`} />,
   CartesianGrid: () => null,
   Legend: () => null,
-  Line: () => null,
+  Line: ({ dataKey }: { dataKey?: string }) => <i data-testid={`line-${dataKey}`} />,
+  ReferenceLine: () => null,
   Tooltip: () => null,
   XAxis: () => null,
   YAxis: () => null,
+}));
+
+vi.mock('@/hooks/useOccupancyWaitlistSeries', () => ({
+  useOccupancyWaitlistSeries: () => waitlistQueryState,
 }));
 
 const report: OccupancyCapacityReportData = {
@@ -174,6 +187,7 @@ vi.mock('@/hooks/useOccupancyCapacityReport', () => ({
 describe('OccupancyCapacityReport', () => {
   beforeEach(() => {
     refetch.mockClear();
+    waitlistRefetch.mockClear();
     comparisonEnabled = false;
     comparisonDateOnlyRange = null;
     reportQueryState = {
@@ -189,6 +203,21 @@ describe('OccupancyCapacityReport', () => {
       isFetching: false,
       refetch,
     };
+    waitlistQueryState = {
+      data: {
+        series: [{
+          period: '2026-08-10', entries: 3, entry_people: 6, seated: 2,
+          seated_people: 4, dropped: 1, dropped_people: 2, average_wait_minutes: 18,
+        }],
+        meta: {
+          period_start: '2026-08-01', period_end: '2026-08-20', time_zone: 'America/Manaus',
+          granularity: 'day', event_semantics: 'event_timestamp', generated_at: '2026-08-20T12:00:00Z',
+        },
+      },
+      isError: false,
+      isFetching: false,
+      refetch: waitlistRefetch,
+    };
   });
 
   it('shows mixed capacity quality and the aggregated views', () => {
@@ -202,6 +231,80 @@ describe('OccupancyCapacityReport', () => {
       'os indicadores e o gráfico consideram todo o período selecionado e não mudam com “Modo de capacidade”',
     );
     expect(screen.queryByText(/perman\u00eancia real/i)).not.toBeInTheDocument();
+  });
+
+  it('preserves the operational waitlist KPIs and line chart without inventing a daily conversion', () => {
+    waitlistQueryState = {
+      data: {
+        series: [
+          {
+            period: '2026-08-10', entries: 4, entry_people: 8, seated: 1,
+            seated_people: 2, dropped: 0, dropped_people: 0, average_wait_minutes: 10,
+          },
+          {
+            period: '2026-08-11', entries: 0, entry_people: 0, seated: 3,
+            seated_people: 6, dropped: 2, dropped_people: 4, average_wait_minutes: 30,
+          },
+        ],
+        meta: {
+          period_start: '2026-08-01', period_end: '2026-08-20', time_zone: 'America/Manaus',
+          granularity: 'day', event_semantics: 'event_timestamp', generated_at: '2026-08-20T12:00:00Z',
+        },
+      },
+      isError: false,
+      isFetching: false,
+      refetch: waitlistRefetch,
+    };
+
+    render(<MemoryRouter><OccupancyCapacityReport /></MemoryRouter>);
+
+    const summary = screen.getByLabelText('Resumo da fila de espera');
+    expect(within(summary).getByText('Entradas')).toBeInTheDocument();
+    expect(within(summary).getByText('Sentados')).toBeInTheDocument();
+    expect(within(summary).getByText('Sa\u00eddas sem sentar')).toBeInTheDocument();
+    expect(within(summary).getByText('Convers\u00e3o geral')).toBeInTheDocument();
+    expect(within(summary).getByText('Espera m\u00e9dia')).toBeInTheDocument();
+    expect(within(summary).getAllByText('4')).toHaveLength(2);
+    expect(within(summary).getByText('2')).toBeInTheDocument();
+    // 2 sentados entre as 3 entradas da mesma coorte do relat\u00f3rio. O valor
+    // n\u00e3o usa 4 / 4 eventos da s\u00e9rie temporal.
+    expect(within(summary).getByText('66,7%')).toBeInTheDocument();
+    expect(within(summary).getByText('25,0 min')).toBeInTheDocument();
+    expect(screen.getByText(/n\u00e3o \u00e9 calculada dia a dia/i)).toBeInTheDocument();
+
+    expect(screen.getByTestId('line-entries')).toBeInTheDocument();
+    expect(screen.getByTestId('line-seated')).toBeInTheDocument();
+    expect(screen.getByTestId('line-dropped')).toBeInTheDocument();
+    expect(screen.getByTestId('line-average_wait_minutes')).toBeInTheDocument();
+    expect(screen.queryByTestId('bar-entries')).not.toBeInTheDocument();
+  });
+
+  it('keeps the hourly analysis as bars behind its URL view', () => {
+    reportQueryState = {
+      data: {
+        ...report,
+        waitlist_by_hour: [{
+          hour: '19:00:00', entries: 3, people: 6, seated: 2, dropped: 1,
+          average_wait_minutes: 18,
+        }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/?waitlist_view=hour']}>
+        <OccupancyCapacityReport />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Por hor\u00e1rio' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('bar-entries')).toBeInTheDocument();
+    expect(screen.getByTestId('bar-seated')).toBeInTheDocument();
+    expect(screen.getByTestId('bar-dropped')).toBeInTheDocument();
+    expect(screen.queryByTestId('line-average_wait_minutes')).not.toBeInTheDocument();
   });
 
   it('does not expose the per-reservation listing or the table breakdown', () => {
@@ -294,6 +397,18 @@ describe('OccupancyCapacityReport', () => {
   });
 
   it('shows explicit empty states instead of blank charts', () => {
+    waitlistQueryState = {
+      data: {
+        series: [],
+        meta: {
+          period_start: '2026-08-01', period_end: '2026-08-20', time_zone: 'America/Manaus',
+          granularity: 'day', event_semantics: 'event_timestamp', generated_at: '2026-08-20T12:00:00Z',
+        },
+      },
+      isError: false,
+      isFetching: false,
+      refetch: waitlistRefetch,
+    };
     reportQueryState = {
       data: {
         ...report,
@@ -321,7 +436,7 @@ describe('OccupancyCapacityReport', () => {
     render(<MemoryRouter><OccupancyCapacityReport /></MemoryRouter>);
 
     expect(screen.getByText('Nenhum dado de capacidade ou demanda')).toBeInTheDocument();
-    expect(screen.getByText('Nenhuma entrada na fila neste recorte.')).toBeInTheDocument();
+    expect(screen.getByText('Nenhum evento da fila neste recorte.')).toBeInTheDocument();
     expect(screen.getByText('Sem reservas elegíveis para calcular no-show por horário.')).toBeInTheDocument();
   });
 

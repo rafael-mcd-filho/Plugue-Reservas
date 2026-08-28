@@ -60,7 +60,9 @@ export function useLiveFunnelPresence(companyId?: string) {
         })),
       };
     },
-    enabled: true,
+    // O painel Ao Vivo só é exibido quando existe uma unidade definida.
+    // Evita consultar e atualizar a agregação global em segundo plano no superadmin.
+    enabled: Boolean(companyId && companyId !== 'all'),
     refetchInterval: 15_000,
     refetchIntervalInBackground: false,
     staleTime: 10_000,

@@ -1058,12 +1058,12 @@ describe('funnel tracking persistence safety', () => {
       step: 'page_view',
     };
     window.localStorage.setItem('pg_tracking_pending_events', JSON.stringify([legacyPayload]));
-    const originalSetItem = Storage.prototype.setItem;
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function setItem(key, value) {
+    const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
+    const setItemSpy = vi.spyOn(window.localStorage, 'setItem').mockImplementation(function setItem(key, value) {
       if (key.startsWith('pg_tracking_pending_event_v3:')) {
         throw new DOMException('quota', 'QuotaExceededError');
       }
-      originalSetItem.call(this, key, value);
+      originalSetItem(key, value);
     });
 
     const scope = getFunnelTrackingScope(undefined, 'company-a')!;

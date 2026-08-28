@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AttendanceLossesReport from '@/pages/AttendanceLossesReport';
 import type { AttendanceLossesReport as AttendanceLossesReportData } from '@/lib/attendance-losses-report';
+import type { AttendanceOutcomeSeries } from '@/hooks/useAttendanceOutcomeSeries';
 
 const refetch = vi.fn();
+const seriesRefetch = vi.fn();
 let reportQueryState: {
   data?: AttendanceLossesReportData;
   isLoading: boolean;
@@ -13,6 +15,12 @@ let reportQueryState: {
   isFetching: boolean;
   error?: Error;
   refetch: typeof refetch;
+};
+let seriesQueryState: {
+  data?: AttendanceOutcomeSeries;
+  isError: boolean;
+  isFetching: boolean;
+  refetch: typeof seriesRefetch;
 };
 
 vi.mock('@/contexts/CompanySlugContext', () => ({
@@ -51,12 +59,18 @@ vi.mock('@/components/reports/ReportFilterBar', () => ({
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BarChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ComposedChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Bar: () => null,
   CartesianGrid: () => null,
   Legend: () => null,
+  Line: () => null,
   Tooltip: () => null,
   XAxis: () => null,
   YAxis: () => null,
+}));
+
+vi.mock('@/hooks/useAttendanceOutcomeSeries', () => ({
+  useAttendanceOutcomeSeries: () => seriesQueryState,
 }));
 
 vi.mock('@/hooks/useAttendanceLossesReport', () => ({
@@ -125,7 +139,30 @@ const report: AttendanceLossesReportData = {
 describe('AttendanceLossesReport', () => {
   beforeEach(() => {
     refetch.mockClear();
+    seriesRefetch.mockClear();
     reportQueryState = { data: report, isLoading: false, isError: false, isFetching: false, refetch };
+    seriesQueryState = {
+      data: {
+        series: [{
+          period: '2026-08-10', reservations: 10, attended: 6, no_show: 2, cancelled: 1,
+          scheduled: 1, reserved_people: 28, attended_people: 18, no_show_people: 5,
+          cancelled_people: 2, scheduled_people: 3, lost_people: 7,
+          expected_reservations: 10, realized_reservations: 6,
+          expected_people: 28, realized_people: 18, attendance_rate: 75, no_show_rate: 25,
+          loss_rate: 30, realized_reservation_rate: 60, realized_people_rate: 64.3,
+        }],
+        meta: {
+          period_start: '2026-08-01', period_end: '2026-08-20', time_zone: 'America/Manaus',
+          granularity: 'day', outcome: 'all', entry_method: 'all',
+          attendance_rate_formula: 'attended / (attended + no_show)',
+          realized_rate_formula: 'attended / all_reservations',
+          generated_at: '2026-08-20T12:00:00Z',
+        },
+      },
+      isError: false,
+      isFetching: false,
+      refetch: seriesRefetch,
+    };
   });
 
   it('labels associations as observational', () => {
@@ -133,6 +170,29 @@ describe('AttendanceLossesReport', () => {
 
     expect(screen.getByText(/diferenças não comprovam que WhatsApp ou pré-pagamento causaram/)).toBeInTheDocument();
     expect(screen.getByText(/Pagamento recebido antes do horário e ainda em estado pago/)).toBeInTheDocument();
+  });
+
+  it('summarizes expected, realized, losses and realization for the selected unit', () => {
+    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+
+    const reservationTotals = within(screen.getByTestId('attendance-series-totals'));
+    expect(reservationTotals.getByText('Esperado')).toBeInTheDocument();
+    expect(reservationTotals.getByText('10')).toBeInTheDocument();
+    expect(reservationTotals.getByText('Check-ins')).toBeInTheDocument();
+    expect(reservationTotals.getByText('6')).toBeInTheDocument();
+    expect(reservationTotals.getByText('Perdas')).toBeInTheDocument();
+    expect(reservationTotals.getByText('3')).toBeInTheDocument();
+    expect(reservationTotals.getByText('Realização')).toBeInTheDocument();
+    expect(reservationTotals.getByText('60,0%')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pessoas' }));
+
+    const peopleTotals = within(screen.getByTestId('attendance-series-totals'));
+    expect(peopleTotals.getByText('28')).toBeInTheDocument();
+    expect(peopleTotals.getByText('Compareceram')).toBeInTheDocument();
+    expect(peopleTotals.getByText('18')).toBeInTheDocument();
+    expect(peopleTotals.getByText('7')).toBeInTheDocument();
+    expect(peopleTotals.getByText('64,3%')).toBeInTheDocument();
   });
 
   it('does not expose the per-reservation listing', () => {
@@ -144,6 +204,21 @@ describe('AttendanceLossesReport', () => {
   });
 
   it('shows explicit empty states for charts and reservations', () => {
+    seriesQueryState = {
+      data: {
+        series: [],
+        meta: {
+          period_start: '2026-08-01', period_end: '2026-08-20', time_zone: 'America/Manaus',
+          granularity: 'day', outcome: 'all', entry_method: 'all',
+          attendance_rate_formula: 'attended / (attended + no_show)',
+          realized_rate_formula: 'attended / all_reservations',
+          generated_at: '2026-08-20T12:00:00Z',
+        },
+      },
+      isError: false,
+      isFetching: false,
+      refetch: seriesRefetch,
+    };
     const emptySummary = Object.fromEntries(Object.keys(summary).map((key) => [key, 0])) as typeof summary;
     reportQueryState = {
       data: {

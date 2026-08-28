@@ -8,6 +8,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -36,6 +37,7 @@ import ReportMetricCard from '@/components/reports/ReportMetricCard';
 import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useOccupancyCapacityReport } from '@/hooks/useOccupancyCapacityReport';
+import { useOccupancyWaitlistSeries } from '@/hooks/useOccupancyWaitlistSeries';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import {
   OCCUPANCY_CAPACITY_MODES,
@@ -107,6 +109,17 @@ const MODE_LABELS: Record<OccupancyCapacityModeFilter, string> = {
   capacity: UI.modeCapacity,
   tables: UI.modeTables,
 };
+
+type CapacityEvolutionView = 'volumes' | 'rates';
+type WaitlistEvolutionView = 'period' | 'hour';
+
+function isCapacityEvolutionView(value: string | null): value is CapacityEvolutionView {
+  return value === 'volumes' || value === 'rates';
+}
+
+function isWaitlistEvolutionView(value: string | null): value is WaitlistEvolutionView {
+  return value === 'period' || value === 'hour';
+}
 
 function formatInteger(value: number): string {
   return numberFormatter.format(Number.isFinite(value) ? value : 0);
@@ -234,6 +247,12 @@ export default function OccupancyCapacityReport() {
   const outcome: OccupancyCapacityOutcomeFilter = OCCUPANCY_CAPACITY_OUTCOMES.includes(rawOutcome as OccupancyCapacityOutcomeFilter)
     ? rawOutcome as OccupancyCapacityOutcomeFilter
     : 'all';
+  const evolutionView: CapacityEvolutionView = isCapacityEvolutionView(searchParams.get('capacity_view'))
+    ? searchParams.get('capacity_view') as CapacityEvolutionView
+    : 'volumes';
+  const waitlistView: WaitlistEvolutionView = isWaitlistEvolutionView(searchParams.get('waitlist_view'))
+    ? searchParams.get('waitlist_view') as WaitlistEvolutionView
+    : 'period';
 
   const reportQuery = useOccupancyCapacityReport({
     companyId,
@@ -256,6 +275,13 @@ export default function OccupancyCapacityReport() {
     availabilityMode,
     outcome: 'all',
     enabled: companyTimeZoneResolved && !filters.rangeError && !!filters.comparisonDateOnlyRange,
+  });
+  const waitlistSeriesQuery = useOccupancyWaitlistSeries({
+    companyId,
+    periodStart: filters.dateOnlyRange.from,
+    periodEnd: filters.dateOnlyRange.to,
+    granularity: filters.granularity,
+    enabled: companyTimeZoneResolved && !filters.rangeError,
   });
 
   const report = reportQuery.data;
@@ -281,7 +307,69 @@ export default function OccupancyCapacityReport() {
   const evolutionHasData = !!report && report.series.some((point) => (
     point.published_capacity > 0 || point.reserved_people > 0 || point.checked_in_people > 0
   ));
-  const waitlistHasData = !!report && report.waitlist_by_hour.some((row) => row.entries > 0);
+  const evolutionData = useMemo(() => (report?.series ?? []).map((point) => ({
+    ...point,
+    excess_people: Math.max(point.reserved_people - point.published_capacity, 0),
+    capacity_status: point.published_capacity === 0
+      ? point.reserved_people > 0 || point.checked_in_people > 0
+        ? 'no_capacity'
+        : 'empty'
+      : point.reserved_people > point.published_capacity
+        ? 'over'
+        : point.reserved_people === point.published_capacity
+          ? 'full'
+          : 'below',
+  })), [report?.series]);
+  const evolutionStatus = useMemo(() => evolutionData.reduce((totals, point) => ({
+    over: totals.over + (point.capacity_status === 'over' ? 1 : 0),
+    full: totals.full + (point.capacity_status === 'full' ? 1 : 0),
+    noCapacity: totals.noCapacity + (point.capacity_status === 'no_capacity' ? 1 : 0),
+    excessPeople: totals.excessPeople + point.excess_people,
+  }), { over: 0, full: 0, noCapacity: 0, excessPeople: 0 }), [evolutionData]);
+  const waitlistPeriodData = useMemo(
+    () => (waitlistSeriesQuery.data?.series ?? []).map((point) => ({
+      ...point,
+      // A linha deve ter uma lacuna quando ninguém foi sentado no bucket.
+      // Zero minutos sugeriria uma espera observada que não existiu.
+      average_wait_minutes: point.seated > 0 ? point.average_wait_minutes : null,
+    })),
+    [waitlistSeriesQuery.data?.series],
+  );
+  const waitlistPeriodTotals = useMemo(() => {
+    const totals = waitlistPeriodData.reduce((current, point) => ({
+      entries: current.entries + point.entries,
+      seated: current.seated + point.seated,
+      dropped: current.dropped + point.dropped,
+      waitedMinutes: current.waitedMinutes + ((point.average_wait_minutes ?? 0) * point.seated),
+    }), { entries: 0, seated: 0, dropped: 0, waitedMinutes: 0 });
+
+    return {
+      entries: totals.entries,
+      seated: totals.seated,
+      dropped: totals.dropped,
+      averageWaitMinutes: totals.seated > 0 ? totals.waitedMinutes / totals.seated : null,
+    };
+  }, [waitlistPeriodData]);
+  const displayedWaitlistTotals = waitlistView === 'period'
+    ? waitlistPeriodTotals
+    : {
+        entries: report?.summary.waitlist_entries ?? 0,
+        seated: report?.summary.waitlist_seated ?? 0,
+        dropped: report?.summary.waitlist_dropped ?? 0,
+        averageWaitMinutes: (report?.summary.waitlist_seated ?? 0) > 0
+          ? report?.summary.average_wait_minutes ?? 0
+          : null,
+      };
+  // Diferentemente da série operacional (eventos no dia em que aconteceram),
+  // esta taxa usa uma coorte coerente: entradas criadas no período e quantas
+  // delas já chegaram a ser sentadas. Por isso ela existe apenas como KPI geral.
+  const waitlistCohortEntries = report?.summary.waitlist_entries ?? 0;
+  const waitlistCohortConversionRate = waitlistCohortEntries > 0
+    ? (100 * (report?.summary.waitlist_seated ?? 0)) / waitlistCohortEntries
+    : null;
+  const waitlistHasData = waitlistView === 'period'
+    ? waitlistPeriodData.some((row) => row.entries > 0 || row.seated > 0 || row.dropped > 0)
+    : !!report && report.waitlist_by_hour.some((row) => row.entries > 0);
   const noShowHasData = !!report && report.no_show_by_hour.some((row) => row.eligible_reservations > 0);
 
   const setFilterParam = (key: string, value: string) => {
@@ -294,13 +382,23 @@ export default function OccupancyCapacityReport() {
     }, { replace: true });
   };
 
+  const setViewParam = (key: string, value: string, defaultValue: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (value === defaultValue) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
   const refresh = () => {
     void reportQuery.refetch();
+    void waitlistSeriesQuery.refetch();
     if (filters.comparisonDateOnlyRange) void comparisonQuery.refetch();
   };
 
   const filterBar = (
-    <ReportFilterBar filters={filters} isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching} onRefresh={refresh}>
+    <ReportFilterBar filters={filters} isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || waitlistSeriesQuery.isFetching} onRefresh={refresh}>
       <div className="min-w-0 flex-1 space-y-1 sm:w-44 sm:flex-none">
         <Label htmlFor="occupancy-capacity-mode" className="text-xs">{UI.modeFilter}</Label>
         <Select value={availabilityMode} onValueChange={(value) => setFilterParam('capacity_mode', value)}>
@@ -318,8 +416,8 @@ export default function OccupancyCapacityReport() {
       icon={Gauge}
       filters={filterBar}
       updatedAt={report?.meta.generated_at ?? null}
-      isRefreshing={reportQuery.isFetching && !!report}
-      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching}
+      isRefreshing={(reportQuery.isFetching || waitlistSeriesQuery.isFetching) && !!report}
+      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || waitlistSeriesQuery.isFetching}
     >
       {(!companyTimeZoneResolved || (reportQuery.isLoading && !report)) ? <ReportLoading /> : reportQuery.isError && !report ? (
         <Alert variant="destructive" className="py-5">
@@ -420,23 +518,66 @@ export default function OccupancyCapacityReport() {
           </section>
 
           <Card className="overflow-hidden border-border shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">{UI.evolutionTitle}</CardTitle>
-              <CardDescription>{UI.evolutionDescription}</CardDescription>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-base">{UI.evolutionTitle}</CardTitle>
+                  <CardDescription>{UI.evolutionDescription}</CardDescription>
+                </div>
+                <div className="inline-flex self-start rounded-md border border-border bg-muted/20 p-0.5" aria-label="Visualização da capacidade">
+                  {(['volumes', 'rates'] as CapacityEvolutionView[]).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      className={cn(
+                        'rounded px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        evolutionView === view ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      aria-pressed={evolutionView === view}
+                      onClick={() => setViewParam('capacity_view', view, 'volumes')}
+                    >
+                      {view === 'volumes' ? 'Volumes' : 'Taxas'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                <span className="rounded-md bg-muted/50 px-2 py-1"><strong className="tabular-nums text-foreground">{evolutionStatus.full}</strong> períodos em 100%</span>
+                <span className="rounded-md bg-destructive/10 px-2 py-1"><strong className="tabular-nums text-destructive">{evolutionStatus.over}</strong> acima da capacidade</span>
+                <span className="rounded-md bg-warning/10 px-2 py-1"><strong className="tabular-nums text-foreground">{formatInteger(evolutionStatus.excessPeople)}</strong> pessoas excedentes</span>
+                {evolutionStatus.noCapacity > 0 && <span className="rounded-md bg-muted/50 px-2 py-1"><strong className="tabular-nums text-foreground">{evolutionStatus.noCapacity}</strong> sem base publicada</span>}
+                <span className="rounded-md bg-muted/50 px-2 py-1">Qualidade: <strong className="text-foreground">{qualityLabel(report.meta.capacity_history)}</strong></span>
+              </div>
             </CardHeader>
             <CardContent>
               {evolutionHasData ? <>
               <div className="h-[320px] w-full" role="img" aria-label={`${UI.evolutionTitle}. ${formatInteger(report.summary.reserved_people)} pessoas reservadas e ${formatInteger(report.summary.checked_in_people)} com check-in.`}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={report.series} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                  <ComposedChart data={evolutionData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="period" tickFormatter={(value) => formatPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} minTickGap={26} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <RechartsTooltip labelFormatter={(value) => formatDate(String(value))} formatter={(value: number, name: string) => [formatInteger(value), name]} />
+                    <YAxis domain={evolutionView === 'rates' ? [0, 'auto'] : undefined} tickFormatter={evolutionView === 'rates' ? (value) => `${value}%` : undefined} tick={{ fontSize: 11 }} />
+                    <RechartsTooltip
+                      labelFormatter={(value) => formatDate(String(value))}
+                      formatter={(value: number, name: string) => [
+                        evolutionView === 'rates' ? formatPercent(value) : formatInteger(value),
+                        name,
+                      ]}
+                    />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Area type="monotone" dataKey="published_capacity" name={UI.capacity} fill="hsl(var(--primary) / 0.12)" stroke="hsl(var(--primary))" strokeWidth={2} />
-                    <Bar dataKey="reserved_people" name="Pessoas reservadas" fill="hsl(var(--warning))" radius={[3, 3, 0, 0]} />
-                    <Line type="monotone" dataKey="checked_in_people" name="Check-ins" stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} />
+                    {evolutionView === 'volumes' ? (
+                      <>
+                        <Area type="monotone" dataKey="published_capacity" name={UI.capacity} fill="hsl(var(--primary) / 0.12)" stroke="hsl(var(--primary))" strokeWidth={2} />
+                        <Bar dataKey="reserved_people" name="Pessoas reservadas" fill="hsl(var(--warning))" radius={[3, 3, 0, 0]} />
+                        <Line type="monotone" dataKey="checked_in_people" name="Check-ins" stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} />
+                      </>
+                    ) : (
+                      <>
+                        <ReferenceLine y={100} stroke="hsl(var(--destructive))" strokeDasharray="6 4" label={{ value: '100%', position: 'insideTopRight', fontSize: 11 }} />
+                        <Line type="monotone" dataKey="capacity_pressure_rate" name="Pressão da demanda" stroke="hsl(var(--warning))" strokeWidth={2.5} dot={{ r: 2.5 }} />
+                        <Line type="monotone" dataKey="check_in_capacity_rate" name="Check-ins sobre capacidade" stroke="hsl(var(--success))" strokeWidth={2.5} dot={{ r: 2.5 }} />
+                      </>
+                    )}
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -467,34 +608,162 @@ export default function OccupancyCapacityReport() {
 
           <section className="grid gap-4 xl:grid-cols-2">
             <Card className="border-border shadow-sm">
-              <CardHeader><CardTitle className="text-base">{UI.waitlistHourTitle}</CardTitle><CardDescription>{UI.waitlistHourDescription}</CardDescription></CardHeader>
-              <CardContent>
-                {waitlistHasData ? <>
+              <CardHeader className="space-y-3">
+                <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+                  <div>
+                    <CardTitle className="text-base">Fluxo da fila de espera</CardTitle>
+                    <CardDescription>
+                      {waitlistView === 'period'
+                        ? 'Cada evento entra no período em que realmente ocorreu: entrada, atendimento ou saída.'
+                        : UI.waitlistHourDescription}
+                    </CardDescription>
+                  </div>
+                  <div className="inline-flex shrink-0 rounded-md border border-border bg-muted/20 p-0.5" aria-label="Visualização da fila">
+                    {(['period', 'hour'] as WaitlistEvolutionView[]).map((view) => (
+                      <button
+                        key={view}
+                        type="button"
+                        className={cn(
+                          'rounded px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          waitlistView === view ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        aria-pressed={waitlistView === view}
+                        onClick={() => setViewParam('waitlist_view', view, 'period')}
+                      >
+                        {view === 'period' ? 'Por período' : 'Por horário'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5" aria-label="Resumo da fila de espera">
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[hsl(28_85%_55%)]" aria-hidden="true" />
+                      <span className="truncate text-xs text-muted-foreground">Entradas</span>
+                    </div>
+                    <strong className="shrink-0 text-sm tabular-nums">
+                      {waitlistView === 'period' && waitlistSeriesQuery.isError
+                        ? '—'
+                        : formatInteger(displayedWaitlistTotals.entries)}
+                    </strong>
+                  </div>
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[hsl(var(--success))]" aria-hidden="true" />
+                      <span className="truncate text-xs text-muted-foreground">Sentados</span>
+                    </div>
+                    <strong className="shrink-0 text-sm tabular-nums">
+                      {waitlistView === 'period' && waitlistSeriesQuery.isError
+                        ? '—'
+                        : formatInteger(displayedWaitlistTotals.seated)}
+                    </strong>
+                  </div>
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-destructive" aria-hidden="true" />
+                      <span className="truncate text-xs text-muted-foreground">Saídas sem sentar</span>
+                    </div>
+                    <strong className="shrink-0 text-sm tabular-nums">
+                      {waitlistView === 'period' && waitlistSeriesQuery.isError
+                        ? '—'
+                        : formatInteger(displayedWaitlistTotals.dropped)}
+                    </strong>
+                  </div>
+                  <div
+                    className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2"
+                    title="Percentual das entradas criadas no período que já foram sentadas."
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-foreground/45" aria-hidden="true" />
+                      <span className="truncate text-xs text-muted-foreground">Conversão geral</span>
+                    </div>
+                    <strong className="shrink-0 text-sm tabular-nums">
+                      {waitlistCohortConversionRate === null ? '—' : formatPercent(waitlistCohortConversionRate)}
+                    </strong>
+                  </div>
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[hsl(var(--info))]" aria-hidden="true" />
+                      <span className="truncate text-xs text-muted-foreground">Espera média</span>
+                    </div>
+                    <strong className="shrink-0 text-sm tabular-nums">
+                      {waitlistView === 'period' && waitlistSeriesQuery.isError
+                        ? '—'
+                        : displayedWaitlistTotals.averageWaitMinutes === null
+                          ? '—'
+                          : formatMinutes(displayedWaitlistTotals.averageWaitMinutes)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p>
+                    A conversão geral acompanha a mesma coorte: entradas criadas no período que já foram sentadas.
+                    Ela não é calculada dia a dia, pois entrada e atendimento podem acontecer em datas diferentes.
+                  </p>
+                </div>
+
+                {waitlistSeriesQuery.isError && waitlistView === 'period' ? (
+                  <div className="flex min-h-[250px] flex-col items-center justify-center text-center">
+                    <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
+                    <p className="mt-3 text-sm font-medium">Não foi possível carregar o fluxo por período</p>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => waitlistSeriesQuery.refetch()}>
+                      Tentar novamente
+                    </Button>
+                  </div>
+                ) : waitlistHasData ? <>
                 <div
                   className="h-[280px] w-full"
                   role="img"
-                  aria-label={`${UI.waitlistHourTitle}. ${formatInteger(report.summary.waitlist_entries)} entradas, ${formatInteger(report.summary.waitlist_seated)} pessoas sentadas e ${formatInteger(report.summary.waitlist_dropped)} saídas sem sentar.`}
+                  aria-label={`Fluxo da fila. ${formatInteger(displayedWaitlistTotals.entries)} entradas no recorte atual.`}
                 >
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={report.waitlist_by_hour} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                    <ComposedChart data={waitlistView === 'period' ? waitlistPeriodData : report.waitlist_by_hour} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                      <XAxis dataKey="hour" tickFormatter={formatTime} tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <RechartsTooltip labelFormatter={(value) => formatTime(String(value))} />
+                      <XAxis
+                        dataKey={waitlistView === 'period' ? 'period' : 'hour'}
+                        tickFormatter={(value) => waitlistView === 'period'
+                          ? formatPeriod(value, filters.granularity)
+                          : formatTime(value)}
+                        tick={{ fontSize: 11 }}
+                      />
+                      <YAxis yAxisId="count" tick={{ fontSize: 11 }} />
+                      {waitlistView === 'period' && <YAxis yAxisId="minutes" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(value) => `${value} min`} />}
+                      <RechartsTooltip
+                        labelFormatter={(value) => waitlistView === 'period' ? formatDate(String(value)) : formatTime(String(value))}
+                        formatter={(value: number, name: string) => [
+                          name === 'Espera média' ? formatMinutes(value) : formatInteger(value),
+                          name,
+                        ]}
+                      />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="entries" name="Entradas" fill="hsl(var(--info))" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="seated" name="Sentados" fill="hsl(var(--success))" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="dropped" name="Sa\u00eddas sem sentar" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} />
+                      {waitlistView === 'period' ? (
+                        <>
+                          <Line yAxisId="count" type="monotone" dataKey="entries" name="Entradas na fila" stroke="hsl(28, 85%, 55%)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line yAxisId="count" type="monotone" dataKey="seated" name="Sentados" stroke="hsl(var(--success))" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line yAxisId="count" type="monotone" dataKey="dropped" name="Saídas sem sentar" stroke="hsl(var(--destructive))" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line yAxisId="minutes" type="monotone" dataKey="average_wait_minutes" name="Espera média" stroke="hsl(var(--info))" strokeWidth={2.5} strokeDasharray="6 4" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />
+                        </>
+                      ) : (
+                        <>
+                          <Bar yAxisId="count" dataKey="entries" name="Entradas" fill="hsl(var(--info))" radius={[3, 3, 0, 0]} />
+                          <Bar yAxisId="count" dataKey="seated" name="Sentados" fill="hsl(var(--success))" radius={[3, 3, 0, 0]} />
+                          <Bar yAxisId="count" dataKey="dropped" name="Saídas sem sentar" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} />
+                        </>
+                      )}
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
                 <p className="sr-only">
-                  {formatInteger(report.summary.waitlist_entries)} entradas na fila,
-                  {' '}{formatInteger(report.summary.waitlist_seated)} pessoas sentadas e
-                  {' '}{formatInteger(report.summary.waitlist_dropped)} saídas sem sentar.
+                  {formatInteger(displayedWaitlistTotals.entries)} entradas na fila,
+                  {' '}{formatInteger(displayedWaitlistTotals.seated)} atendidas e
+                  {' '}{formatInteger(displayedWaitlistTotals.dropped)} saídas sem sentar.
                 </p>
                 </> : (
-                  <p className="py-16 text-center text-sm text-muted-foreground">Nenhuma entrada na fila neste recorte.</p>
+                  <p className="py-16 text-center text-sm text-muted-foreground">Nenhum evento da fila neste recorte.</p>
                 )}
               </CardContent>
             </Card>

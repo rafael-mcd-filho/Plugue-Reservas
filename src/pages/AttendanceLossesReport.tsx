@@ -4,9 +4,10 @@ import { ptBR } from 'date-fns/locale';
 import { useSearchParams } from 'react-router-dom';
 import {
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
+  Line,
   ResponsiveContainer,
   Tooltip as ChartTooltip,
   XAxis,
@@ -35,17 +36,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useAttendanceLossesReport } from '@/hooks/useAttendanceLossesReport';
+import { useAttendanceOutcomeSeries } from '@/hooks/useAttendanceOutcomeSeries';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import {
   ATTENDANCE_ENTRY_METHODS,
   ATTENDANCE_OUTCOMES,
-  aggregateAttendanceLossesSeries,
   type AttendanceEntryMethodFilter,
   type AttendanceLossesAssociation,
   type AttendanceLossesSegment,
   type AttendanceOutcomeFilter,
   type AttendanceSegmentDimension,
 } from '@/lib/attendance-losses-report';
+import type { ReportGranularity } from '@/lib/report-filters';
 import { cn } from '@/lib/utils';
 
 // The report no longer lists individual reservations, but the RPC contract still
@@ -122,9 +124,11 @@ function formatDateTime(value: string | null): string {
   return isValid(parsed) ? format(parsed, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : '—';
 }
 
-function formatChartDate(value: string): string {
+function formatSeriesPeriod(value: string, granularity: ReportGranularity): string {
   const parsed = parseISO(value);
-  return isValid(parsed) ? format(parsed, 'dd/MM', { locale: ptBR }) : value;
+  if (!isValid(parsed)) return value;
+  if (granularity === 'month') return format(parsed, 'MMM/yy', { locale: ptBR }).replace('.', '');
+  return format(parsed, 'dd/MM', { locale: ptBR });
 }
 
 function Trend({ current, previous, invert = false }: { current: number; previous: number; invert?: boolean }) {
@@ -209,6 +213,7 @@ export default function AttendanceLossesReport() {
   const outcomeParam = searchParams.get('outcome');
   const entryMethodParam = searchParams.get('entry');
   const segmentParam = searchParams.get('segment');
+  const seriesMetric = searchParams.get('attendance_metric') === 'people' ? 'people' : 'reservations';
   const outcome: AttendanceOutcomeFilter = isOutcomeFilter(outcomeParam) ? outcomeParam : 'all';
   const entryMethod: AttendanceEntryMethodFilter = isEntryMethodFilter(entryMethodParam) ? entryMethodParam : 'all';
   const segmentDimension: AttendanceSegmentDimension = isSegmentDimension(segmentParam) ? segmentParam : 'weekday';
@@ -226,14 +231,51 @@ export default function AttendanceLossesReport() {
     enabled: companyTimeZoneResolved && !rangeError,
   });
   const report = reportQuery.data;
+  const seriesQuery = useAttendanceOutcomeSeries({
+    companyId,
+    periodStart: dateOnlyRange.from,
+    periodEnd: dateOnlyRange.to,
+    granularity: reportFilters.granularity,
+    outcome,
+    entryMethod,
+    enabled: companyTimeZoneResolved && !rangeError,
+  });
 
   const selectedSegmentRows = report?.segments[segmentDimension] ?? [];
   const segmentHasData = selectedSegmentRows.some((row) => row.reservations > 0);
-  const seriesData = useMemo(
-    () => aggregateAttendanceLossesSeries(report?.daily_series ?? [], reportFilters.granularity),
-    [report?.daily_series, reportFilters.granularity],
-  );
-  const seriesHasData = seriesData.some((row) => row.reservations > 0);
+  const seriesData = seriesQuery.data?.series;
+  const seriesHasData = seriesData?.some((row) => row.reservations > 0) ?? false;
+  const seriesTotals = useMemo(() => {
+    const totals = (seriesData ?? []).reduce((accumulator, point) => ({
+      expectedReservations: accumulator.expectedReservations + point.expected_reservations,
+      realizedReservations: accumulator.realizedReservations + point.realized_reservations,
+      lostReservations: accumulator.lostReservations + point.no_show + point.cancelled,
+      expectedPeople: accumulator.expectedPeople + point.expected_people,
+      realizedPeople: accumulator.realizedPeople + point.realized_people,
+      lostPeople: accumulator.lostPeople + point.lost_people,
+    }), {
+      expectedReservations: 0,
+      realizedReservations: 0,
+      lostReservations: 0,
+      expectedPeople: 0,
+      realizedPeople: 0,
+      lostPeople: 0,
+    });
+
+    const expected = seriesMetric === 'people'
+      ? totals.expectedPeople
+      : totals.expectedReservations;
+    const realized = seriesMetric === 'people'
+      ? totals.realizedPeople
+      : totals.realizedReservations;
+
+    return {
+      expected,
+      realized,
+      losses: seriesMetric === 'people' ? totals.lostPeople : totals.lostReservations,
+      realizationRate: expected > 0 ? Math.round((realized / expected) * 1000) / 10 : 0,
+    };
+  }, [seriesData, seriesMetric]);
 
   const updateUrlFilter = useCallback((key: string, value: string, defaultValue: string) => {
     setSearchParams((current) => {
@@ -245,6 +287,11 @@ export default function AttendanceLossesReport() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const refreshReport = () => {
+    void reportQuery.refetch();
+    void seriesQuery.refetch();
+  };
+
 
   return (
     <ReportShell
@@ -253,13 +300,13 @@ export default function AttendanceLossesReport() {
       icon={ShieldAlert}
       eyebrow="Relatório operacional"
       updatedAt={report?.meta.generated_at}
-      isRefreshing={reportQuery.isFetching && !reportQuery.isLoading}
-      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching}
+      isRefreshing={(reportQuery.isFetching || seriesQuery.isFetching) && !reportQuery.isLoading}
+      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || seriesQuery.isFetching}
       filters={(
         <ReportFilterBar
           filters={reportFilters}
-          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching}
-          onRefresh={() => reportQuery.refetch()}
+          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || seriesQuery.isFetching}
+          onRefresh={refreshReport}
         >
           <div className="flex min-w-0 flex-1 flex-wrap gap-2 sm:flex-none">
             <div className="min-w-0 flex-1 space-y-1 sm:w-44 sm:flex-none">
@@ -376,12 +423,40 @@ export default function AttendanceLossesReport() {
           </div>
 
           <Card className="border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Evolução diária dos resultados</CardTitle>
-              <CardDescription>O recorte considera a data agendada, no fuso da empresa.</CardDescription>
+            <CardHeader className="gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">
+                  Evolução {reportFilters.granularity === 'day' ? 'diária' : reportFilters.granularity === 'week' ? 'semanal' : 'mensal'} dos resultados
+                </CardTitle>
+                <CardDescription>
+                  Barras mostram todos os desfechos; a linha mostra realizado ÷ esperado no mesmo período.
+                </CardDescription>
+              </div>
+              <div className="inline-flex self-start rounded-md border border-border bg-muted/20 p-0.5" aria-label="Unidade da evolução">
+                {(['reservations', 'people'] as const).map((metric) => (
+                  <button
+                    key={metric}
+                    type="button"
+                    className={cn(
+                      'rounded px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      seriesMetric === metric ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-pressed={seriesMetric === metric}
+                    onClick={() => updateUrlFilter('attendance_metric', metric, 'reservations')}
+                  >
+                    {metric === 'reservations' ? 'Reservas' : 'Pessoas'}
+                  </button>
+                ))}
+              </div>
             </CardHeader>
             <CardContent>
-              {seriesHasData ? (
+              {seriesQuery.isError ? (
+                <div className="flex min-h-[250px] flex-col items-center justify-center text-center">
+                  <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
+                  <p className="mt-3 text-sm font-medium">Não foi possível carregar a evolução</p>
+                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => seriesQuery.refetch()}>Tentar novamente</Button>
+                </div>
+              ) : seriesHasData ? (
                 <div>
                   <p className="sr-only">
                     No período: {formatInteger(report.summary.attended)} comparecimentos,
@@ -389,25 +464,80 @@ export default function AttendanceLossesReport() {
                     {' '}{formatInteger(report.summary.cancelled)} cancelamentos e
                     {' '}{formatInteger(report.summary.scheduled)} reservas em aberto.
                   </p>
-                  <div className="h-[330px] w-full" role="img" aria-label="Gráfico diário de comparecimentos, no-shows, cancelamentos e reservas em aberto">
+                  <dl
+                    className="mb-3 grid grid-cols-2 gap-2 rounded-lg border border-border bg-muted/20 p-2 sm:grid-cols-4"
+                    data-testid="attendance-series-totals"
+                    aria-label={`Totais da evolução em ${seriesMetric === 'people' ? 'pessoas' : 'reservas'}`}
+                  >
+                    <div className="rounded-md bg-card px-2.5 py-2 shadow-sm">
+                      <dt className="text-[11px] text-muted-foreground">Esperado</dt>
+                      <dd className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+                        {formatInteger(seriesTotals.expected)}
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-success/20 bg-success-soft px-2.5 py-2">
+                      <dt className="text-[11px] text-muted-foreground">
+                        {seriesMetric === 'people' ? 'Compareceram' : 'Check-ins'}
+                      </dt>
+                      <dd className="mt-0.5 text-sm font-semibold tabular-nums text-success">
+                        {formatInteger(seriesTotals.realized)}
+                      </dd>
+                    </div>
+                    <div className="rounded-md bg-card px-2.5 py-2 shadow-sm">
+                      <dt className="text-[11px] text-muted-foreground">Perdas</dt>
+                      <dd className="mt-0.5 text-sm font-semibold tabular-nums text-destructive">
+                        {formatInteger(seriesTotals.losses)}
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-info/20 bg-info-soft/40 px-2.5 py-2">
+                      <dt className="text-[11px] text-muted-foreground">Realização</dt>
+                      <dd className="mt-0.5 text-sm font-semibold tabular-nums text-info">
+                        {formatPercent(seriesTotals.realizationRate)}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="h-[330px] w-full" role="img" aria-label={`Gráfico ${reportFilters.granularity === 'day' ? 'diário' : reportFilters.granularity === 'week' ? 'semanal' : 'mensal'} de comparecimentos, no-shows, cancelamentos e reservas em aberto`}>
                     <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={seriesData} margin={{ top: 12, right: 8, left: -18, bottom: 4 }}>
+                    <ComposedChart data={seriesData ?? []} margin={{ top: 12, right: 8, left: -18, bottom: 4 }}>
                       <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="date" tickFormatter={formatChartDate} stroke={CHART_COLORS.axis} tick={{ fontSize: 11 }} minTickGap={24} />
-                      <YAxis allowDecimals={false} stroke={CHART_COLORS.axis} tick={{ fontSize: 11 }} />
+                      <XAxis dataKey="period" tickFormatter={(value) => formatSeriesPeriod(value, reportFilters.granularity)} stroke={CHART_COLORS.axis} tick={{ fontSize: 11 }} minTickGap={24} />
+                      <YAxis yAxisId="count" allowDecimals={false} stroke={CHART_COLORS.axis} tick={{ fontSize: 11 }} />
+                      <YAxis
+                        yAxisId="rate"
+                        orientation="right"
+                        domain={[0, (dataMax: number) => Math.max(100, Math.ceil(dataMax / 10) * 10)]}
+                        tickFormatter={(value) => `${value}%`}
+                        stroke="hsl(var(--info))"
+                        tick={{ fontSize: 11 }}
+                      />
                       <ChartTooltip
                         labelFormatter={(value) => formatDateOnly(String(value))}
-                        formatter={(value, name) => [formatInteger(Number(value)), name]}
+                        formatter={(value, name) => [
+                          String(name).includes('Realização') ? formatPercent(Number(value)) : formatInteger(Number(value)),
+                          name,
+                        ]}
                         contentStyle={{ borderRadius: 10, borderColor: 'hsl(var(--border))' }}
                       />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="attended" name="Comparecimento" stackId="outcome" fill={CHART_COLORS.attended} radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="no_show" name="No-show" stackId="outcome" fill={CHART_COLORS.noShow} />
-                      <Bar dataKey="cancelled" name="Cancelamento" stackId="outcome" fill={CHART_COLORS.cancelled} />
-                      <Bar dataKey="scheduled" name="Em aberto" stackId="outcome" fill={CHART_COLORS.scheduled} />
-                    </BarChart>
+                      <Bar yAxisId="count" dataKey={seriesMetric === 'people' ? 'attended_people' : 'attended'} name="Comparecimento" stackId="outcome" fill={CHART_COLORS.attended} radius={[3, 3, 0, 0]} />
+                      <Bar yAxisId="count" dataKey={seriesMetric === 'people' ? 'no_show_people' : 'no_show'} name="No-show" stackId="outcome" fill={CHART_COLORS.noShow} />
+                      <Bar yAxisId="count" dataKey={seriesMetric === 'people' ? 'cancelled_people' : 'cancelled'} name="Cancelamento" stackId="outcome" fill={CHART_COLORS.cancelled} />
+                      <Bar yAxisId="count" dataKey={seriesMetric === 'people' ? 'scheduled_people' : 'scheduled'} name="Em aberto" stackId="outcome" fill={CHART_COLORS.scheduled} />
+                      <Line
+                        yAxisId="rate"
+                        type="monotone"
+                        dataKey={seriesMetric === 'people' ? 'realized_people_rate' : 'realized_reservation_rate'}
+                        name="Realização (compareceu ÷ esperado)"
+                        stroke="hsl(var(--info))"
+                        strokeWidth={2.5}
+                        dot={{ r: 2.5 }}
+                      />
+                    </ComposedChart>
                     </ResponsiveContainer>
                   </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    “Realização” considera comparecimentos sobre todas as reservas/pessoas esperadas. A taxa de comparecimento dos cards continua usando apenas comparecimentos + no-shows.
+                  </p>
                 </div>
               ) : (
                 <div className="flex min-h-[250px] flex-col items-center justify-center text-center">

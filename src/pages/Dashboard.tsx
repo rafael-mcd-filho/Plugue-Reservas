@@ -14,48 +14,33 @@ import {
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  BarChart, Bar, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, Legend, ReferenceLine,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
   CalendarCheck, Users, TrendingUp, CalendarIcon,
-  ArrowUpRight, ArrowDownRight, Minus, ClipboardList, Info,
+  ArrowUpRight, ArrowDownRight, Minus, ClipboardList, Info, CircleAlert, RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
-import {
-  getFunnelErrorMessage,
-  getFunnelAwareFreshnessLabel,
-  getFunnelPresentationState,
-  useFunnelData,
-  type FunnelCompanyScope,
-  type FunnelQueryParams,
-} from '@/hooks/useFunnelData';
 import { useLiveFunnelPresence } from '@/hooks/useLiveFunnelPresence';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
-import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import DashboardReportOverview from '@/components/dashboard/DashboardReportOverview';
+import { useCustomerRecurrenceVisitSeries } from '@/hooks/useCustomerRecurrenceVisitSeries';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
+import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
+import { buildDashboardReportSearch } from '@/lib/dashboard-report-search';
 import type { DateRange } from 'react-day-picker';
-
-const PERIOD_OPTIONS = [
-  { value: '7', label: 'Últimos 7 dias' },
-  { value: '15', label: 'Últimos 15 dias' },
-  { value: '30', label: 'Últimos 30 dias' },
-  { value: '90', label: 'Últimos 3 meses' },
-  { value: 'custom', label: 'Personalizado' },
-];
 
 const DASHBOARD_PERIOD_OPTIONS = [
   { value: 'today', label: 'Hoje' },
@@ -67,45 +52,30 @@ const DASHBOARD_PERIOD_OPTIONS = [
   { value: 'custom', label: 'Período personalizado' },
 ];
 
-const CHART_COLORS = {
-  primary: 'hsl(var(--primary))',
-  success: 'hsl(var(--success))',
-  destructive: 'hsl(var(--destructive))',
-  muted: 'hsl(var(--muted-foreground))',
-  grid: 'rgba(0, 0, 0, 0.08)',
-  surface: 'hsl(var(--card))',
-  border: 'rgba(0, 0, 0, 0.08)',
-};
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => (
+    typeof window.matchMedia !== 'function'
+      ? true
+      : window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ));
 
-const DAILY_CAPACITY_STATUS_META = {
-  below: {
-    label: 'Abaixo da capacidade',
-    color: 'hsl(145, 63%, 42%)',
-  },
-  full: {
-    label: 'Lotado',
-    color: 'hsl(28, 85%, 55%)',
-  },
-  over: {
-    label: 'Acima da capacidade',
-    color: 'hsl(0, 72%, 51%)',
-  },
-  no_capacity: {
-    label: 'Sem capacidade',
-    color: 'hsl(0, 0%, 45%)',
-  },
-} as const;
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
 
-function formatDashboardDateRangeLabel(range: DateRange | undefined) {
-  if (!range?.from) {
-    return 'Selecionar período';
-  }
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+    updatePreference();
 
-  if (!range.to) {
-    return `${format(range.from, 'dd/MM/yyyy')} - ...`;
-  }
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updatePreference);
+      return () => mediaQuery.removeEventListener('change', updatePreference);
+    }
 
-  return `${format(range.from, 'dd/MM/yyyy')} - ${format(range.to, 'dd/MM/yyyy')}`;
+    mediaQuery.addListener(updatePreference);
+    return () => mediaQuery.removeListener(updatePreference);
+  }, []);
+
+  return prefersReducedMotion;
 }
 
 function formatComparisonPeriodRangeLabel(startDate: Date, endDate: Date) {
@@ -114,19 +84,6 @@ function formatComparisonPeriodRangeLabel(startDate: Date, endDate: Date) {
   }
 
   return `${format(startDate, 'dd/MM/yyyy')} - ${format(endDate, 'dd/MM/yyyy')}`;
-}
-
-function formatFunnelRequestPeriodLabel(request: FunnelQueryParams | undefined) {
-  if (!request) return undefined;
-
-  const parseCalendarDate = (value: string) => {
-    const [year, month, day] = value.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
-  return formatComparisonPeriodRangeLabel(
-    parseCalendarDate(request.startDate),
-    parseCalendarDate(request.endDate),
-  );
 }
 
 function getPreviousEquivalentRange(startDate: Date, endDate: Date) {
@@ -465,12 +422,18 @@ export default function Dashboard() {
   const companyContext = useMaybeCompanySlug();
   const isCompanyContext = !!companyContext;
   const queryClient = useQueryClient();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const {
+    activeRoles,
+    hasPermission,
+    permissionsError,
+    permissionsLoading,
+  } = useCompanyPermissions();
 
   const [companyId, setCompanyId] = useState<string>('all');
   const [period, setPeriod] = useState('this_month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-  const [uniqueFunnelOnly, setUniqueFunnelOnly] = useState(false);
-  const [expectedVsActualMetric, setExpectedVsActualMetric] = useState<'reservations' | 'people'>('reservations');
+  const [reservationVolumeMetric, setReservationVolumeMetric] = useState<'reservations' | 'people'>('reservations');
 
   const { data: companies = [] } = useQuery({
     queryKey: ['dashboard-companies'],
@@ -495,72 +458,53 @@ export default function Dashboard() {
   const effectiveCompanyId = isCompanyContext ? companyContext?.companyId : (companyId !== 'all' ? companyId : undefined);
   const isInitialFeatureFlagsLoading = isCompanyContext && featureFlagsLoading && !featureFlags;
   const advancedReportsEnabled = !isCompanyContext || (!featureFlagsLoading && !!featureFlags?.features.advanced_reports);
-  const funnelScope = useMemo<FunnelCompanyScope | null>(() => {
-    if (isCompanyContext) {
-      return companyContext?.companyId
-        ? { kind: 'company', companyId: companyContext.companyId }
-        : null;
-    }
-    if (companyId === 'all') return { kind: 'global' };
-    return companyId ? { kind: 'company', companyId } : null;
-  }, [companyContext?.companyId, companyId, isCompanyContext]);
+  const hasAdvancedReportRole = activeRoles.includes('admin') || activeRoles.includes('superadmin');
+  const showCompanyReportOverview = !!companyContext?.slug
+    && advancedReportsEnabled
+    && !permissionsLoading
+    && !permissionsError
+    && hasAdvancedReportRole
+    && hasPermission('dashboard_view');
 
   const {
     dailyStats,
-    dailyCapacityStats,
     dailyCapacityTotals,
-    createdReservationDailyStats,
-    reservationLeadTrend,
     createdReservationTotals,
     reservationOriginBreakdown,
-    reservationOriginDailyStats,
-    waitlistDailyStats,
     totals,
     prevTotals,
     waitlistTotals,
     isLoading: dashLoading,
     isFetching: dashFetching,
     lastUpdatedAt: dashboardUpdatedAt,
-  } = useDashboardData(effectiveCompanyId, startDate, endDate, comparisonStartDate, comparisonEndDate);
-
-  const {
-    data: funnelResult,
-    dataUpdatedAt: funnelUpdatedAt = 0,
-    isFetching: funnelFetching,
-    isPending: funnelPending,
-    isError: funnelIsError,
-    error: funnelError,
-    isPlaceholderData: funnelIsPlaceholderData,
-    refetch: refetchFunnel,
-  } = useFunnelData({
-    scope: funnelScope,
+    operationalIsError: dashboardOperationalIsError,
+    reportOverviewIsError: dashboardReportOverviewIsError,
+    refetch: refetchDashboard,
+  } = useDashboardData(
+    effectiveCompanyId,
     startDate,
     endDate,
-    uniqueOnly: uniqueFunnelOnly,
-    enabled: advancedReportsEnabled,
-  });
-  const funnelData = funnelResult?.points ?? [];
-  const funnelPresentationState = getFunnelPresentationState({
-    data: funnelResult,
-    isPending: funnelPending,
-    isFetching: funnelFetching,
-    isError: funnelIsError,
-  });
-  const funnelErrorMessage = funnelIsError ? getFunnelErrorMessage(funnelError) : undefined;
-  const funnelPreviousDataLabel = funnelIsPlaceholderData
-    ? formatFunnelRequestPeriodLabel(funnelResult?.request)
-    : undefined;
-  const funnelHasVisibleError = advancedReportsEnabled
-    && (funnelPresentationState === 'error' || funnelPresentationState === 'stale-error');
-  const funnelCompanyId = funnelScope?.kind === 'company' ? funnelScope.companyId : undefined;
+    comparisonStartDate,
+    comparisonEndDate,
+    { includeReportOverview: showCompanyReportOverview },
+  );
+
+  const liveFunnelCompanyId = effectiveCompanyId;
   const {
     data: liveFunnelPresence,
     dataUpdatedAt: liveFunnelUpdatedAt = 0,
     isFetching: liveFunnelFetching,
-  } = useLiveFunnelPresence(funnelCompanyId);
+    isPending: liveFunnelPending,
+    isError: liveFunnelIsError,
+  } = useLiveFunnelPresence(liveFunnelCompanyId);
 
   useEffect(() => {
-    const channel = supabase
+    // No agregado global, qualquer evento de qualquer unidade causaria uma
+    // invalidação em massa. O polling mantém esse contexto atualizado sem
+    // abrir uma assinatura global de alto volume.
+    if (!effectiveCompanyId) return undefined;
+
+    let channel = supabase
       .channel(`dashboard-live:${effectiveCompanyId ?? 'all'}`)
       .on(
         'postgres_changes',
@@ -573,10 +517,14 @@ export default function Dashboard() {
         () => {
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-prev'] });
-          queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
+          if (showCompanyReportOverview) {
+            queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
+          }
         },
-      )
-      .on(
+      );
+
+    if (showCompanyReportOverview) {
+      channel = channel.on(
         'postgres_changes',
         {
           event: '*',
@@ -589,35 +537,37 @@ export default function Dashboard() {
           queryClient.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
         },
-      )
-      .subscribe();
+      );
+    }
+
+    channel = channel.subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [queryClient, effectiveCompanyId]);
+  }, [effectiveCompanyId, queryClient, showCompanyReportOverview]);
 
-  const visibleReservationOriginItems = useMemo(
-    () => reservationOriginBreakdown.items.filter((item) => item.value > 0),
-    [reservationOriginBreakdown.items],
+  const dominantReservationOrigin = reservationOriginBreakdown.items.reduce<
+    (typeof reservationOriginBreakdown.items)[number] | undefined
+  >(
+    (dominant, item) => (!dominant || item.value > dominant.value ? item : dominant),
+    undefined,
   );
-  const funnelDescription = uniqueFunnelOnly
-    ? isCompanyContext
-      ? 'Visitantes únicos que acessaram a página pública no período e avançaram no processo de reserva'
-      : 'Visitantes únicos de todas as unidades que acessaram a página pública no período'
-    : isCompanyContext
-      ? 'Sessões que acessaram a página pública no período e avançaram no processo de reserva'
-      : 'Sessões de todas as unidades que acessaram a página pública no período';
-  const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, funnelUpdatedAt || 0, liveFunnelUpdatedAt || 0);
+  const lastDataSyncAt = Math.max(dashboardUpdatedAt || 0, liveFunnelUpdatedAt || 0);
   const hasFreshnessData = lastDataSyncAt > 0;
   const dataLagMs = hasFreshnessData ? Date.now() - lastDataSyncAt : 0;
   const dataIsStale = hasFreshnessData && dataLagMs > 45000;
-  const dataIsSyncing = dashFetching || funnelFetching || liveFunnelFetching;
-  const freshnessLabel = getFunnelAwareFreshnessLabel({
-    hasFunnelError: funnelHasVisibleError,
-    isSyncing: dataIsSyncing,
-    isStale: dataIsStale,
-  });
+  const dataIsSyncing = dashFetching || liveFunnelFetching;
+  const dashboardHasVisibleError = Boolean(
+    dashboardOperationalIsError || dashboardReportOverviewIsError || liveFunnelIsError,
+  );
+  const freshnessLabel = dashboardHasVisibleError
+    ? 'Erro parcial'
+    : dataIsSyncing
+      ? 'Sincronizando'
+      : dataIsStale
+        ? 'Dados com atraso'
+        : 'Atualizado';
 
   const periodLabel = comparisonLabel;
   const currentPeriodRangeLabel = formatComparisonPeriodRangeLabel(startDate, endDate);
@@ -630,101 +580,83 @@ export default function Dashboard() {
   const waitlistConversionRate = waitlistTotals.total > 0
     ? Math.round((waitlistTotals.seated / waitlistTotals.total) * 100)
     : 0;
-  const expectedVsActualDailyStats = useMemo(
-    () => dailyStats.map((day) => {
-      const expected = day.reservations;
-      const accounted = day.completed + day.noShows + day.cancellations;
-      const pending = Math.max(expected - accounted, 0);
-
-      const expectedGuests = day.totalGuests;
-      const accountedGuests = day.completedGuests + day.noShowGuests + day.cancelledGuests;
-      const pendingGuests = Math.max(expectedGuests - accountedGuests, 0);
-
-      return {
-        ...day,
-        expected,
-        pending,
-        realizedRate: expected > 0 ? Math.round((day.completed / expected) * 100) : 0,
-        expectedGuests,
-        pendingGuests,
-        realizedRateGuests: expectedGuests > 0 ? Math.round((day.completedGuests / expectedGuests) * 100) : 0,
-      };
-    }),
-    [dailyStats],
-  );
-  const expectedVsActualTotals = useMemo(
-    () => {
-      const totalsByStatus = expectedVsActualDailyStats.reduce(
-        (acc, day) => ({
-          cancellations: acc.cancellations + day.cancellations,
-          completed: acc.completed + day.completed,
-          expected: acc.expected + day.expected,
-          noShows: acc.noShows + day.noShows,
-          pending: acc.pending + day.pending,
-          cancelledGuests: acc.cancelledGuests + day.cancelledGuests,
-          completedGuests: acc.completedGuests + day.completedGuests,
-          expectedGuests: acc.expectedGuests + day.expectedGuests,
-          noShowGuests: acc.noShowGuests + day.noShowGuests,
-          pendingGuests: acc.pendingGuests + day.pendingGuests,
-        }),
-        {
-          cancellations: 0,
-          completed: 0,
-          expected: 0,
-          noShows: 0,
-          pending: 0,
-          cancelledGuests: 0,
-          completedGuests: 0,
-          expectedGuests: 0,
-          noShowGuests: 0,
-          pendingGuests: 0,
-        },
-      );
-
-      return {
-        ...totalsByStatus,
-        realizedRate: totalsByStatus.expected > 0
-          ? Math.round((totalsByStatus.completed / totalsByStatus.expected) * 100)
-          : 0,
-        realizedRateGuests: totalsByStatus.expectedGuests > 0
-          ? Math.round((totalsByStatus.completedGuests / totalsByStatus.expectedGuests) * 100)
-          : 0,
-      };
-    },
-    [expectedVsActualDailyStats],
-  );
-
-  const expectedVsActualIsPeople = expectedVsActualMetric === 'people';
-  const expectedVsActualConfig = expectedVsActualIsPeople
-    ? {
-        completedLabel: 'Compareceram',
-        completedTotal: expectedVsActualTotals.completedGuests,
-        expectedTotal: expectedVsActualTotals.expectedGuests,
-        lossesTotal: expectedVsActualTotals.noShowGuests + expectedVsActualTotals.cancelledGuests,
-        rateTotal: expectedVsActualTotals.realizedRateGuests,
-      }
-    : {
-        completedLabel: 'Check-ins',
-        completedTotal: expectedVsActualTotals.completed,
-        expectedTotal: expectedVsActualTotals.expected,
-        lossesTotal: expectedVsActualTotals.noShows + expectedVsActualTotals.cancellations,
-        rateTotal: expectedVsActualTotals.realizedRate,
-      };
-  // Chaves estáveis com valores conforme o modo: o Recharts interpola a altura das barras
-  // (morph) ao alternar Reservas ⇄ Pessoas, em vez de redesenhar do zero.
-  const expectedVsActualChartData = useMemo(() => {
-    const isPeople = expectedVsActualMetric === 'people';
-    return expectedVsActualDailyStats.map((day) => ({
+  const reservationVolumeIsPeople = reservationVolumeMetric === 'people';
+  const reservationVolumeMetricLabel = reservationVolumeIsPeople ? 'Pessoas' : 'Reservas';
+  const reservationVolumeMetricLabelLower = reservationVolumeIsPeople ? 'pessoas' : 'reservas';
+  const reservationVolumeChartData = useMemo(
+    () => dailyStats.map((day) => ({
+      date: day.date,
       label: day.label,
-      expected: isPeople ? day.expectedGuests : day.expected,
-      completed: isPeople ? day.completedGuests : day.completed,
-      noShows: isPeople ? day.noShowGuests : day.noShows,
-      cancellations: isPeople ? day.cancelledGuests : day.cancellations,
-      pending: isPeople ? day.pendingGuests : day.pending,
-      realizedRate: isPeople ? day.realizedRateGuests : day.realizedRate,
-    }));
-  }, [expectedVsActualDailyStats, expectedVsActualMetric]);
+      value: reservationVolumeIsPeople ? day.activeGuests : day.activeReservations,
+    })),
+    [dailyStats, reservationVolumeIsPeople],
+  );
+  const reservationVolumeSummary = useMemo(() => {
+    const total = reservationVolumeChartData.reduce((sum, day) => sum + day.value, 0);
+    const peakDay = reservationVolumeChartData.reduce<(typeof reservationVolumeChartData)[number] | null>(
+      (peak, day) => (!peak || day.value > peak.value ? day : peak),
+      null,
+    );
+
+    return {
+      total,
+      averagePerDay: reservationVolumeChartData.length > 0
+        ? total / reservationVolumeChartData.length
+        : 0,
+      peakDay: peakDay && peakDay.value > 0 ? peakDay : null,
+    };
+  }, [reservationVolumeChartData]);
+  const reservationVolumeAverageLabel = reservationVolumeSummary.averagePerDay.toLocaleString('pt-BR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  const attendanceOverviewRate = totals.reservations > 0
+    ? Math.round((totals.completed / totals.reservations) * 100)
+    : 0;
+  // Granularidade mensal: o card só precisa dos totais do período, então buscamos o menor payload possível.
+  const recurrenceVisitSeries = useCustomerRecurrenceVisitSeries({
+    companyId: showCompanyReportOverview ? companyContext?.companyId : undefined,
+    periodStart: format(startDate, 'yyyy-MM-dd'),
+    periodEnd: format(endDate, 'yyyy-MM-dd'),
+    granularity: 'month',
+    includeCompanions: false,
+    enabled: showCompanyReportOverview && hasPermission('leads_view'),
+  });
+  const recurrenceOverview = useMemo(() => {
+    const series = recurrenceVisitSeries.data?.series;
+    if (!series?.length) return null;
+
+    const totalsByVisit = series.reduce(
+      (acc, point) => ({
+        totalVisits: acc.totalVisits + point.total_visits,
+        firstVisits: acc.firstVisits + point.first_visits,
+        returnVisits: acc.returnVisits + point.return_visits,
+      }),
+      { totalVisits: 0, firstVisits: 0, returnVisits: 0 },
+    );
+
+    return {
+      ...totalsByVisit,
+      returnRate: totalsByVisit.totalVisits > 0
+        ? (totalsByVisit.returnVisits / totalsByVisit.totalVisits) * 100
+        : 0,
+    };
+  }, [recurrenceVisitSeries.data]);
+  const attendanceOverviewLosses = totals.noShows + totals.cancellations;
+  // Reservas do período que ainda não receberam desfecho (nem check-in, nem no-show, nem cancelamento).
+  const attendanceOverviewPending = Math.max(
+    totals.reservations - totals.completed - attendanceOverviewLosses,
+    0,
+  );
   const dailyCapacityHasCapacity = dailyCapacityTotals.totalCapacity > 0;
+  const dailyCapacityIdleSeats = Math.max(
+    dailyCapacityTotals.totalCapacity - dailyCapacityTotals.checkedInGuests,
+    0,
+  );
+  const reportSearch = useMemo(
+    () => buildDashboardReportSearch({ period, startDate, endDate }),
+    [endDate, period, startDate],
+  );
 
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
@@ -736,7 +668,7 @@ export default function Dashboard() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge
-                    variant={funnelHasVisibleError || dataIsStale ? 'destructive' : dataIsSyncing ? 'secondary' : 'outline'}
+                    variant={dashboardHasVisibleError || dataIsStale ? 'destructive' : dataIsSyncing ? 'secondary' : 'outline'}
                     className="gap-1.5"
                     tabIndex={0}
                     role="status"
@@ -756,7 +688,7 @@ export default function Dashboard() {
                   <p className="mt-1">
                     O painel se atualiza sozinho e pode levar alguns segundos para refletir mudanças recentes.
                     {dataIsStale ? ' Neste momento existe um pequeno atraso na atualização.' : ''}
-                    {funnelHasVisibleError ? ' O funil de reservas não pôde ser atualizado; os demais indicadores continuam disponíveis.' : ''}
+                    {dashboardHasVisibleError ? ' Parte dos dados não pôde ser atualizada neste momento.' : ''}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -767,7 +699,7 @@ export default function Dashboard() {
         <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
           {!isCompanyContext && (
             <Select value={companyId} onValueChange={setCompanyId}>
-              <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectTrigger className="w-full sm:w-[200px]" aria-label="Unidade analisada">
                 <SelectValue placeholder="Todas as unidades" />
               </SelectTrigger>
               <SelectContent>
@@ -780,7 +712,7 @@ export default function Dashboard() {
           )}
 
           <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-full sm:w-[220px]">
+            <SelectTrigger className="w-full sm:w-[220px]" aria-label="Período da dashboard">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -801,40 +733,57 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {funnelCompanyId && liveFunnelPresence && (
+      {liveFunnelCompanyId && (
         <LiveFunnelPanel
-          data={liveFunnelPresence.stages}
-          totalActive={liveFunnelPresence.totalActive}
-          windowMinutes={liveFunnelPresence.windowMinutes}
+          data={liveFunnelPresence?.stages ?? []}
+          totalActive={liveFunnelPresence?.totalActive ?? 0}
+          windowMinutes={liveFunnelPresence?.windowMinutes ?? 5}
+          isLoading={liveFunnelPending}
+          isUnavailable={liveFunnelIsError && !liveFunnelPresence}
         />
       )}
 
       {dashLoading || isInitialFeatureFlagsLoading ? (
-        <>
-          {/* KPI skeleton */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 [&>*]:min-w-0">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-md border border-border bg-card p-5 shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 animate-pulse rounded-md bg-muted" />
-                  <div className="space-y-2">
-                    <div className="h-6 w-12 animate-pulse rounded bg-muted" />
-                    <div className="h-3 w-20 animate-pulse rounded bg-muted" />
-                  </div>
-                </div>
+        <div className="space-y-4" role="status" aria-label="Carregando dados da Dashboard">
+          <span className="sr-only">Carregando dados da Dashboard…</span>
+          <div aria-hidden="true" className="space-y-4">
+            <div className="h-[140px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
+            <div className="h-[230px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
+            {advancedReportsEnabled && (
+              <div className="h-[360px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
+            )}
+            {showCompanyReportOverview && (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-[180px] animate-pulse rounded-2xl border border-border bg-muted/60 motion-reduce:animate-none"
+                  />
+                ))}
               </div>
-            ))}
+            )}
           </div>
-          {/* Chart skeleton */}
-          <div className="grid gap-6 lg:grid-cols-3 [&>*]:min-w-0">
-            <div className="lg:col-span-2 h-72 animate-pulse rounded-md border border-border bg-muted" />
-            <div className="h-72 animate-pulse rounded-md border border-border bg-muted" />
-          </div>
-          <div className="grid gap-6 [&>*]:min-w-0">
-            <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
-            <div className="h-56 animate-pulse rounded-md border border-border bg-muted" />
-          </div>
-        </>
+        </div>
+      ) : dashboardOperationalIsError ? (
+        <Card className="border border-destructive/25 bg-destructive/5 shadow-sm" role="alert">
+          <CardContent className="flex flex-col items-start gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+                <CircleAlert className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Não foi possível carregar a Dashboard</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Os dados operacionais não serão exibidos como zero. Tente novamente em instantes.
+                </p>
+              </div>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refetchDashboard()}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
           {/* KPI — linha 1: equação de atendimentos + pessoas */}
@@ -1151,161 +1100,6 @@ export default function Dashboard() {
             </Card>
           )}
 
-          <Card className="border border-border shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">
-                <SectionTitle
-                  title="Fila de Espera por Dia"
-                  tooltip="Mostra, por dia, quantas pessoas entraram na fila, quantas foram atendidas, quantas saíram sem sentar e o tempo médio de espera. Agrupado pela data de entrada na fila."
-                />
-              </CardTitle>
-              <CardDescription>
-                Cada linha usa o dia em que o evento realmente aconteceu.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: 'hsl(28, 85%, 55%)' }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs text-muted-foreground">Entradas</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {waitlistTotals.total.toLocaleString('pt-BR')}
-                  </span>
-                </div>
-
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: 'hsl(145, 63%, 42%)' }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs text-muted-foreground">Sentados</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {waitlistTotals.seated.toLocaleString('pt-BR')}
-                  </span>
-                </div>
-
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: 'hsl(0, 72%, 51%)' }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs text-muted-foreground">Desistências</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {waitlistTotals.expired.toLocaleString('pt-BR')}
-                  </span>
-                </div>
-
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full bg-foreground/45"
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs text-muted-foreground">Conversão</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {waitlistConversionRate.toLocaleString('pt-BR')}%
-                  </span>
-                </div>
-
-                <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: 'hsl(202, 89%, 48%)' }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-xs text-muted-foreground">Espera média</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {waitlistTotals.avgWaitMin.toLocaleString('pt-BR')}min
-                  </span>
-                </div>
-              </div>
-
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={waitlistDailyStats}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <YAxis
-                      yAxisId="wait"
-                      orientation="right"
-                      tick={{ fontSize: 12 }}
-                      stroke="hsl(202, 89%, 48%)"
-                      tickFormatter={(value: number) => `${value}m`}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                      formatter={(value: number, name: string) => {
-                        if (name === 'Tempo médio de espera') {
-                          return [`${value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} min`, name];
-                        }
-
-                        return [`${value} cliente${value === 1 ? '' : 's'}`, name];
-                      }}
-                    />
-                    <Legend />
-                    <Line
-                      yAxisId="count"
-                      type="monotone"
-                      dataKey="entries"
-                      name="Entradas na fila"
-                      stroke="hsl(28, 85%, 55%)"
-                      strokeWidth={2.5}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                    <Line
-                      yAxisId="count"
-                      type="monotone"
-                      dataKey="seated"
-                      name="Sentados"
-                      stroke="hsl(145, 63%, 42%)"
-                      strokeWidth={2.5}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                    <Line
-                      yAxisId="count"
-                      type="monotone"
-                      dataKey="dropped"
-                      name="Desistências"
-                      stroke="hsl(0, 72%, 51%)"
-                      strokeWidth={2.5}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                    <Line
-                      yAxisId="wait"
-                      type="monotone"
-                      dataKey="avgWaitMin"
-                      name="Tempo médio de espera"
-                      stroke="hsl(202, 89%, 48%)"
-                      strokeWidth={2.5}
-                      strokeDasharray="6 4"
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                      connectNulls={false}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
 
           {advancedReportsEnabled && (
             <Card className="border border-border shadow-sm">
@@ -1314,709 +1108,239 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <CardTitle className="text-base">
                       <SectionTitle
-                        title="Esperado vs. Realizado"
-                        tooltip="Compara, dia a dia, o total esperado com o que virou check-in, no-show, cancelamento ou ficou pendente/outro status. Agrupado pela data da reserva. Use o botão Reservas/Pessoas para alternar entre contar reservas e contar pessoas — em Pessoas, o esperado soma os lugares reservados (agendadas + fila de espera) e 'Compareceram' usa quem realmente fez check-in."
+                        title="Reservas por dia"
+                        tooltip="Mostra somente reservas ativas — confirmadas ou com check-in — agrupadas pela data da visita. Alterne entre Reservas e Pessoas; a linha tracejada indica a média diária da métrica selecionada no período."
                       />
                     </CardTitle>
+                    <CardDescription className="mt-1">
+                      Reservas ativas pela data da visita no período selecionado.
+                    </CardDescription>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs sm:justify-end">
-                    <div className="inline-flex items-center rounded-md border border-border bg-muted/20 p-0.5">
+                  <div
+                    className="inline-flex w-fit items-center rounded-md border border-border bg-muted/20 p-0.5"
+                    role="group"
+                    aria-label="Alternar métrica do gráfico"
+                  >
+                    {(['reservations', 'people'] as const).map((metric) => (
                       <button
+                        key={metric}
                         type="button"
-                        onClick={() => setExpectedVsActualMetric('reservations')}
+                        aria-pressed={reservationVolumeMetric === metric}
+                        onClick={() => setReservationVolumeMetric(metric)}
                         className={cn(
-                          'rounded px-2 py-0.5 font-medium transition-colors',
-                          !expectedVsActualIsPeople ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                          'touch-manipulation rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                          reservationVolumeMetric === metric
+                            ? 'bg-card text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
                         )}
                       >
-                        Reservas
+                        {metric === 'reservations' ? 'Reservas' : 'Pessoas'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setExpectedVsActualMetric('people')}
-                        className={cn(
-                          'rounded px-2 py-0.5 font-medium transition-colors',
-                          expectedVsActualIsPeople ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                        )}
-                      >
-                        Pessoas
-                      </button>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
-                      <span className="text-muted-foreground">Esperado</span>
-                      <span className="font-semibold text-foreground">
-                        {expectedVsActualConfig.expectedTotal.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-success/30 bg-success-soft px-2 py-1">
-                      <span className="text-muted-foreground">{expectedVsActualConfig.completedLabel}</span>
-                      <span className="font-semibold text-success">
-                        {expectedVsActualConfig.completedTotal.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
-                      <span className="text-muted-foreground">Perdas</span>
-                      <span className="font-semibold text-destructive">
-                        {expectedVsActualConfig.lossesTotal.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-info/20 bg-info-soft/40 px-2 py-1">
-                      <span className="text-muted-foreground">Realização</span>
-                      <span className="font-semibold text-info">
-                        {expectedVsActualConfig.rateTotal.toLocaleString('pt-BR')}%
-                      </span>
-                    </div>
+                    ))}
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={expectedVsActualChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis
-                        yAxisId="rate"
-                        orientation="right"
-                        domain={[0, 100]}
-                        tick={{ fontSize: 12 }}
-                        stroke="hsl(202, 89%, 48%)"
-                        tickFormatter={(value: number) => `${value}%`}
-                      />
-                      <RechartsTooltip
-                        content={({ active, payload, label }: any) => {
-                          if (!active || !payload?.length) return null;
-
-                          const point = payload[0]?.payload;
-                          if (!point) return null;
-
-                          return (
-                            <div className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
-                              <p className="font-semibold text-foreground">{label}</p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {expectedVsActualIsPeople ? 'Pessoas' : 'Reservas'}
-                              </p>
-                              <div className="mt-2 space-y-1 text-muted-foreground">
-                                <p>Esperado: <span className="font-medium text-foreground">{(point.expected ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>{expectedVsActualConfig.completedLabel}: <span className="font-medium text-success">{(point.completed ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>No-shows: <span className="font-medium text-destructive">{(point.noShows ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Canceladas: <span className="font-medium text-foreground">{(point.cancellations ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Pendentes/outros: <span className="font-medium text-foreground">{(point.pending ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Taxa realizada: <span className="font-medium text-info">{(point.realizedRate ?? 0).toLocaleString('pt-BR')}%</span></p>
-                              </div>
-                            </div>
-                          );
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        yAxisId="count"
-                        dataKey="completed"
-                        name={expectedVsActualConfig.completedLabel}
-                        stackId="expected"
-                        fill="hsl(145, 63%, 42%)"
-                        maxBarSize={48}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                      <Bar
-                        yAxisId="count"
-                        dataKey="noShows"
-                        name="No-shows"
-                        stackId="expected"
-                        fill="hsl(0, 72%, 51%)"
-                        maxBarSize={48}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                      <Bar
-                        yAxisId="count"
-                        dataKey="cancellations"
-                        name="Canceladas"
-                        stackId="expected"
-                        fill="hsl(14, 72%, 58%)"
-                        maxBarSize={48}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                      <Bar
-                        yAxisId="count"
-                        dataKey="pending"
-                        name="Pendentes/outros"
-                        stackId="expected"
-                        fill="hsl(0, 0%, 72%)"
-                        maxBarSize={48}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                      <Line
-                        yAxisId="rate"
-                        type="monotone"
-                        dataKey="realizedRate"
-                        name="Taxa realizada"
-                        stroke="hsl(202, 89%, 48%)"
-                        strokeWidth={2.5}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {advancedReportsEnabled && (
-            <Card className="border border-border shadow-sm">
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <CardTitle className="text-base">
-                      <SectionTitle
-                        title="Ocupação da capacidade diária"
-                        tooltip="Compara, dia a dia, a capacidade total dos horários de reserva com as pessoas que fizeram check-in. A capacidade respeita regras por capacidade, limites globais por horário, mapas ativos, bloqueios e o período selecionado no dashboard."
-                      />
-                    </CardTitle>
-                    <CardDescription>
-                      {dailyCapacityHasCapacity
-                        ? `${dailyCapacityTotals.checkedInGuests.toLocaleString('pt-BR')} pessoas presentes em ${dailyCapacityTotals.totalCapacity.toLocaleString('pt-BR')} lugares disponíveis no período.`
-                        : 'Sem capacidade calculada no período selecionado.'}
-                    </CardDescription>
+                <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-muted/15 px-3 py-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      {reservationVolumeIsPeople ? 'Pessoas em reservas ativas' : 'Reservas ativas'}
+                    </p>
+                    <p className="text-lg font-semibold leading-tight tabular-nums text-foreground">
+                      {reservationVolumeSummary.total.toLocaleString('pt-BR')}
+                    </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs sm:justify-end">
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
-                      <span className="text-muted-foreground">Capacidade</span>
-                      <span className="font-semibold text-foreground">
-                        {dailyCapacityTotals.totalCapacity.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-success/30 bg-success-soft px-2 py-1">
-                      <span className="text-muted-foreground">Pessoas presentes</span>
-                      <span className="font-semibold text-success">
-                        {dailyCapacityTotals.checkedInGuests.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-info/20 bg-info-soft/40 px-2 py-1">
-                      <span className="text-muted-foreground">Ocupação</span>
-                      <span className="font-semibold text-info">
-                        {dailyCapacityTotals.occupancyRate.toLocaleString('pt-BR')}%
-                      </span>
-                    </div>
-                    {dailyCapacityTotals.overCapacityDays > 0 && (
-                      <div className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive-soft px-2 py-1">
-                        <span className="text-muted-foreground">Acima</span>
-                        <span className="font-semibold text-destructive">
-                          {dailyCapacityTotals.overCapacityDays.toLocaleString('pt-BR')} dia{dailyCapacityTotals.overCapacityDays === 1 ? '' : 's'}
-                        </span>
-                      </div>
+                  <div className="rounded-lg border border-border bg-muted/15 px-3 py-2">
+                    <p className="text-[11px] text-muted-foreground">Média/dia no período</p>
+                    <p className="text-lg font-semibold leading-tight tabular-nums text-foreground">
+                      {reservationVolumeAverageLabel}
+                    </p>
+                  </div>
+                  <div className="col-span-2 min-w-0 rounded-lg border border-border bg-muted/15 px-3 py-2 lg:col-span-1">
+                    <p className="text-[11px] text-muted-foreground">Dia de pico</p>
+                    <p className="text-lg font-semibold leading-tight tabular-nums text-foreground">
+                      {reservationVolumeSummary.peakDay?.label ?? '—'}
+                    </p>
+                    {reservationVolumeSummary.peakDay && (
+                      <p className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+                        {reservationVolumeSummary.peakDay.value.toLocaleString('pt-BR')} {reservationVolumeMetricLabelLower}
+                      </p>
                     )}
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                  {(['below', 'full', 'over'] as const).map((status) => (
-                    <span key={status} className="inline-flex items-center gap-1.5">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: DAILY_CAPACITY_STATUS_META[status].color }}
-                        aria-hidden="true"
-                      />
-                      {DAILY_CAPACITY_STATUS_META[status].label}
-                    </span>
-                  ))}
-                </div>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={dailyCapacityStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis yAxisId="guests" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis
-                        yAxisId="rate"
-                        orientation="right"
-                        domain={[0, (dataMax: number) => Math.max(120, Math.ceil(dataMax / 10) * 10)]}
-                        tick={{ fontSize: 12 }}
-                        stroke="hsl(202, 89%, 48%)"
-                        tickFormatter={(value: number) => `${value}%`}
-                      />
-                      <RechartsTooltip
-                        content={({ active, payload, label }: any) => {
-                          if (!active || !payload?.length) return null;
 
-                          const point = payload[0]?.payload;
-                          if (!point) return null;
-
-                          const status = point.status as keyof typeof DAILY_CAPACITY_STATUS_META;
-                          const statusMeta = DAILY_CAPACITY_STATUS_META[status] ?? DAILY_CAPACITY_STATUS_META.no_capacity;
-
-                          return (
-                            <div className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
-                              <div className="flex items-center justify-between gap-4">
-                                <p className="font-semibold text-foreground">{label}</p>
-                                <span
-                                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
-                                  style={{ backgroundColor: statusMeta.color }}
-                                >
-                                  {statusMeta.label}
-                                </span>
-                              </div>
-                              <div className="mt-2 space-y-1 text-muted-foreground">
-                                <p>Capacidade: <span className="font-medium text-foreground">{(point.totalCapacity ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Horários com capacidade: <span className="font-medium text-foreground">{(point.slotCount ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Pessoas presentes: <span className="font-medium text-success">{(point.checkedInGuests ?? 0).toLocaleString('pt-BR')}</span></p>
-                                <p>Ocupação: <span className="font-medium text-info">{(point.occupancyRate ?? 0).toLocaleString('pt-BR')}%</span></p>
-                                {(point.overCapacityGuests ?? 0) > 0 && (
-                                  <p>Excesso: <span className="font-medium text-destructive">{point.overCapacityGuests.toLocaleString('pt-BR')} pessoa{point.overCapacityGuests === 1 ? '' : 's'}</span></p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        yAxisId="guests"
-                        dataKey="totalCapacity"
-                        name="Capacidade"
-                        fill="hsl(0, 0%, 82%)"
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={42}
-                      />
-                      <Bar
-                        yAxisId="guests"
-                        dataKey="checkedInGuests"
-                        name="Pessoas presentes"
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={42}
-                      >
-                        {dailyCapacityStats.map((day) => (
-                          <Cell
-                            key={day.date}
-                            fill={DAILY_CAPACITY_STATUS_META[day.status].color}
-                          />
+                {reservationVolumeSummary.total > 0 ? (
+                  <>
+                    <table className="sr-only">
+                      <caption>{reservationVolumeMetricLabel} em reservas ativas por data da visita</caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">Data</th>
+                          <th scope="col">{reservationVolumeMetricLabel}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reservationVolumeChartData.map((day) => (
+                          <tr key={day.date}>
+                            <th scope="row">{day.label}</th>
+                            <td>{day.value}</td>
+                          </tr>
                         ))}
-                      </Bar>
-                      <ReferenceLine
-                        yAxisId="rate"
-                        y={100}
-                        stroke="hsl(0, 72%, 51%)"
-                        strokeDasharray="4 4"
-                        ifOverflow="extendDomain"
-                      />
-                      <Line
-                        yAxisId="rate"
-                        type="monotone"
-                        dataKey="occupancyRate"
-                        name="Ocupação"
-                        stroke="hsl(202, 89%, 48%)"
-                        strokeWidth={2.5}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive
-                        animationDuration={500}
-                        animationEasing="ease-out"
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card className="border border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                <SectionTitle
-                  title="Registros em reservas por data de criação"
-                  tooltip="Mostra quantos registros foram criados em reservas por dia, separando agendadas da fila. Agrupado pela data de criação da reserva — quando o cliente fez o agendamento, não quando vai visitar."
-                />
-              </CardTitle>
-              <CardDescription>
-                {createdReservationTotals.totalCreated > 0
-                  ? `${createdReservationTotals.scheduledCreated} agendadas e ${createdReservationTotals.waitlistCreated} vindas da fila foram registradas em reservas no período.`
-                  : 'Sem novos registros em reservas no período selecionado.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={createdReservationDailyStats}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                      formatter={(value: number, name: string) => [`${value} registro${value === 1 ? '' : 's'}`, name]}
-                    />
-                    <Legend />
-                    <Bar
-                      dataKey="scheduledCreatedReservations"
-                      name="Agendadas"
-                      fill="hsl(28, 85%, 55%)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                    <Bar
-                      dataKey="waitlistCreatedReservations"
-                      name="Fila convertida"
-                      fill="hsl(145, 63%, 42%)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="createdReservations"
-                      name="Total em reservations"
-                      stroke="hsl(202, 89%, 48%)"
-                      strokeWidth={2.5}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Antecedência das reservas agendadas"
-                    tooltip="Mostra com quantos dias de antecedência as reservas agendadas costumam ser feitas. A fila não entra aqui. Agrupado pela data de criação da reserva — o período selecionado filtra quando o agendamento foi feito."
-                  />
-                </CardTitle>
-                <CardDescription>
-                  Média de {createdReservationTotals.avgLeadDays.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dias entre a criação e o dia marcado nas reservas agendadas.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-border bg-muted/20 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-                      <MetricLabel
-                        label="Média geral"
-                        tooltip="Média de dias entre o momento em que a reserva agendada foi feita e o dia marcado para a visita."
-                      />
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">
-                      {createdReservationTotals.avgLeadDays.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dias
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-muted/20 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-                      <MetricLabel
-                        label="Mesmo dia"
-                        tooltip="Reservas feitas para o próprio dia."
-                      />
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{createdReservationTotals.sameDayReservations}</p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-muted/20 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-                      <MetricLabel
-                        label="Agendadas criadas"
-                        tooltip="Total de reservas agendadas criadas no sistema no período selecionado. Conta pela data de criação da reserva."
-                      />
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-foreground">{createdReservationTotals.scheduledCreated}</p>
-                  </div>
-                </div>
-
-                <div className="h-[260px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={reservationLeadTrend}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis yAxisId="left" allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <RechartsTooltip
-                        contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }}
-                        formatter={(value: number, name: string) => {
-                          if (name === 'Antecedência média (dias)') {
-                            return [`${value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dias`, name];
-                          }
-
-                          return [`${value} reserva${value === 1 ? '' : 's'}`, name];
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        yAxisId="left"
-                        dataKey="createdReservations"
-                        name="Agendadas criadas"
-                        fill="hsl(28, 85%, 55%)"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="avgLeadDays"
-                        name="Antecedência média (dias)"
-                        stroke="hsl(202, 89%, 48%)"
-                        strokeWidth={2.5}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-w-0 border border-border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  <SectionTitle
-                    title="Cancelamentos e No Show das agendadas"
-                    tooltip="Mostra as perdas do período por cancelamento e por reservas que viraram No Show. Agrupado pela data da reserva — quando o cliente estava programado para visitar."
-                  />
-                </CardTitle>
-                <CardDescription>Acompanhamento diário das perdas nas reservas agendadas</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[260px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={dailyStats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                      <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(0, 0%, 100%)', border: '1px solid hsl(0, 0%, 88%)', borderRadius: '0.5rem', fontSize: '0.875rem' }} />
-                      <Legend />
-                      <Bar dataKey="cancellations" name="Cancelamentos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="noShows" name="No Show" fill="hsl(0, 0%, 35%)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          <Card className="border border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                <SectionTitle
-                  title="Forma de entrada das reservas"
-                  tooltip="Mostra como cada reserva foi registrada no sistema: online, por filiado ou parceiro, criada no painel ou convertida da fila. Não representa atribuição de campanhas ou canais de marketing."
-                />
-              </CardTitle>
-              <CardDescription>
-                Considera a data da visita. Cada reserva entra em uma única forma — {reservationOriginBreakdown.total.toLocaleString('pt-BR')} reservas · {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas no período.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {reservationOriginBreakdown.total > 0 ? (
-                <div className="space-y-6">
-                  <div className="hidden relative h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={visibleReservationOriginItems}
-                          dataKey="value"
-                          nameKey="label"
-                          innerRadius={72}
-                          outerRadius={104}
-                          paddingAngle={2}
-                          stroke="hsl(var(--background))"
-                          strokeWidth={2}
-                        >
-                          {visibleReservationOriginItems.map((item) => (
-                            <Cell key={item.key} fill={item.color} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip
-                          contentStyle={{
-                            backgroundColor: 'hsl(0, 0%, 100%)',
-                            border: '1px solid hsl(0, 0%, 88%)',
-                            borderRadius: '0.5rem',
-                            fontSize: '0.875rem',
-                          }}
-                          formatter={(value, name, context) => [
-                            `${Number(value).toLocaleString('pt-BR')} reserva${Number(value) === 1 ? '' : 's'} · ${Number(context?.payload?.people ?? 0).toLocaleString('pt-BR')} pessoas (${Number(context?.payload?.percentage ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`,
-                            name,
-                          ]}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-[11px] uppercase tracking-[0.1em] text-muted-foreground">Total</span>
-                      <span className="text-3xl font-semibold text-foreground">
-                        {reservationOriginBreakdown.total.toLocaleString('pt-BR')}
-                      </span>
-                      <span className="text-xs text-muted-foreground">reservas</span>
-                      <span className="mt-0.5 text-xs text-muted-foreground">
-                        {reservationOriginBreakdown.totalPeople.toLocaleString('pt-BR')} pessoas
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {reservationOriginBreakdown.items.map((item) => (
-                      <div
-                        key={item.key}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5"
-                      >
-                        <div className="flex min-w-0 items-center gap-2.5">
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: item.color }}
-                            aria-hidden="true"
-                          />
-                          <div className="min-w-0">
-                            <p className="truncate text-[13px] font-medium leading-tight text-foreground">{item.label}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {item.percentage.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-                            </p>
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="flex items-center justify-end gap-1 text-base font-semibold text-foreground leading-tight">
-                            <CalendarCheck className="h-3 w-3 text-primary" />
-                            {item.value.toLocaleString('pt-BR')}
-                          </p>
-                          <p className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
-                            <Users className="h-2.5 w-2.5 text-info" />
-                            {item.people.toLocaleString('pt-BR')} {item.people === 1 ? 'pessoa' : 'pessoas'}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
-                    <div className="mb-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Forma de entrada por dia</p>
-                        <p className="text-xs text-muted-foreground">
-                          Uma barra empilhada por data da visita, mostrando como as reservas foram registradas.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="h-[320px]">
+                      </tbody>
+                    </table>
+                    <div className="h-[260px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={reservationOriginDailyStats} barGap={2} maxBarSize={42}>
+                        <BarChart
+                          accessibilityLayer
+                          data={reservationVolumeChartData}
+                          margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                        >
                           <CartesianGrid strokeDasharray="3 3" stroke="hsl(0, 0%, 88%)" />
                           <XAxis dataKey="label" tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
-                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(0, 0%, 40%)" />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} stroke="hsl(28, 85%, 55%)" />
                           <RechartsTooltip
-                            cursor={{ fill: 'hsl(var(--primary) / 0.08)' }}
-                            content={({ active, payload }) => {
+                            content={({ active, payload, label }: any) => {
                               if (!active || !payload?.length) return null;
 
-                              const point = payload[0].payload as Record<string, number | string>;
-                              const dayItems = visibleReservationOriginItems
-                                .map((item) => {
-                                  const reservations = Number(point[item.key] ?? 0);
-                                  const people = Number(point[`${item.key}People`] ?? 0);
-                                  return { ...item, reservations, people };
-                                })
-                                .filter((item) => item.reservations > 0);
+                              const point = payload[0]?.payload;
+                              if (!point) return null;
 
                               return (
-                                <div className="min-w-[220px] rounded-xl border border-border bg-background/95 p-3 shadow-lg backdrop-blur-sm">
-                                  <div className="mb-2 border-b border-border/70 pb-2">
-                                    <p className="text-sm font-semibold text-foreground">{String(point.label)}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {Number(point.totalReservations ?? 0).toLocaleString('pt-BR')} reservas ·{' '}
-                                      {Number(point.totalPeople ?? 0).toLocaleString('pt-BR')} pessoas
+                                <div className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
+                                  <p className="font-semibold text-foreground">{label}</p>
+                                  <p className="text-[11px] text-muted-foreground">Data da visita</p>
+                                  <div className="mt-2 space-y-1 text-muted-foreground">
+                                    <p>
+                                      {reservationVolumeMetricLabel}:{' '}
+                                      <span className="font-medium text-primary">
+                                        {(point.value ?? 0).toLocaleString('pt-BR')}
+                                      </span>
                                     </p>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    {dayItems.map((item) => (
-                                      <div key={item.key} className="flex items-center justify-between gap-4 text-xs">
-                                        <div className="flex min-w-0 items-center gap-2">
-                                          <span
-                                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                            style={{ backgroundColor: item.color }}
-                                            aria-hidden="true"
-                                          />
-                                          <span className="truncate text-foreground">{item.label}</span>
-                                        </div>
-                                        <span className="shrink-0 text-muted-foreground">
-                                          {item.reservations.toLocaleString('pt-BR')} · {item.people.toLocaleString('pt-BR')}p
-                                        </span>
-                                      </div>
-                                    ))}
+                                    <p>
+                                      Média diária:{' '}
+                                      <span className="font-medium text-info">{reservationVolumeAverageLabel}</span>
+                                    </p>
                                   </div>
                                 </div>
                               );
                             }}
                           />
-                          <Legend />
-                          {visibleReservationOriginItems.map((item, index) => (
-                            <Bar
-                              key={item.key}
-                              dataKey={item.key}
-                              name={item.label}
-                              stackId="reservation-origin"
-                              fill={item.color}
-                              radius={index === visibleReservationOriginItems.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-                            />
-                          ))}
+                          <ReferenceLine
+                            y={reservationVolumeSummary.averagePerDay}
+                            isFront
+                            stroke="hsl(202, 89%, 48%)"
+                            strokeDasharray="6 4"
+                            strokeWidth={2}
+                            ifOverflow="extendDomain"
+                            label={{
+                              value: `Média ${reservationVolumeAverageLabel}`,
+                              position: 'insideTopRight',
+                              fill: 'hsl(202, 89%, 38%)',
+                              fontSize: 11,
+                              fontWeight: 600,
+                            }}
+                          />
+                          <Bar
+                            dataKey="value"
+                            name={reservationVolumeMetricLabel}
+                            fill="hsl(var(--primary))"
+                            radius={[4, 4, 0, 0]}
+                            maxBarSize={46}
+                            isAnimationActive={!prefersReducedMotion}
+                            animationDuration={500}
+                            animationEasing="ease-out"
+                          />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
+                  </>
+                ) : (
+                  <div
+                    role="status"
+                    className="flex h-[180px] items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 px-4 text-center"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Nenhuma reserva ativa no período
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Altere o período da dashboard para consultar outras datas.
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
-                  Sem reservas no período para agrupar por forma de entrada.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          {advancedReportsEnabled ? (
-            <>
-          <div className="[&>*]:min-w-0">
-            <ReservationFunnelChart
-              data={funnelData}
-              title={isCompanyContext ? 'Funil de Reservas' : 'Funil de Reservas (Global)'}
-              description={funnelDescription}
-              measurementLabel={uniqueFunnelOnly ? 'Visitantes únicos' : 'Sessões'}
-              state={funnelPresentationState}
-              errorMessage={funnelErrorMessage}
-              isShowingPreviousData={funnelIsPlaceholderData}
-              previousDataLabel={funnelPreviousDataLabel}
-              onRetry={() => {
-                void refetchFunnel();
-              }}
-              headerActions={(
-                <div className="flex items-center justify-end text-sm text-muted-foreground">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={uniqueFunnelOnly}
-                      onChange={(event) => setUniqueFunnelOnly(event.target.checked)}
-                      className="h-4 w-4 rounded-sm border border-primary text-primary accent-primary"
-                    />
-                    Mostrar visitantes únicos
-                  </label>
-                </div>
-              )}
-            />
-          </div>
-            </>
-          ) : (
-            <Card className="border border-primary/20 bg-primary-soft shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base">Relatório avançado bloqueado</CardTitle>
-                <CardDescription>Esta empresa ainda não tem acesso aos gráficos detalhados, heatmap e funil.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-primary/85">
-                  Os indicadores básicos continuam disponíveis acima. Libere a feature no perfil da empresa para habilitar a análise avançada.
-                </p>
+                )}
               </CardContent>
             </Card>
+          )}
+
+          {showCompanyReportOverview && companyContext && (
+            dashboardReportOverviewIsError ? (
+              <Card className="border border-destructive/20 bg-destructive/5 shadow-sm" role="alert">
+                <CardContent className="flex flex-col items-start gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Resumo dos relatórios indisponível</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Os indicadores operacionais acima continuam válidos.
+                      </p>
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void refetchDashboard()}>
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    Tentar novamente
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <DashboardReportOverview
+              slug={companyContext.slug}
+              search={reportSearch}
+              canViewRecurrence={hasPermission('leads_view')}
+              demand={{
+                createdReservations: createdReservationTotals.totalCreated,
+                scheduledCreated: createdReservationTotals.scheduledCreated,
+                sameDayReservations: createdReservationTotals.sameDayReservations,
+                waitlistCreated: createdReservationTotals.waitlistCreated,
+                averageLeadDays: createdReservationTotals.avgLeadDays,
+                dominantEntryLabel: dominantReservationOrigin?.value
+                  ? dominantReservationOrigin.label
+                  : undefined,
+                dominantEntryPercentage: dominantReservationOrigin?.value
+                  ? dominantReservationOrigin.percentage
+                  : undefined,
+              }}
+              attendance={{
+                realizationRate: attendanceOverviewRate,
+                losses: attendanceOverviewLosses,
+                noShows: totals.noShows,
+                cancellations: totals.cancellations,
+                pending: attendanceOverviewPending,
+              }}
+              capacity={{
+                hasCapacity: dailyCapacityHasCapacity,
+                occupancyRate: dailyCapacityTotals.occupancyRate,
+                pressureDays: dailyCapacityTotals.fullDays + dailyCapacityTotals.overCapacityDays,
+                idleSeats: dailyCapacityIdleSeats,
+              }}
+              waitlist={{
+                entries: waitlistTotals.total,
+                conversionRate: waitlistConversionRate,
+                averageWaitMinutes: waitlistTotals.avgWaitMin,
+                dropped: waitlistTotals.expired,
+              }}
+              recurrence={recurrenceOverview}
+              recurrenceStatus={
+                recurrenceVisitSeries.isLoading
+                  ? 'loading'
+                  : recurrenceVisitSeries.isError
+                    ? 'error'
+                    : recurrenceOverview
+                      ? 'ready'
+                      : 'empty'
+              }
+              />
+            )
           )}
         </>
       )}

@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:reports:sql": "node supabase/tests/run_advanced_report_temporal_rpc_contract.mjs && node supabase/tests/run_occupancy_waitlist_series_regression.mjs && node supabase/tests/run_customer_recurrence_temporal_regression.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -76,6 +77,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@eslint/js": "^9.32.0",
     "@playwright/test": "^1.57.0",
     "@tailwindcss/typography": "^0.5.16",

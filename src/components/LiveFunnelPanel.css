@@ -1,0 +1,40 @@
+.live-funnel-layout {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.live-funnel-divider {
+  display: none;
+}
+
+.live-funnel-stage-viewport {
+  min-width: 0;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.live-funnel-stages {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+  min-width: 680px;
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .live-funnel-layout {
+    grid-template-columns: 214px 1px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .live-funnel-summary {
+    padding-right: 0.25rem;
+  }
+
+  .live-funnel-divider {
+    display: block;
+    width: 1px;
+    height: 2.25rem;
+    background: hsl(var(--border));
+  }
+}

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -7,6 +7,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -30,6 +33,7 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
 import ReportMetricCard from '@/components/reports/ReportMetricCard';
 import ReportShell from '@/components/reports/ReportShell';
@@ -39,6 +43,10 @@ import {
   getDemandConversionErrorMessage,
   useDemandConversionReport,
 } from '@/hooks/useDemandConversionReport';
+import {
+  type DemandEntryModeTrendPoint,
+  useDemandTemporalAnalysis,
+} from '@/hooks/useDemandTemporalAnalysis';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { ReportGranularity } from '@/lib/report-filters';
 import { type ReservationOriginKey } from '@/lib/reservation-origin';
@@ -56,6 +64,39 @@ const ENTRY_COLORS: Record<ReservationOriginKey, string> = {
   manual: 'hsl(0 0% 35%)',
   waitlist: 'hsl(338 78% 55%)',
 };
+
+type EntryTrendMetricKey = Exclude<keyof DemandEntryModeTrendPoint, 'period'>;
+
+const ENTRY_ORIGINS: Array<{
+  key: ReservationOriginKey;
+  label: string;
+  reservationsKey: EntryTrendMetricKey;
+  peopleKey: EntryTrendMetricKey;
+}> = [
+  { key: 'online', label: 'Online', reservationsKey: 'online_reservations', peopleKey: 'online_people' },
+  { key: 'affiliate', label: 'Filiados e parceiros', reservationsKey: 'affiliate_reservations', peopleKey: 'affiliate_people' },
+  { key: 'manual', label: 'Criada no painel', reservationsKey: 'manual_reservations', peopleKey: 'manual_people' },
+  { key: 'waitlist', label: 'Convertida da fila', reservationsKey: 'waitlist_reservations', peopleKey: 'waitlist_people' },
+];
+
+type DemandEvolutionLens = 'journey' | 'created' | 'entry_created' | 'entry_visit' | 'lead_time';
+type DemandEvolutionMetric = 'reservations' | 'people';
+
+const DEMAND_LENSES: Array<{ key: DemandEvolutionLens; label: string }> = [
+  { key: 'journey', label: 'Jornada' },
+  { key: 'created', label: 'Reservas criadas' },
+  { key: 'entry_created', label: 'Entrada por captação' },
+  { key: 'entry_visit', label: 'Entrada por visita' },
+  { key: 'lead_time', label: 'Antecedência' },
+];
+
+function isDemandLens(value: string | null): value is DemandEvolutionLens {
+  return DEMAND_LENSES.some((lens) => lens.key === value);
+}
+
+function isDemandMetric(value: string | null): value is DemandEvolutionMetric {
+  return value === 'reservations' || value === 'people';
+}
 
 function isEntryFilter(value: string | null): value is DemandConversionEntryFilter {
   return value === 'all' || value === 'online' || value === 'affiliate' || value === 'manual' || value === 'waitlist';
@@ -108,10 +149,8 @@ function ReportSkeleton() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-28 rounded-xl" />)}
       </div>
-      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.4fr]">
-        <Skeleton className="h-[340px] rounded-xl" />
-        <Skeleton className="h-[340px] rounded-xl" />
-      </div>
+      <Skeleton className="h-[390px] rounded-xl" />
+      <Skeleton className="h-[380px] rounded-xl" />
       <Skeleton className="h-64 rounded-xl" />
     </div>
   );
@@ -129,6 +168,12 @@ export default function DemandConversionReport() {
   const entryMode: DemandConversionEntryFilter = isEntryFilter(searchParams.get('entry'))
     ? searchParams.get('entry') as DemandConversionEntryFilter
     : 'all';
+  const evolutionLens: DemandEvolutionLens = isDemandLens(searchParams.get('analysis'))
+    ? searchParams.get('analysis') as DemandEvolutionLens
+    : 'journey';
+  const evolutionMetric: DemandEvolutionMetric = isDemandMetric(searchParams.get('metric'))
+    ? searchParams.get('metric') as DemandEvolutionMetric
+    : 'reservations';
 
   const updateParams = useCallback((updates: Record<string, string | null>) => {
     setSearchParams((current) => {
@@ -153,13 +198,69 @@ export default function DemandConversionReport() {
     entryMode,
     enabled: companyTimeZoneResolved && !filters.rangeError,
   });
+  const temporalQuery = useDemandTemporalAnalysis({
+    companyId,
+    periodStart: filters.dateOnlyRange.from,
+    periodEnd: filters.dateOnlyRange.to,
+    granularity: filters.granularity,
+    enabled: companyTimeZoneResolved && !filters.rangeError,
+  });
   const report = reportQuery.data;
+  const temporal = temporalQuery.data;
   const trendHasData = !!report && report.trend.some((point) => (
     point.page_views > 0 || point.completed > 0 || point.created_reservations > 0
   ));
   const transitionHasData = !!report && report.transition_times.some((transition) => transition.sample_size > 0);
   const leadTimeHasData = !!report && report.lead_time_bands.some((band) => band.reservations > 0);
   const partySizeHasData = !!report && report.party_size_bands.some((band) => band.reservations > 0);
+  const selectedEntryTrend = useMemo(
+    () => evolutionLens === 'entry_visit'
+      ? temporal?.entry_mode_visit_trend ?? []
+      : temporal?.entry_mode_created_trend ?? [],
+    [evolutionLens, temporal?.entry_mode_created_trend, temporal?.entry_mode_visit_trend],
+  );
+  const visitEntryTrend = useMemo(
+    () => temporal?.entry_mode_visit_trend ?? [],
+    [temporal?.entry_mode_visit_trend],
+  );
+  const selectedEntrySummary = useMemo(() => {
+    const origins = ENTRY_ORIGINS.map((origin) => ({
+      ...origin,
+      reservations: selectedEntryTrend.reduce((total, point) => total + point[origin.reservationsKey], 0),
+      people: selectedEntryTrend.reduce((total, point) => total + point[origin.peopleKey], 0),
+    }));
+    const totalReservations = origins.reduce((total, origin) => total + origin.reservations, 0);
+    const totalPeople = origins.reduce((total, origin) => total + origin.people, 0);
+
+    return {
+      totalReservations,
+      totalPeople,
+      origins: origins.map((origin) => ({
+        ...origin,
+        percentage: totalReservations > 0 ? (origin.reservations / totalReservations) * 100 : 0,
+      })),
+    };
+  }, [selectedEntryTrend]);
+  const isEntryEvolution = evolutionLens === 'entry_created' || evolutionLens === 'entry_visit';
+  const visitEntryTrendHasData = visitEntryTrend.some((point) => (
+    point.online_reservations + point.affiliate_reservations
+    + point.manual_reservations + point.waitlist_reservations
+  ) > 0);
+  const selectedEvolutionHasData = evolutionLens === 'journey'
+    ? trendHasData
+    : evolutionLens === 'created'
+      ? !!report && report.trend.some((point) => point.created_reservations > 0 || point.created_people > 0)
+      : evolutionLens === 'lead_time'
+        ? !!temporal && temporal.lead_time_trend.some((point) => point.scheduled_reservations > 0)
+        : selectedEntryTrend.some((point) => (
+            point.online_reservations + point.affiliate_reservations
+            + point.manual_reservations + point.waitlist_reservations
+          ) > 0);
+
+  const refreshReport = () => {
+    void reportQuery.refetch();
+    void temporalQuery.refetch();
+  };
 
   return (
     <ReportShell
@@ -168,13 +269,13 @@ export default function DemandConversionReport() {
       icon={MousePointerClick}
       eyebrow="Relatório avançado"
       updatedAt={report?.meta.generated_at}
-      isRefreshing={reportQuery.isFetching && !!report}
-      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching}
+      isRefreshing={(reportQuery.isFetching || temporalQuery.isFetching) && !!report}
+      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching}
       filters={(
         <ReportFilterBar
           filters={filters}
-          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching}
-          onRefresh={() => reportQuery.refetch()}
+          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching}
+          onRefresh={refreshReport}
         >
           <div className={REPORT_FILTER_TOGGLE_CLASS}>
             <Label htmlFor="demand-unique" className="cursor-pointer whitespace-nowrap text-xs">Visitantes únicos</Label>
@@ -265,87 +366,202 @@ export default function DemandConversionReport() {
             />
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-[0.9fr_1.4fr]">
-            <Card className="border-border shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base">Avanço pelo funil</CardTitle>
-                <CardDescription>Cada etapa mostra retenção e abandono em relação à etapa anterior.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {report.summary.sessions > 0 ? report.funnel.map((stage, index) => (
-                  <div key={stage.step} className="space-y-1.5">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-medium text-foreground">{stage.label}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {index === 0 ? 'Base do funil' : `${formatPercent(stage.conversion_from_previous)} avançaram`}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-base font-semibold tabular-nums">{formatInteger(stage.count)}</p>
-                        {index < report.funnel.length - 1 && stage.dropoff > 0 && (
-                          <p className="text-[11px] text-destructive">−{formatInteger(stage.dropoff)} ({formatPercent(stage.dropoff_rate)})</p>
-                        )}
-                      </div>
-                    </div>
-                    <Progress value={stage.conversion_from_start} className="h-1.5" aria-label={`${stage.label}: ${formatPercent(stage.conversion_from_start)} da base`} />
-                  </div>
-                )) : (
-                  <div className="rounded-lg border border-dashed border-border p-5 text-center text-sm text-muted-foreground">Nenhuma jornada iniciou no período.</div>
-                )}
-              </CardContent>
-            </Card>
+          <section className="space-y-4" aria-label="Funil e evolução da demanda">
+            <div className="[&>*]:min-w-0">
+              <ReservationFunnelChart
+                data={report.funnel.map((stage) => ({ step: stage.step, count: stage.count }))}
+                title="Funil de Reservas"
+                description={`${uniqueOnly ? 'Visitantes' : 'Sessões'} que acessaram a página pública no período e avançaram no processo. O percentual ao fim de cada barra é sobre a base inicial.`}
+                measurementLabel={uniqueOnly ? 'Visitantes únicos' : 'Sessões'}
+                state={reportQuery.isFetching
+                  ? 'refreshing'
+                  : report.summary.sessions > 0
+                    ? 'ready'
+                    : 'valid-empty'}
+              />
+            </div>
 
-            <Card className="border-border shadow-sm">
-              <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <Card className="min-w-0 border-border shadow-sm">
+              <CardHeader className="space-y-3">
                 <div>
-                  <CardTitle className="text-base">Demanda ao longo do tempo</CardTitle>
+                  <CardTitle className="text-base">Evolução da demanda</CardTitle>
                   <CardDescription>
-                    O funil web permanece total; “criadas” respeita a forma de entrada selecionada.
+                    Alterne a leitura sem perder o período e a granularidade selecionados.
                   </CardDescription>
                 </div>
-                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-hidden="true">
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-info" /> Inícios</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> Finalizadas</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-success" /> Criadas</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap gap-1" role="tablist" aria-label="Análise temporal de demanda">
+                    {DEMAND_LENSES.map((lens) => (
+                      <Button
+                        key={lens.key}
+                        type="button"
+                        role="tab"
+                        size="sm"
+                        variant={evolutionLens === lens.key ? 'default' : 'outline'}
+                        aria-selected={evolutionLens === lens.key}
+                        className="h-8 px-2.5 text-xs"
+                        onClick={() => updateParams({ analysis: lens.key === 'journey' ? null : lens.key })}
+                      >
+                        {lens.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {evolutionLens !== 'journey' && evolutionLens !== 'lead_time' && (
+                    <div className="inline-flex rounded-md border border-border bg-muted/20 p-0.5" aria-label="Métrica da evolução">
+                      {(['reservations', 'people'] as DemandEvolutionMetric[]).map((metric) => (
+                        <button
+                          key={metric}
+                          type="button"
+                          className={cn(
+                            'rounded px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            evolutionMetric === metric ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                          )}
+                          aria-pressed={evolutionMetric === metric}
+                          onClick={() => updateParams({ metric: metric === 'reservations' ? null : metric })}
+                        >
+                          {metric === 'reservations' ? 'Reservas' : 'Pessoas'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
-                {trendHasData ? <>
-                <div className="h-[300px] w-full" role="img" aria-label={`Série de demanda com ${report.trend.length} períodos`}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={report.trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="demandPageFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(var(--info))" stopOpacity={0.24} />
-                          <stop offset="95%" stopColor="hsl(var(--info))" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                      <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <RechartsTooltip
-                        labelFormatter={(value) => formatDate(String(value))}
-                        formatter={(value: number, name: string) => [
-                          formatInteger(value),
-                          name === 'page_views' ? 'Inícios' : name === 'completed' ? 'Finalizadas' : 'Criadas',
-                        ]}
-                        contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
-                      />
-                      <Area type="monotone" dataKey="page_views" name="page_views" stroke="hsl(var(--info))" strokeWidth={2} fill="url(#demandPageFill)" />
-                      <Area type="monotone" dataKey="completed" name="completed" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="transparent" />
-                      <Area type="monotone" dataKey="created_reservations" name="created_reservations" stroke="hsl(var(--success))" strokeWidth={2} strokeDasharray="5 4" fill="transparent" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-                <p className="sr-only">
-                  No período, {formatInteger(report.summary.sessions)} jornadas iniciaram e {formatInteger(report.summary.completed)} finalizaram uma reserva.
-                </p>
-                </> : (
-                  <div className="flex min-h-[250px] flex-col items-center justify-center text-center">
+                {!temporalQuery.isError && selectedEvolutionHasData && isEntryEvolution && (
+                  <section className="mb-4 space-y-2.5" aria-labelledby="entry-evolution-summary-title">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                      <div className="min-w-0">
+                        <h3 id="entry-evolution-summary-title" className="text-sm font-semibold text-foreground">
+                          Formas de entrada das reservas
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          {evolutionLens === 'entry_visit'
+                            ? 'Distribuição pela data marcada para atendimento; o percentual considera o total de reservas.'
+                            : 'Distribuição pela data em que a reserva foi registrada; o percentual considera o total de reservas.'}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                        <strong className="font-semibold text-foreground">{formatInteger(selectedEntrySummary.totalReservations)}</strong> reservas
+                        {' · '}
+                        <strong className="font-semibold text-foreground">{formatInteger(selectedEntrySummary.totalPeople)}</strong> pessoas
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      {selectedEntrySummary.origins.map((origin) => (
+                        <article
+                          key={origin.key}
+                          className="min-w-0 rounded-lg border border-border/70 bg-muted/25 px-3 py-2"
+                          aria-label={`${origin.label}: ${formatInteger(origin.reservations)} reservas, ${formatPercent(origin.percentage)}, ${formatInteger(origin.people)} pessoas`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: ENTRY_COLORS[origin.key] }}
+                                aria-hidden="true"
+                              />
+                              <span className="truncate">{origin.label}</span>
+                            </h4>
+                            <span className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">
+                              {formatPercent(origin.percentage)}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex min-w-0 items-baseline gap-1.5">
+                            <span className="text-lg font-semibold tabular-nums text-foreground">
+                              {formatInteger(origin.reservations)}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">reservas</span>
+                            <span className="ml-auto truncate text-[11px] tabular-nums text-muted-foreground">
+                              {formatInteger(origin.people)} pessoas
+                            </span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {temporalQuery.isError && evolutionLens !== 'journey' && evolutionLens !== 'created' ? (
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                    <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
+                    <p className="mt-3 text-sm font-medium">Não foi possível carregar esta evolução</p>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => temporalQuery.refetch()}>
+                      Tentar novamente
+                    </Button>
+                  </div>
+                ) : selectedEvolutionHasData ? (
+                  <div
+                    className="h-[310px] w-full"
+                    role="tabpanel"
+                    aria-label={`Evolução: ${DEMAND_LENSES.find((lens) => lens.key === evolutionLens)?.label}`}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      {evolutionLens === 'journey' ? (
+                        <AreaChart data={report.trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                          <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip labelFormatter={(value) => formatDate(String(value))} contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }} />
+                          <Legend iconType="circle" iconSize={7} />
+                          <Area type="monotone" dataKey="page_views" name="Página pública" stroke="hsl(var(--info))" fill="transparent" strokeWidth={2} />
+                          <Area type="monotone" dataKey="date_selections" name="Seleção de data" stroke="hsl(var(--primary))" fill="transparent" strokeWidth={2} />
+                          <Area type="monotone" dataKey="time_selections" name="Seleção de horário" stroke="hsl(var(--warning))" fill="transparent" strokeWidth={2} />
+                          <Area type="monotone" dataKey="forms" name="Dados pessoais" stroke="hsl(var(--muted-foreground))" fill="transparent" strokeWidth={2} />
+                          <Area type="monotone" dataKey="completed" name="Reserva finalizada" stroke="hsl(var(--success))" fill="transparent" strokeWidth={2.5} />
+                        </AreaChart>
+                      ) : evolutionLens === 'created' ? (
+                        <ComposedChart data={report.trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                          <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip labelFormatter={(value) => formatDate(String(value))} contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }} />
+                          <Legend iconType="circle" iconSize={7} />
+                          <Bar dataKey={evolutionMetric === 'people' ? 'created_people' : 'created_reservations'} name={evolutionMetric === 'people' ? 'Pessoas' : 'Reservas'} fill="hsl(var(--primary))" radius={[5, 5, 0, 0]} maxBarSize={44} />
+                        </ComposedChart>
+                      ) : evolutionLens === 'lead_time' ? (
+                        <ComposedChart data={temporal?.lead_time_trend ?? []} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                          <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="days" orientation="right" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip labelFormatter={(value) => formatDate(String(value))} contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }} />
+                          <Legend iconType="circle" iconSize={7} />
+                          <Bar yAxisId="count" dataKey="scheduled_reservations" name="Reservas agendadas" fill="hsl(var(--primary))" radius={[5, 5, 0, 0]} maxBarSize={42} />
+                          <Bar yAxisId="count" dataKey="same_day_reservations" name="Mesmo dia" fill="hsl(var(--warning))" radius={[5, 5, 0, 0]} maxBarSize={42} />
+                          <Line yAxisId="days" type="monotone" dataKey="average_lead_days" name="Antecedência média (dias)" stroke="hsl(var(--info))" strokeWidth={2.5} dot={{ r: 2.5 }} />
+                        </ComposedChart>
+                      ) : (
+                        <BarChart data={selectedEntryTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                          <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip
+                            labelFormatter={(value) => formatDate(String(value))}
+                            formatter={(value: number, name: string) => [
+                              `${formatInteger(value)} ${evolutionMetric === 'people' ? 'pessoas' : 'reservas'}`,
+                              name,
+                            ]}
+                            contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+                          />
+                          <Legend iconType="circle" iconSize={7} />
+                          {ENTRY_ORIGINS.map((origin) => (
+                            <Bar
+                              key={origin.key}
+                              dataKey={evolutionMetric === 'people' ? origin.peopleKey : origin.reservationsKey}
+                              name={origin.label}
+                              stackId="entry-mode"
+                              fill={ENTRY_COLORS[origin.key]}
+                              maxBarSize={48}
+                            />
+                          ))}
+                        </BarChart>
+                      )}
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
                     <CalendarDays className="h-8 w-8 text-muted-foreground/50" aria-hidden="true" />
-                    <p className="mt-3 text-sm font-medium">Nenhuma demanda registrada</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Altere o período ou a forma de entrada para consultar outros resultados.</p>
+                    <p className="mt-3 text-sm font-medium">Sem dados para esta leitura</p>
+                    <p className="mt-1 max-w-sm text-xs text-muted-foreground">Escolha outra análise ou amplie o período.</p>
                   </div>
                 )}
               </CardContent>
@@ -460,42 +676,127 @@ export default function DemandConversionReport() {
           </Card>
 
           <Card className="border-border shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">Formas de entrada</CardTitle>
-              <CardDescription>
-                Selecione uma forma para filtrar os indicadores e as análises de reservas criadas. Os indicadores e etapas do funil web permanecem totais.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {report.entry_modes.map((mode) => {
-                const active = entryMode === mode.key;
-                return (
+            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <CardTitle className="text-base">Formas de entrada</CardTitle>
+                <CardDescription>
+                  Os cartões filtram as análises de reservas criadas. A evolução abaixo usa a data marcada para a visita; o funil web permanece total.
+                </CardDescription>
+              </div>
+              <div className="inline-flex shrink-0 self-start rounded-md border border-border bg-muted/20 p-0.5" aria-label="Métrica das formas de entrada">
+                {(['reservations', 'people'] as DemandEvolutionMetric[]).map((metric) => (
                   <button
-                    key={mode.key}
+                    key={metric}
                     type="button"
-                    onClick={() => updateParams({ entry: active ? null : mode.key })}
                     className={cn(
-                      'rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      active ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40 hover:bg-muted/70',
+                      'rounded px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      evolutionMetric === metric ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                     )}
-                    aria-pressed={active}
+                    aria-pressed={evolutionMetric === metric}
+                    onClick={() => updateParams({ metric: metric === 'reservations' ? null : metric })}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ENTRY_COLORS[mode.key] }} aria-hidden="true" />
-                        <span className="truncate">{mode.label}</span>
-                      </span>
-                      <Filter className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
-                    </div>
-                    <div className="mt-1 flex items-baseline gap-1.5">
-                      <span className="text-xl font-semibold tabular-nums">{formatInteger(mode.reservations)}</span>
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {formatPercent(mode.percentage)} · {formatInteger(mode.people)} pessoas
-                      </span>
-                    </div>
+                    {metric === 'reservations' ? 'Reservas' : 'Pessoas'}
                   </button>
-                );
-              })}
+                ))}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {report.entry_modes.map((mode) => {
+                  const active = entryMode === mode.key;
+                  return (
+                    <button
+                      key={mode.key}
+                      type="button"
+                      onClick={() => updateParams({ entry: active ? null : mode.key })}
+                      className={cn(
+                        'rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        active ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40 hover:bg-muted/70',
+                      )}
+                      aria-pressed={active}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ENTRY_COLORS[mode.key] }} aria-hidden="true" />
+                          <span className="truncate">{mode.label}</span>
+                        </span>
+                        <Filter className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-1.5">
+                        <span className="text-xl font-semibold tabular-nums">{formatInteger(mode.reservations)}</span>
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {formatPercent(mode.percentage)} · {formatInteger(mode.people)} pessoas
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <section
+                className="rounded-xl border border-border/70 bg-background/70 p-3"
+                aria-label="Evolução das formas de entrada"
+              >
+                <div className="mb-3">
+                  <h3 className="text-sm font-medium text-foreground">
+                    Forma de entrada por {filters.granularity === 'day' ? 'dia' : filters.granularity === 'week' ? 'semana' : 'mês'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Uma barra empilhada por data da visita, mostrando como as reservas foram registradas.
+                  </p>
+                </div>
+
+                {temporalQuery.isError ? (
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                    <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
+                    <p className="mt-3 text-sm font-medium">Não foi possível carregar a evolução das formas de entrada</p>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => temporalQuery.refetch()}>
+                      Tentar novamente
+                    </Button>
+                  </div>
+                ) : temporalQuery.isFetching && !temporal ? (
+                  <Skeleton className="h-[310px] w-full rounded-lg" />
+                ) : visitEntryTrendHasData ? (
+                  <div
+                    className="h-[310px] w-full"
+                    role="img"
+                    aria-label={`Formas de entrada por ${filters.granularity === 'day' ? 'dia' : filters.granularity === 'week' ? 'semana' : 'mês'}, em ${evolutionMetric === 'people' ? 'pessoas' : 'reservas'}`}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={visitEntryTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                        <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <RechartsTooltip
+                          labelFormatter={(value) => formatDate(String(value))}
+                          formatter={(value: number, name: string) => [
+                            `${formatInteger(value)} ${evolutionMetric === 'people' ? 'pessoas' : 'reservas'}`,
+                            name,
+                          ]}
+                          contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+                        />
+                        <Legend iconType="circle" iconSize={7} />
+                        {ENTRY_ORIGINS.map((origin) => (
+                          <Bar
+                            key={origin.key}
+                            dataKey={evolutionMetric === 'people' ? origin.peopleKey : origin.reservationsKey}
+                            name={origin.label}
+                            stackId="entry-mode-over-time"
+                            fill={ENTRY_COLORS[origin.key]}
+                            maxBarSize={48}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                    <CalendarDays className="h-8 w-8 text-muted-foreground/50" aria-hidden="true" />
+                    <p className="mt-3 text-sm font-medium">Nenhuma forma de entrada neste período</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Amplie o período para consultar a evolução.</p>
+                  </div>
+                )}
+              </section>
             </CardContent>
           </Card>
 
