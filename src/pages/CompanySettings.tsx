@@ -24,6 +24,7 @@ import {
   Wallet,
   CalendarCheck,
   CalendarClock,
+  Globe,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
@@ -59,6 +60,11 @@ import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import { validateHeroMediaFile, type HeroMediaType } from '@/lib/hero-media';
+import {
+  DEFAULT_COMPANY_TIME_ZONE,
+  buildCompanyTimeZoneOptions,
+  normalizeCompanyTimeZone,
+} from '@/lib/company-time-zones';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
 
 interface OpeningHour {
@@ -137,10 +143,10 @@ const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
-const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
-const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
-const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
+const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -318,6 +324,7 @@ export default function CompanySettings() {
   const [publicWaitlistEnabled, setPublicWaitlistEnabled] = useState(false);
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [googleReviewUrl, setGoogleReviewUrl] = useState('');
+  const [timeZone, setTimeZone] = useState(DEFAULT_COMPANY_TIME_ZONE);
   const [reservationDuration, setReservationDuration] = useState(30);
   const [reservationSlotIntervalMinutes, setReservationSlotIntervalMinutes] = useState(30);
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
@@ -375,6 +382,7 @@ export default function CompanySettings() {
     ));
     setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
     setGoogleMapsUrl(company.google_maps_url || '');
+    setTimeZone(normalizeCompanyTimeZone((company as any).time_zone));
     setReservationDuration((company as any).reservation_duration ?? 30);
     setReservationSlotIntervalMinutes((company as any).reservation_slot_interval_minutes ?? (company as any).reservation_duration ?? 30);
     setMaxGuestsPerSlot((company as any).max_guests_per_slot ?? 0);
@@ -463,6 +471,7 @@ export default function CompanySettings() {
 
       const baseCompanyUpdate = {
         opening_hours: hours,
+        time_zone: normalizeCompanyTimeZone(timeZone),
         payment_methods: payments,
         description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
         logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
@@ -1619,6 +1628,25 @@ export default function CompanySettings() {
                     {publicCustomizationLocked && (
                       <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>
                     )}
+                  </div>
+
+                  <div className={settingsFieldGroupClassName}>
+                    <Label htmlFor="company-settings-time-zone" className={settingsLabelClassName}><Globe className="h-4 w-4" /> Fuso horário</Label>
+                    <Select value={timeZone} onValueChange={setTimeZone}>
+                      <SelectTrigger id="company-settings-time-zone" className={settingsFieldClassName}>
+                        <SelectValue placeholder="Selecione o fuso horário" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {buildCompanyTimeZoneOptions(timeZone).map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label} ({option.offsetLabel})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Define o dia usado nos relatórios. Afeta reservas próximas à meia-noite.
+                    </p>
                   </div>
                 </div>
               </div>
