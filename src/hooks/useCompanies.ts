@@ -35,6 +35,7 @@ export interface Company {
   description: string | null;
   logo_url: string | null;
   hero_media_url?: string | null;
+  hero_media_urls?: string[] | null;
   hero_media_type?: 'image' | 'video' | null;
   opening_hours: any[] | null;
   payment_methods: Record<string, boolean> | null;

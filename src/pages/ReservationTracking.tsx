@@ -32,7 +32,7 @@ import {
   getReservationPaymentByTrackingCode,
   type ReservationPaymentFunctionResponse,
 } from '@/lib/asaas-prepayment-api';
-import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { isValidCompanySlug, toBrazilWhatsAppNumber } from '@/lib/validation';
@@ -351,10 +351,10 @@ export default function ReservationTracking() {
     reconcileExpiredPayment.mutate(activePayment.payment_token);
   }, [isPendingPayment, paymentNeedsExpireCheck, activePayment?.payment_token, reconcileExpiredPayment]);
 
-  useEffect(() => {
-    syncPublicCompanyIcons(company?.logo_url);
-    return () => removePublicCompanyIcons();
-  }, [company?.logo_url]);
+  useFaviconOverride(
+    companyLoading ? undefined : company?.logo_url ?? null,
+    slug ? `company:${slug}` : undefined,
+  );
 
   if (isLoading) {
     return (

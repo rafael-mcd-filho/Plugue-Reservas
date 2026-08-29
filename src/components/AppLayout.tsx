@@ -37,6 +37,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import { useSystemBranding } from '@/hooks/useSettings';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
 import NotificationBanner from '@/components/NotificationBanner';
@@ -110,10 +111,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return window.localStorage.getItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY) === 'true';
   });
   const { user, profile, roles, loading, signOut } = useAuth();
-  const { data: systemBranding } = useSystemBranding();
+  const { data: systemBranding, isLoading: systemBrandingLoading } = useSystemBranding();
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
   const { data: companyFeatureFlags, isLoading: companyFeatureFlagsLoading } = useCompanyFeatureFlags(companyContext?.companyId);
   const systemLogo = systemBranding?.system_logo_url || '';
+  useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
   const userId = user?.id;
 
   const {

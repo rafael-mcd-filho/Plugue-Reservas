@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -26,6 +26,8 @@ import {
   CalendarClock,
   Globe,
   LayoutTemplate,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
@@ -60,7 +62,14 @@ import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
 import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
-import { validateHeroMediaFile, type HeroMediaType } from '@/lib/hero-media';
+import {
+  getCompanyHeroMediaStoragePath,
+  HERO_MEDIA_MAX_IMAGES,
+  partitionPendingHeroMediaUploads,
+  validateHeroMediaFiles,
+  type HeroMediaType,
+  type PendingHeroMediaUploadRecord,
+} from '@/lib/hero-media';
 import {
   DEFAULT_COMPANY_TIME_ZONE,
   buildCompanyTimeZoneOptions,
@@ -196,7 +205,8 @@ function PublicHeaderStylePreview({ variant }: { variant: 'classic' | 'modern' }
 
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_urls, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT_WITH_LEGACY_HERO_MEDIA = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
 const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
@@ -262,6 +272,16 @@ function normalizeOptionalHttpUrl(value: string) {
   }
 }
 
+function getStoredHeroMediaUrls(company: Company): string[] {
+  const galleryUrls = Array.isArray(company.hero_media_urls)
+    ? company.hero_media_urls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+    : [];
+
+  return galleryUrls.length > 0
+    ? galleryUrls
+    : (company.hero_media_url ? [company.hero_media_url] : []);
+}
+
 export default function CompanySettings() {
   const { companyId, companyName, slug } = useCompanySlug();
   const qc = useQueryClient();
@@ -273,6 +293,22 @@ export default function CompanySettings() {
       const selectAttempts = [
         {
           select: COMPANY_SETTINGS_SELECT,
+          missingColumns: [
+            'hero_media_urls',
+            'hero_media_url',
+            'hero_media_type',
+            'public_header_style',
+            'public_reservation_exit_prompt_primary_text',
+            'public_reservation_exit_prompt_primary_text_size',
+            'public_reservation_exit_prompt_secondary_text',
+            'public_reservation_exit_prompt_secondary_text_size',
+            'large_party_whatsapp_threshold',
+            'reservation_late_tolerance_minutes',
+            'reservation_slot_interval_minutes',
+          ],
+        },
+        {
+          select: COMPANY_SETTINGS_SELECT_WITH_LEGACY_HERO_MEDIA,
           missingColumns: [
             'hero_media_url',
             'hero_media_type',
@@ -385,7 +421,7 @@ export default function CompanySettings() {
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
   const [reservationLateToleranceMinutes, setReservationLateToleranceMinutes] = useState(10);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [heroMediaUrl, setHeroMediaUrl] = useState('');
+  const [heroMediaUrls, setHeroMediaUrls] = useState<string[]>([]);
   const [heroMediaType, setHeroMediaType] = useState<HeroMediaType | ''>('');
   const [publicHeaderStyle, setPublicHeaderStyle] = useState<'classic' | 'modern'>('classic');
   const [uploadingHeroMedia, setUploadingHeroMedia] = useState(false);
@@ -395,8 +431,66 @@ export default function CompanySettings() {
   const [noticeActiveUntil, setNoticeActiveUntil] = useState('');
   const [uploadingNoticeImage, setUploadingNoticeImage] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const activeCompanyIdRef = useRef<string | null>(companyId ?? null);
+  const savingCompanyIdsRef = useRef(new Set<string>());
+  const pendingHeroMediaUploadsRef = useRef(new Map<string, PendingHeroMediaUploadRecord>());
   const publicReservationExitPromptPrimaryTextRef = useRef<HTMLTextAreaElement | null>(null);
   const publicReservationExitPromptSecondaryTextRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const reconcilePendingHeroMediaUploads = useCallback(async (
+    targetCompanyId: string,
+    persistedUrls: readonly string[],
+    candidates?: readonly PendingHeroMediaUploadRecord[],
+  ) => {
+    const pendingUploads = candidates ?? Array.from(pendingHeroMediaUploadsRef.current.values())
+      .filter((upload) => upload.companyId === targetCompanyId);
+    const { persisted, orphaned: orphanedUploads } = partitionPendingHeroMediaUploads(
+      pendingUploads,
+      targetCompanyId,
+      persistedUrls,
+    );
+
+    for (const upload of persisted) {
+      const currentUpload = pendingHeroMediaUploadsRef.current.get(upload.url);
+      if (!currentUpload || currentUpload.path !== upload.path) continue;
+      pendingHeroMediaUploadsRef.current.delete(upload.url);
+    }
+
+    if (orphanedUploads.length === 0) return null;
+
+    const orphanedPaths = Array.from(new Set(orphanedUploads.map((upload) => upload.path)));
+    const { error } = await supabase.storage
+      .from('system-assets')
+      .remove(orphanedPaths);
+
+    if (error) return error.message;
+
+    for (const upload of orphanedUploads) {
+      const currentUpload = pendingHeroMediaUploadsRef.current.get(upload.url);
+      if (currentUpload?.path === upload.path) {
+        pendingHeroMediaUploadsRef.current.delete(upload.url);
+      }
+    }
+
+    return null;
+  }, []);
+
+  useEffect(() => {
+    activeCompanyIdRef.current = companyId ?? null;
+    const mountedCompanyId = companyId;
+    const savingCompanyIds = savingCompanyIdsRef.current;
+
+    return () => {
+      activeCompanyIdRef.current = null;
+      if (!mountedCompanyId || savingCompanyIds.has(mountedCompanyId)) return;
+
+      void reconcilePendingHeroMediaUploads(mountedCompanyId, []).then((cleanupError) => {
+        if (cleanupError) {
+          console.warn('Não foi possível limpar uploads pendentes da mídia de fundo:', cleanupError);
+        }
+      });
+    };
+  }, [companyId, reconcilePendingHeroMediaUploads]);
 
   useEffect(() => {
     setInitialized(false);
@@ -410,8 +504,17 @@ export default function CompanySettings() {
     setPayments((company.payment_methods as Record<string, boolean>) || DEFAULT_PAYMENTS);
     setDescription(company.description || '');
     setLogoUrl(company.logo_url || '');
-    setHeroMediaUrl(company.hero_media_url || '');
-    setHeroMediaType((company.hero_media_type as HeroMediaType) || '');
+    const storedHeroMediaUrls = getStoredHeroMediaUrls(company);
+    const storedHeroMediaType: HeroMediaType | '' = storedHeroMediaUrls.length === 0
+      ? ''
+      : company.hero_media_type === 'video'
+        ? 'video'
+        : 'image';
+
+    setHeroMediaUrls(
+      storedHeroMediaUrls.slice(0, storedHeroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES),
+    );
+    setHeroMediaType(storedHeroMediaType);
     setPublicHeaderStyle((company as any).public_header_style === 'modern' ? 'modern' : 'classic');
     setAddress(company.address || '');
     setPhone(formatBrazilPhone(company.phone));
@@ -482,6 +585,10 @@ export default function CompanySettings() {
     mutationFn: async () => {
       if (!company) throw new Error('Empresa não encontrada');
 
+      const targetCompanyId = companyId!;
+      const pendingHeroMediaUploadsAtSave = Array.from(pendingHeroMediaUploadsRef.current.values())
+        .filter((upload) => upload.companyId === targetCompanyId);
+
       const normalizedMapsEmbedUrl = normalizeGoogleMapsEmbedInput(googleMapsUrl);
       const normalizedGoogleReviewUrl = normalizeOptionalHttpUrl(googleReviewUrl);
 
@@ -510,6 +617,17 @@ export default function CompanySettings() {
       const normalizedReservationExitPromptSecondaryText = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
       const normalizedLargePartyThreshold = normalizeLargePartyThreshold(largePartyThreshold);
       const normalizedReservationLateToleranceMinutes = normalizeReservationLateToleranceMinutes(reservationLateToleranceMinutes);
+      const originalHeroMediaUrls = getStoredHeroMediaUrls(company);
+      const finalHeroMediaUrls = publicCustomizationLocked
+        ? originalHeroMediaUrls
+        : heroMediaUrls.slice(0, heroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES);
+      const finalHeroMediaType = publicCustomizationLocked
+        ? (originalHeroMediaUrls.length === 0
+          ? ''
+          : company.hero_media_type === 'video'
+            ? 'video'
+            : 'image')
+        : heroMediaType;
 
       if (!publicCustomizationLocked && noticeActive) {
         if (!hasNoticeContent) {
@@ -554,19 +672,48 @@ export default function CompanySettings() {
         large_party_whatsapp_threshold: normalizedLargePartyThreshold,
         reservation_late_tolerance_minutes: normalizedReservationLateToleranceMinutes,
       } as any;
-      const companyUpdateWithHeroMedia = {
+      const companyUpdateWithLegacyHeroMedia = {
         ...companyUpdateWithLargePartyThreshold,
-        hero_media_url: publicCustomizationLocked ? (company.hero_media_url ?? null) : (heroMediaUrl || null),
-        hero_media_type: publicCustomizationLocked ? (company.hero_media_type ?? null) : (heroMediaType || null),
+        hero_media_url: finalHeroMediaUrls[0] || null,
+        hero_media_type: finalHeroMediaType || null,
         public_header_style: publicCustomizationLocked
           ? ((company as any).public_header_style ?? 'classic')
           : publicHeaderStyle,
+      } as any;
+      const companyUpdateWithHeroGallery = {
+        ...companyUpdateWithLegacyHeroMedia,
+        hero_media_urls: finalHeroMediaUrls,
       } as any;
 
       const updateAttempts = [
         {
           payload: {
-            ...companyUpdateWithHeroMedia,
+            ...companyUpdateWithHeroGallery,
+            show_public_sticky_reserve_button: showPublicStickyReserveButton,
+            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
+            public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
+            public_reservation_exit_prompt_primary_text_size: publicReservationExitPromptPrimaryTextSize,
+            public_reservation_exit_prompt_secondary_text: normalizedReservationExitPromptSecondaryText,
+            public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
+          } as any,
+          missingColumns: [
+            'hero_media_urls',
+            'hero_media_url',
+            'hero_media_type',
+            'public_header_style',
+            'public_reservation_exit_prompt_primary_text',
+            'public_reservation_exit_prompt_primary_text_size',
+            'public_reservation_exit_prompt_secondary_text',
+            'public_reservation_exit_prompt_secondary_text_size',
+            'large_party_whatsapp_threshold',
+            'reservation_late_tolerance_minutes',
+            'reservation_slot_interval_minutes',
+          ],
+          heroMediaPersistence: 'gallery',
+        },
+        {
+          payload: {
+            ...companyUpdateWithLegacyHeroMedia,
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
             show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
             public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
@@ -586,6 +733,7 @@ export default function CompanySettings() {
             'reservation_late_tolerance_minutes',
             'reservation_slot_interval_minutes',
           ],
+          heroMediaPersistence: 'legacy',
         },
         {
           payload: {
@@ -604,6 +752,7 @@ export default function CompanySettings() {
             'public_reservation_exit_prompt_secondary_text_size',
             'reservation_slot_interval_minutes',
           ],
+          heroMediaPersistence: 'none',
         },
         {
           payload: {
@@ -612,6 +761,7 @@ export default function CompanySettings() {
             show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
           } as any,
           missingColumns: ['show_public_reservation_exit_prompt', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
+          heroMediaPersistence: 'none',
         },
         {
           payload: {
@@ -619,35 +769,41 @@ export default function CompanySettings() {
             show_public_sticky_reserve_button: showPublicStickyReserveButton,
           } as any,
           missingColumns: ['show_public_sticky_reserve_button', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
+          heroMediaPersistence: 'none',
         },
         {
           payload: companyUpdateWithLargePartyThreshold,
           missingColumns: ['large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
+          heroMediaPersistence: 'none',
         },
         {
           payload: baseCompanyUpdate,
           missingColumns: ['reservation_slot_interval_minutes'],
+          heroMediaPersistence: 'none',
         },
         {
           payload: legacyBaseCompanyUpdate,
           missingColumns: [],
+          heroMediaPersistence: 'none',
         },
       ] as const;
 
       let updatedCompany: { id: string } | null = null;
       let error: unknown = null;
+      let heroMediaPersistence: 'gallery' | 'legacy' | 'none' = 'none';
 
       for (const attempt of updateAttempts) {
         const result = await supabase
           .from('companies' as any)
           .update(attempt.payload)
-          .eq('id', companyId)
+          .eq('id', targetCompanyId)
           .select('id')
           .maybeSingle();
 
         if (!result.error) {
           updatedCompany = result.data;
           error = null;
+          heroMediaPersistence = attempt.heroMediaPersistence;
           break;
         }
 
@@ -663,10 +819,21 @@ export default function CompanySettings() {
       if (error) throw error;
       if (!updatedCompany) throw new Error('Sem permissão para salvar as configurações desta unidade.');
 
+      const persistedHeroMediaUrls = heroMediaPersistence === 'gallery'
+        ? finalHeroMediaUrls
+        : heroMediaPersistence === 'legacy'
+          ? finalHeroMediaUrls.slice(0, 1)
+          : originalHeroMediaUrls;
+      let heroMediaCleanupError = await reconcilePendingHeroMediaUploads(
+        targetCompanyId,
+        persistedHeroMediaUrls,
+        pendingHeroMediaUploadsAtSave,
+      );
+
       const { error: npsConfigError } = await supabase
         .from('company_nps_configs' as any)
         .upsert({
-          company_id: companyId,
+          company_id: targetCompanyId,
           google_review_url: normalizedGoogleReviewUrl,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'company_id' });
@@ -679,7 +846,7 @@ export default function CompanySettings() {
         const { error: noticeError } = await supabase
           .from('company_public_notices' as any)
           .upsert({
-            company_id: companyId,
+            company_id: targetCompanyId,
             text: trimmedNoticeText || null,
             image_url: noticeImageUrl || null,
             is_active: noticeActive,
@@ -688,8 +855,37 @@ export default function CompanySettings() {
 
         if (noticeError) throw noticeError;
       }
+
+      const persistedHeroMediaUrlSet = new Set(persistedHeroMediaUrls);
+      const systemAssetsPublicUrl = supabase.storage
+        .from('system-assets')
+        .getPublicUrl('')
+        .data.publicUrl;
+      const staleHeroMediaPaths = Array.from(new Set(
+        originalHeroMediaUrls
+          .filter((url) => !persistedHeroMediaUrlSet.has(url))
+          .map((url) => getCompanyHeroMediaStoragePath(url, targetCompanyId, systemAssetsPublicUrl))
+          .filter((path): path is string => !!path),
+      ));
+      if (staleHeroMediaPaths.length > 0) {
+        const { error: cleanupError } = await supabase.storage
+          .from('system-assets')
+          .remove(staleHeroMediaPaths);
+
+        if (cleanupError) {
+          console.warn('Não foi possível limpar mídias de fundo substituídas:', cleanupError);
+          heroMediaCleanupError ??= cleanupError.message;
+        }
+      }
+
+      return { heroMediaCleanupError };
     },
-    onSuccess: () => {
+    onMutate: () => {
+      const targetCompanyId = companyId;
+      if (targetCompanyId) savingCompanyIdsRef.current.add(targetCompanyId);
+      return { targetCompanyId };
+    },
+    onSuccess: ({ heroMediaCleanupError }) => {
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
@@ -697,9 +893,25 @@ export default function CompanySettings() {
       qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-nps-config', companyId] });
       toast.success('Configurações salvas!');
+      if (heroMediaCleanupError) {
+        toast.warning('As configurações foram salvas, mas alguns arquivos antigos não puderam ser removidos.');
+      }
     },
     onError: (error: any) => {
       toast.error(`Erro ao salvar: ${error.message}`);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context?.targetCompanyId) {
+        savingCompanyIdsRef.current.delete(context.targetCompanyId);
+
+        if (activeCompanyIdRef.current !== context.targetCompanyId) {
+          void reconcilePendingHeroMediaUploads(context.targetCompanyId, []).then((cleanupError) => {
+            if (cleanupError) {
+              console.warn('Não foi possível limpar uploads pendentes apó sair da empresa:', cleanupError);
+            }
+          });
+        }
+      }
     },
   });
 
@@ -934,48 +1146,129 @@ export default function CompanySettings() {
   };
 
   const handleHeroMediaUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
 
-    if (!file || publicCustomizationLocked) {
+    if (files.length === 0 || publicCustomizationLocked || saveMutation.isPending || !companyId) {
       event.target.value = '';
       return;
     }
 
-    const validation = validateHeroMediaFile(file);
+    const validation = validateHeroMediaFiles(files);
     if (!validation.valid) {
       toast.error(validation.error);
       event.target.value = '';
       return;
     }
 
+    if (
+      validation.type === 'image'
+      && heroMediaType === 'image'
+      && heroMediaUrls.length + files.length > HERO_MEDIA_MAX_IMAGES
+    ) {
+      const availableSlots = HERO_MEDIA_MAX_IMAGES - heroMediaUrls.length;
+      toast.error(
+        availableSlots > 0
+          ? `Você pode adicionar mais ${availableSlots} ${availableSlots === 1 ? 'imagem' : 'imagens'}.`
+          : 'A galeria já possui o máximo de 4 imagens. Remova uma para adicionar outra.',
+      );
+      event.target.value = '';
+      return;
+    }
+
     setUploadingHeroMedia(true);
+    const uploadedPaths: string[] = [];
+    const uploadCompanyId = companyId;
 
     try {
-      const extension = (file.name.split('.').pop() || (validation.type === 'video' ? 'mp4' : 'png')).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
       const slugBase = slugify(slug || companyName || 'empresa');
-      const filePath = `company-hero-media/${companyId}/${slugBase || 'empresa'}-${Date.now()}.${extension}`;
+      const uploadBatchId = Date.now();
+      const uploadedUrls: string[] = [];
 
-      const { error: uploadError } = await supabase.storage
-        .from('system-assets')
-        .upload(filePath, file, { upsert: false });
+      for (const [index, file] of files.entries()) {
+        const extension = (file.name.split('.').pop() || (validation.type === 'video' ? 'mp4' : 'png'))
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '') || 'png';
+        const filePath = `company-hero-media/${uploadCompanyId}/${slugBase || 'empresa'}-${uploadBatchId}-${index + 1}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from('system-assets')
+          .upload(filePath, file, { upsert: false });
 
-      if (uploadError) {
-        throw uploadError;
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(filePath);
+
+        const { data: publicUrlData } = supabase.storage
+          .from('system-assets')
+          .getPublicUrl(filePath);
+
+        uploadedUrls.push(publicUrlData.publicUrl);
       }
 
-      const { data: publicUrlData } = supabase.storage
-        .from('system-assets')
-        .getPublicUrl(filePath);
+      if (activeCompanyIdRef.current !== uploadCompanyId) {
+        const { error: abandonedUploadError } = await supabase.storage
+          .from('system-assets')
+          .remove(uploadedPaths);
 
-      setHeroMediaUrl(publicUrlData.publicUrl);
+        if (abandonedUploadError) {
+          console.warn('Não foi possível limpar um upload abandonado da mídia de fundo:', abandonedUploadError);
+        }
+        return;
+      }
+
+      for (const [index, url] of uploadedUrls.entries()) {
+        pendingHeroMediaUploadsRef.current.set(url, {
+          companyId: uploadCompanyId,
+          path: uploadedPaths[index],
+          url,
+        });
+      }
+
+      setHeroMediaUrls((current) => (
+        validation.type === 'image' && heroMediaType === 'image'
+          ? [...current, ...uploadedUrls]
+          : uploadedUrls
+      ));
       setHeroMediaType(validation.type);
-      toast.success('Mídia de fundo enviada com sucesso');
+      toast.success(
+        validation.type === 'video'
+          ? 'Vídeo enviado. Salve as configurações para confirmar a alteração.'
+          : `${files.length} ${files.length === 1 ? 'imagem enviada' : 'imagens enviadas'}. Salve as configurações para confirmar.`,
+      );
     } catch (error: any) {
+      if (uploadedPaths.length > 0) {
+        const { error: rollbackError } = await supabase.storage
+          .from('system-assets')
+          .remove(uploadedPaths);
+
+        if (rollbackError) {
+          console.warn('Não foi possível limpar um upload incompleto da mídia de fundo:', rollbackError);
+        }
+      }
       toast.error(`Erro ao enviar mídia de fundo: ${error.message}`);
     } finally {
       setUploadingHeroMedia(false);
       event.target.value = '';
     }
+  };
+
+  const moveHeroImage = (index: number, direction: -1 | 1) => {
+    if (publicCustomizationLocked || uploadingHeroMedia) return;
+
+    setHeroMediaUrls((current) => {
+      const destination = index + direction;
+      if (destination < 0 || destination >= current.length) return current;
+
+      const reordered = [...current];
+      [reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
+      return reordered;
+    });
+  };
+
+  const removeHeroMedia = (index: number) => {
+    if (publicCustomizationLocked || uploadingHeroMedia) return;
+
+    const remaining = heroMediaUrls.filter((_, currentIndex) => currentIndex !== index);
+    setHeroMediaUrls(remaining);
+    if (remaining.length === 0) setHeroMediaType('');
   };
 
   if (isLoading) {
@@ -1009,7 +1302,7 @@ export default function CompanySettings() {
         </div>
         <Button
           onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
+          disabled={saveMutation.isPending || uploadingHeroMedia}
           className="h-10 gap-2 self-start rounded-lg px-4"
         >
           <Save className="h-4 w-4" />
@@ -1898,20 +2191,23 @@ export default function CompanySettings() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3 pt-2">
-              <div className="flex flex-wrap items-center gap-2">
+            <CardContent className="space-y-4 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="relative">
                   <input
                     type="file"
                     accept="image/*,video/mp4,video/webm"
+                    multiple
                     onChange={handleHeroMediaUpload}
-                    disabled={publicCustomizationLocked || uploadingHeroMedia}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                    aria-label="Selecionar imagens ou um vídeo para o banner"
+                    aria-describedby="hero-media-guidance"
+                    className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
                   />
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={publicCustomizationLocked || uploadingHeroMedia}
+                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
                     className="pointer-events-none gap-2 bg-white"
                   >
                     {uploadingHeroMedia ? (
@@ -1921,51 +2217,126 @@ export default function CompanySettings() {
                     ) : (
                       <ImageIcon className="h-4 w-4" />
                     )}
-                    {uploadingHeroMedia ? 'Enviando...' : 'Enviar foto ou vídeo'}
+                    {uploadingHeroMedia
+                      ? `Enviando ${heroMediaType === 'image' ? 'imagens' : 'mídia'}...`
+                      : heroMediaUrls.length > 0
+                        ? 'Adicionar ou substituir mídia'
+                        : 'Enviar imagens ou vídeo'}
                   </Button>
                 </div>
 
-                {heroMediaUrl && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={publicCustomizationLocked || uploadingHeroMedia}
-                    onClick={() => {
-                      setHeroMediaUrl('');
-                      setHeroMediaType('');
-                    }}
-                    className="gap-2 text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Remover
-                  </Button>
+                {heroMediaType === 'image' && heroMediaUrls.length > 0 && (
+                  <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
+                    {heroMediaUrls.length} de {HERO_MEDIA_MAX_IMAGES} imagens
+                  </span>
                 )}
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                Foto: recomendado 1920×1080px, até 5MB. Vídeo: MP4, 1920×1080px, 6 a 12 segundos em loop e sem áudio, até 15MB.
+              <p id="hero-media-guidance" className="text-xs leading-relaxed text-muted-foreground">
+                Escolha 1 vídeo ou até 4 imagens — os formatos não podem ser misturados. Imagem: recomendado 1920×1080px, até 5MB cada. Vídeo: MP4 ou WebM, 6 a 12 segundos em loop e sem áudio, até 15MB.
               </p>
 
-              <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
-                {heroMediaUrl && heroMediaType === 'video' ? (
+              {heroMediaType === 'video' && heroMediaUrls[0] ? (
+                <div className="relative max-w-2xl overflow-hidden rounded-xl border border-[rgba(0,0,0,0.1)] bg-[#17130f] shadow-sm">
                   <video
-                    src={heroMediaUrl}
-                    className="max-h-48 w-full rounded-lg object-contain"
+                    src={heroMediaUrls[0]}
+                    className="max-h-72 w-full object-contain"
                     muted
                     loop
                     autoPlay
                     playsInline
                   />
-                ) : heroMediaUrl ? (
-                  <img
-                    src={heroMediaUrl}
-                    alt="Prévia da mídia de fundo do banner"
-                    className="max-h-48 w-full rounded-lg object-contain"
-                  />
-                ) : (
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-gradient-to-t from-black/80 via-black/55 to-transparent px-3 pb-3 pt-8 text-white">
+                    <span className="flex items-center gap-2 text-xs font-medium">
+                      <Video className="h-4 w-4" />
+                      Vídeo do banner
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                      onClick={() => removeHeroMedia(0)}
+                      aria-label="Remover vídeo do banner"
+                      className="h-8 gap-1.5 bg-white/95 text-destructive hover:bg-white"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remover
+                    </Button>
+                  </div>
+                </div>
+              ) : heroMediaType === 'image' && heroMediaUrls.length > 0 ? (
+                <div className="grid max-w-4xl gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {heroMediaUrls.map((url, index) => (
+                    <article
+                      key={`${url}-${index}`}
+                      className={cn(
+                        'group overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md',
+                        index === 0 ? 'border-primary/45 ring-1 ring-primary/15' : 'border-[rgba(0,0,0,0.1)]',
+                      )}
+                    >
+                      <div className="relative aspect-video overflow-hidden bg-muted">
+                        <img
+                          src={url}
+                          alt={`Prévia da imagem ${index + 1} do banner`}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute left-2 top-2 flex items-center gap-1.5">
+                          <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-black/70 px-1.5 text-[11px] font-semibold text-white backdrop-blur-sm">
+                            {index + 1}
+                          </span>
+                          {index === 0 && (
+                            <span className="rounded-full bg-primary px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground shadow-sm">
+                              Capa
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-1 border-t border-border/70 p-1.5">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === 0}
+                            onClick={() => moveHeroImage(index, -1)}
+                            aria-label={`Mover imagem ${index + 1} para a esquerda`}
+                            className="h-8 w-8"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === heroMediaUrls.length - 1}
+                            onClick={() => moveHeroImage(index, 1)}
+                            aria-label={`Mover imagem ${index + 1} para a direita`}
+                            className="h-8 w-8"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                          onClick={() => removeHeroMedia(index)}
+                          aria-label={`Remover imagem ${index + 1}`}
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex min-h-36 max-w-md items-center justify-center rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
                   <p className="text-center text-xs text-muted-foreground">Nenhuma mídia de fundo enviada ainda.</p>
-                )}
-              </div>
+                </div>
+              )}
 
               {publicCustomizationLocked && (
                 <p className="text-xs text-muted-foreground">

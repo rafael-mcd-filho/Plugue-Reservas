@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
-import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import {
@@ -105,10 +105,10 @@ export default function PublicWaitlistPage() {
     [queueEnabled],
   );
 
-  useEffect(() => {
-    syncPublicCompanyIcons(company?.logo_url);
-    return () => removePublicCompanyIcons();
-  }, [company?.logo_url]);
+  useFaviconOverride(
+    isLoading ? undefined : company?.logo_url ?? null,
+    slug ? `company:${slug}` : undefined,
+  );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

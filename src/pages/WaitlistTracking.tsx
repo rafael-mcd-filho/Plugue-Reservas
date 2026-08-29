@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
-import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import {
   formatWaitlistCountdown,
   getWaitlistCallRemainingMs,
@@ -108,7 +108,7 @@ export default function WaitlistTracking() {
     refetchInterval: 5000,
   });
 
-  const { data: company } = useQuery({
+  const { data: company, isLoading: companyLoading } = useQuery({
     queryKey: ['company-public-waitlist', slug],
     queryFn: async () => {
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
@@ -129,10 +129,10 @@ export default function WaitlistTracking() {
     enabled: slugIsValid,
   });
 
-  useEffect(() => {
-    syncPublicCompanyIcons(company?.logo_url);
-    return () => removePublicCompanyIcons();
-  }, [company?.logo_url]);
+  useFaviconOverride(
+    companyLoading ? undefined : company?.logo_url ?? null,
+    slug ? `company:${slug}` : undefined,
+  );
 
   const leaveWaitlist = useMutation({
     mutationFn: async () => {

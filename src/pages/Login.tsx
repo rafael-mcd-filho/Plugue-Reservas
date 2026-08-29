@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { UtensilsCrossed, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getEmailValidationMessage, normalizeEmail } from '@/lib/validation';
+import { useSystemBranding } from '@/hooks/useSettings';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 
 interface LoginLocationState {
   redirectTo?: string;
@@ -49,6 +51,9 @@ export default function Login() {
     [location.state],
   );
   const helperMessage = useMemo(() => getRedirectMessage(redirectTo), [redirectTo]);
+  const { data: systemBranding, isLoading: systemBrandingLoading } = useSystemBranding();
+  const systemLogo = systemBranding?.system_logo_url || '';
+  useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -84,9 +89,13 @@ export default function Login() {
       <Card className="w-full max-w-md border-none shadow-sm">
         <CardHeader className="text-center space-y-4">
           <div className="flex justify-center">
-            <div className="p-3 rounded-lg bg-primary/10">
-              <UtensilsCrossed className="h-8 w-8 text-primary" />
-            </div>
+            {systemLogo ? (
+              <img src={systemLogo} alt={systemBranding?.system_name || ''} className="h-14 w-14 rounded-lg object-contain" />
+            ) : (
+              <div className="p-3 rounded-lg bg-primary/10">
+                <UtensilsCrossed className="h-8 w-8 text-primary" />
+              </div>
+            )}
           </div>
           <div>
             <CardTitle className="text-2xl">

@@ -30,6 +30,7 @@ import {
   type ReservationPaymentStatus,
   type ReservationPrepaymentBillingType,
 } from '@/lib/asaas-prepayment-contracts';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { toBrazilWhatsAppNumber } from '@/lib/validation';
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
@@ -265,6 +266,10 @@ export default function PublicReservationPayment() {
   });
 
   const payment = paymentQuery.data;
+  useFaviconOverride(
+    paymentQuery.isLoading ? undefined : payment?.company.logo_url ?? null,
+    payment?.company.slug ? `company:${payment.company.slug}` : 'payment',
+  );
   const showPaymentActions = payment?.status === 'pending' || payment?.status === 'awaiting_method';
   const now = useNow(Boolean(showPaymentActions));
   const remainingSeconds = payment ? getRemainingSeconds(payment.expires_at, now) : 0;

@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:reports:sql": "node supabase/tests/run_advanced_report_temporal_rpc_contract.mjs && node supabase/tests/run_occupancy_waitlist_series_regression.mjs && node supabase/tests/run_customer_recurrence_temporal_regression.mjs",
+    "test:hero-gallery:sql": "node supabase/tests/run_company_hero_media_gallery_regression.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

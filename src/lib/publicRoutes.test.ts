@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getPublicCompanySlugFromPathname, isPublicApplicationPath } from './publicRoutes';
+import {
+  getPublicApplicationCompanySlug,
+  getPublicCompanySlugFromPathname,
+  isPublicApplicationPath,
+} from './publicRoutes';
 
 describe('public application route selection', () => {
   it.each([
@@ -30,5 +34,25 @@ describe('public application route selection', () => {
     expect(getPublicCompanySlugFromPathname('/beco-magico-joao-pessoa/f/parceiro')).toBe('beco-magico-joao-pessoa');
     expect(getPublicCompanySlugFromPathname('/beco-magico-joao-pessoa/fila')).toBeNull();
     expect(getPublicCompanySlugFromPathname('/login')).toBeNull();
+  });
+
+  it.each([
+    ['/beco-magico-joao-pessoa', 'beco-magico-joao-pessoa'],
+    ['/beco-magico-joao-pessoa/fila', 'beco-magico-joao-pessoa'],
+    ['/beco-magico-joao-pessoa/fila/ABC123', 'beco-magico-joao-pessoa'],
+    ['/beco-magico-joao-pessoa/reserva/ABC123', 'beco-magico-joao-pessoa'],
+    ['/beco-magico-joao-pessoa/avaliacao/token', 'beco-magico-joao-pessoa'],
+    ['/beco-magico-joao-pessoa/f/parceiro', 'beco-magico-joao-pessoa'],
+  ])('extracts the tenant from public company route %s', (pathname, expectedSlug) => {
+    expect(getPublicApplicationCompanySlug(pathname)).toBe(expectedSlug);
+  });
+
+  it.each([
+    '/pagamento/token',
+    '/login',
+    '/dashboard',
+    '/',
+  ])('does not invent a company slug for %s', (pathname) => {
+    expect(getPublicApplicationCompanySlug(pathname)).toBeNull();
   });
 });

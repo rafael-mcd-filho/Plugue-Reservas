@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { isValidCompanySlug } from '@/lib/validation';
 
 interface PublicReviewData {
@@ -247,10 +247,10 @@ export default function ReservationReview() {
     },
   });
 
-  useEffect(() => {
-    syncPublicCompanyIcons(review?.company_logo_url ?? null);
-    return () => removePublicCompanyIcons();
-  }, [review?.company_logo_url]);
+  useFaviconOverride(
+    isLoading ? undefined : review?.company_logo_url ?? null,
+    slug ? `company:${slug}` : undefined,
+  );
 
   useEffect(() => {
     if (!review) return;

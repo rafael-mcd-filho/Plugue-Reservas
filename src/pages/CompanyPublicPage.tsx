@@ -21,6 +21,7 @@ import PublicPageSkeleton from '@/components/PublicPageSkeleton';
 import instagramLogoUrl from '@/assets/brands/instagram-logo.svg';
 import whatsappGlyphUrl from '@/assets/brands/whatsapp-glyph.svg';
 import { Card, CardContent } from '@/components/ui/card';
+import PublicHeroMedia from '@/components/public/PublicHeroMedia';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { RichTextContent } from '@/components/ui/rich-text-editor';
 import { useFunnelTracking } from '@/hooks/useFunnelTracking';
@@ -35,7 +36,8 @@ import {
   toBrazilWhatsAppNumber,
 } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
-import { removePublicCompanyIcons, syncPublicCompanyIcons } from '@/lib/publicCompanyIcons';
+import { useFaviconOverride } from '@/lib/publicCompanyIcons';
+import { normalizePublicHeroMediaUrls } from '@/lib/publicHeroMedia';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 import { lazyWithReload, preloadLazyImport } from '@/lib/lazyReload';
@@ -127,47 +129,6 @@ function RefinedRatingStarsLink({ href, className }: { href: string; className?:
         ))}
       </span>
     </a>
-  );
-}
-
-function HeroMedia({
-  url,
-  type,
-  className,
-}: {
-  url: string;
-  type: 'image' | 'video';
-  className: string;
-}) {
-  if (type === 'video') {
-    return (
-      <video
-        key={url}
-        src={url}
-        className={className}
-        autoPlay
-        loop
-        muted
-        playsInline
-        preload="metadata"
-        aria-hidden="true"
-        tabIndex={-1}
-      />
-    );
-  }
-
-  return (
-    <img
-      src={url}
-      alt=""
-      aria-hidden="true"
-      width={1600}
-      height={900}
-      loading="eager"
-      decoding="async"
-      fetchPriority="high"
-      className={className}
-    />
   );
 }
 
@@ -567,6 +528,11 @@ export default function CompanyPublicPage() {
 
   const { trackStep, startJourney, getTrackingSnapshot, clearJourney } = useFunnelTracking(company?.id, slug);
 
+  useFaviconOverride(
+    isLoading ? undefined : company?.logo_url ?? null,
+    slug ? `company:${slug}` : undefined,
+  );
+
   const handleOpenReservation = () => {
     void startJourney();
     setShowReservation(true);
@@ -664,7 +630,14 @@ export default function CompanyPublicPage() {
   const publicReservationExitPromptSecondaryTextSize = (company as any)?.public_reservation_exit_prompt_secondary_text_size ?? null;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
-  const showHeroMedia = customPublicPageEnabled && !!company?.hero_media_url;
+  const heroMediaUrls = useMemo(
+    () => normalizePublicHeroMediaUrls(
+      company?.hero_media_urls,
+      company?.hero_media_url,
+    ),
+    [company],
+  );
+  const showHeroMedia = customPublicPageEnabled && heroMediaUrls.length > 0;
   const heroMediaType = company?.hero_media_type === 'video' ? 'video' : 'image';
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
   // O estilo escolhido vale para todos os tamanhos de tela. Manter os ramos
@@ -750,14 +723,12 @@ export default function CompanyPublicPage() {
       upsertMeta('property', 'og:image:alt', `Logo do ${company.name}`);
       upsertMeta('name', 'twitter:image', seoImage);
       upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
-      syncPublicCompanyIcons(seoImage);
     } else {
       removeMeta('property', 'og:image');
       removeMeta('property', 'og:image:secure_url');
       removeMeta('property', 'og:image:alt');
       removeMeta('name', 'twitter:image');
       removeMeta('name', 'twitter:image:alt');
-      removePublicCompanyIcons();
     }
 
     upsertJsonLd(compactJsonLd({
@@ -804,9 +775,8 @@ export default function CompanyPublicPage() {
       removeMeta('name', 'twitter:image:alt');
       removeCanonical();
       removeJsonLd();
-      removePublicCompanyIcons();
     };
-  }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours]);
+  }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours, slug]);
 
   if (isLoading) {
     return <PublicPageSkeleton />;
@@ -887,11 +857,13 @@ export default function CompanyPublicPage() {
           className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden')}
           style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
         />
-        {!useModernHeader && showHeroMedia && company.hero_media_url && (
+        {!useModernHeader && showHeroMedia && (
           <>
-            <HeroMedia
-              url={company.hero_media_url}
+            <PublicHeroMedia
+              urls={heroMediaUrls}
+              fallbackUrl={company.hero_media_url}
               type={heroMediaType}
+              resetKey={company.id}
               className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
             />
             <div
@@ -917,10 +889,12 @@ export default function CompanyPublicPage() {
         <div className="relative z-10 mx-auto max-w-lg md:max-w-5xl">
           <div className="animate-slide-up text-foreground motion-reduce:animate-none">
             <div className="relative -mx-2 h-[400px] overflow-hidden rounded-[1.35rem] md:mx-0 md:h-auto md:aspect-[16/7] md:rounded-[1.75rem]">
-              {showHeroMedia && company.hero_media_url ? (
-                <HeroMedia
-                  url={company.hero_media_url}
+              {showHeroMedia ? (
+                <PublicHeroMedia
+                  urls={heroMediaUrls}
+                  fallbackUrl={company.hero_media_url}
                   type={heroMediaType}
+                  resetKey={company.id}
                   className="h-full w-full object-cover"
                 />
               ) : (

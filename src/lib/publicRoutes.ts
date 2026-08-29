@@ -48,3 +48,13 @@ export function getPublicCompanySlugFromPathname(pathname: string) {
   if (segments.length === 3 && second === 'f') return first;
   return null;
 }
+
+/** Returns the company slug for any public-app route (page, fila, reserva, avaliacao, f). */
+export function getPublicApplicationCompanySlug(pathname: string) {
+  if (!isPublicApplicationPath(pathname)) return null;
+  const [first] = getPathSegments(pathname);
+
+  // The payment route is public but its first segment is a route name, not a tenant.
+  if (!first || first === 'pagamento') return null;
+  return first;
+}

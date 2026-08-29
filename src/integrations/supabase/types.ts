@@ -148,6 +148,9 @@ export type Database = {
           description: string | null
           email: string | null
           google_maps_url: string | null
+          hero_media_type: "image" | "video" | null
+          hero_media_url: string | null
+          hero_media_urls: string[]
           id: string
           instagram: string | null
           large_party_whatsapp_threshold: number
@@ -176,6 +179,9 @@ export type Database = {
           description?: string | null
           email?: string | null
           google_maps_url?: string | null
+          hero_media_type?: "image" | "video" | null
+          hero_media_url?: string | null
+          hero_media_urls?: string[]
           id?: string
           instagram?: string | null
           large_party_whatsapp_threshold?: number
@@ -204,6 +210,9 @@ export type Database = {
           description?: string | null
           email?: string | null
           google_maps_url?: string | null
+          hero_media_type?: "image" | "video" | null
+          hero_media_url?: string | null
+          hero_media_urls?: string[]
           id?: string
           instagram?: string | null
           large_party_whatsapp_threshold?: number
@@ -1096,6 +1105,9 @@ export type Database = {
           address: string | null
           description: string | null
           google_maps_url: string | null
+          hero_media_type: "image" | "video" | null
+          hero_media_url: string | null
+          hero_media_urls: string[] | null
           id: string | null
           instagram: string | null
           large_party_whatsapp_threshold: number | null
@@ -1115,6 +1127,9 @@ export type Database = {
           address?: string | null
           description?: string | null
           google_maps_url?: string | null
+          hero_media_type?: "image" | "video" | null
+          hero_media_url?: string | null
+          hero_media_urls?: string[] | null
           id?: string | null
           instagram?: string | null
           large_party_whatsapp_threshold?: number | null
@@ -1134,6 +1149,9 @@ export type Database = {
           address?: string | null
           description?: string | null
           google_maps_url?: string | null
+          hero_media_type?: "image" | "video" | null
+          hero_media_url?: string | null
+          hero_media_urls?: string[] | null
           id?: string | null
           instagram?: string | null
           large_party_whatsapp_threshold?: number | null
