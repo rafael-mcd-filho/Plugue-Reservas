@@ -1030,29 +1030,48 @@ export default function CompanyPublicPage() {
               </Button>
             </div>
 
-            {/* A nova hierarquia centralizada entra apenas no desktop. */}
+            {/* Desktop moderno repete a mesma hierarquia visual do mobile. */}
             <div className="mx-auto mt-5 hidden max-w-2xl space-y-4 px-1 pb-1 text-center md:block">
-              {googleMapsSearchUrl && <RefinedRatingStarsLink href={googleMapsSearchUrl} />}
-              <HeroOrnamentDivider className="mt-4" />
-              <h1 className="mt-4 text-balance text-[clamp(2rem,3vw,2.75rem)] font-bold leading-tight tracking-tight text-foreground">
+              <h1 className="text-balance text-[clamp(2rem,3vw,2.75rem)] font-bold leading-tight tracking-tight text-foreground">
                 {company.name}
               </h1>
 
-              {instagramUrl && instagramLabel && (
-                <a
-                  href={instagramUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Instagram"
-                  className="mt-3 inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
-                >
-                  <InstagramLogo className="h-[1.15rem] w-[1.15rem] shrink-0" />
-                  <span className="truncate tracking-[0.01em]">{instagramLabel}</span>
-                </a>
+              {(googleMapsSearchUrl || (instagramUrl && instagramLabel)) && (
+                <div className="flex items-center justify-center gap-3">
+                  {googleMapsSearchUrl && (
+                    <a
+                      href={googleMapsSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Avaliações no Google"
+                      className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-foreground transition-opacity hover:opacity-75"
+                    >
+                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                      {PUBLIC_RATING_LABEL}
+                    </a>
+                  )}
+
+                  {googleMapsSearchUrl && instagramUrl && instagramLabel && (
+                    <span className="h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+                  )}
+
+                  {instagramUrl && instagramLabel && (
+                    <a
+                      href={instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Instagram"
+                      className="inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <InstagramLogo className="h-[1.15rem] w-[1.15rem] shrink-0" />
+                      <span className="truncate tracking-[0.01em]">{instagramLabel}</span>
+                    </a>
+                  )}
+                </div>
               )}
 
               {showDescription && (
-                <div className="mt-4 rounded-lg bg-card p-5 text-left shadow-sm">
+                <div className="mt-4 rounded-lg bg-card p-5 shadow-sm">
                   <RichTextContent
                     value={company.description}
                     className="text-base leading-relaxed text-muted-foreground [&_h1]:text-xl [&_h1]:text-foreground [&_h2]:text-lg [&_h2]:text-foreground [&_p]:text-base"
