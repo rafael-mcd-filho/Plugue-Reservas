@@ -25,6 +25,7 @@ import {
   CalendarCheck,
   CalendarClock,
   Globe,
+  LayoutTemplate,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
@@ -141,9 +142,61 @@ function WhatsAppIcon({ className }: { className?: string }) {
 
 const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
+const PUBLIC_HEADER_STYLE_OPTIONS = [
+  {
+    value: 'classic' as const,
+    label: 'Clássico',
+    description: 'Banner escuro com a mídia ao fundo e a logo no topo.',
+  },
+  {
+    value: 'modern' as const,
+    label: 'Moderno',
+    description: 'Fundo claro com a mídia em destaque e a logo sobreposta.',
+  },
+];
+
+// Miniatura do topo da pagina publica, so para o lojista comparar os dois estilos.
+function PublicHeaderStylePreview({ variant }: { variant: 'classic' | 'modern' }) {
+  const faixa = 'rounded-full';
+
+  if (variant === 'modern') {
+    return (
+      <div className="overflow-hidden rounded-lg border border-[rgba(0,0,0,0.08)] bg-[#F0ECE5] p-2" aria-hidden="true">
+        <div className="relative">
+          <div className="h-14 rounded-md bg-[linear-gradient(150deg,#7A3608_0%,#3A1B06_55%,#1C1108_100%)]" />
+          <div className="absolute -bottom-3 left-1/2 h-6 w-6 -translate-x-1/2 rounded-full bg-[#8B2F2F] ring-2 ring-[#F0ECE5]" />
+        </div>
+        <div className="mt-5 flex flex-col items-center gap-1.5">
+          <span className={cn(faixa, 'h-1.5 w-20 bg-foreground/25')} />
+          <span className={cn(faixa, 'h-1 w-12 bg-foreground/15')} />
+          <span className="mt-1 h-3 w-full rounded bg-white" />
+          <span className="mt-0.5 h-3 w-full rounded bg-primary/70" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="overflow-hidden rounded-lg border border-[rgba(0,0,0,0.08)] p-2"
+      style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
+      aria-hidden="true"
+    >
+      <div className="flex flex-col items-center gap-1.5 py-1">
+        <span className="h-6 w-6 rounded-full bg-[#8B2F2F] ring-1 ring-white/20" />
+        <span className={cn(faixa, 'h-1.5 w-10 bg-[#F5D08A]/70')} />
+        <span className={cn(faixa, 'h-1.5 w-20 bg-white/70')} />
+        <span className={cn(faixa, 'h-1 w-12 bg-white/25')} />
+        <span className="mt-1 h-3 w-full rounded bg-white/90" />
+        <span className="mt-0.5 h-3 w-full rounded bg-primary/80" />
+      </div>
+    </div>
+  );
+}
+
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
 const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
@@ -223,6 +276,7 @@ export default function CompanySettings() {
           missingColumns: [
             'hero_media_url',
             'hero_media_type',
+            'public_header_style',
             'public_reservation_exit_prompt_primary_text',
             'public_reservation_exit_prompt_primary_text_size',
             'public_reservation_exit_prompt_secondary_text',
@@ -333,6 +387,7 @@ export default function CompanySettings() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [heroMediaUrl, setHeroMediaUrl] = useState('');
   const [heroMediaType, setHeroMediaType] = useState<HeroMediaType | ''>('');
+  const [publicHeaderStyle, setPublicHeaderStyle] = useState<'classic' | 'modern'>('classic');
   const [uploadingHeroMedia, setUploadingHeroMedia] = useState(false);
   const [noticeText, setNoticeText] = useState('');
   const [noticeImageUrl, setNoticeImageUrl] = useState('');
@@ -357,6 +412,7 @@ export default function CompanySettings() {
     setLogoUrl(company.logo_url || '');
     setHeroMediaUrl(company.hero_media_url || '');
     setHeroMediaType((company.hero_media_type as HeroMediaType) || '');
+    setPublicHeaderStyle((company as any).public_header_style === 'modern' ? 'modern' : 'classic');
     setAddress(company.address || '');
     setPhone(formatBrazilPhone(company.phone));
     setInstagram(normalizeInstagramHandle(company.instagram));
@@ -502,6 +558,9 @@ export default function CompanySettings() {
         ...companyUpdateWithLargePartyThreshold,
         hero_media_url: publicCustomizationLocked ? (company.hero_media_url ?? null) : (heroMediaUrl || null),
         hero_media_type: publicCustomizationLocked ? (company.hero_media_type ?? null) : (heroMediaType || null),
+        public_header_style: publicCustomizationLocked
+          ? ((company as any).public_header_style ?? 'classic')
+          : publicHeaderStyle,
       } as any;
 
       const updateAttempts = [
@@ -518,6 +577,7 @@ export default function CompanySettings() {
           missingColumns: [
             'hero_media_url',
             'hero_media_type',
+            'public_header_style',
             'public_reservation_exit_prompt_primary_text',
             'public_reservation_exit_prompt_primary_text_size',
             'public_reservation_exit_prompt_secondary_text',
@@ -1919,6 +1979,68 @@ export default function CompanySettings() {
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
                 <div className={settingsBadgeClassName}>
+                  <LayoutTemplate className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Estilo do topo da página</CardTitle>
+                  <CardDescription>
+                    Muda apenas o topo da página pública no celular. Horários, endereço, formas de pagamento e o botão do
+                    WhatsApp continuam iguais nos dois estilos, e no computador o topo é sempre o mesmo.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-2">
+              <div className="grid gap-3 md:grid-cols-2">
+                {PUBLIC_HEADER_STYLE_OPTIONS.map((option) => {
+                  const selected = publicHeaderStyle === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={publicCustomizationLocked}
+                      aria-pressed={selected}
+                      onClick={() => setPublicHeaderStyle(option.value)}
+                      className={cn(
+                        'flex flex-col gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                        selected
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                          : 'border-[rgba(0,0,0,0.08)] bg-muted/15 hover:bg-muted/30',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-base font-semibold text-foreground">{option.label}</p>
+                          <p className="text-sm text-muted-foreground">{option.description}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            'mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                            selected ? 'border-primary' : 'border-muted-foreground/40',
+                          )}
+                        >
+                          {selected && <span className="h-2 w-2 rounded-full bg-primary" />}
+                        </span>
+                      </div>
+                      <PublicHeaderStylePreview variant={option.value} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {publicCustomizationLocked && (
+                <p className="text-xs text-muted-foreground">
+                  O estilo do topo fica bloqueado quando a página pública customizada está desativada.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
                   <MessageCircle className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
@@ -1932,7 +2054,7 @@ export default function CompanySettings() {
                 <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-1">
                     <Label className="text-base font-semibold">Botão do WhatsApp</Label>
-                    <p className="text-sm text-muted-foreground">Controla se o botão aparece na página pública.</p>
+                    <p className="text-sm text-muted-foreground">Controla se o botão flutuante aparece na página pública.</p>
                     {publicCustomizationLocked && (
                       <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
                     )}

@@ -183,6 +183,11 @@
     animation: attentionPulse 1.9s ease-in-out infinite;
     will-change: transform, box-shadow;
   }
+  /* Mesma cadencia da pulsacao padrao, porem com brilho ambar constante. */
+  .animate-attention-pulse-glow {
+    animation: attentionPulseGlow 1.9s ease-in-out infinite;
+    will-change: transform, box-shadow;
+  }
 }
 
 /* ─── Keyframes ───────────────────────────────────────────────────────────── */
@@ -203,5 +208,22 @@
   40% {
     transform: scale(1.01);
     box-shadow: 0 6px 18px rgba(217, 119, 6, 0.14);
+  }
+}
+
+@keyframes attentionPulseGlow {
+  0%, 72%, 100% {
+    transform: scale(1);
+    box-shadow: 0 6px 18px -4px rgba(197, 124, 54, 0.5);
+  }
+
+  24% {
+    transform: scale(1.018);
+    box-shadow: 0 14px 34px -6px rgba(217, 119, 6, 0.6);
+  }
+
+  40% {
+    transform: scale(1.01);
+    box-shadow: 0 10px 26px -6px rgba(217, 119, 6, 0.45);
   }
 }

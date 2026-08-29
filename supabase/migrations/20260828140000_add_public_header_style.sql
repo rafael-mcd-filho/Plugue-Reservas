@@ -1,0 +1,128 @@
+-- Estilo do cabecalho da pagina publica no mobile.
+-- 'classic' mantem o banner escuro com a midia ao fundo (comportamento historico);
+-- 'modern' usa o cartao claro com a midia no topo e a logo sobreposta.
+-- O desktop segue sempre com o banner classico, independente da escolha.
+ALTER TABLE public.companies
+  ADD COLUMN IF NOT EXISTS public_header_style text NOT NULL DEFAULT 'classic';
+
+ALTER TABLE public.companies
+  DROP CONSTRAINT IF EXISTS companies_public_header_style_check;
+
+ALTER TABLE public.companies
+  ADD CONSTRAINT companies_public_header_style_check
+  CHECK (public_header_style IN ('classic', 'modern'));
+
+CREATE OR REPLACE VIEW public.companies_public
+WITH (security_invoker = false) AS
+SELECT
+  id,
+  name,
+  slug,
+  logo_url,
+  description,
+  phone,
+  address,
+  google_maps_url,
+  whatsapp,
+  instagram,
+  opening_hours,
+  payment_methods,
+  reservation_duration,
+  max_guests_per_slot,
+  status,
+  show_public_whatsapp_button,
+  public_waitlist_enabled,
+  show_public_sticky_reserve_button,
+  show_public_reservation_exit_prompt,
+  public_reservation_exit_prompt_primary_text,
+  public_reservation_exit_prompt_primary_text_size,
+  public_reservation_exit_prompt_secondary_text,
+  public_reservation_exit_prompt_secondary_text_size,
+  large_party_whatsapp_threshold,
+  reservation_late_tolerance_minutes,
+  hero_media_url,
+  hero_media_type,
+  public_header_style
+FROM public.companies
+WHERE status = 'active';
+
+GRANT SELECT ON public.companies_public TO anon;
+GRANT SELECT ON public.companies_public TO authenticated;
+
+DROP FUNCTION IF EXISTS public.get_public_company_by_slug(text);
+
+CREATE OR REPLACE FUNCTION public.get_public_company_by_slug(_slug text)
+RETURNS TABLE (
+  id uuid,
+  name text,
+  slug text,
+  logo_url text,
+  hero_media_url text,
+  hero_media_type text,
+  public_header_style text,
+  description text,
+  phone text,
+  address text,
+  google_maps_url text,
+  whatsapp text,
+  show_public_whatsapp_button boolean,
+  show_public_sticky_reserve_button boolean,
+  public_waitlist_enabled boolean,
+  instagram text,
+  opening_hours jsonb,
+  payment_methods jsonb,
+  reservation_duration integer,
+  max_guests_per_slot integer,
+  status text,
+  custom_public_page_enabled boolean,
+  show_public_reservation_exit_prompt boolean,
+  public_reservation_exit_prompt_primary_text text,
+  public_reservation_exit_prompt_primary_text_size text,
+  public_reservation_exit_prompt_secondary_text text,
+  public_reservation_exit_prompt_secondary_text_size text,
+  large_party_whatsapp_threshold integer,
+  reservation_late_tolerance_minutes integer
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    c.id,
+    c.name,
+    c.slug,
+    c.logo_url,
+    c.hero_media_url,
+    c.hero_media_type,
+    c.public_header_style,
+    c.description,
+    c.phone,
+    c.address,
+    c.google_maps_url,
+    c.whatsapp,
+    c.show_public_whatsapp_button,
+    c.show_public_sticky_reserve_button,
+    c.public_waitlist_enabled,
+    c.instagram,
+    c.opening_hours,
+    c.payment_methods,
+    c.reservation_duration,
+    c.max_guests_per_slot,
+    c.status,
+    public.company_feature_enabled(c.id, 'custom_public_page') AS custom_public_page_enabled,
+    c.show_public_reservation_exit_prompt,
+    c.public_reservation_exit_prompt_primary_text,
+    c.public_reservation_exit_prompt_primary_text_size,
+    c.public_reservation_exit_prompt_secondary_text,
+    c.public_reservation_exit_prompt_secondary_text_size,
+    c.large_party_whatsapp_threshold,
+    c.reservation_late_tolerance_minutes
+  FROM public.companies c
+  WHERE c.slug = _slug
+    AND c.status = 'active'
+  LIMIT 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_public_company_by_slug(text) TO anon;
+GRANT EXECUTE ON FUNCTION public.get_public_company_by_slug(text) TO authenticated;

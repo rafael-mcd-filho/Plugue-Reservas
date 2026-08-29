@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState, type SVGProps } from 'react';
+import { Suspense, useEffect, useMemo, useState, type CSSProperties, type SVGProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -11,13 +11,14 @@ import {
   ExternalLink,
   Loader2,
   MapPin,
-  Navigation,
   Phone,
   QrCode,
   Star,
   Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import instagramLogoUrl from '@/assets/brands/instagram-logo.svg';
+import whatsappGlyphUrl from '@/assets/brands/whatsapp-glyph.svg';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { RichTextContent } from '@/components/ui/rich-text-editor';
@@ -45,6 +46,10 @@ const ReservationModal = lazyWithReload(loadReservationModal, 'reservation-modal
 const FunnelDebugPanel = lazyWithReload(() => import('@/components/FunnelDebugPanel'), 'funnel-debug-panel');
 const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
+// Nota exibida na pagina publica. Nao ha avaliacao no cadastro: as 5 estrelas antigas
+// tambem eram fixas, entao este valor mantem a mesma natureza decorativa.
+const PUBLIC_RATING_LABEL = '5,0';
+
 const PUBLIC_WHATSAPP_MESSAGE = 'Ol\u00E1, vim pela p\u00E1gina de reservas e gostaria de ajuda.';
 
 interface OpeningHour {
@@ -66,16 +71,6 @@ interface PublicNotice {
   text: string | null;
   image_url: string | null;
   active_until: string | null;
-}
-
-function InstagramIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
-      <rect x="3.5" y="3.5" width="17" height="17" rx="5" />
-      <circle cx="12" cy="12" r="3.75" />
-      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
 }
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
@@ -112,6 +107,22 @@ function RatingStarsLink({ href, className }: { href: string; className?: string
   );
 }
 
+// O arquivo externo evita ids de gradiente duplicados quando os layouts mobile
+// e desktop coexistem no DOM e tambem deixa a origem da marca rastreavel.
+function InstagramLogo({ className }: { className?: string }) {
+  return <img src={instagramLogoUrl} alt="" aria-hidden="true" className={className} />;
+}
+
+function HeroOrnamentDivider({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex items-center justify-center gap-3', className)} aria-hidden="true">
+      <span className="h-px w-14 bg-gradient-to-r from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
+      <span className="h-2.5 w-2.5 rotate-45 rounded-[2px] border border-[#E3B36A]/70 bg-[radial-gradient(circle_at_30%_30%,rgba(255,224,173,0.65),rgba(96,49,11,0.9))] shadow-[0_0_14px_rgba(201,138,58,0.2)]" />
+      <span className="h-px w-14 bg-gradient-to-l from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
+    </div>
+  );
+}
+
 function RefinedRatingStarsLink({ href, className }: { href: string; className?: string }) {
   return (
     <a
@@ -135,16 +146,6 @@ function RefinedRatingStarsLink({ href, className }: { href: string; className?:
         ))}
       </span>
     </a>
-  );
-}
-
-function HeroOrnamentDivider({ className }: { className?: string }) {
-  return (
-    <div className={cn('flex items-center justify-center gap-3', className)} aria-hidden="true">
-      <span className="h-px w-14 bg-gradient-to-r from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
-      <span className="h-2.5 w-2.5 rotate-45 rounded-[2px] border border-[#E3B36A]/70 bg-[radial-gradient(circle_at_30%_30%,rgba(255,224,173,0.65),rgba(96,49,11,0.9))] shadow-[0_0_14px_rgba(201,138,58,0.2)]" />
-      <span className="h-px w-14 bg-gradient-to-l from-transparent via-[#C98A3A]/70 to-[#F2D2A1]/25" />
-    </div>
   );
 }
 
@@ -385,24 +386,6 @@ function getGoogleMapsOpenUrl(company: Company | null) {
   return null;
 }
 
-function getGoogleMapsDirectionsUrl(company: Company | null) {
-  if (!company) return null;
-
-  if (company.address) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(flattenAddress(company.address))}`;
-  }
-
-  if (company.google_maps_url && !company.google_maps_url.includes('/embed')) {
-    return company.google_maps_url;
-  }
-
-  if (company.name) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(company.name)}`;
-  }
-
-  return null;
-}
-
 function truncateSeoText(value: string, maxLength = 155) {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
@@ -616,7 +599,6 @@ export default function CompanyPublicPage() {
   const instagramUrl = buildInstagramProfileUrl(company?.instagram);
   const instagramLabel = useMemo(() => formatInstagramHandleLabel(company?.instagram), [company?.instagram]);
   const googleMapsSearchUrl = getGoogleMapsOpenUrl(company);
-  const googleMapsDirectionsUrl = getGoogleMapsDirectionsUrl(company);
   const addressLines = (company?.address || '').split('\n');
   const addressTitle = addressLines[0]?.trim() || '';
   const addressSubtitle = addressLines.slice(1).join('\n').trim();
@@ -639,6 +621,16 @@ export default function CompanyPublicPage() {
   const showHeroMedia = customPublicPageEnabled && !!(company as any)?.hero_media_url;
   const heroMediaType = (company as any)?.hero_media_type === 'video' ? 'video' : 'image';
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
+  // Estilo do cabecalho escolhido pela empresa. Vale apenas no mobile:
+  // no desktop os dois estilos usam o mesmo banner.
+  const useModernHeader = (company as any)?.public_header_style === 'modern';
+  // A barra fixa de reserva mede pt-3 (0.75rem) + botao lg (2.5rem) + padding inferior seguro.
+  // O botao flutuante fica 1.25rem acima dela para nao encostar no CTA.
+  const whatsappFabStyle = {
+    '--wa-fab-bottom': publicStickyReserveButtonEnabled
+      ? 'calc(4.5rem + max(0.75rem, env(safe-area-inset-bottom, 0px)))'
+      : 'calc(1.25rem + env(safe-area-inset-bottom, 0px))',
+  } as CSSProperties;
   const activePublicNotice = publicNotice && publicNotice.id !== dismissedNoticeId ? publicNotice : null;
   const getOpeningHourForDate = (date: Date) => {
     return findOpeningHoursForDayIndex(openingHours, date.getDay());
@@ -861,16 +853,23 @@ export default function CompanyPublicPage() {
   return (
     <div className="min-h-screen bg-secondary pb-24 md:pb-0">
       <div
-        className="relative overflow-hidden px-4 pb-8 pt-5 text-primary-foreground md:pb-14 md:pt-6"
-        style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
+        className={cn(
+          'relative overflow-hidden px-4 pb-8 md:pb-14 md:pt-6 md:text-primary-foreground',
+          useModernHeader ? 'pt-2 text-foreground' : 'pt-5 text-primary-foreground',
+        )}
       >
+        {/* Fundo escuro do banner. No estilo moderno o mobile acompanha o fundo claro da pagina. */}
+        <div
+          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden md:block')}
+          style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
+        />
         {showHeroMedia && (
           <>
             {heroMediaType === 'video' ? (
               <video
                 key={(company as any)?.hero_media_url}
                 src={(company as any)?.hero_media_url}
-                className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+                className={cn('pointer-events-none absolute inset-0 z-0 h-full w-full object-cover', useModernHeader && 'hidden md:block')}
                 autoPlay
                 loop
                 muted
@@ -881,11 +880,11 @@ export default function CompanyPublicPage() {
                 src={(company as any)?.hero_media_url}
                 alt=""
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+                className={cn('pointer-events-none absolute inset-0 z-0 h-full w-full object-cover', useModernHeader && 'hidden md:block')}
               />
             )}
             <div
-              className="pointer-events-none absolute inset-0 z-[1]"
+              className={cn('pointer-events-none absolute inset-0 z-[1]', useModernHeader && 'hidden md:block')}
               style={{
                 background:
                   'linear-gradient(180deg, rgba(10,7,3,0.78) 0%, rgba(10,7,3,0.5) 35%, rgba(10,7,3,0.58) 70%, rgba(10,7,3,0.88) 100%)',
@@ -894,15 +893,144 @@ export default function CompanyPublicPage() {
           </>
         )}
         <div
-          className="pointer-events-none absolute inset-0"
+          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden md:block')}
           style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
         />
         <div
-          className="pointer-events-none absolute bottom-0 left-0 right-0 h-24"
+          className={cn('pointer-events-none absolute bottom-0 left-0 right-0 h-24', useModernHeader && 'hidden md:block')}
           style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
         />
 
-        <div className="relative z-10 mx-auto max-w-lg md:max-w-5xl">
+        {/* Estilo moderno (so mobile): cartao claro com a midia no topo e a logo sobreposta. */}
+        {useModernHeader && (
+        <div className="relative z-10 mx-auto max-w-lg md:hidden">
+          <div className="animate-slide-up text-foreground">
+            <div className="relative -mx-2 h-[400px] overflow-hidden rounded-[1.35rem]">
+              {showHeroMedia ? (
+                heroMediaType === 'video' ? (
+                  <video
+                    key={(company as any)?.hero_media_url}
+                    src={(company as any)?.hero_media_url}
+                    className="h-full w-full object-cover"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <img
+                    src={(company as any)?.hero_media_url}
+                    alt=""
+                    aria-hidden="true"
+                    className="h-full w-full object-cover"
+                  />
+                )
+              ) : (
+                <div
+                  aria-hidden="true"
+                  className="h-full w-full"
+                  style={{
+                    background:
+                      'repeating-linear-gradient(115deg, rgba(0,0,0,0.24) 0px, rgba(0,0,0,0.24) 16px, rgba(255,255,255,0.05) 16px, rgba(255,255,255,0.05) 32px), linear-gradient(150deg, #7A3608 0%, #3A1B06 55%, #1C1108 100%)',
+                  }}
+                />
+              )}
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/15" />
+
+              {openingStatus && (
+                <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-background/95 px-2.5 py-1 shadow-md backdrop-blur-sm">
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      openingStatus.variant === 'open' ? 'bg-emerald-500' : 'bg-amber-500',
+                    )}
+                  />
+                  <span className="text-[0.72rem] font-semibold text-foreground">{openingStatus.title}</span>
+                </div>
+              )}
+            </div>
+
+            {/* A midia e position:relative, entao a logo precisa de z-index proprio
+                para cruzar a borda por cima em vez de ficar atras dela. */}
+            <div className="relative z-10 -mt-11 flex justify-center">
+              {showCustomLogo ? (
+                <img
+                  src={company.logo_url}
+                  alt={company.name}
+                  className="h-[5.5rem] w-[5.5rem] shrink-0 rounded-full object-cover shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary"
+                />
+              ) : (
+                <div className="flex h-[5.5rem] w-[5.5rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary">
+                  {company.name.charAt(0)}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-3 px-1 pb-1 text-center">
+              <h2 className="text-balance text-[clamp(1.35rem,5.4vw,1.75rem)] font-bold leading-tight tracking-tight text-foreground">
+                {company.name}
+              </h2>
+
+              {(googleMapsSearchUrl || (instagramUrl && instagramLabel)) && (
+                <div className="flex items-center justify-center gap-3">
+                  {googleMapsSearchUrl && (
+                    <a
+                      href={googleMapsSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Avaliações no Google"
+                      className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-foreground transition-opacity hover:opacity-75"
+                    >
+                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                      {PUBLIC_RATING_LABEL}
+                    </a>
+                  )}
+
+                  {googleMapsSearchUrl && instagramUrl && instagramLabel && (
+                    <span className="h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+                  )}
+
+                  {instagramUrl && instagramLabel && (
+                    <a
+                      href={instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Instagram"
+                      className="inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <InstagramLogo className="h-[1.15rem] w-[1.15rem] shrink-0" />
+                      <span className="truncate tracking-[0.01em]">{instagramLabel}</span>
+                    </a>
+                  )}
+                </div>
+              )}
+              {showDescription && (
+                <div className="rounded-lg bg-card p-4 shadow-sm">
+                  <RichTextContent
+                    value={company.description}
+                    className="text-sm leading-relaxed text-muted-foreground [&_h1]:text-xl [&_h1]:text-foreground [&_h2]:text-lg [&_h2]:text-foreground [&_p]:text-sm"
+                  />
+                </div>
+              )}
+
+              <Button
+                className="group animate-attention-pulse-glow w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90"
+                size="lg"
+                onMouseEnter={() => void preloadReservationModal()}
+                onFocus={() => void preloadReservationModal()}
+                onClick={handleOpenReservation}
+              >
+                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                Reservar agora
+              </Button>
+            </div>
+          </div>
+        </div>
+        )}
+
+        {/* Estilo classico: banner escuro. Serve os dois estilos no desktop e,
+            no mobile, apenas quem nao escolheu o moderno. */}
+        <div className={cn('relative z-10 mx-auto max-w-lg md:max-w-5xl', useModernHeader && 'hidden md:block')}>
           <div className="flex flex-col items-center md:items-start">
             {showCustomLogo ? (
               <img
@@ -940,7 +1068,7 @@ export default function CompanyPublicPage() {
                     className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[0.72rem] font-medium text-[#F1D6DE] transition-[background-color,border-color,color] hover:border-white/20 hover:bg-white/10 hover:text-white"
                   >
                     <span className="inline-flex h-5.5 w-5.5 items-center justify-center rounded-full bg-white/10 text-pink-200">
-                      <InstagramIcon className="h-[0.7rem] w-[0.7rem]" />
+                      <InstagramLogo className="h-[0.7rem] w-[0.7rem]" />
                     </span>
                     <span className="text-[0.72rem] tracking-[0.01em]">{instagramLabel}</span>
                   </a>
@@ -956,7 +1084,7 @@ export default function CompanyPublicPage() {
               </div>
             </div>
 
-            <div className="mt-5 space-y-3 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
+            <div className="mt-5 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
               <Button
                 className="group animate-attention-pulse-fast w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
                 size="lg"
@@ -967,19 +1095,6 @@ export default function CompanyPublicPage() {
                 <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
                 Reservar agora
               </Button>
-
-              {showWhatsappButton && (
-                <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
-                  <Button
-                    variant="secondary"
-                    className="w-full gap-2 rounded-lg border-none bg-background text-base font-semibold text-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-background/90"
-                    size="lg"
-                  >
-                    <WhatsAppIcon className="h-5 w-5 text-emerald-600" />
-                    Falar pelo WhatsApp
-                  </Button>
-                </a>
-              )}
             </div>
           </div>
         </div>
@@ -1110,31 +1225,16 @@ export default function CompanyPublicPage() {
                   </div>
                 )}
 
-                {(googleMapsDirectionsUrl || googleMapsSearchUrl) && (
-                  <div className="flex flex-wrap gap-2">
-                    {googleMapsDirectionsUrl && (
-                      <a
-                        href={googleMapsDirectionsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex flex-1 items-center justify-center gap-2 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90"
-                      >
-                        <Navigation className="h-4 w-4" />
-                        <span className="whitespace-nowrap">Traçar rota</span>
-                      </a>
-                    )}
-                    {googleMapsSearchUrl && (
-                      <a
-                        href={googleMapsSearchUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex flex-1 items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
-                      >
-                        Abrir no Maps
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
-                  </div>
+                {googleMapsSearchUrl && (
+                  <a
+                    href={googleMapsSearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
+                  >
+                    Abrir no Mapa
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
                 )}
 
                 {company.address && company.phone && <div className="border-t border-border" />}
@@ -1240,6 +1340,25 @@ export default function CompanyPublicPage() {
         </DialogContent>
       </Dialog>
 
+      {showWhatsappButton && (
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Falar pelo WhatsApp"
+          title="Falar pelo WhatsApp"
+          style={whatsappFabStyle}
+          className="fixed right-4 bottom-[var(--wa-fab-bottom)] z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[linear-gradient(145deg,#3BE97C_0%,#25D366_45%,#17A94F_100%)] shadow-[0_10px_26px_-6px_rgba(15,120,60,0.55)] ring-1 ring-black/10 transition-[transform,filter] duration-150 hover:scale-105 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366] focus-visible:ring-offset-2 active:scale-95 md:right-6 md:bottom-6 md:h-[3.3rem] md:w-[3.3rem]"
+        >
+          <img
+            src={whatsappGlyphUrl}
+            alt=""
+            aria-hidden="true"
+            className="h-[1.6rem] w-[1.6rem] md:h-[1.73rem] md:w-[1.73rem]"
+          />
+        </a>
+      )}
+
       {publicStickyReserveButtonEnabled && (
         <div
           className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 px-4 pt-3 shadow-[0_-12px_32px_rgba(0,0,0,0.14)] backdrop-blur-xl md:hidden"
@@ -1247,7 +1366,7 @@ export default function CompanyPublicPage() {
         >
           <div className="mx-auto max-w-lg">
             <Button
-              className="group animate-attention-pulse-fast w-full gap-2 rounded-lg text-base font-semibold shadow-sm transition-[background-color,box-shadow,transform] duration-150"
+              className="group animate-attention-pulse-glow w-full gap-2 rounded-lg text-base font-semibold transition-[background-color,transform] duration-150"
               size="lg"
               onClick={handleOpenReservation}
               onMouseEnter={() => void preloadReservationModal()}
