@@ -176,16 +176,9 @@ describe('useFunnelTracking reliability', () => {
     expect(snapshots[0].session_id).toBe(pendingPings[0].body.session_id);
   });
 
-  it('keeps session_ping and page_view durable when the first request fails', async () => {
+  it('creates the cold session and page_view in one Edge request', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-    let sessionAttempts = 0;
-    mocks.invoke.mockImplementation((_: string, { body }: { body: TrackingEventPayload }) => {
-      if (body.event_name === 'session_ping' && sessionAttempts++ === 0) {
-        return Promise.resolve({ data: null, error: new Error('offline') });
-      }
-      return Promise.resolve(successfulResponse(body));
-    });
 
     const { result } = renderHook(() => useFunnelTracking('company-a', 'company-a'));
     await settleEffects();
@@ -194,33 +187,24 @@ describe('useFunnelTracking reliability', () => {
     });
 
     const scope = getFunnelTrackingScope('company-a', 'company-a')!;
-    const pending = readPendingFunnelEvents<TrackingEventPayload>(scope);
-    expect(pending.map((item) => item.payload.event_name)).toEqual(['session_ping', 'page_view']);
-    expect(invokedPayloads().some((payload) => payload.event_name === 'page_view')).toBe(false);
-    const retryAt = Math.min(...pending.map((item) => item.nextAttemptAt));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(retryAt - Date.now() + 2);
-    });
     expect(readPendingFunnelEvents(scope)).toHaveLength(0);
-    expect(invokedPayloads().filter((payload) => payload.event_name === 'session_ping')).toHaveLength(2);
-    const pageViewPayload = invokedPayloads().find((payload) => payload.event_name === 'page_view');
-    expect(pageViewPayload?.session_id).toBe('session-company-a');
+    expect(invokedPayloads()).toHaveLength(1);
+    expect(invokedPayloads().filter((payload) => payload.event_name === 'session_ping')).toHaveLength(0);
+    const pageViewPayload = invokedPayloads()[0];
+    expect(pageViewPayload.event_name).toBe('page_view');
+    expect(pageViewPayload.session_id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(pageViewPayload?.occurred_at).toBe(new Date(NOW).toISOString());
-    const sessionEventIds = invokedPayloads()
-      .filter((payload) => payload.event_name === 'session_ping')
-      .map((payload) => payload.event_id);
-    expect(new Set(sessionEventIds).size).toBe(1);
+    expect(readTrackingState(scope)?.session_id).toBe('session-company-a');
   });
 
-  it('retries a response-lost session_ping with the same event and provisional session IDs', async () => {
+  it('retries a response-lost bootstrap page_view with stable event and session IDs', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-    let pingAttempts = 0;
+    let pageViewAttempts = 0;
     mocks.invoke.mockImplementation((_: string, { body }: { body: TrackingEventPayload }) => {
-      if (body.event_name === 'session_ping') {
-        pingAttempts += 1;
-        if (pingAttempts === 1) {
+      if (body.event_name === 'page_view') {
+        pageViewAttempts += 1;
+        if (pageViewAttempts === 1) {
           return Promise.resolve({ data: null, error: new Error('response lost') });
         }
         return Promise.resolve({
@@ -248,16 +232,15 @@ describe('useFunnelTracking reliability', () => {
       await vi.advanceTimersByTimeAsync(retryAt - Date.now() + 1);
     });
 
-    const pings = invokedPayloads().filter((payload) => payload.event_name === 'session_ping');
-    expect(pings).toHaveLength(2);
-    expect(new Set(pings.map((payload) => payload.event_id)).size).toBe(1);
-    expect(new Set(pings.map((payload) => payload.session_id)).size).toBe(1);
-    expect(pings[0].session_id).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(invokedPayloads().find((payload) => payload.event_name === 'page_view')?.session_id)
-      .toBe(pings[0].session_id);
+    const pageViews = invokedPayloads().filter((payload) => payload.event_name === 'page_view');
+    expect(pageViews).toHaveLength(2);
+    expect(new Set(pageViews.map((payload) => payload.event_id)).size).toBe(1);
+    expect(new Set(pageViews.map((payload) => payload.session_id)).size).toBe(1);
+    expect(pageViews[0].session_id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(invokedPayloads().filter((payload) => payload.event_name === 'session_ping')).toHaveLength(0);
   });
 
-  it('reuses the pending session_ping when tracking is called again during backoff', async () => {
+  it('reuses the pending bootstrap page_view when session consumers run during backoff', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     mocks.invoke.mockResolvedValue({ data: null, error: new Error('offline') });
@@ -268,8 +251,8 @@ describe('useFunnelTracking reliability', () => {
     });
 
     const scope = getFunnelTrackingScope('company-a', 'company-a')!;
-    const firstPing = readPendingFunnelEvents<TrackingEventPayload>(scope)
-      .find((item) => item.payload.event_name === 'session_ping')!;
+    const firstPageView = readPendingFunnelEvents<TrackingEventPayload>(scope)
+      .find((item) => item.payload.event_name === 'page_view')!;
     await act(async () => {
       await Promise.all([
         result.current.getTrackingSnapshot(),
@@ -278,12 +261,12 @@ describe('useFunnelTracking reliability', () => {
       ]);
     });
 
-    const pendingPings = readPendingFunnelEvents<TrackingEventPayload>(scope)
-      .filter((item) => item.payload.event_name === 'session_ping');
-    expect(pendingPings).toHaveLength(1);
-    expect(pendingPings[0].payload.event_id).toBe(firstPing.payload.event_id);
-    expect(pendingPings[0].payload.session_id).toBe(firstPing.payload.session_id);
-    expect(invokedPayloads().filter((payload) => payload.event_name === 'session_ping'))
+    const pendingPageViews = readPendingFunnelEvents<TrackingEventPayload>(scope)
+      .filter((item) => item.payload.event_name === 'page_view');
+    expect(pendingPageViews).toHaveLength(1);
+    expect(pendingPageViews[0].payload.event_id).toBe(firstPageView.payload.event_id);
+    expect(pendingPageViews[0].payload.session_id).toBe(firstPageView.payload.session_id);
+    expect(invokedPayloads().filter((payload) => payload.event_name === 'page_view'))
       .toHaveLength(1);
   });
 
@@ -301,12 +284,12 @@ describe('useFunnelTracking reliability', () => {
     const pending = readPendingFunnelEvents<TrackingEventPayload>(
       getFunnelTrackingScope('company-a', 'company-a')!,
     );
-    expect(pending.map((item) => item.payload.event_name)).toEqual(['session_ping', 'page_view']);
-    expect(pending.find((item) => item.payload.event_name === 'session_ping')?.retryCount).toBe(1);
-    expect(invokedPayloads().some((payload) => payload.event_name === 'page_view')).toBe(false);
+    expect(pending.map((item) => item.payload.event_name)).toEqual(['page_view']);
+    expect(pending[0]?.retryCount).toBe(1);
+    expect(invokedPayloads().filter((payload) => payload.event_name === 'page_view')).toHaveLength(1);
   });
 
-  it('dead-letters session dependents after a permanent ping failure without a recovery loop', async () => {
+  it('dead-letters a permanent bootstrap failure without a recovery loop', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     mocks.invoke.mockResolvedValue({
@@ -322,7 +305,7 @@ describe('useFunnelTracking reliability', () => {
     const scope = getFunnelTrackingScope('company-a', 'company-a')!;
     expect(readPendingFunnelEvents(scope)).toHaveLength(0);
     expect(readFunnelDeadLetters(scope).map((item) => item.eventName).sort())
-      .toEqual(['page_view', 'session_ping']);
+      .toEqual(['page_view']);
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -692,8 +675,8 @@ describe('useFunnelTracking reliability', () => {
 
     const scope = getFunnelTrackingScope('company-a', 'company-a')!;
     const pending = readPendingFunnelEvents<TrackingEventPayload>(scope);
-    expect(pending.map((item) => item.payload.event_name)).toEqual(['session_ping', 'page_view']);
-    expect(pending.find((item) => item.payload.event_name === 'session_ping')?.retryCount).toBe(1);
+    expect(pending.map((item) => item.payload.event_name)).toEqual(['page_view']);
+    expect(pending[0]?.retryCount).toBe(1);
     expect(mocks.invoke.mock.calls[0]?.[1]?.signal.aborted).toBe(true);
   });
 
@@ -902,10 +885,9 @@ describe('useFunnelTracking reliability', () => {
     }
 
     const pending = readPendingFunnelEvents<TrackingEventPayload>(scope);
-    expect(pending).toHaveLength(2);
+    expect(pending).toHaveLength(1);
     expect(readFunnelDeadLetters(scope)).toHaveLength(0);
-    const sessionEventId = pending.find((item) => item.payload.event_name === 'session_ping')!
-      .payload.event_id;
+    const bootstrapEventId = pending[0].payload.event_id;
 
     mocks.invoke.mockImplementation((_: string, { body }: { body: TrackingEventPayload }) => (
       Promise.resolve(successfulResponse(body))
@@ -916,10 +898,9 @@ describe('useFunnelTracking reliability', () => {
     });
 
     expect(readPendingFunnelEvents(scope)).toHaveLength(0);
-    const sessionAttempts = invokedPayloads().filter((payload) => payload.event_name === 'session_ping');
-    expect(new Set(sessionAttempts.map((payload) => payload.event_id))).toEqual(new Set([sessionEventId]));
-    expect(invokedPayloads().find((payload) => payload.event_name === 'page_view')?.session_id)
-      .toBe('session-company-a');
+    const pageViewAttempts = invokedPayloads().filter((payload) => payload.event_name === 'page_view');
+    expect(new Set(pageViewAttempts.map((payload) => payload.event_id))).toEqual(new Set([bootstrapEventId]));
+    expect(readTrackingState(scope)?.session_id).toBe('session-company-a');
   });
 });
 

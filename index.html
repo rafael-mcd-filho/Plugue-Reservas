@@ -11,6 +11,13 @@
     <meta name="author" content="Plugue Reservas" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" sizes="any" />
+    <link rel="preconnect" href="https://hdpxqqiudiotanrybvcf.supabase.co" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;display=swap"
+    />
 
     <meta property="og:title" content="Plugue Reservas" />
     <meta
@@ -26,10 +33,48 @@
       name="twitter:description"
       content="Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp."
     />
+    <style>
+      .initial-page-loader {
+        align-items: center;
+        background: hsl(38 26% 92%);
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 24px;
+      }
+      .initial-page-loader__mark {
+        animation: initial-page-pulse 1.5s ease-in-out infinite;
+        background: hsl(35 14% 84%);
+        border-radius: 999px;
+        height: 96px;
+        width: 96px;
+      }
+      .initial-page-loader__label {
+        clip: rect(0, 0, 0, 0);
+        clip-path: inset(50%);
+        height: 1px;
+        overflow: hidden;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+      }
+      @keyframes initial-page-pulse {
+        50% { opacity: 0.45; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .initial-page-loader__mark { animation: none; }
+      }
+    </style>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="initial-page-loader" role="status">
+        <div class="initial-page-loader__mark" aria-hidden="true"></div>
+        <span class="initial-page-loader__label">Carregando página</span>
+      </div>
+    </div>
+    <script type="module" src="/src/publicCompanyBootstrap.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

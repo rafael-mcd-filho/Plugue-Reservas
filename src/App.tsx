@@ -10,6 +10,7 @@ import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
+import PublicPageSkeleton from "@/components/PublicPageSkeleton";
 import CompanyFeatureRouteGate from "@/components/company/CompanyFeatureRouteGate";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyPermissions } from "@/hooks/useCompanyPermissions";
@@ -107,40 +108,6 @@ function AuthPageSkeleton() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PublicPageSkeleton() {
-  return (
-    <div className="min-h-screen bg-secondary">
-      <div className="h-16 bg-[#130D06]" />
-      <div className="bg-[#130D06] px-4 pb-10 pt-8">
-        <div className="mx-auto grid max-w-5xl gap-8 md:grid-cols-[1fr_320px]">
-          <div className="space-y-4">
-            <Skeleton className="h-7 w-24 bg-white/10" />
-            <Skeleton className="h-12 w-3/4 bg-white/10" />
-            <Skeleton className="h-5 w-11/12 bg-white/10" />
-            <Skeleton className="h-5 w-2/3 bg-white/10" />
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Skeleton className="h-8 w-28 rounded-full bg-white/10" />
-              <Skeleton className="h-8 w-24 rounded-full bg-white/10" />
-              <Skeleton className="h-8 w-36 rounded-full bg-white/10" />
-            </div>
-          </div>
-          <div className="space-y-3">
-            <Skeleton className="h-14 w-full rounded-full bg-white/10" />
-            <Skeleton className="h-14 w-full rounded-full bg-white/10" />
-          </div>
-        </div>
-      </div>
-      <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-        <Skeleton className="h-36 w-full rounded-lg" />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-64 w-full rounded-lg" />
-          <Skeleton className="h-64 w-full rounded-lg" />
         </div>
       </div>
     </div>

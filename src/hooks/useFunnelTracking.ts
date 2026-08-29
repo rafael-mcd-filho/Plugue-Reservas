@@ -486,8 +486,13 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
     const nextJourneyId = canApplyJourney
       ? result.journey_id as string
       : previous.journey_id ?? null;
-    const isSessionPing = payload.event_name === 'session_ping';
-    const canApplySession = isSessionPing
+    const isSessionBootstrap = payload.event_name === 'session_ping'
+      || (
+        !previous.session_id
+        && previous.pending_session_event_id === payload.event_id
+        && previous.pending_session_id === payload.session_id
+      );
+    const canApplySession = isSessionBootstrap
       ? previous.pending_session_event_id === payload.event_id
         || (!previous.pending_session_event_id && !previous.session_id)
       : previous.session_id === payload.session_id;
@@ -498,10 +503,10 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
       session_id: canApplySession
         ? result.session_id ?? previous.session_id ?? payload.session_id ?? null
         : previous.session_id ?? null,
-      pending_session_id: isSessionPing && canApplySession
+      pending_session_id: isSessionBootstrap && canApplySession
         ? null
         : previous.pending_session_id ?? null,
-      pending_session_event_id: isSessionPing && canApplySession
+      pending_session_event_id: isSessionBootstrap && canApplySession
         ? null
         : previous.pending_session_event_id ?? null,
       // A delayed session/page response with journey_id=null cannot erase a newer journey.
@@ -510,7 +515,7 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
         ? true
         : previous.journey_confirmed,
     });
-    if (isSessionPing && canApplySession) {
+    if (isSessionBootstrap && canApplySession) {
       makeSessionDependentFunnelEventsDue(targetScope);
     }
     if (canApplyJourney) {
@@ -559,9 +564,16 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
             let outboundPayload = item.payload;
             if (item.payload.event_name !== 'session_ping') {
               const state = readTrackingState(targetScope);
-              if (!state?.session_id) {
+              const ownsPendingSession = !!state
+                && state.pending_session_event_id === item.payload.event_id
+                && state.pending_session_id === item.payload.session_id;
+              if (!state?.session_id && !ownsPendingSession) {
                 const pendingSession = readPendingFunnelEvents<TrackingEventPayload>(targetScope)
-                  .find((pendingItem) => pendingItem.payload.event_name === 'session_ping');
+                  .find((pendingItem) => (
+                    pendingItem.payload.event_id === state?.pending_session_event_id
+                  ))
+                  ?? readPendingFunnelEvents<TrackingEventPayload>(targetScope)
+                    .find((pendingItem) => pendingItem.payload.event_name === 'session_ping');
                 if (!pendingSession) {
                   const recoverySession = {
                     ...buildRecoverySessionPayload(item.payload),
@@ -585,6 +597,7 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
                 deferFunnelEvent(targetScope, item.payload.event_id, resumeAt);
                 continue;
               }
+              if (!state) continue;
 
               const payloadJourneyId = typeof item.payload.journey_id === 'string'
                 ? item.payload.journey_id
@@ -663,7 +676,10 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
                 retryCount: failure.retryCount,
                 errorMessage,
               });
-            } else if (item.payload.event_name === 'session_ping') {
+            } else if (
+              item.payload.event_name === 'session_ping'
+              || readTrackingState(targetScope)?.pending_session_event_id === item.payload.event_id
+            ) {
               const currentState = readTrackingState(targetScope);
               if (currentState?.pending_session_event_id === item.payload.event_id) {
                 mergeTrackingState(targetScope, {
@@ -850,11 +866,10 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
       let latestState = getOrCreateState(scope);
       if (latestState.session_id) return latestState;
 
-      const pendingSessions = readPendingFunnelEvents<TrackingEventPayload>(scope)
-        .filter((item) => item.payload.event_name === 'session_ping');
-      const pendingSession = pendingSessions.find((item) => (
+      const pendingEvents = readPendingFunnelEvents<TrackingEventPayload>(scope);
+      const pendingSession = pendingEvents.find((item) => (
         item.payload.event_id === latestState.pending_session_event_id
-      )) ?? pendingSessions[0];
+      )) ?? pendingEvents.find((item) => item.payload.event_name === 'session_ping');
       if (pendingSession && latestState.pending_session_event_id !== pendingSession.payload.event_id) {
         latestState = mergeTrackingState(scope, {
           ...latestState,
@@ -1072,10 +1087,34 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
     if (!scope || step === 'completed') return;
 
     if (step === 'page_view') {
-      // Queue both records before the first network continuation. This preserves
-      // the real occurred_at even when the initial session request fails.
+      let state = getOrCreateState(scope);
+      if (!state.session_id && !state.pending_session_event_id) {
+        // public-tracking can create the provisional session and persist the
+        // first page_view atomically. This removes a full serial Edge roundtrip
+        // from the cold-load path while keeping event_id retries idempotent.
+        const eventId = crypto.randomUUID();
+        const pendingSessionId = state.pending_session_id ?? crypto.randomUUID();
+        state = mergeTrackingState(scope, {
+          ...state,
+          pending_session_id: pendingSessionId,
+          pending_session_event_id: eventId,
+        });
+        const bootstrapPayload = buildPayload(state, companyId, companySlug, 'page_view', {
+          event_id: eventId,
+          session_id: pendingSessionId,
+          step,
+          journey_id: null,
+          metadata: {
+            tracking_source: 'public_web',
+          },
+        });
+
+        queueEvent(scope, bootstrapPayload);
+        await flushPendingEvents(scope);
+        return;
+      }
+
       const sessionPromise = ensureSession();
-      const state = getOrCreateState(scope);
       const payload = buildPayload(state, companyId, companySlug, 'page_view', {
         step,
         journey_id: null,

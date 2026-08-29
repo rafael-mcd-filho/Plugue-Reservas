@@ -1,5 +1,12 @@
-import { createRoot } from "react-dom/client";
-import App from "./App.tsx";
+import { isPublicApplicationPath } from "@/lib/publicRoutes";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+const usePublicApplication = isPublicApplicationPath(window.location.pathname);
+
+if (usePublicApplication) {
+  void import("./PublicAppEntry.tsx");
+}
+
+if (!usePublicApplication) {
+  void import("./AppEntry.tsx");
+}

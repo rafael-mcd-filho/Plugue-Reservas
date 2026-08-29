@@ -17,6 +17,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import PublicPageSkeleton from '@/components/PublicPageSkeleton';
 import instagramLogoUrl from '@/assets/brands/instagram-logo.svg';
 import whatsappGlyphUrl from '@/assets/brands/whatsapp-glyph.svg';
 import { Card, CardContent } from '@/components/ui/card';
@@ -39,6 +40,7 @@ import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 import { lazyWithReload, preloadLazyImport } from '@/lib/lazyReload';
 import { findOpeningHoursForDayIndex, getDayIndexFromName } from '@/lib/openingHours';
+import { getPrefetchedPublicCompany } from '@/publicCompanyBootstrap';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
 const preloadReservationModal = () => preloadLazyImport(loadReservationModal, 'reservation-modal');
@@ -46,10 +48,8 @@ const ReservationModal = lazyWithReload(loadReservationModal, 'reservation-modal
 const FunnelDebugPanel = lazyWithReload(() => import('@/components/FunnelDebugPanel'), 'funnel-debug-panel');
 const DEFAULT_SEO_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const PUBLIC_RESERVATION_JSON_LD_ID = 'public-reservation-json-ld';
-// Nota exibida na pagina publica. Nao ha avaliacao no cadastro: as 5 estrelas antigas
-// tambem eram fixas, entao este valor mantem a mesma natureza decorativa.
+// A avaliacao exibida no cabecalho moderno continua decorativa, como antes.
 const PUBLIC_RATING_LABEL = '5,0';
-
 const PUBLIC_WHATSAPP_MESSAGE = 'Ol\u00E1, vim pela p\u00E1gina de reservas e gostaria de ajuda.';
 
 interface OpeningHour {
@@ -85,25 +85,6 @@ function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
         d="M9.25 6.65c-.23 0-.45.11-.63.31-.31.33-.82.83-.82 1.94s.81 2.18.92 2.33c.11.14 1.58 2.52 3.83 3.44 1.87.75 2.25.6 2.66.56.41-.04 1.32-.54 1.51-1.06.19-.53.19-.97.13-1.06-.05-.09-.19-.15-.39-.25-.2-.1-1.16-.57-1.34-.64-.18-.06-.31-.09-.45.12-.13.2-.52.63-.63.77-.12.13-.24.15-.43.05-.2-.1-.84-.31-1.6-1-.59-.53-.99-1.19-1.12-1.39-.12-.2-.02-.3.09-.4.09-.09.2-.23.3-.34.1-.11.13-.2.2-.32.07-.13.03-.25-.01-.34-.05-.1-.44-1.12-.61-1.53-.16-.39-.33-.4-.45-.4h-.38Z"
       />
     </svg>
-  );
-}
-
-function RatingStarsLink({ href, className }: { href: string; className?: string }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="Avaliações no Google"
-      className={cn(
-        'inline-flex items-center rounded-md border border-amber-300/30 bg-black/25 px-3 py-1.5 shadow-[0_0_22px_rgba(251,191,36,0.24)] backdrop-blur-sm transition-[background-color,box-shadow,transform] duration-200 hover:bg-black/35 hover:shadow-[0_0_30px_rgba(251,191,36,0.36)]',
-        className,
-      )}
-    >
-      <span className="bg-gradient-to-r from-amber-200 via-yellow-300 to-amber-500 bg-clip-text text-lg font-black leading-none text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
-        ★★★★★
-      </span>
-    </a>
   );
 }
 
@@ -146,6 +127,47 @@ function RefinedRatingStarsLink({ href, className }: { href: string; className?:
         ))}
       </span>
     </a>
+  );
+}
+
+function HeroMedia({
+  url,
+  type,
+  className,
+}: {
+  url: string;
+  type: 'image' | 'video';
+  className: string;
+}) {
+  if (type === 'video') {
+    return (
+      <video
+        key={url}
+        src={url}
+        className={className}
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="metadata"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt=""
+      aria-hidden="true"
+      width={1600}
+      height={900}
+      loading="eager"
+      decoding="async"
+      fetchPriority="high"
+      className={className}
+    />
   );
 }
 
@@ -503,6 +525,15 @@ export default function CompanyPublicPage() {
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
     queryFn: async () => {
+      const prefetchedCompany = getPrefetchedPublicCompany(slug!);
+      if (prefetchedCompany) {
+        try {
+          return await prefetchedCompany as Company | null;
+        } catch {
+          // A falha do atalho nao deve impedir o fallback oficial do cliente.
+        }
+      }
+
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
 
       if (!rpcResult.error) {
@@ -547,7 +578,22 @@ export default function CompanyPublicPage() {
 
   useEffect(() => {
     if (!company?.id) return;
-    void preloadReservationModal();
+
+    let timer: number | undefined;
+    const schedulePreload = () => {
+      timer = window.setTimeout(() => void preloadReservationModal(), 600);
+    };
+
+    if (document.readyState === 'complete') {
+      schedulePreload();
+    } else {
+      window.addEventListener('load', schedulePreload, { once: true });
+    }
+
+    return () => {
+      window.removeEventListener('load', schedulePreload);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [company?.id]);
 
   const { data: blockedDates = [] } = useQuery({
@@ -608,7 +654,7 @@ export default function CompanyPublicPage() {
   );
   const paymentMethods = (company?.payment_methods as Record<string, boolean>) || {};
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
-  const customPublicPageEnabled = (company as any)?.custom_public_page_enabled ?? true;
+  const customPublicPageEnabled = company?.custom_public_page_enabled ?? true;
   const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
   const publicStickyReserveButtonEnabled = (company as any)?.show_public_sticky_reserve_button ?? true;
   const publicReservationExitPromptEnabled = (company as any)?.show_public_reservation_exit_prompt ?? false;
@@ -618,12 +664,12 @@ export default function CompanyPublicPage() {
   const publicReservationExitPromptSecondaryTextSize = (company as any)?.public_reservation_exit_prompt_secondary_text_size ?? null;
   const showCustomLogo = customPublicPageEnabled && !!company?.logo_url;
   const showDescription = customPublicPageEnabled && richTextHasContent(company?.description);
-  const showHeroMedia = customPublicPageEnabled && !!(company as any)?.hero_media_url;
-  const heroMediaType = (company as any)?.hero_media_type === 'video' ? 'video' : 'image';
+  const showHeroMedia = customPublicPageEnabled && !!company?.hero_media_url;
+  const heroMediaType = company?.hero_media_type === 'video' ? 'video' : 'image';
   const showWhatsappButton = customPublicPageEnabled && publicWhatsappButtonEnabled && !!whatsappUrl;
-  // Estilo do cabecalho escolhido pela empresa. Vale apenas no mobile:
-  // no desktop os dois estilos usam o mesmo banner.
-  const useModernHeader = (company as any)?.public_header_style === 'modern';
+  // O estilo escolhido vale para todos os tamanhos de tela. Manter os ramos
+  // mutuamente exclusivos evita montar (e baixar) duas copias da mesma midia.
+  const useModernHeader = customPublicPageEnabled && company?.public_header_style === 'modern';
   // A barra fixa de reserva mede pt-3 (0.75rem) + botao lg (2.5rem) + padding inferior seguro.
   // O botao flutuante fica 1.25rem acima dela para nao encostar no CTA.
   const whatsappFabStyle = {
@@ -763,29 +809,7 @@ export default function CompanyPublicPage() {
   }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-secondary">
-        {/* Header skeleton */}
-        <div className="h-16 bg-[#130D06]" />
-        {/* Hero skeleton */}
-        <div className="bg-[#1C1108] px-4 pb-8 pt-5">
-          <div className="mx-auto max-w-lg space-y-4">
-            <div className="h-6 w-40 animate-pulse rounded-full bg-white/10" />
-            <div className="space-y-2">
-              <div className="h-10 w-3/4 animate-pulse rounded-lg bg-white/10" />
-              <div className="h-4 w-full animate-pulse rounded bg-white/10" />
-              <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
-            </div>
-            <div className="h-12 w-full animate-pulse rounded-lg bg-primary/30" />
-          </div>
-        </div>
-        {/* Cards skeleton */}
-        <div className="mx-auto max-w-lg space-y-4 px-4 py-5">
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        </div>
-      </div>
-    );
+    return <PublicPageSkeleton />;
   }
 
   if (!slugIsValid || error || !company) {
@@ -851,40 +875,27 @@ export default function CompanyPublicPage() {
   }
 
   return (
-    <div className="min-h-screen bg-secondary pb-24 md:pb-0">
+    <main className="min-h-screen bg-secondary pb-24 md:pb-0">
       <div
         className={cn(
           'relative overflow-hidden px-4 pb-8 md:pb-14 md:pt-6 md:text-primary-foreground',
           useModernHeader ? 'pt-2 text-foreground' : 'pt-5 text-primary-foreground',
         )}
       >
-        {/* Fundo escuro do banner. No estilo moderno o mobile acompanha o fundo claro da pagina. */}
+        {/* O fundo escuro pertence apenas ao estilo classico. */}
         <div
-          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden md:block')}
+          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden')}
           style={{ background: 'linear-gradient(170deg, #130D06 0%, #1C1108 50%, #2E1800 100%)' }}
         />
-        {showHeroMedia && (
+        {!useModernHeader && showHeroMedia && company.hero_media_url && (
           <>
-            {heroMediaType === 'video' ? (
-              <video
-                key={(company as any)?.hero_media_url}
-                src={(company as any)?.hero_media_url}
-                className={cn('pointer-events-none absolute inset-0 z-0 h-full w-full object-cover', useModernHeader && 'hidden md:block')}
-                autoPlay
-                loop
-                muted
-                playsInline
-              />
-            ) : (
-              <img
-                src={(company as any)?.hero_media_url}
-                alt=""
-                aria-hidden="true"
-                className={cn('pointer-events-none absolute inset-0 z-0 h-full w-full object-cover', useModernHeader && 'hidden md:block')}
-              />
-            )}
+            <HeroMedia
+              url={company.hero_media_url}
+              type={heroMediaType}
+              className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+            />
             <div
-              className={cn('pointer-events-none absolute inset-0 z-[1]', useModernHeader && 'hidden md:block')}
+              className="pointer-events-none absolute inset-0 z-[1]"
               style={{
                 background:
                   'linear-gradient(180deg, rgba(10,7,3,0.78) 0%, rgba(10,7,3,0.5) 35%, rgba(10,7,3,0.58) 70%, rgba(10,7,3,0.88) 100%)',
@@ -893,38 +904,25 @@ export default function CompanyPublicPage() {
           </>
         )}
         <div
-          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden md:block')}
+          className={cn('pointer-events-none absolute inset-0', useModernHeader && 'hidden')}
           style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 60%, rgba(232,105,10,0.16) 0%, transparent 70%)' }}
         />
         <div
-          className={cn('pointer-events-none absolute bottom-0 left-0 right-0 h-24', useModernHeader && 'hidden md:block')}
+          className={cn('pointer-events-none absolute bottom-0 left-0 right-0 h-24', useModernHeader && 'hidden')}
           style={{ background: 'linear-gradient(to top, rgba(46,24,0,0.58) 0%, transparent 100%)' }}
         />
 
-        {/* Estilo moderno (so mobile): cartao claro com a midia no topo e a logo sobreposta. */}
+        {/* Estilo moderno: cartao claro com a midia no topo e a logo sobreposta. */}
         {useModernHeader && (
-        <div className="relative z-10 mx-auto max-w-lg md:hidden">
-          <div className="animate-slide-up text-foreground">
-            <div className="relative -mx-2 h-[400px] overflow-hidden rounded-[1.35rem]">
-              {showHeroMedia ? (
-                heroMediaType === 'video' ? (
-                  <video
-                    key={(company as any)?.hero_media_url}
-                    src={(company as any)?.hero_media_url}
-                    className="h-full w-full object-cover"
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                  />
-                ) : (
-                  <img
-                    src={(company as any)?.hero_media_url}
-                    alt=""
-                    aria-hidden="true"
-                    className="h-full w-full object-cover"
-                  />
-                )
+        <div className="relative z-10 mx-auto max-w-lg md:max-w-5xl">
+          <div className="animate-slide-up text-foreground motion-reduce:animate-none">
+            <div className="relative -mx-2 h-[400px] overflow-hidden rounded-[1.35rem] md:mx-0 md:h-auto md:aspect-[16/7] md:rounded-[1.75rem]">
+              {showHeroMedia && company.hero_media_url ? (
+                <HeroMedia
+                  url={company.hero_media_url}
+                  type={heroMediaType}
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <div
                   aria-hidden="true"
@@ -952,24 +950,30 @@ export default function CompanyPublicPage() {
 
             {/* A midia e position:relative, entao a logo precisa de z-index proprio
                 para cruzar a borda por cima em vez de ficar atras dela. */}
-            <div className="relative z-10 -mt-11 flex justify-center">
+            <div className="relative z-10 -mt-11 flex justify-center md:-mt-14">
               {showCustomLogo ? (
                 <img
                   src={company.logo_url}
                   alt={company.name}
-                  className="h-[5.5rem] w-[5.5rem] shrink-0 rounded-full object-cover shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary"
+                  width={112}
+                  height={112}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority={showHeroMedia ? 'auto' : 'high'}
+                  className="h-[5.5rem] w-[5.5rem] shrink-0 rounded-full object-cover shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary md:h-28 md:w-28"
                 />
               ) : (
-                <div className="flex h-[5.5rem] w-[5.5rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary">
+                <div className="flex h-[5.5rem] w-[5.5rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-[0_6px_18px_rgba(0,0,0,0.28)] ring-4 ring-secondary md:h-28 md:w-28 md:text-[2.5rem]">
                   {company.name.charAt(0)}
                 </div>
               )}
             </div>
 
-            <div className="mt-3 space-y-3 px-1 pb-1 text-center">
-              <h2 className="text-balance text-[clamp(1.35rem,5.4vw,1.75rem)] font-bold leading-tight tracking-tight text-foreground">
+            {/* Mobile permanece visualmente identico ao layout moderno anterior. */}
+            <div className="mt-3 space-y-3 px-1 pb-1 text-center md:hidden">
+              <h1 className="text-balance text-[clamp(1.35rem,5.4vw,1.75rem)] font-bold leading-tight tracking-tight text-foreground">
                 {company.name}
-              </h2>
+              </h1>
 
               {(googleMapsSearchUrl || (instagramUrl && instagramLabel)) && (
                 <div className="flex items-center justify-center gap-3">
@@ -1004,6 +1008,7 @@ export default function CompanyPublicPage() {
                   )}
                 </div>
               )}
+
               {showDescription && (
                 <div className="rounded-lg bg-card p-4 shadow-sm">
                   <RichTextContent
@@ -1014,7 +1019,49 @@ export default function CompanyPublicPage() {
               )}
 
               <Button
-                className="group animate-attention-pulse-glow w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90"
+                className="group w-full animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90"
+                size="lg"
+                onMouseEnter={() => void preloadReservationModal()}
+                onFocus={() => void preloadReservationModal()}
+                onClick={handleOpenReservation}
+              >
+                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                Reservar agora
+              </Button>
+            </div>
+
+            {/* A nova hierarquia centralizada entra apenas no desktop. */}
+            <div className="mx-auto mt-5 hidden max-w-2xl space-y-4 px-1 pb-1 text-center md:block">
+              {googleMapsSearchUrl && <RefinedRatingStarsLink href={googleMapsSearchUrl} />}
+              <HeroOrnamentDivider className="mt-4" />
+              <h1 className="mt-4 text-balance text-[clamp(2rem,3vw,2.75rem)] font-bold leading-tight tracking-tight text-foreground">
+                {company.name}
+              </h1>
+
+              {instagramUrl && instagramLabel && (
+                <a
+                  href={instagramUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Instagram"
+                  className="mt-3 inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
+                >
+                  <InstagramLogo className="h-[1.15rem] w-[1.15rem] shrink-0" />
+                  <span className="truncate tracking-[0.01em]">{instagramLabel}</span>
+                </a>
+              )}
+
+              {showDescription && (
+                <div className="mt-4 rounded-lg bg-card p-5 text-left shadow-sm">
+                  <RichTextContent
+                    value={company.description}
+                    className="text-base leading-relaxed text-muted-foreground [&_h1]:text-xl [&_h1]:text-foreground [&_h2]:text-lg [&_h2]:text-foreground [&_p]:text-base"
+                  />
+                </div>
+              )}
+
+              <Button
+                className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
                 size="lg"
                 onMouseEnter={() => void preloadReservationModal()}
                 onFocus={() => void preloadReservationModal()}
@@ -1028,65 +1075,109 @@ export default function CompanyPublicPage() {
         </div>
         )}
 
-        {/* Estilo classico: banner escuro. Serve os dois estilos no desktop e,
-            no mobile, apenas quem nao escolheu o moderno. */}
-        <div className={cn('relative z-10 mx-auto max-w-lg md:max-w-5xl', useModernHeader && 'hidden md:block')}>
-          <div className="flex flex-col items-center md:items-start">
+        {/* Estilo classico: mobile preservado; nova composicao somente no desktop. */}
+        {!useModernHeader && (
+          <div className="relative z-10 mx-auto flex max-w-lg flex-col items-center text-center md:max-w-2xl">
             {showCustomLogo ? (
               <img
                 src={company.logo_url}
                 alt={company.name}
-                className="h-[6.2rem] w-[6.2rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-[5.5rem] md:w-[5.5rem]"
+                width={112}
+                height={112}
+                loading="eager"
+                decoding="async"
+                fetchPriority={showHeroMedia ? 'auto' : 'high'}
+                className="h-[6.2rem] w-[6.2rem] shrink-0 rounded-full border border-white/20 object-cover shadow-lg md:h-28 md:w-28"
               />
             ) : (
-              <div className="flex h-[6.2rem] w-[6.2rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-lg md:h-[5.5rem] md:w-[5.5rem] md:text-[2.2rem]">
+              <div className="flex h-[6.2rem] w-[6.2rem] shrink-0 items-center justify-center rounded-full bg-primary text-[2rem] font-bold text-primary-foreground shadow-lg md:h-28 md:w-28 md:text-[2.5rem]">
                 {company.name.charAt(0)}
               </div>
             )}
+
             {googleMapsSearchUrl && (
               <RefinedRatingStarsLink href={googleMapsSearchUrl} className="mt-4 md:hidden" />
             )}
             {googleMapsSearchUrl && <HeroOrnamentDivider className="mt-4 md:hidden" />}
-          </div>
 
-          <div className="mt-5 md:grid md:grid-cols-[minmax(0,1fr)_22rem] md:gap-10">
-            <div className="space-y-5 animate-slide-up">
-              {googleMapsSearchUrl && (
-                <RefinedRatingStarsLink href={googleMapsSearchUrl} className="hidden md:inline-flex" />
-              )}
+            <div className="mt-5 w-full md:hidden">
+              <div className="animate-slide-up space-y-5">
+                <div className="space-y-3 text-center">
+                  <h1 className="mx-auto w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(1.7rem,6.2vw,2.15rem)] font-bold leading-tight tracking-tight">
+                    {company.name}
+                  </h1>
+                  {instagramUrl && instagramLabel && (
+                    <a
+                      href={instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Instagram"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[0.72rem] font-medium text-[#F1D6DE] transition-[background-color,border-color,color] hover:border-white/20 hover:bg-white/10 hover:text-white"
+                    >
+                      <span className="inline-flex h-5.5 w-5.5 items-center justify-center rounded-full bg-white/10 text-pink-200">
+                        <InstagramLogo className="h-[0.7rem] w-[0.7rem]" />
+                      </span>
+                      <span className="text-[0.72rem] tracking-[0.01em]">{instagramLabel}</span>
+                    </a>
+                  )}
+                  {showDescription && (
+                    <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
+                      <RichTextContent
+                        value={company.description}
+                        className="text-sm leading-relaxed text-muted-foreground [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
 
-              <div className="space-y-3 text-center md:text-left">
-                <h2 className="mx-auto w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(1.7rem,6.2vw,2.15rem)] font-bold leading-tight tracking-tight md:mx-0 md:text-[clamp(2rem,3vw,2.7rem)]">
-                  {company.name}
-                </h2>
-                {instagramUrl && instagramLabel && (
-                  <a
-                    href={instagramUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Instagram"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[0.72rem] font-medium text-[#F1D6DE] transition-[background-color,border-color,color] hover:border-white/20 hover:bg-white/10 hover:text-white"
-                  >
-                    <span className="inline-flex h-5.5 w-5.5 items-center justify-center rounded-full bg-white/10 text-pink-200">
-                      <InstagramLogo className="h-[0.7rem] w-[0.7rem]" />
-                    </span>
-                    <span className="text-[0.72rem] tracking-[0.01em]">{instagramLabel}</span>
-                  </a>
-                )}
-                {showDescription && (
-                  <div className="mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-4 text-foreground shadow-lg">
-                    <RichTextContent
-                      value={company.description}
-                      className="text-sm leading-relaxed text-muted-foreground md:text-base [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-sm md:[&_p]:text-base"
-                    />
-                  </div>
-                )}
+              <div className="mt-5 animate-slide-up [animation-delay:80ms]">
+                <Button
+                  className="group w-full animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
+                  size="lg"
+                  onMouseEnter={() => void preloadReservationModal()}
+                  onFocus={() => void preloadReservationModal()}
+                  onClick={handleOpenReservation}
+                >
+                  <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                  Reservar agora
+                </Button>
               </div>
             </div>
 
-            <div className="mt-5 animate-slide-up [animation-delay:80ms] md:mt-0 md:self-end">
+            <div className="mt-4 hidden w-full animate-slide-up space-y-4 motion-reduce:animate-none md:block">
+              {googleMapsSearchUrl && <RefinedRatingStarsLink href={googleMapsSearchUrl} />}
+              <HeroOrnamentDivider className="mt-4" />
+              <h1 className="mt-4 text-balance text-[clamp(2rem,3vw,2.75rem)] font-bold leading-tight tracking-tight">
+                {company.name}
+              </h1>
+
+              {instagramUrl && instagramLabel && (
+                <a
+                  href={instagramUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Instagram"
+                  className="mt-3 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[0.78rem] font-medium text-[#F1D6DE] transition-[background-color,border-color,color] hover:border-white/20 hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-pink-200">
+                    <InstagramLogo className="h-3 w-3" />
+                  </span>
+                  <span className="tracking-[0.01em]">{instagramLabel}</span>
+                </a>
+              )}
+
+              {showDescription && (
+                <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-white/15 bg-background p-5 text-left text-foreground shadow-lg">
+                  <RichTextContent
+                    value={company.description}
+                    className="text-base leading-relaxed text-muted-foreground [&_h1]:text-2xl [&_h1]:text-foreground [&_h2]:text-xl [&_h2]:text-foreground [&_p]:text-base"
+                  />
+                </div>
+              )}
+
               <Button
-                className="group animate-attention-pulse-fast w-full gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
+                className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
                 size="lg"
                 onMouseEnter={() => void preloadReservationModal()}
                 onFocus={() => void preloadReservationModal()}
@@ -1097,7 +1188,7 @@ export default function CompanyPublicPage() {
               </Button>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="mx-auto max-w-lg space-y-4 px-4 py-5 md:max-w-5xl md:space-y-6 md:py-6">
@@ -1403,6 +1494,6 @@ export default function CompanyPublicPage() {
           exitRecoverySecondaryTextSize={publicReservationExitPromptSecondaryTextSize}
         />
       </Suspense>
-    </div>
+    </main>
   );
 }

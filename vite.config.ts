@@ -22,6 +22,30 @@ const buildInfo = {
   builtAt: new Date().toISOString(),
 };
 
+const publicPageIconModules = new Set([
+  "banknote",
+  "calendar-check",
+  "clock",
+  "credit-card",
+  "external-link",
+  "loader-circle",
+  "map-pin",
+  "phone",
+  "qr-code",
+  "star",
+  "wallet",
+]);
+
+function getManualChunk(id: string) {
+  const normalizedId = id.replace(/\\/g, "/");
+  const iconMatch = normalizedId.match(/\/lucide-react\/dist\/esm\/icons\/([^/]+)\.js$/);
+  if (iconMatch && publicPageIconModules.has(iconMatch[1])) {
+    return "public-icons";
+  }
+
+  return undefined;
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
@@ -42,5 +66,14 @@ export default defineConfig(({ mode }) => ({
     __APP_VERSION__: JSON.stringify(buildInfo.version),
     __APP_COMMIT__: JSON.stringify(buildInfo.commit),
     __APP_BUILT_AT__: JSON.stringify(buildInfo.builtAt),
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // The restaurant page uses this small, stable icon set above the fold.
+        // Keeping it together avoids a separate HTTP request per icon on 4G.
+        manualChunks: getManualChunk,
+      },
+    },
   },
 }));
