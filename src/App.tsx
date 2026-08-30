@@ -58,6 +58,8 @@ const AccessDenied = lazyWithReload(() => import("@/pages/AccessDenied"));
 const CompanyPublicPage = lazyWithReload(() => import("@/pages/CompanyPublicPage"));
 const SystemHealth = lazyWithReload(() => import("@/pages/SystemHealth"));
 const NotFound = lazyWithReload(() => import("@/pages/NotFound"));
+// Landing page pública servida em "/" para quem ainda não está autenticado.
+const Home = lazyWithReload(() => import("@/pages/Home"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,6 +111,19 @@ function AuthPageSkeleton() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LandingPageSkeleton() {
+  return (
+    <div className="min-h-screen bg-[#f8f4ec] px-5 pt-24 sm:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <Skeleton className="h-8 w-64 rounded-full bg-[#e9e0d2]" />
+        <Skeleton className="h-14 w-full max-w-2xl bg-[#e9e0d2]" />
+        <Skeleton className="h-14 w-4/5 max-w-xl bg-[#e9e0d2]" />
+        <Skeleton className="h-12 w-56 rounded-full bg-[#e9e0d2]" />
       </div>
     </div>
   );
@@ -196,6 +211,20 @@ function HomeRedirect() {
     return <CompanySlugRedirect companyId={profile.company_id} />;
   }
   return <Navigate to="/acesso-negado" replace />;
+}
+
+function RootRoute() {
+  const { user, loading } = useAuth();
+
+  // Visitante anônimo vê a landing page. Quem já está autenticado segue direto para o painel.
+  if (loading) return <LandingPageSkeleton />;
+  if (user) return <HomeRedirect />;
+
+  return (
+    <SuspenseRoute fallback={<LandingPageSkeleton />}>
+      <Home />
+    </SuspenseRoute>
+  );
 }
 
 function CompanySlugRedirect({ companyId }: { companyId: string }) {
@@ -293,14 +322,7 @@ const App = () => (
                 }
               />
 
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <HomeRedirect />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/" element={<RootRoute />} />
 
               <Route
                 path="/dashboard"

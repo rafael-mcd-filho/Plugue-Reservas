@@ -135,6 +135,13 @@
     line-height: 1.5;
   }
 
+  a,
+  button,
+  summary {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(202, 108, 53, 0.14);
+  }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Poppins', sans-serif;
     line-height: 1.25;
@@ -152,6 +159,10 @@
 
   /* Respeita prefers-reduced-motion */
   @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
