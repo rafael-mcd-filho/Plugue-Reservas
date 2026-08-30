@@ -1,9 +1,10 @@
-export const DEFAULT_SYSTEM_NAME = 'Plugue Reservas';
+export const DEFAULT_SYSTEM_NAME = 'Plug Guest';
 
 const LEGACY_SYSTEM_NAMES = new Set([
   'ReservaFacil',
   'ReservaFácil',
   'PlugGuest',
+  'Plugue Reservas',
 ]);
 
 export function normalizeSystemName(value: string | null | undefined) {

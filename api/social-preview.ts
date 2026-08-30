@@ -18,7 +18,7 @@ interface PublicCompanyPreview {
   address: string | null;
 }
 
-const DEFAULT_SYSTEM_NAME = 'Plugue Reservas';
+const DEFAULT_SYSTEM_NAME = 'Plug Guest';
 const DEFAULT_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_SUPABASE_URL = 'https://hdpxqqiudiotanrybvcf.supabase.co';
