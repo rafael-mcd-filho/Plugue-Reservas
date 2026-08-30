@@ -901,11 +901,26 @@ function PageShell({ children }: { children: ReactNode }) {
   );
 }
 
-function useLandingMetadata(systemName: string) {
+function upsertLandingMeta(attribute: 'name' | 'property', key: string, content: string) {
+  let element = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"]`);
+  if (!element) {
+    element = document.createElement('meta');
+    element.setAttribute(attribute, key);
+    document.head.appendChild(element);
+  }
+
+  element.content = content;
+}
+
+function useLandingMetadata(systemName: string, systemLogoUrl: string) {
   useEffect(() => {
-    const title = systemName + ' | Reservas sob controle para restaurantes';
+    const title = systemName + ' | Sistema de Reservas';
     const description =
       'Reserva descomplicada, controle das perdas e relatórios com a ocupação real da casa. Abra cada noite sabendo o que esperar do salão.';
+    const canonicalUrl = `${window.location.origin}/`;
+    const shareImage = systemLogoUrl
+      ? new URL(systemLogoUrl, window.location.origin).toString()
+      : null;
     const updates = [
       ['meta[name="description"]', description],
       ['meta[property="og:title"]', title],
@@ -920,6 +935,28 @@ function useLandingMetadata(systemName: string) {
     document.title = title;
     updates.forEach(([selector, content]) => document.querySelector(selector)?.setAttribute('content', content));
 
+    // A LP não declarava endereço próprio: sem isso o Google trata cada variação de URL
+    // (com utm, com barra final) como página distinta.
+    upsertLandingMeta('property', 'og:url', canonicalUrl);
+    upsertLandingMeta('property', 'og:locale', 'pt_BR');
+    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    const createdCanonical = !canonical;
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.appendChild(canonical);
+    }
+    const previousCanonical = canonical.href;
+    canonical.href = canonicalUrl;
+
+    if (shareImage) {
+      upsertLandingMeta('property', 'og:image', shareImage);
+      upsertLandingMeta('property', 'og:image:secure_url', shareImage);
+      upsertLandingMeta('property', 'og:image:alt', systemName);
+      upsertLandingMeta('name', 'twitter:image', shareImage);
+      upsertLandingMeta('name', 'twitter:card', 'summary_large_image');
+    }
+
     return () => {
       document.title = previousTitle;
       updates.forEach(([selector], index) => {
@@ -927,8 +964,14 @@ function useLandingMetadata(systemName: string) {
         const previousValue = previousValues[index];
         if (element && previousValue !== null) element.setAttribute('content', previousValue);
       });
+
+      if (createdCanonical) {
+        canonical?.remove();
+      } else if (canonical) {
+        canonical.href = previousCanonical;
+      }
     };
-  }, [systemName]);
+  }, [systemLogoUrl, systemName]);
 }
 
 export default function Home() {
@@ -936,7 +979,7 @@ export default function Home() {
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
   const systemLogo = systemBranding?.system_logo_url || '';
   useFaviconOverride(systemLogo);
-  useLandingMetadata(systemName);
+  useLandingMetadata(systemName, systemLogo);
 
   return (
     <PageShell>

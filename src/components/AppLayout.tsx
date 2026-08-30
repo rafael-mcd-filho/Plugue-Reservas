@@ -7,16 +7,20 @@ import {
   Bot,
   Building2,
   CalendarCheck,
+  CalendarClock,
   CalendarDays,
   ChevronDown,
   ClipboardList,
+  Clock,
   Contact,
   CreditCard,
   ExternalLink,
   Grid3X3,
+  Info,
   LayoutDashboard,
   Link2,
   LogOut,
+  Megaphone,
   Menu,
   MessageSquareQuote,
   Pin,
@@ -59,6 +63,13 @@ import {
 import OverdueBillingBanner from '@/components/billing/OverdueBillingBanner';
 import OverdueBillingDialog from '@/components/billing/OverdueBillingDialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  COMPANY_SETTINGS_SECTIONS,
+  COMPANY_SETTINGS_SECTION_DESCRIPTIONS,
+  COMPANY_SETTINGS_SECTION_LABELS,
+  getCompanySettingsSectionPath,
+  type CompanySettingsSection,
+} from '@/lib/company-settings-sections';
 
 interface NavItem {
   label: string;
@@ -80,6 +91,14 @@ const ROLE_LABELS: Record<AppRole, string> = {
 };
 
 const DESKTOP_SIDEBAR_PINNED_STORAGE_KEY = 'app-layout:desktop-sidebar-pinned';
+
+const COMPANY_SETTINGS_SECTION_ICONS: Record<CompanySettingsSection, LucideIcon> = {
+  empresa: Info,
+  agenda: Clock,
+  reservas: CalendarCheck,
+  disponibilidade: CalendarClock,
+  'pagina-publica': Megaphone,
+};
 
 function getFortalezaDateKey() {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -104,6 +123,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [reportsNavOpen, setReportsNavOpen] = useState(() => (
     location.pathname.includes('/admin/relatorios/')
+  ));
+  const [settingsNavOpen, setSettingsNavOpen] = useState(() => (
+    location.pathname.includes('/admin/configuracoes')
   ));
   const [overdueBillingDialogOpen, setOverdueBillingDialogOpen] = useState(false);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(() => {
@@ -311,15 +333,18 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'events_view',
         },
-        {
-          label: 'Configura\u00E7\u00F5es',
-          description: 'Hor\u00E1rios e p\u00E1gina',
-          icon: Settings,
-          path: `/${slug}/admin/configuracoes`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'settings_view',
-        },
       ]
+    : [];
+
+  const companySettingsNavItems: NavItem[] = slug
+    ? COMPANY_SETTINGS_SECTIONS.map((section) => ({
+        label: COMPANY_SETTINGS_SECTION_LABELS[section],
+        description: COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section],
+        icon: COMPANY_SETTINGS_SECTION_ICONS[section],
+        path: getCompanySettingsSectionPath(slug, section),
+        showFor: ['admin', 'operator', 'superadmin'],
+        requiredPermission: 'settings_view',
+      }))
     : [];
 
   const superadminNavItems: NavItem[] = !slug
@@ -440,10 +465,19 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
+  const visibleSettingsNavItems = companySettingsNavItems.filter((item) => {
+    if (!rolesLoaded) return false;
+    if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
+    if (permissionsLoading && item.requiredPermission) return false;
+    if (!hasCompanyPermission(item.requiredPermission)) return false;
+    return true;
+  });
+
   const visibleNavItems = [
     ...visiblePrimaryNavItems,
     ...visibleReportsNavItems,
     ...visibleManagementNavItems,
+    ...visibleSettingsNavItems,
   ];
   const companyDashboardPath = slug ? `/${slug}/admin` : null;
   const visibleCompanyDashboardItem = companyDashboardPath
@@ -463,6 +497,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const activeNavItem = visibleNavItems.find((item) => isNavItemActive(item)) ?? null;
   const isReportsNavActive = visibleReportsNavItems.some((item) => isNavItemActive(item));
+  const isSettingsNavActive = visibleSettingsNavItems.some((item) => isNavItemActive(item));
   const isProfileRoute = location.pathname === profilePath;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
   const showHeaderContextBadges = !isOperatorPanel;
@@ -487,11 +522,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // No painel o título é só a marca; a chamada de marketing do index.html vale para o site.
+  useEffect(() => {
+    document.title = systemName;
+  }, [systemName]);
+
   useEffect(() => {
     if (!slug) return;
     const reportsPath = `/${slug}/admin/relatorios`;
     if (location.pathname === reportsPath || location.pathname.startsWith(`${reportsPath}/`)) {
       setReportsNavOpen(true);
+    }
+
+    const settingsPath = `/${slug}/admin/configuracoes`;
+    if (location.pathname === settingsPath || location.pathname.startsWith(`${settingsPath}/`)) {
+      setSettingsNavOpen(true);
     }
   }, [location.pathname, slug]);
 
@@ -631,49 +676,74 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     );
   };
 
-  const renderReportsNavGroup = () => {
-    if (visibleReportsNavItems.length === 0) return null;
+  const renderNavGroup = ({ label, icon: GroupIcon, items, open, onOpenChange, isActive }: {
+    label: string;
+    icon: LucideIcon;
+    items: NavItem[];
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    isActive: boolean;
+  }) => {
+    if (items.length === 0) return null;
 
     return (
-      <Collapsible open={reportsNavOpen} onOpenChange={setReportsNavOpen}>
+      <Collapsible open={open} onOpenChange={onOpenChange}>
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            aria-label={`${reportsNavOpen ? 'Recolher' : 'Expandir'} relat\u00F3rios`}
+            aria-label={`${open ? 'Recolher' : 'Expandir'} ${label.toLowerCase()}`}
             className={cn(
               'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-[color,background-color,border-color]',
-              isReportsNavActive
+              isActive
                 ? 'bg-sidebar-accent/70 text-sidebar-foreground'
                 : 'text-sidebar-foreground/72 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground',
             )}
           >
-            <BarChart3
+            <GroupIcon
               aria-hidden="true"
               className={cn(
                 'h-4 w-4 shrink-0 transition-colors',
-                isReportsNavActive
+                isActive
                   ? 'text-sidebar-foreground/80'
                   : 'text-sidebar-foreground/45 group-hover:text-sidebar-foreground/80',
               )}
             />
-            <span className="min-w-0 flex-1 truncate">{'Relat\u00F3rios'}</span>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
             <ChevronDown
               aria-hidden="true"
               className={cn(
                 'h-3.5 w-3.5 shrink-0 text-sidebar-foreground/45 transition-transform duration-200',
-                reportsNavOpen && 'rotate-180',
+                open && 'rotate-180',
               )}
             />
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="ml-5 mt-1 space-y-1 border-l border-sidebar-border/80 pl-2">
-            {visibleReportsNavItems.map(renderNavLink)}
+            {items.map(renderNavLink)}
           </div>
         </CollapsibleContent>
       </Collapsible>
     );
   };
+
+  const renderReportsNavGroup = () => renderNavGroup({
+    label: 'Relat\u00F3rios',
+    icon: BarChart3,
+    items: visibleReportsNavItems,
+    open: reportsNavOpen,
+    onOpenChange: setReportsNavOpen,
+    isActive: isReportsNavActive,
+  });
+
+  const renderSettingsNavGroup = () => renderNavGroup({
+    label: 'Configura\u00E7\u00F5es',
+    icon: Settings,
+    items: visibleSettingsNavItems,
+    open: settingsNavOpen,
+    onOpenChange: setSettingsNavOpen,
+    isActive: isSettingsNavActive,
+  });
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -757,13 +827,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              {visibleManagementNavItems.length > 0 && (
+              {(visibleManagementNavItems.length > 0 || visibleSettingsNavItems.length > 0) && (
                 <div className="space-y-2">
                   <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-sidebar-foreground/32">
                     Gestão
                   </p>
                   <div className="space-y-1">
                     {visibleManagementNavItems.map(renderNavLink)}
+                    {renderSettingsNavGroup()}
                   </div>
                 </div>
               )}

@@ -1019,7 +1019,7 @@ export default function CompanyDialog({
                       <div>
                         <CardTitle className="flex items-center gap-2 text-base">
                           <CircleDollarSign className="h-4 w-4 text-primary" />
-                          Mensalidades da Plug Guest
+                          Mensalidades da Plugue Guest
                         </CardTitle>
                         <CardDescription className="mt-1 max-w-2xl">
                           Vincule o Customer ID da conta global do Asaas. O sistema apenas consulta e exibe as cobranças identificadas.

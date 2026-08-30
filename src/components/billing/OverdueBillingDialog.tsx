@@ -42,8 +42,8 @@ export default function OverdueBillingDialog({
             <DialogTitle className="text-xl">Pagamento em atraso</DialogTitle>
             <DialogDescription className="text-sm leading-relaxed text-foreground/70">
               {overdueCount === 1
-                ? 'Existe uma mensalidade da Plug Guest aguardando pagamento.'
-                : `Existem ${overdueCount} mensalidades da Plug Guest aguardando pagamento.`}
+                ? 'Existe uma mensalidade da Plugue Guest aguardando pagamento.'
+                : `Existem ${overdueCount} mensalidades da Plugue Guest aguardando pagamento.`}
             </DialogDescription>
           </DialogHeader>
         </div>

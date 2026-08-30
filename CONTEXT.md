@@ -13,7 +13,7 @@ Este repositorio implementa uma plataforma multi-tenant de reservas para restaur
 - integracao com Evolution API para automacoes via WhatsApp;
 - funil de conversao, fila de espera, leads e monitoramento operacional.
 
-O nome exibido no produto e configuravel via `system_settings`, com fallback atual para `Plug Guest`.
+O nome exibido no produto e configuravel via `system_settings`, com fallback atual para `Plugue Guest`.
 
 ## Stack Tecnica
 
@@ -96,7 +96,7 @@ Scripts principais em `package.json`:
 - `/:slug/admin/calendario`
 - `/:slug/admin/fila`
 - `/:slug/admin/automacoes`
-- `/:slug/admin/configuracoes`
+- `/:slug/admin/configuracoes/:secao` (`empresa`, `agenda`, `reservas`, `disponibilidade`, `pagina-publica`; a rota sem secao redireciona para `empresa`)
 - `/:slug/admin/usuarios`
 - `/:slug/admin/leads`
 

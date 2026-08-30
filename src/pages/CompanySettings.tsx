@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Save,
@@ -23,7 +23,6 @@ import {
   QrCode,
   Wallet,
   CalendarCheck,
-  CalendarClock,
   Globe,
   LayoutTemplate,
   ChevronLeft,
@@ -39,10 +38,10 @@ import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { getGoogleMapsEmbedUrl, normalizeGoogleMapsEmbedInput } from '@/lib/maps';
 import {
@@ -76,6 +75,14 @@ import {
   normalizeCompanyTimeZone,
 } from '@/lib/company-time-zones';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
+import {
+  COMPANY_SETTINGS_SECTION_DESCRIPTIONS,
+  COMPANY_SETTINGS_SECTION_LABELS,
+  getCompanySettingsSectionPath,
+  isCompanySettingsSection,
+  resolveCompanySettingsSection,
+  type CompanySettingsSection,
+} from '@/lib/company-settings-sections';
 
 interface OpeningHour {
   day: string;
@@ -124,16 +131,6 @@ const DEFAULT_PAYMENTS: Record<string, boolean> = {
   vale_refeicao: false,
 };
 
-const SETTINGS_TABS = ['info', 'location', 'hours', 'reservations', 'availability', 'payments', 'public-page'] as const;
-const SETTINGS_TAB_ITEMS = [
-  { value: 'info', label: 'Empresa', icon: Info },
-  { value: 'location', label: 'Localização', icon: MapPin },
-  { value: 'hours', label: 'Agenda', icon: Clock },
-  { value: 'reservations', label: 'Reservas', icon: CalendarCheck },
-  { value: 'availability', label: 'Disponibilidade', icon: CalendarClock },
-  { value: 'payments', label: 'Pagamentos', icon: CreditCard },
-  { value: 'public-page', label: 'Página Pública', icon: Megaphone },
-] as const;
 const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
 const settingsFieldClassName = 'h-10 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsTextAreaClassName = 'rounded-xl border-[rgba(0,0,0,0.14)] bg-white shadow-none';
@@ -211,19 +208,6 @@ const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, time_zo
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_LEGACY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, public_waitlist_enabled, google_maps_url, reservation_duration, max_guests_per_slot';
 
-type SettingsTab = (typeof SETTINGS_TABS)[number];
-
-function isSettingsTab(value: string | null): value is SettingsTab {
-  return value !== null && SETTINGS_TABS.includes(value as SettingsTab);
-}
-
-function normalizeSettingsTab(value: string | null): SettingsTab | null {
-  if (isSettingsTab(value)) return value;
-  if (value === 'blocked') return 'hours';
-  if (value === 'schedule-rules' || value === 'rules') return 'availability';
-  return null;
-}
-
 function isMissingCompanySettingsColumnError(error: unknown, columnName: string) {
   const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
   const message = typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message ?? '') : '';
@@ -232,8 +216,54 @@ function isMissingCompanySettingsColumnError(error: unknown, columnName: string)
     && message.includes(columnName);
 }
 
-function isMissingAnyCompanySettingsColumnError(error: unknown, columnNames: string[]) {
+function isMissingAnyCompanySettingsColumnError(error: unknown, columnNames: readonly string[]) {
   return columnNames.some((columnName) => isMissingCompanySettingsColumnError(error, columnName));
+}
+
+type CompanyUpdatePayload = Record<string, unknown>;
+
+// Colunas criadas por migracoes recentes: em bancos que ainda nao as receberam a coluna sai do
+// payload e o restante do salvamento segue normalmente.
+const OPTIONAL_COMPANY_COLUMNS = [
+  'hero_media_urls',
+  'hero_media_url',
+  'hero_media_type',
+  'public_header_style',
+  'public_reservation_exit_prompt_primary_text',
+  'public_reservation_exit_prompt_primary_text_size',
+  'public_reservation_exit_prompt_secondary_text',
+  'public_reservation_exit_prompt_secondary_text_size',
+  'show_public_reservation_exit_prompt',
+  'show_public_sticky_reserve_button',
+  'large_party_whatsapp_threshold',
+  'reservation_late_tolerance_minutes',
+  'reservation_slot_interval_minutes',
+];
+
+/** Grava so as colunas recebidas e devolve as que realmente foram persistidas. */
+async function updateCompanySettingsColumns(companyId: string, payload: CompanyUpdatePayload) {
+  const attemptPayload: CompanyUpdatePayload = { ...payload };
+
+  for (;;) {
+    const result = await supabase
+      .from('companies' as any)
+      .update(attemptPayload)
+      .eq('id', companyId)
+      .select('id')
+      .maybeSingle();
+
+    if (!result.error) {
+      if (!result.data) throw new Error('Sem permissão para salvar as configurações desta unidade.');
+      return new Set(Object.keys(attemptPayload));
+    }
+
+    const missingColumn = OPTIONAL_COMPANY_COLUMNS.find((column) => (
+      column in attemptPayload && isMissingCompanySettingsColumnError(result.error, column)
+    ));
+
+    if (!missingColumn) throw result.error;
+    delete attemptPayload[missingColumn];
+  }
 }
 
 function slugify(text: string) {
@@ -272,6 +302,85 @@ function normalizeOptionalHttpUrl(value: string) {
   }
 }
 
+/** Valores do formulario derivados da empresa gravada. Alimenta o seed e a marca de "nao salvo". */
+function buildCompanyFormValues(company: Company) {
+  const storedHeroMediaUrls = getStoredHeroMediaUrls(company);
+  const storedHeroMediaType: HeroMediaType | '' = storedHeroMediaUrls.length === 0
+    ? ''
+    : company.hero_media_type === 'video'
+      ? 'video'
+      : 'image';
+
+  return {
+    hours: (company.opening_hours as OpeningHour[]) || DEFAULT_HOURS,
+    payments: (company.payment_methods as Record<string, boolean>) || DEFAULT_PAYMENTS,
+    description: company.description || '',
+    logoUrl: company.logo_url || '',
+    heroMediaUrls: storedHeroMediaUrls.slice(0, storedHeroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES),
+    heroMediaType: storedHeroMediaType,
+    publicHeaderStyle: ((company as any).public_header_style === 'modern' ? 'modern' : 'classic') as 'classic' | 'modern',
+    address: company.address || '',
+    phone: formatBrazilPhone(company.phone),
+    instagram: normalizeInstagramHandle(company.instagram),
+    whatsapp: formatBrazilPhone(company.whatsapp),
+    showPublicWhatsappButton: (company.show_public_whatsapp_button ?? true) ? 'show' : 'hide',
+    showPublicStickyReserveButton: (company as any).show_public_sticky_reserve_button ?? true,
+    showPublicReservationExitPrompt: (company as any).show_public_reservation_exit_prompt ?? false,
+    publicReservationExitPromptPrimaryText: getPublicReservationExitPromptTextValue(
+      (company as any).public_reservation_exit_prompt_primary_text,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
+    ),
+    publicReservationExitPromptPrimaryTextSize: normalizePublicReservationExitPromptTextSize(
+      (company as any).public_reservation_exit_prompt_primary_text_size,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
+    ),
+    publicReservationExitPromptSecondaryText: getPublicReservationExitPromptTextValue(
+      (company as any).public_reservation_exit_prompt_secondary_text,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
+    ),
+    publicReservationExitPromptSecondaryTextSize: normalizePublicReservationExitPromptTextSize(
+      (company as any).public_reservation_exit_prompt_secondary_text_size,
+      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
+    ),
+    publicWaitlistEnabled: company.public_waitlist_enabled ?? false,
+    googleMapsUrl: company.google_maps_url || '',
+    timeZone: normalizeCompanyTimeZone((company as any).time_zone),
+    reservationDuration: (company as any).reservation_duration ?? 30,
+    reservationSlotIntervalMinutes: (company as any).reservation_slot_interval_minutes
+      ?? (company as any).reservation_duration
+      ?? 30,
+    maxGuestsPerSlot: (company as any).max_guests_per_slot ?? 0,
+    largePartyThreshold: normalizeLargePartyThreshold((company as any).large_party_whatsapp_threshold),
+    reservationLateToleranceMinutes: normalizeReservationLateToleranceMinutes(
+      (company as any).reservation_late_tolerance_minutes,
+    ),
+  };
+}
+
+function buildNoticeFormValues(notice: CompanyPublicNoticeSettings | null) {
+  if (!notice) {
+    return { noticeText: '', noticeImageUrl: '', noticeActive: false, noticeActiveUntil: '' };
+  }
+
+  const noticeExpiresAt = notice.active_until ? new Date(notice.active_until) : null;
+
+  return {
+    noticeText: notice.text || '',
+    noticeImageUrl: notice.image_url || '',
+    noticeActive: notice.is_active && !!noticeExpiresAt && noticeExpiresAt.getTime() > Date.now(),
+    noticeActiveUntil: toDateTimeLocalValue(notice.active_until),
+  };
+}
+
+type CompanyFormValues = ReturnType<typeof buildCompanyFormValues>;
+type NoticeFormValues = ReturnType<typeof buildNoticeFormValues>;
+
+function hasFormChanges<T extends Record<string, unknown>>(saved: T, current: T) {
+  return (Object.keys(saved) as (keyof T)[]).some(
+    (key) => JSON.stringify(saved[key]) !== JSON.stringify(current[key]),
+  );
+}
+
 function getStoredHeroMediaUrls(company: Company): string[] {
   const galleryUrls = Array.isArray(company.hero_media_urls)
     ? company.hero_media_urls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -282,10 +391,25 @@ function getStoredHeroMediaUrls(company: Company): string[] {
     : (company.hero_media_url ? [company.hero_media_url] : []);
 }
 
-export default function CompanySettings() {
+// Cada secao de configuracoes tem rota propria; a rota base redireciona para a primeira delas
+// e ainda aceita o ?tab= antigo para nao quebrar links salvos.
+export default function CompanySettingsRoute() {
+  const { slug: routeSlug, section } = useParams<{ slug: string; section?: string }>();
+  const [searchParams] = useSearchParams();
+
+  if (!isCompanySettingsSection(section)) {
+    const fallbackSection = resolveCompanySettingsSection(section, searchParams.get('tab'));
+    return <Navigate to={getCompanySettingsSectionPath(routeSlug ?? '', fallbackSection)} replace />;
+  }
+
+  // A key remonta a pagina a cada troca de secao: o que nao foi salvo é descartado e o
+  // formulario volta a refletir exatamente o que esta gravado.
+  return <CompanySettingsSectionPage key={section} section={section} />;
+}
+
+function CompanySettingsSectionPage({ section }: { section: CompanySettingsSection }) {
   const { companyId, companyName, slug } = useCompanySlug();
   const qc = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: company, isLoading, error: companyError } = useQuery({
     queryKey: ['company-settings', companyId],
@@ -344,7 +468,7 @@ export default function CompanySettings() {
           .maybeSingle();
 
         if (!result.error) {
-          return result.data as Company | null;
+          return result.data as unknown as Company | null;
         }
 
         if (attempt.missingColumns.length > 0 && isMissingAnyCompanySettingsColumnError(result.error, attempt.missingColumns)) {
@@ -372,7 +496,7 @@ export default function CompanySettings() {
         .maybeSingle();
 
       if (error) throw error;
-      return data as CompanyPublicNoticeSettings | null;
+      return data as unknown as CompanyPublicNoticeSettings | null;
     },
     enabled: !!companyId,
   });
@@ -391,7 +515,7 @@ export default function CompanySettings() {
         return null;
       }
 
-      return data as CompanyNpsConfigSettings | null;
+      return data as unknown as CompanyNpsConfigSettings | null;
     },
     enabled: !!companyId,
   });
@@ -436,6 +560,11 @@ export default function CompanySettings() {
   const pendingHeroMediaUploadsRef = useRef(new Map<string, PendingHeroMediaUploadRecord>());
   const publicReservationExitPromptPrimaryTextRef = useRef<HTMLTextAreaElement | null>(null);
   const publicReservationExitPromptSecondaryTextRef = useRef<HTMLTextAreaElement | null>(null);
+  const savedFormRef = useRef<{
+    company: CompanyFormValues | null;
+    notice: NoticeFormValues | null;
+    googleReviewUrl: string | null;
+  }>({ company: null, notice: null, googleReviewUrl: null });
 
   const reconcilePendingHeroMediaUploads = useCallback(async (
     targetCompanyId: string,
@@ -495,386 +624,287 @@ export default function CompanySettings() {
   useEffect(() => {
     setInitialized(false);
     setGoogleReviewUrl('');
+    savedFormRef.current = { company: null, notice: null, googleReviewUrl: null };
   }, [companyId]);
 
   useEffect(() => {
     if (!company || initialized) return;
 
-    setHours((company.opening_hours as OpeningHour[]) || DEFAULT_HOURS);
-    setPayments((company.payment_methods as Record<string, boolean>) || DEFAULT_PAYMENTS);
-    setDescription(company.description || '');
-    setLogoUrl(company.logo_url || '');
-    const storedHeroMediaUrls = getStoredHeroMediaUrls(company);
-    const storedHeroMediaType: HeroMediaType | '' = storedHeroMediaUrls.length === 0
-      ? ''
-      : company.hero_media_type === 'video'
-        ? 'video'
-        : 'image';
+    const values = buildCompanyFormValues(company);
 
-    setHeroMediaUrls(
-      storedHeroMediaUrls.slice(0, storedHeroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES),
-    );
-    setHeroMediaType(storedHeroMediaType);
-    setPublicHeaderStyle((company as any).public_header_style === 'modern' ? 'modern' : 'classic');
-    setAddress(company.address || '');
-    setPhone(formatBrazilPhone(company.phone));
-    setInstagram(normalizeInstagramHandle(company.instagram));
-    setWhatsapp(formatBrazilPhone(company.whatsapp));
-    setShowPublicWhatsappButton((company.show_public_whatsapp_button ?? true) ? 'show' : 'hide');
-    setShowPublicStickyReserveButton((company as any).show_public_sticky_reserve_button ?? true);
-    setShowPublicReservationExitPrompt((company as any).show_public_reservation_exit_prompt ?? false);
-    setPublicReservationExitPromptPrimaryText(getPublicReservationExitPromptTextValue(
-      (company as any).public_reservation_exit_prompt_primary_text,
-      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT,
-    ));
-    setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(
-      (company as any).public_reservation_exit_prompt_primary_text_size,
-      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT_SIZE,
-    ));
-    setPublicReservationExitPromptSecondaryText(getPublicReservationExitPromptTextValue(
-      (company as any).public_reservation_exit_prompt_secondary_text,
-      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT,
-    ));
-    setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(
-      (company as any).public_reservation_exit_prompt_secondary_text_size,
-      DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE,
-    ));
-    setPublicWaitlistEnabled(company.public_waitlist_enabled ?? false);
-    setGoogleMapsUrl(company.google_maps_url || '');
-    setTimeZone(normalizeCompanyTimeZone((company as any).time_zone));
-    setReservationDuration((company as any).reservation_duration ?? 30);
-    setReservationSlotIntervalMinutes((company as any).reservation_slot_interval_minutes ?? (company as any).reservation_duration ?? 30);
-    setMaxGuestsPerSlot((company as any).max_guests_per_slot ?? 0);
-    setLargePartyThreshold(normalizeLargePartyThreshold((company as any).large_party_whatsapp_threshold));
-    setReservationLateToleranceMinutes(normalizeReservationLateToleranceMinutes((company as any).reservation_late_tolerance_minutes));
+    setHours(values.hours);
+    setPayments(values.payments);
+    setDescription(values.description);
+    setLogoUrl(values.logoUrl);
+    setHeroMediaUrls(values.heroMediaUrls);
+    setHeroMediaType(values.heroMediaType);
+    setPublicHeaderStyle(values.publicHeaderStyle);
+    setAddress(values.address);
+    setPhone(values.phone);
+    setInstagram(values.instagram);
+    setWhatsapp(values.whatsapp);
+    setShowPublicWhatsappButton(values.showPublicWhatsappButton);
+    setShowPublicStickyReserveButton(values.showPublicStickyReserveButton);
+    setShowPublicReservationExitPrompt(values.showPublicReservationExitPrompt);
+    setPublicReservationExitPromptPrimaryText(values.publicReservationExitPromptPrimaryText);
+    setPublicReservationExitPromptPrimaryTextSize(values.publicReservationExitPromptPrimaryTextSize);
+    setPublicReservationExitPromptSecondaryText(values.publicReservationExitPromptSecondaryText);
+    setPublicReservationExitPromptSecondaryTextSize(values.publicReservationExitPromptSecondaryTextSize);
+    setPublicWaitlistEnabled(values.publicWaitlistEnabled);
+    setGoogleMapsUrl(values.googleMapsUrl);
+    setTimeZone(values.timeZone);
+    setReservationDuration(values.reservationDuration);
+    setReservationSlotIntervalMinutes(values.reservationSlotIntervalMinutes);
+    setMaxGuestsPerSlot(values.maxGuestsPerSlot);
+    setLargePartyThreshold(values.largePartyThreshold);
+    setReservationLateToleranceMinutes(values.reservationLateToleranceMinutes);
+    // A linha de base é registrada junto com o seed para nunca ficar defasada dele.
+    savedFormRef.current.company = values;
     setInitialized(true);
   }, [company, initialized]);
 
   useEffect(() => {
     if (publicNotice === undefined) return;
 
-    if (!publicNotice) {
-      setNoticeText('');
-      setNoticeImageUrl('');
-      setNoticeActive(false);
-      setNoticeActiveUntil('');
-      return;
-    }
+    const values = buildNoticeFormValues(publicNotice);
 
-    const noticeExpiresAt = publicNotice.active_until ? new Date(publicNotice.active_until) : null;
-    const isNoticeStillActive = publicNotice.is_active
-      && !!noticeExpiresAt
-      && noticeExpiresAt.getTime() > Date.now();
-
-    setNoticeText(publicNotice.text || '');
-    setNoticeImageUrl(publicNotice.image_url || '');
-    setNoticeActive(isNoticeStillActive);
-    setNoticeActiveUntil(toDateTimeLocalValue(publicNotice.active_until));
+    setNoticeText(values.noticeText);
+    setNoticeImageUrl(values.noticeImageUrl);
+    setNoticeActive(values.noticeActive);
+    setNoticeActiveUntil(values.noticeActiveUntil);
+    savedFormRef.current.notice = values;
   }, [publicNotice]);
 
   useEffect(() => {
     if (npsConfig === undefined) return;
     setGoogleReviewUrl(npsConfig?.google_review_url || '');
+    savedFormRef.current.googleReviewUrl = npsConfig?.google_review_url || '';
   }, [npsConfig]);
 
   const publicCustomizationLocked = featureFlags
     ? !featureFlags.features.custom_public_page
     : false;
 
+  const currentCompanyFormValues: CompanyFormValues = {
+    hours,
+    payments,
+    description,
+    logoUrl,
+    heroMediaUrls,
+    heroMediaType,
+    publicHeaderStyle,
+    address,
+    phone,
+    instagram,
+    whatsapp,
+    showPublicWhatsappButton,
+    showPublicStickyReserveButton,
+    showPublicReservationExitPrompt,
+    publicReservationExitPromptPrimaryText,
+    publicReservationExitPromptPrimaryTextSize,
+    publicReservationExitPromptSecondaryText,
+    publicReservationExitPromptSecondaryTextSize,
+    publicWaitlistEnabled,
+    googleMapsUrl,
+    timeZone,
+    reservationDuration,
+    reservationSlotIntervalMinutes,
+    maxGuestsPerSlot,
+    largePartyThreshold,
+    reservationLateToleranceMinutes,
+  };
+  const currentNoticeFormValues: NoticeFormValues = {
+    noticeText,
+    noticeImageUrl,
+    noticeActive,
+    noticeActiveUntil,
+  };
+  const currentFormRef = useRef({
+    company: currentCompanyFormValues,
+    notice: currentNoticeFormValues,
+    googleReviewUrl,
+  });
+  currentFormRef.current = {
+    company: currentCompanyFormValues,
+    notice: currentNoticeFormValues,
+    googleReviewUrl,
+  };
+
+  // Cada bloco só entra na conta depois de ter recebido o valor gravado, senão o formulário
+  // apareceria como alterado no intervalo entre a query responder e o seed rodar.
+  const savedForm = savedFormRef.current;
+  const hasUnsavedChanges = (
+    (!!savedForm.company && hasFormChanges(savedForm.company, currentCompanyFormValues))
+    || (!!savedForm.notice && hasFormChanges(savedForm.notice, currentNoticeFormValues))
+    || (savedForm.googleReviewUrl !== null && savedForm.googleReviewUrl !== googleReviewUrl)
+  );
+  useUnsavedChangesWarning(hasUnsavedChanges);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!company) throw new Error('Empresa não encontrada');
 
       const targetCompanyId = companyId!;
-      const pendingHeroMediaUploadsAtSave = Array.from(pendingHeroMediaUploadsRef.current.values())
-        .filter((upload) => upload.companyId === targetCompanyId);
+      const companyUpdate: CompanyUpdatePayload = {};
+      let heroMediaCleanupError: string | null = null;
 
-      const normalizedMapsEmbedUrl = normalizeGoogleMapsEmbedInput(googleMapsUrl);
-      const normalizedGoogleReviewUrl = normalizeOptionalHttpUrl(googleReviewUrl);
-
-      if (googleMapsUrl.trim() && !normalizedMapsEmbedUrl) {
-        throw new Error('Use um link de incorporação válido do Google Maps.');
+      if (section === 'agenda') {
+        companyUpdate.opening_hours = hours;
       }
 
-      if (googleReviewUrl.trim() && !normalizedGoogleReviewUrl) {
-        throw new Error('Use um link valido para avaliacao no Google.');
+      if (section === 'empresa') {
+        const normalizedMapsEmbedUrl = normalizeGoogleMapsEmbedInput(googleMapsUrl);
+        const normalizedGoogleReviewUrl = normalizeOptionalHttpUrl(googleReviewUrl);
+
+        if (googleMapsUrl.trim() && !normalizedMapsEmbedUrl) {
+          throw new Error('Use um link de incorporação válido do Google Maps.');
+        }
+
+        if (googleReviewUrl.trim() && !normalizedGoogleReviewUrl) {
+          throw new Error('Use um link valido para avaliacao no Google.');
+        }
+
+        const phoneError = getPhoneValidationMessage(phone, 'um telefone');
+        if (phoneError) {
+          throw new Error(phoneError);
+        }
+
+        const whatsappError = getPhoneValidationMessage(whatsapp, 'um WhatsApp');
+        if (whatsappError) {
+          throw new Error(whatsappError);
+        }
+
+        companyUpdate.time_zone = normalizeCompanyTimeZone(timeZone);
+        companyUpdate.payment_methods = payments;
+        companyUpdate.address = address;
+        companyUpdate.phone = formatBrazilPhone(phone);
+        companyUpdate.instagram = normalizeInstagramHandle(instagram) || null;
+        companyUpdate.google_maps_url = normalizedMapsEmbedUrl || null;
+
+        // Campos bloqueados pelo plano ficam de fora do update em vez de serem reescritos.
+        if (!publicCustomizationLocked) {
+          companyUpdate.description = toSafeRichTextHtml(description);
+          companyUpdate.logo_url = logoUrl;
+          companyUpdate.whatsapp = formatBrazilPhone(whatsapp);
+        }
       }
 
-      const phoneError = getPhoneValidationMessage(phone, 'um telefone');
-      if (phoneError) {
-        throw new Error(phoneError);
+      if (section === 'reservas') {
+        companyUpdate.reservation_duration = reservationDuration;
+        companyUpdate.reservation_slot_interval_minutes = reservationSlotIntervalMinutes;
+        companyUpdate.max_guests_per_slot = maxGuestsPerSlot;
+        companyUpdate.large_party_whatsapp_threshold = normalizeLargePartyThreshold(largePartyThreshold);
+        companyUpdate.reservation_late_tolerance_minutes = normalizeReservationLateToleranceMinutes(reservationLateToleranceMinutes);
+        companyUpdate.show_public_reservation_exit_prompt = showPublicReservationExitPrompt;
+        companyUpdate.public_reservation_exit_prompt_primary_text = publicReservationExitPromptPrimaryText.replace(/\r\n/g, '\n');
+        companyUpdate.public_reservation_exit_prompt_primary_text_size = publicReservationExitPromptPrimaryTextSize;
+        companyUpdate.public_reservation_exit_prompt_secondary_text = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
+        companyUpdate.public_reservation_exit_prompt_secondary_text_size = publicReservationExitPromptSecondaryTextSize;
       }
 
-      const whatsappError = getPhoneValidationMessage(whatsapp, 'um WhatsApp');
-      if (whatsappError) {
-        throw new Error(whatsappError);
-      }
-
+      const originalHeroMediaUrls = getStoredHeroMediaUrls(company);
+      const finalHeroMediaUrls = heroMediaUrls.slice(0, heroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES);
       const trimmedNoticeText = noticeText.trim();
       const hasNoticeContent = !!trimmedNoticeText || !!noticeImageUrl;
       const noticeActiveUntilIso = fromDateTimeLocalValue(noticeActiveUntil);
-      const normalizedReservationExitPromptPrimaryText = publicReservationExitPromptPrimaryText.replace(/\r\n/g, '\n');
-      const normalizedReservationExitPromptSecondaryText = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
-      const normalizedLargePartyThreshold = normalizeLargePartyThreshold(largePartyThreshold);
-      const normalizedReservationLateToleranceMinutes = normalizeReservationLateToleranceMinutes(reservationLateToleranceMinutes);
-      const originalHeroMediaUrls = getStoredHeroMediaUrls(company);
-      const finalHeroMediaUrls = publicCustomizationLocked
-        ? originalHeroMediaUrls
-        : heroMediaUrls.slice(0, heroMediaType === 'video' ? 1 : HERO_MEDIA_MAX_IMAGES);
-      const finalHeroMediaType = publicCustomizationLocked
-        ? (originalHeroMediaUrls.length === 0
-          ? ''
-          : company.hero_media_type === 'video'
-            ? 'video'
-            : 'image')
-        : heroMediaType;
+      const savesHeroMedia = section === 'pagina-publica' && !publicCustomizationLocked;
 
-      if (!publicCustomizationLocked && noticeActive) {
-        if (!hasNoticeContent) {
-          throw new Error('Informe um texto ou uma imagem para ativar o aviso.');
+      if (section === 'pagina-publica') {
+        if (!publicCustomizationLocked && noticeActive) {
+          if (!hasNoticeContent) {
+            throw new Error('Informe um texto ou uma imagem para ativar o aviso.');
+          }
+
+          if (!noticeActiveUntilIso) {
+            throw new Error('Informe até quando o aviso deve ficar ativo.');
+          }
+
+          if (new Date(noticeActiveUntilIso).getTime() <= Date.now()) {
+            throw new Error('A data final do aviso precisa ser futura.');
+          }
         }
 
-        if (!noticeActiveUntilIso) {
-          throw new Error('Informe até quando o aviso deve ficar ativo.');
-        }
+        companyUpdate.public_waitlist_enabled = publicWaitlistEnabled;
+        companyUpdate.show_public_sticky_reserve_button = showPublicStickyReserveButton;
 
-        if (new Date(noticeActiveUntilIso).getTime() <= Date.now()) {
-          throw new Error('A data final do aviso precisa ser futura.');
+        if (savesHeroMedia) {
+          companyUpdate.show_public_whatsapp_button = showPublicWhatsappButton === 'show';
+          companyUpdate.public_header_style = publicHeaderStyle;
+          companyUpdate.hero_media_urls = finalHeroMediaUrls;
+          companyUpdate.hero_media_url = finalHeroMediaUrls[0] || null;
+          companyUpdate.hero_media_type = heroMediaType || null;
         }
       }
 
-      const baseCompanyUpdate = {
-        opening_hours: hours,
-        time_zone: normalizeCompanyTimeZone(timeZone),
-        payment_methods: payments,
-        description: publicCustomizationLocked ? (company.description || '') : toSafeRichTextHtml(description),
-        logo_url: publicCustomizationLocked ? (company.logo_url || '') : logoUrl,
-        address,
-        phone: formatBrazilPhone(phone),
-        instagram: normalizeInstagramHandle(instagram) || null,
-        whatsapp: publicCustomizationLocked ? (company.whatsapp || '') : formatBrazilPhone(whatsapp),
-        show_public_whatsapp_button: publicCustomizationLocked
-          ? (company.show_public_whatsapp_button ?? true)
-          : showPublicWhatsappButton === 'show',
-        public_waitlist_enabled: publicWaitlistEnabled,
-        google_maps_url: normalizedMapsEmbedUrl || null,
-        reservation_duration: reservationDuration,
-        reservation_slot_interval_minutes: reservationSlotIntervalMinutes,
-        max_guests_per_slot: maxGuestsPerSlot,
-        updated_at: new Date().toISOString(),
-      } as any;
-      const {
-        reservation_slot_interval_minutes: _reservationSlotIntervalMinutes,
-        ...legacyBaseCompanyUpdate
-      } = baseCompanyUpdate;
-      const companyUpdateWithLargePartyThreshold = {
-        ...baseCompanyUpdate,
-        large_party_whatsapp_threshold: normalizedLargePartyThreshold,
-        reservation_late_tolerance_minutes: normalizedReservationLateToleranceMinutes,
-      } as any;
-      const companyUpdateWithLegacyHeroMedia = {
-        ...companyUpdateWithLargePartyThreshold,
-        hero_media_url: finalHeroMediaUrls[0] || null,
-        hero_media_type: finalHeroMediaType || null,
-        public_header_style: publicCustomizationLocked
-          ? ((company as any).public_header_style ?? 'classic')
-          : publicHeaderStyle,
-      } as any;
-      const companyUpdateWithHeroGallery = {
-        ...companyUpdateWithLegacyHeroMedia,
-        hero_media_urls: finalHeroMediaUrls,
-      } as any;
-
-      const updateAttempts = [
-        {
-          payload: {
-            ...companyUpdateWithHeroGallery,
-            show_public_sticky_reserve_button: showPublicStickyReserveButton,
-            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
-            public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
-            public_reservation_exit_prompt_primary_text_size: publicReservationExitPromptPrimaryTextSize,
-            public_reservation_exit_prompt_secondary_text: normalizedReservationExitPromptSecondaryText,
-            public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
-          } as any,
-          missingColumns: [
-            'hero_media_urls',
-            'hero_media_url',
-            'hero_media_type',
-            'public_header_style',
-            'public_reservation_exit_prompt_primary_text',
-            'public_reservation_exit_prompt_primary_text_size',
-            'public_reservation_exit_prompt_secondary_text',
-            'public_reservation_exit_prompt_secondary_text_size',
-            'large_party_whatsapp_threshold',
-            'reservation_late_tolerance_minutes',
-            'reservation_slot_interval_minutes',
-          ],
-          heroMediaPersistence: 'gallery',
-        },
-        {
-          payload: {
-            ...companyUpdateWithLegacyHeroMedia,
-            show_public_sticky_reserve_button: showPublicStickyReserveButton,
-            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
-            public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
-            public_reservation_exit_prompt_primary_text_size: publicReservationExitPromptPrimaryTextSize,
-            public_reservation_exit_prompt_secondary_text: normalizedReservationExitPromptSecondaryText,
-            public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
-          } as any,
-          missingColumns: [
-            'hero_media_url',
-            'hero_media_type',
-            'public_header_style',
-            'public_reservation_exit_prompt_primary_text',
-            'public_reservation_exit_prompt_primary_text_size',
-            'public_reservation_exit_prompt_secondary_text',
-            'public_reservation_exit_prompt_secondary_text_size',
-            'large_party_whatsapp_threshold',
-            'reservation_late_tolerance_minutes',
-            'reservation_slot_interval_minutes',
-          ],
-          heroMediaPersistence: 'legacy',
-        },
-        {
-          payload: {
-            ...baseCompanyUpdate,
-            show_public_sticky_reserve_button: showPublicStickyReserveButton,
-            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
-            public_reservation_exit_prompt_primary_text: normalizedReservationExitPromptPrimaryText,
-            public_reservation_exit_prompt_primary_text_size: publicReservationExitPromptPrimaryTextSize,
-            public_reservation_exit_prompt_secondary_text: normalizedReservationExitPromptSecondaryText,
-            public_reservation_exit_prompt_secondary_text_size: publicReservationExitPromptSecondaryTextSize,
-          } as any,
-          missingColumns: [
-            'public_reservation_exit_prompt_primary_text',
-            'public_reservation_exit_prompt_primary_text_size',
-            'public_reservation_exit_prompt_secondary_text',
-            'public_reservation_exit_prompt_secondary_text_size',
-            'reservation_slot_interval_minutes',
-          ],
-          heroMediaPersistence: 'none',
-        },
-        {
-          payload: {
-            ...companyUpdateWithLargePartyThreshold,
-            show_public_sticky_reserve_button: showPublicStickyReserveButton,
-            show_public_reservation_exit_prompt: showPublicReservationExitPrompt,
-          } as any,
-          missingColumns: ['show_public_reservation_exit_prompt', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
-          heroMediaPersistence: 'none',
-        },
-        {
-          payload: {
-            ...companyUpdateWithLargePartyThreshold,
-            show_public_sticky_reserve_button: showPublicStickyReserveButton,
-          } as any,
-          missingColumns: ['show_public_sticky_reserve_button', 'large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
-          heroMediaPersistence: 'none',
-        },
-        {
-          payload: companyUpdateWithLargePartyThreshold,
-          missingColumns: ['large_party_whatsapp_threshold', 'reservation_late_tolerance_minutes', 'reservation_slot_interval_minutes'],
-          heroMediaPersistence: 'none',
-        },
-        {
-          payload: baseCompanyUpdate,
-          missingColumns: ['reservation_slot_interval_minutes'],
-          heroMediaPersistence: 'none',
-        },
-        {
-          payload: legacyBaseCompanyUpdate,
-          missingColumns: [],
-          heroMediaPersistence: 'none',
-        },
-      ] as const;
-
-      let updatedCompany: { id: string } | null = null;
-      let error: unknown = null;
-      let heroMediaPersistence: 'gallery' | 'legacy' | 'none' = 'none';
-
-      for (const attempt of updateAttempts) {
-        const result = await supabase
-          .from('companies' as any)
-          .update(attempt.payload)
-          .eq('id', targetCompanyId)
-          .select('id')
-          .maybeSingle();
-
-        if (!result.error) {
-          updatedCompany = result.data;
-          error = null;
-          heroMediaPersistence = attempt.heroMediaPersistence;
-          break;
-        }
-
-        error = result.error;
-
-        if (attempt.missingColumns.length > 0 && isMissingAnyCompanySettingsColumnError(result.error, attempt.missingColumns)) {
-          continue;
-        }
-
-        throw result.error;
-      }
-
-      if (error) throw error;
-      if (!updatedCompany) throw new Error('Sem permissão para salvar as configurações desta unidade.');
-
-      const persistedHeroMediaUrls = heroMediaPersistence === 'gallery'
-        ? finalHeroMediaUrls
-        : heroMediaPersistence === 'legacy'
-          ? finalHeroMediaUrls.slice(0, 1)
-          : originalHeroMediaUrls;
-      let heroMediaCleanupError = await reconcilePendingHeroMediaUploads(
-        targetCompanyId,
-        persistedHeroMediaUrls,
-        pendingHeroMediaUploadsAtSave,
-      );
-
-      const { error: npsConfigError } = await supabase
-        .from('company_nps_configs' as any)
-        .upsert({
-          company_id: targetCompanyId,
-          google_review_url: normalizedGoogleReviewUrl,
+      const persistedColumns = Object.keys(companyUpdate).length > 0
+        ? await updateCompanySettingsColumns(targetCompanyId, {
+          ...companyUpdate,
           updated_at: new Date().toISOString(),
-        } as any, { onConflict: 'company_id' });
+        })
+        : new Set<string>();
 
-      if (npsConfigError) {
-        throw npsConfigError;
+      if (section === 'pagina-publica') {
+        const persistedHeroMediaUrls = persistedColumns.has('hero_media_urls')
+          ? finalHeroMediaUrls
+          : persistedColumns.has('hero_media_url')
+            ? finalHeroMediaUrls.slice(0, 1)
+            : originalHeroMediaUrls;
+
+        heroMediaCleanupError = await reconcilePendingHeroMediaUploads(
+          targetCompanyId,
+          persistedHeroMediaUrls,
+          Array.from(pendingHeroMediaUploadsRef.current.values())
+            .filter((upload) => upload.companyId === targetCompanyId),
+        );
+
+        if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
+          const { error: noticeError } = await supabase
+            .from('company_public_notices' as any)
+            .upsert({
+              company_id: targetCompanyId,
+              text: trimmedNoticeText || null,
+              image_url: noticeImageUrl || null,
+              is_active: noticeActive,
+              active_until: noticeActiveUntilIso,
+            }, { onConflict: 'company_id' });
+
+          if (noticeError) throw noticeError;
+        }
+
+        const persistedHeroMediaUrlSet = new Set(persistedHeroMediaUrls);
+        const systemAssetsPublicUrl = supabase.storage
+          .from('system-assets')
+          .getPublicUrl('')
+          .data.publicUrl;
+        const staleHeroMediaPaths = Array.from(new Set(
+          originalHeroMediaUrls
+            .filter((url) => !persistedHeroMediaUrlSet.has(url))
+            .map((url) => getCompanyHeroMediaStoragePath(url, targetCompanyId, systemAssetsPublicUrl))
+            .filter((path): path is string => !!path),
+        ));
+        if (staleHeroMediaPaths.length > 0) {
+          const { error: cleanupError } = await supabase.storage
+            .from('system-assets')
+            .remove(staleHeroMediaPaths);
+
+          if (cleanupError) {
+            console.warn('Não foi possível limpar mídias de fundo substituídas:', cleanupError);
+            heroMediaCleanupError ??= cleanupError.message;
+          }
+        }
       }
 
-      if (!publicCustomizationLocked && (publicNotice || hasNoticeContent || noticeActiveUntilIso || noticeActive)) {
-        const { error: noticeError } = await supabase
-          .from('company_public_notices' as any)
+      if (section === 'empresa') {
+        const { error: npsConfigError } = await supabase
+          .from('company_nps_configs' as any)
           .upsert({
             company_id: targetCompanyId,
-            text: trimmedNoticeText || null,
-            image_url: noticeImageUrl || null,
-            is_active: noticeActive,
-            active_until: noticeActiveUntilIso,
-          }, { onConflict: 'company_id' });
+            google_review_url: normalizeOptionalHttpUrl(googleReviewUrl),
+            updated_at: new Date().toISOString(),
+          } as any, { onConflict: 'company_id' });
 
-        if (noticeError) throw noticeError;
-      }
-
-      const persistedHeroMediaUrlSet = new Set(persistedHeroMediaUrls);
-      const systemAssetsPublicUrl = supabase.storage
-        .from('system-assets')
-        .getPublicUrl('')
-        .data.publicUrl;
-      const staleHeroMediaPaths = Array.from(new Set(
-        originalHeroMediaUrls
-          .filter((url) => !persistedHeroMediaUrlSet.has(url))
-          .map((url) => getCompanyHeroMediaStoragePath(url, targetCompanyId, systemAssetsPublicUrl))
-          .filter((path): path is string => !!path),
-      ));
-      if (staleHeroMediaPaths.length > 0) {
-        const { error: cleanupError } = await supabase.storage
-          .from('system-assets')
-          .remove(staleHeroMediaPaths);
-
-        if (cleanupError) {
-          console.warn('Não foi possível limpar mídias de fundo substituídas:', cleanupError);
-          heroMediaCleanupError ??= cleanupError.message;
+        if (npsConfigError) {
+          throw npsConfigError;
         }
       }
 
@@ -886,13 +916,16 @@ export default function CompanySettings() {
       return { targetCompanyId };
     },
     onSuccess: ({ heroMediaCleanupError }) => {
+      // O que está na tela passa a ser a nova referência: normalizações feitas no save
+      // (sanitização da descrição, link do mapa) não devem reacender o aviso de não salvo.
+      savedFormRef.current = { ...currentFormRef.current };
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-nps-config', companyId] });
-      toast.success('Configurações salvas!');
+      toast.success(`Configurações de ${COMPANY_SETTINGS_SECTION_LABELS[section]} salvas!`);
       if (heroMediaCleanupError) {
         toast.warning('As configurações foram salvas, mas alguns arquivos antigos não puderam ser removidos.');
       }
@@ -924,23 +957,6 @@ export default function CompanySettings() {
   const publicWaitlistUrl = typeof window === 'undefined'
     ? `/${slug}/fila`
     : `${window.location.origin}/${slug}/fila`;
-  const activeTab: SettingsTab = normalizeSettingsTab(searchParams.get('tab')) ?? 'info';
-
-  const handleTabChange = (value: string) => {
-    if (!isSettingsTab(value)) return;
-
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-
-      if (value === 'info') {
-        next.delete('tab');
-      } else {
-        next.set('tab', value);
-      }
-
-      return next;
-    }, { replace: true });
-  };
 
   const copyPublicWaitlistUrl = async () => {
     try {
@@ -1154,7 +1170,7 @@ export default function CompanySettings() {
     }
 
     const validation = validateHeroMediaFiles(files);
-    if (!validation.valid) {
+    if ('error' in validation) {
       toast.error(validation.error);
       event.target.value = '';
       return;
@@ -1297,20 +1313,38 @@ export default function CompanySettings() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Configurações</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Configurações da unidade {companyName}</p>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {COMPANY_SETTINGS_SECTION_LABELS[section]}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section]} · {companyName}
+          </p>
         </div>
-        <Button
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending || uploadingHeroMedia}
-          className="h-10 gap-2 self-start rounded-lg px-4"
-        >
-          <Save className="h-4 w-4" />
-          Salvar tudo
-        </Button>
+        {/* Disponibilidade nao tem campos proprios aqui: cada regra é salva no card dela. */}
+        {section !== 'disponibilidade' && (
+          <div className="flex items-center gap-3 self-start">
+            {hasUnsavedChanges && !saveMutation.isPending && (
+              <span
+                role="status"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/80 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800"
+              >
+                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Não salvo
+              </span>
+            )}
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || uploadingHeroMedia}
+              className="h-10 gap-2 rounded-lg px-4"
+            >
+              <Save className="h-4 w-4" />
+              {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {publicCustomizationLocked && (
+      {publicCustomizationLocked && (section === 'empresa' || section === 'pagina-publica') && (
         <Card className="rounded-xl border border-primary/20 bg-primary-soft shadow-none">
           <CardContent className="py-3">
             <p className="text-sm font-medium text-primary">Página pública customizada indisponível neste plano.</p>
@@ -1321,29 +1355,8 @@ export default function CompanySettings() {
         </Card>
       )}
 
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-        <div className="overflow-x-auto pb-1">
-          <TabsList className="h-auto w-max min-w-full justify-start rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-1 md:min-w-0">
-            {SETTINGS_TABS.map((tabValue) => {
-              const tab = SETTINGS_TAB_ITEMS.find((item) => item.value === tabValue);
-              if (!tab) return null;
-              const Icon = tab.icon;
-
-              return (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  className="min-h-[36px] shrink-0 gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none"
-                >
-                  <Icon className="h-4 w-4" />
-                  {tab.label}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-        </div>
-
-        <TabsContent value="hours" className="space-y-4">
+      {section === 'agenda' && (
+        <div className="space-y-4">
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
@@ -1461,9 +1474,11 @@ export default function CompanySettings() {
             </Card>
             </div>
           )}
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="reservations" className="space-y-4">
+      {section === 'reservas' && (
+        <div className="space-y-4">
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
@@ -1808,61 +1823,17 @@ export default function CompanySettings() {
               </div>
             </CardContent>
           </Card>}
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="availability" className="space-y-4">
+      {section === 'disponibilidade' && (
+        <div className="space-y-4">
           {companyId && <ReservationScheduleRulesCard companyId={companyId} />}
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="payments">
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <CreditCard className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Formas de pagamento</CardTitle>
-                  <CardDescription>Selecione quais formas de pagamento são aceitas.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div>
-                {PAYMENT_OPTIONS.map((option, index) => {
-                  const Icon = option.icon;
-
-                  return (
-                    <div
-                      key={option.key}
-                      className={cn(
-                        'flex items-center justify-between gap-4 py-4',
-                        index < PAYMENT_OPTIONS.length - 1 && 'border-b border-[rgba(0,0,0,0.08)]',
-                      )}
-                    >
-                      <Label htmlFor={`pay-${option.key}`} className="flex flex-1 cursor-pointer items-center gap-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-sm font-semibold text-foreground">{option.label}</div>
-                          <div className="text-sm text-muted-foreground">{option.description}</div>
-                        </div>
-                      </Label>
-                      <Switch
-                        id={`pay-${option.key}`}
-                        checked={!!payments[option.key]}
-                        onCheckedChange={(checked) => setPayments((current) => ({ ...current, [option.key]: checked }))}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="info">
+      {section === 'empresa' && (
+        <div className="space-y-4">
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
@@ -2174,9 +2145,153 @@ export default function CompanySettings() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="public-page" className="space-y-4">
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <MapPin className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Localização</CardTitle>
+                  <CardDescription>Endereço e mapa exibidos na página pública.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="company-settings-address">Endereço completo</Label>
+                <Textarea
+                  id="company-settings-address"
+                  name="address"
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
+                  placeholder={'Rua Exemplo, 123\nBairro, Cidade - UF, 00000-000'}
+                  rows={3}
+                  className={settingsTextAreaClassName}
+                  autoComplete="street-address"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A primeira linha aparece em destaque na página pública. Use uma quebra de linha para separar o restante (bairro, cidade, CEP).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="company-settings-google-maps">Link do Google Maps (embed)</Label>
+                <Input
+                  id="company-settings-google-maps"
+                  name="google_maps_url"
+                  type="url"
+                  value={googleMapsUrl}
+                  onChange={(event) => setGoogleMapsUrl(event.target.value)}
+                  placeholder="https://www.google.com/maps/embed?pb=..."
+                  className={settingsFieldClassName}
+                  autoComplete="url"
+                  inputMode="url"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  No Google Maps: "Compartilhar" -&gt; "Incorporar mapa" -&gt; copie o valor do atributo{' '}
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">src</span> do iframe gerado.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="company-settings-google-review">Link de avaliacao no Google</Label>
+                <Input
+                  id="company-settings-google-review"
+                  name="google_review_url"
+                  type="url"
+                  value={googleReviewUrl}
+                  onChange={(event) => setGoogleReviewUrl(event.target.value)}
+                  placeholder="https://g.page/r/.../review"
+                  className={settingsFieldClassName}
+                  autoComplete="url"
+                  inputMode="url"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Usado na pesquisa de satisfacao para convidar clientes com nota 9 ou 10 a avaliar a empresa no Google.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Prévia do mapa</Label>
+                <div className="overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-muted/15">
+                  {getGoogleMapsEmbedUrl(googleMapsUrl, address || 'Brasil') ? (
+                    <iframe
+                      src={getGoogleMapsEmbedUrl(googleMapsUrl, address || 'Brasil') ?? undefined}
+                      width="100%"
+                      height="280"
+                      style={{ border: 0 }}
+                      allowFullScreen
+                      loading="lazy"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                      title="Prévia do mapa"
+                    />
+                  ) : (
+                    <div className="flex h-[180px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/90 text-muted-foreground">
+                        <MapPin className="h-5 w-5" />
+                      </div>
+                      <p>Cole o link acima para visualizar o mapa</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={settingsCardClassName}>
+            <CardHeader className="space-y-0 pb-2">
+              <div className="flex items-start gap-3">
+                <div className={settingsBadgeClassName}>
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-lg">Formas de pagamento</CardTitle>
+                  <CardDescription>Selecione quais formas de pagamento são aceitas.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div>
+                {PAYMENT_OPTIONS.map((option, index) => {
+                  const Icon = option.icon;
+
+                  return (
+                    <div
+                      key={option.key}
+                      className={cn(
+                        'flex items-center justify-between gap-4 py-4',
+                        index < PAYMENT_OPTIONS.length - 1 && 'border-b border-[rgba(0,0,0,0.08)]',
+                      )}
+                    >
+                      <Label htmlFor={`pay-${option.key}`} className="flex flex-1 cursor-pointer items-center gap-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold text-foreground">{option.label}</div>
+                          <div className="text-sm text-muted-foreground">{option.description}</div>
+                        </div>
+                      </Label>
+                      <Switch
+                        id={`pay-${option.key}`}
+                        checked={!!payments[option.key]}
+                        onCheckedChange={(checked) => setPayments((current) => ({ ...current, [option.key]: checked }))}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {section === 'pagina-publica' && (
+        <div className="space-y-4">
           <Card className={settingsCardClassName}>
             <CardHeader className="space-y-0 pb-2">
               <div className="flex items-start gap-3">
@@ -2613,107 +2728,8 @@ export default function CompanySettings() {
               </div>
             </CardContent>
           </Card>}
-        </TabsContent>
-
-        <TabsContent value="location">
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <MapPin className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Localização</CardTitle>
-                  <CardDescription>Endereço e mapa exibidos na página pública.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="company-settings-address">Endereço completo</Label>
-                <Textarea
-                  id="company-settings-address"
-                  name="address"
-                  value={address}
-                  onChange={(event) => setAddress(event.target.value)}
-                  placeholder={'Rua Exemplo, 123\nBairro, Cidade - UF, 00000-000'}
-                  rows={3}
-                  className={settingsTextAreaClassName}
-                  autoComplete="street-address"
-                />
-                <p className="text-xs text-muted-foreground">
-                  A primeira linha aparece em destaque na página pública. Use uma quebra de linha para separar o restante (bairro, cidade, CEP).
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="company-settings-google-maps">Link do Google Maps (embed)</Label>
-                <Input
-                  id="company-settings-google-maps"
-                  name="google_maps_url"
-                  type="url"
-                  value={googleMapsUrl}
-                  onChange={(event) => setGoogleMapsUrl(event.target.value)}
-                  placeholder="https://www.google.com/maps/embed?pb=..."
-                  className={settingsFieldClassName}
-                  autoComplete="url"
-                  inputMode="url"
-                  spellCheck={false}
-                />
-                <p className="text-xs text-muted-foreground">
-                  No Google Maps: "Compartilhar" -&gt; "Incorporar mapa" -&gt; copie o valor do atributo{' '}
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">src</span> do iframe gerado.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="company-settings-google-review">Link de avaliacao no Google</Label>
-                <Input
-                  id="company-settings-google-review"
-                  name="google_review_url"
-                  type="url"
-                  value={googleReviewUrl}
-                  onChange={(event) => setGoogleReviewUrl(event.target.value)}
-                  placeholder="https://g.page/r/.../review"
-                  className={settingsFieldClassName}
-                  autoComplete="url"
-                  inputMode="url"
-                  spellCheck={false}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Usado na pesquisa de satisfacao para convidar clientes com nota 9 ou 10 a avaliar a empresa no Google.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Prévia do mapa</Label>
-                <div className="overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-muted/15">
-                  {getGoogleMapsEmbedUrl(googleMapsUrl, address || 'Brasil') ? (
-                    <iframe
-                      src={getGoogleMapsEmbedUrl(googleMapsUrl, address || 'Brasil') ?? undefined}
-                      width="100%"
-                      height="280"
-                      style={{ border: 0 }}
-                      allowFullScreen
-                      loading="lazy"
-                      sandbox="allow-scripts allow-same-origin allow-popups"
-                      title="Prévia do mapa"
-                    />
-                  ) : (
-                    <div className="flex h-[180px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/90 text-muted-foreground">
-                        <MapPin className="h-5 w-5" />
-                      </div>
-                      <p>Cole o link acima para visualizar o mapa</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-      </Tabs>
+        </div>
+      )}
     </div>
   );
 }

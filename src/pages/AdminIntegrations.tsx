@@ -216,7 +216,7 @@ export default function AdminIntegrations() {
                 Asaas — mensalidades da plataforma
               </CardTitle>
               <CardDescription className="mt-1 max-w-2xl">
-                Conexão global usada somente para consultar as cobranças da Plug Guest. O fluxo de pagamentos das reservas permanece separado.
+                Conexão global usada somente para consultar as cobranças da Plugue Guest. O fluxo de pagamentos das reservas permanece separado.
               </CardDescription>
             </div>
             {asaasConfigQuery.isError ? (
@@ -373,7 +373,7 @@ export default function AdminIntegrations() {
                 Esta ação não cria, altera ou exclui nada no Asaas.
               </span>
               <span className="block">
-                No Plug Guest, o Financeiro será desativado e deixará de aparecer temporariamente para os clientes. O cache local de faturas será limpo e todos os Customer IDs precisarão ser revalidados antes de habilitar o módulo novamente.
+                No Plugue Guest, o Financeiro será desativado e deixará de aparecer temporariamente para os clientes. O cache local de faturas será limpo e todos os Customer IDs precisarão ser revalidados antes de habilitar o módulo novamente.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

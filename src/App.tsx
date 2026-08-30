@@ -632,6 +632,17 @@ const App = () => (
                 }
               />
               <Route
+                path="/:slug/admin/configuracoes/:section"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "operator", "superadmin"]}
+                    requiredCompanyPermission="settings_view"
+                  >
+                    <CompanySettings />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
                 path="/:slug/admin/fila"
                 element={
                   <CompanyAdminRoute

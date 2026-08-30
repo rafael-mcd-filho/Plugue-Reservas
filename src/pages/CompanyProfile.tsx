@@ -26,6 +26,7 @@ import {
   useForceSkipCompanyDeletionTeardown,
   useRequestCompanyDeletion,
   useUpdateCompany,
+  COMPANY_DELETION_REQUEST_STATUS_LABEL,
   Company,
   CompanyStatus,
 } from '@/hooks/useCompanies';

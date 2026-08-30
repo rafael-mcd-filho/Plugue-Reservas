@@ -36,6 +36,7 @@ import {
   toBrazilWhatsAppNumber,
 } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
+import { useSystemBranding } from '@/hooks/useSettings';
 import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { normalizePublicHeroMediaUrls } from '@/lib/publicHeroMedia';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
@@ -483,13 +484,17 @@ export default function CompanyPublicPage() {
     () => typeof window !== 'undefined' && window.innerWidth >= 768,
   );
 
+  // O nome da marca vem das configuracoes do sistema; a constante é so o fallback.
+  const { data: systemBranding } = useSystemBranding();
+  const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
+
   const { data: company, isLoading, error } = useQuery({
     queryKey: ['company-public', slug],
     queryFn: async () => {
       const prefetchedCompany = getPrefetchedPublicCompany(slug!);
       if (prefetchedCompany) {
         try {
-          return await prefetchedCompany as Company | null;
+          return await prefetchedCompany as unknown as Company | null;
         } catch {
           // A falha do atalho nao deve impedir o fallback oficial do cliente.
         }
@@ -498,7 +503,7 @@ export default function CompanyPublicPage() {
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
 
       if (!rpcResult.error) {
-        const rows = (rpcResult.data ?? []) as Company[];
+        const rows = (rpcResult.data ?? []) as unknown as Company[];
         return rows.length > 0 ? rows[0] : null;
       }
 
@@ -680,13 +685,18 @@ export default function CompanyPublicPage() {
 
     const canonicalUrl = `${window.location.origin}${window.location.pathname}`;
     const descriptionText = richTextToPlainText(company.description);
-    const seoTitle = `Reservar mesa no ${company.name} | ${DEFAULT_SYSTEM_NAME}`;
+    const seoTitle = `Reservas | ${company.name}`;
+    // A aba fica curta, mas o card compartilhado ganha o texto que descreve a ação.
+    const shareTitle = `Reservar mesa no ${company.name}`;
     const seoDescription = truncateSeoText(
       descriptionText
         ? descriptionText
         : `Página de reserva do ${company.name}${company.address ? ` em ${flattenAddress(company.address)}` : ''}. Consulte horários, localização e faça sua reserva online.`,
     );
-    const seoImage = toAbsoluteUrl(company.logo_url);
+    // A foto do banner preenche o card; a logo costuma ser quadrada e com fundo transparente.
+    const shareImageSource = (showHeroMedia && heroMediaType === 'image' ? heroMediaUrls[0] : null)
+      || company.logo_url;
+    const seoImage = toAbsoluteUrl(shareImageSource);
     const sameAs = [instagramUrl, googleMapsSearchUrl].filter(Boolean) as string[];
     const openingHoursSpecification = openingHours
       .map((hour) => {
@@ -705,24 +715,24 @@ export default function CompanyPublicPage() {
     document.title = seoTitle;
     upsertCanonical(canonicalUrl);
     upsertMeta('name', 'description', seoDescription);
-    upsertMeta('name', 'author', DEFAULT_SYSTEM_NAME);
+    upsertMeta('name', 'author', systemName);
     upsertMeta('name', 'robots', 'index, follow');
-    upsertMeta('property', 'og:title', seoTitle);
+    upsertMeta('property', 'og:title', shareTitle);
     upsertMeta('property', 'og:description', seoDescription);
-    upsertMeta('property', 'og:site_name', DEFAULT_SYSTEM_NAME);
+    upsertMeta('property', 'og:site_name', systemName);
     upsertMeta('property', 'og:type', 'website');
     upsertMeta('property', 'og:locale', 'pt_BR');
     upsertMeta('property', 'og:url', canonicalUrl);
     upsertMeta('name', 'twitter:card', seoImage ? 'summary_large_image' : 'summary');
-    upsertMeta('name', 'twitter:title', seoTitle);
+    upsertMeta('name', 'twitter:title', shareTitle);
     upsertMeta('name', 'twitter:description', seoDescription);
 
     if (seoImage) {
       upsertMeta('property', 'og:image', seoImage);
       upsertMeta('property', 'og:image:secure_url', seoImage);
-      upsertMeta('property', 'og:image:alt', `Logo do ${company.name}`);
+      upsertMeta('property', 'og:image:alt', shareTitle);
       upsertMeta('name', 'twitter:image', seoImage);
-      upsertMeta('name', 'twitter:image:alt', `Logo do ${company.name}`);
+      upsertMeta('name', 'twitter:image:alt', shareTitle);
     } else {
       removeMeta('property', 'og:image');
       removeMeta('property', 'og:image:secure_url');
@@ -755,16 +765,16 @@ export default function CompanyPublicPage() {
     }));
 
     return () => {
-      document.title = DEFAULT_SYSTEM_NAME;
+      document.title = systemName;
       upsertMeta('name', 'description', DEFAULT_SEO_DESCRIPTION);
-      upsertMeta('name', 'author', DEFAULT_SYSTEM_NAME);
+      upsertMeta('name', 'author', systemName);
       upsertMeta('name', 'robots', 'index, follow');
-      upsertMeta('property', 'og:title', DEFAULT_SYSTEM_NAME);
+      upsertMeta('property', 'og:title', systemName);
       upsertMeta('property', 'og:description', DEFAULT_SEO_DESCRIPTION);
-      upsertMeta('property', 'og:site_name', DEFAULT_SYSTEM_NAME);
+      upsertMeta('property', 'og:site_name', systemName);
       upsertMeta('property', 'og:type', 'website');
       upsertMeta('name', 'twitter:card', 'summary_large_image');
-      upsertMeta('name', 'twitter:title', DEFAULT_SYSTEM_NAME);
+      upsertMeta('name', 'twitter:title', systemName);
       upsertMeta('name', 'twitter:description', DEFAULT_SEO_DESCRIPTION);
       removeMeta('property', 'og:locale');
       removeMeta('property', 'og:url');
@@ -776,7 +786,18 @@ export default function CompanyPublicPage() {
       removeCanonical();
       removeJsonLd();
     };
-  }, [company, customPublicPageEnabled, googleMapsSearchUrl, instagramUrl, openingHours, slug]);
+  }, [
+    company,
+    customPublicPageEnabled,
+    googleMapsSearchUrl,
+    heroMediaType,
+    heroMediaUrls,
+    instagramUrl,
+    openingHours,
+    showHeroMedia,
+    slug,
+    systemName,
+  ]);
 
   if (isLoading) {
     return <PublicPageSkeleton />;

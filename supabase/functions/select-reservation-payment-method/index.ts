@@ -148,7 +148,7 @@ async function handlePixPayment(
   }
 
   const customerPayload = {
-    name: reservation.guest_name?.trim() || "Cliente Plug Guest",
+    name: reservation.guest_name?.trim() || "Cliente Plugue Guest",
     cpfCnpj,
     mobilePhone: cleanDigits(reservation.guest_phone) || undefined,
     email: reservation.guest_email?.trim() || undefined,
@@ -292,7 +292,7 @@ async function handleCardPayment(
         const registered = await ensureAsaasAccountSite(
           apiToken,
           appUrl,
-          company.name || "Plug Guest",
+          company.name || "Plugue Guest",
         );
         if (registered) {
           try {

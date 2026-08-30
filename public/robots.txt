@@ -1,14 +1,27 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
 User-agent: *
 Allow: /
+
+# Painel e autenticacao: exigem login e nao tem conteudo indexavel.
+Disallow: /login
+Disallow: /cadastro
+Disallow: /redefinir-senha
+Disallow: /acesso-negado
+Disallow: /dashboard
+Disallow: /empresas
+Disallow: /usuarios
+Disallow: /configuracoes
+Disallow: /notificacoes
+Disallow: /logs
+Disallow: /integracoes
+Disallow: /financeiro
+Disallow: /perfil
+Disallow: /saude
+Disallow: /*/admin
+
+# Links com codigo ou token pessoal: nao devem entrar em indice de busca.
+Disallow: /*/reserva/
+Disallow: /*/avaliacao/
+Disallow: /*/fila/
+Disallow: /pagamento/
+
+Sitemap: https://plugguest.com.br/sitemap.xml

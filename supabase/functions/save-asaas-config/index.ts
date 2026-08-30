@@ -28,7 +28,7 @@ async function tryRegisterAsaasSite(
       .select("name")
       .eq("id", companyId)
       .maybeSingle();
-    const companyName = (company?.name as string | undefined) || "Plug Guest";
+    const companyName = (company?.name as string | undefined) || "Plugue Guest";
     await ensureAsaasAccountSite(apiToken, appUrl, companyName);
   } catch (error) {
     console.warn("tryRegisterAsaasSite failed", error);

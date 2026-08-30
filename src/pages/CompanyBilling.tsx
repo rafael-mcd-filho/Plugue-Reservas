@@ -216,8 +216,8 @@ export function CompanyBillingView({
             </h2>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
               {!moduleStatus?.enabled
-                ? 'O módulo ainda não foi habilitado pela Plug Guest. Nenhuma ação é necessária por enquanto.'
-                : 'As cobranças desta empresa ainda não foram liberadas pela Plug Guest. Nenhuma fatura ou total será exibido até a ativação.'}
+                ? 'O módulo ainda não foi habilitado pela Plugue Guest. Nenhuma ação é necessária por enquanto.'
+                : 'As cobranças desta empresa ainda não foram liberadas pela Plugue Guest. Nenhuma fatura ou total será exibido até a ativação.'}
             </p>
           </CardContent>
         </Card>
@@ -247,8 +247,8 @@ export function CompanyBillingView({
             </h2>
             <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
               {effectiveLinkStatus === 'error'
-                ? 'A Plug Guest foi notificada para revisar a conexão desta unidade com o Asaas. A operação do sistema não é afetada.'
-                : 'A Plug Guest ainda está vinculando as cobranças desta unidade. Quando a configuração for concluída, suas faturas aparecerão aqui automaticamente.'}
+                ? 'A Plugue Guest foi notificada para revisar a conexão desta unidade com o Asaas. A operação do sistema não é afetada.'
+                : 'A Plugue Guest ainda está vinculando as cobranças desta unidade. Quando a configuração for concluída, suas faturas aparecerão aqui automaticamente.'}
             </p>
           </CardContent>
         </Card>
@@ -334,7 +334,7 @@ export function CompanyBillingView({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-primary" />
-              Faturas da Plug Guest
+              Faturas da Plugue Guest
             </CardTitle>
             <span className="text-xs text-muted-foreground">Atualizado em {formatDateTime(effectiveLastSyncedAt)}</span>
           </div>
@@ -370,7 +370,7 @@ export function CompanyBillingView({
                       return (
                         <TableRow key={invoice.id}>
                           <TableCell>
-                            <p className="truncate font-medium">{invoice.description || 'Mensalidade Plug Guest'}</p>
+                            <p className="truncate font-medium">{invoice.description || 'Mensalidade Plugue Guest'}</p>
                             {invoice.paymentDate && (
                               <p className="mt-0.5 text-xs text-muted-foreground">Pago em {formatDate(invoice.paymentDate)}</p>
                             )}
@@ -426,7 +426,7 @@ export function CompanyBillingView({
                       <div className="flex min-w-0 items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <h3 className="break-words text-sm font-semibold leading-snug [overflow-wrap:anywhere]">
-                            {invoice.description || 'Mensalidade Plug Guest'}
+                            {invoice.description || 'Mensalidade Plugue Guest'}
                           </h3>
                         </div>
                         <div className="shrink-0">

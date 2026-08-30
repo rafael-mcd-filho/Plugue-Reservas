@@ -16,9 +16,12 @@ interface PublicCompanyPreview {
   description: string | null;
   logo_url: string | null;
   address: string | null;
+  hero_media_urls: string[] | null;
+  hero_media_type: string | null;
 }
 
-const DEFAULT_SYSTEM_NAME = 'Plug Guest';
+// Mantido em sincronia com src/lib/branding.ts (a função roda fora do bundle do app).
+const DEFAULT_SYSTEM_NAME = 'Plugue Guest';
 const DEFAULT_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_SUPABASE_URL = 'https://hdpxqqiudiotanrybvcf.supabase.co';
@@ -33,7 +36,7 @@ function getHeader(headers: PreviewRequest['headers'], key: string) {
 function getOrigin(request: PreviewRequest) {
   const host = getHeader(request.headers, 'x-forwarded-host') ?? getHeader(request.headers, 'host') ?? '';
   const proto = getHeader(request.headers, 'x-forwarded-proto') ?? 'https';
-  return host ? `${proto}://${host}` : 'https://plugue-reservas.vercel.app';
+  return host ? `${proto}://${host}` : 'https://plugguest.com.br';
 }
 
 function getSlug(request: PreviewRequest) {
@@ -96,7 +99,7 @@ async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> 
 
   const url = new URL('/rest/v1/companies_public', supabaseUrl);
   url.searchParams.set('slug', `eq.${slug}`);
-  url.searchParams.set('select', 'name,description,logo_url,address');
+  url.searchParams.set('select', 'name,description,logo_url,address,hero_media_urls,hero_media_type');
   url.searchParams.set('limit', '1');
 
   const response = await fetch(url, {
@@ -114,16 +117,23 @@ async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> 
 
 function renderPreviewHtml({
   title,
+  shareTitle,
   description,
   canonicalUrl,
   imageUrl,
+  logoUrl,
 }: {
   title: string;
+  shareTitle: string;
   description: string;
   canonicalUrl: string;
   imageUrl: string | null;
+  logoUrl: string | null;
 }) {
   const safeTitle = escapeHtml(title);
+  const safeShareTitle = escapeHtml(shareTitle);
+  // O ícone da prévia continua sendo a logo, mesmo quando o card usa a foto do banner.
+  const safeLogoUrl = logoUrl ? escapeHtml(logoUrl) : null;
   const safeDescription = escapeHtml(description);
   const safeCanonicalUrl = escapeHtml(canonicalUrl);
   const safeImageUrl = imageUrl ? escapeHtml(imageUrl) : null;
@@ -135,7 +145,7 @@ function renderPreviewHtml({
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${safeTitle}</title>
     <meta name="description" content="${safeDescription}" />
-    <meta property="og:title" content="${safeTitle}" />
+    <meta property="og:title" content="${safeShareTitle}" />
     <meta property="og:description" content="${safeDescription}" />
     <meta property="og:site_name" content="${DEFAULT_SYSTEM_NAME}" />
     <meta property="og:type" content="website" />
@@ -143,19 +153,19 @@ function renderPreviewHtml({
     <meta property="og:url" content="${safeCanonicalUrl}" />
     ${safeImageUrl ? `<meta property="og:image" content="${safeImageUrl}" />
     <meta property="og:image:secure_url" content="${safeImageUrl}" />
-    <meta property="og:image:alt" content="${safeTitle}" />
+    <meta property="og:image:alt" content="${safeShareTitle}" />
     <meta name="twitter:image" content="${safeImageUrl}" />
-    <meta name="twitter:image:alt" content="${safeTitle}" />
-    <link rel="icon" href="${safeImageUrl}" />
-    <link rel="shortcut icon" href="${safeImageUrl}" />
-    <link rel="apple-touch-icon" href="${safeImageUrl}" />` : ''}
+    <meta name="twitter:image:alt" content="${safeShareTitle}" />` : ''}
+    ${safeLogoUrl ? `<link rel="icon" href="${safeLogoUrl}" />
+    <link rel="shortcut icon" href="${safeLogoUrl}" />
+    <link rel="apple-touch-icon" href="${safeLogoUrl}" />` : ''}
     <meta name="twitter:card" content="${safeImageUrl ? 'summary_large_image' : 'summary'}" />
-    <meta name="twitter:title" content="${safeTitle}" />
+    <meta name="twitter:title" content="${safeShareTitle}" />
     <meta name="twitter:description" content="${safeDescription}" />
     <link rel="canonical" href="${safeCanonicalUrl}" />
   </head>
   <body>
-    <a href="${safeCanonicalUrl}">${safeTitle}</a>
+    <a href="${safeCanonicalUrl}">${safeShareTitle}</a>
   </body>
 </html>`;
 }
@@ -165,10 +175,19 @@ export default async function handler(request: PreviewRequest, response: Preview
   const slug = getSlug(request);
   const canonicalUrl = slug ? `${origin}/${slug}` : origin;
   const company = slug ? await fetchCompany(slug) : null;
+  // A foto do banner preenche o card; a logo entra só como reserva.
+  const heroImage = company?.hero_media_type === 'image'
+    ? company.hero_media_urls?.find((url) => !!url) ?? null
+    : null;
   const companyLogo = toAbsoluteUrl(company?.logo_url, origin);
+  const companyImage = toAbsoluteUrl(heroImage, origin) ?? companyLogo;
   const companyDescription = richTextToPlainText(company?.description);
+  // Mesmos textos de CompanyPublicPage: aba curta, card descritivo.
   const title = company
-    ? `Reservar mesa no ${company.name} | ${DEFAULT_SYSTEM_NAME}`
+    ? `Reservas | ${company.name}`
+    : DEFAULT_SYSTEM_NAME;
+  const shareTitle = company
+    ? `Reservar mesa no ${company.name}`
     : DEFAULT_SYSTEM_NAME;
   const description = company
     ? truncateSeoText(
@@ -183,8 +202,10 @@ export default async function handler(request: PreviewRequest, response: Preview
   response.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
   response.send(renderPreviewHtml({
     title,
+    shareTitle,
     description,
     canonicalUrl,
-    imageUrl: companyLogo,
+    imageUrl: companyImage,
+    logoUrl: companyLogo,
   }));
 }
