@@ -519,7 +519,7 @@ export function normalizeCompanyBillingInvoice(row: CompanyBillingInvoiceRow): C
     asaasPaymentId: row.asaas_payment_id,
     asaasCustomerId: row.asaas_customer_id,
     asaasSubscriptionId: row.asaas_subscription_id ?? null,
-    description: row.description || 'Mensalidade PlugueGuest',
+    description: row.description || 'Mensalidade Plug Guest',
     status: String(row.status || '').toUpperCase() as AsaasPaymentStatus,
     value: toPlatformBillingNumber(row.value),
     dueDate: row.due_date,

@@ -1,6 +1,6 @@
-# PlugueGuest platform billing (read-only) deploy runbook
+# Plug Guest platform billing (read-only) deploy runbook
 
-This module mirrors PlugueGuest SaaS invoices from a single global Asaas
+This module mirrors Plug Guest SaaS invoices from a single global Asaas
 account. It is independent from the existing per-company Asaas reservation
 prepayment flow.
 

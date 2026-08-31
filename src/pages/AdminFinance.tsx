@@ -269,7 +269,7 @@ export default function AdminFinance() {
                   {!moduleStatus?.available
                     ? 'A página está pronta, mas as tabelas e funções financeiras ainda não estão disponíveis neste ambiente.'
                     : !config?.configured
-                      ? 'Cadastre e valide o token global. Nenhuma cobrança será criada ou alterada pelo Plugue Guest.'
+                      ? 'Cadastre e valide o token global. Nenhuma cobrança será criada ou alterada pelo Plug Guest.'
                       : 'Os clientes ainda não veem o módulo. O superadmin pode revisar vínculos e abrir uma prévia por empresa antes da ativação.'}
                 </p>
               </div>

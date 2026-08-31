@@ -13,7 +13,7 @@ Este repositorio implementa uma plataforma multi-tenant de reservas para restaur
 - integracao com Evolution API para automacoes via WhatsApp;
 - funil de conversao, fila de espera, leads e monitoramento operacional.
 
-O nome exibido no produto e configuravel via `system_settings`, com fallback atual para `Plugue Guest`.
+O nome exibido no produto e configuravel via `system_settings`, com fallback atual para `Plug Guest`.
 
 ## Stack Tecnica
 

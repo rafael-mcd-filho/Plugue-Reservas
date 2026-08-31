@@ -1,10 +1,10 @@
-export const DEFAULT_SYSTEM_NAME = 'Plugue Guest';
+export const DEFAULT_SYSTEM_NAME = 'Plug Guest';
 
 const LEGACY_SYSTEM_NAMES = new Set([
   'ReservaFacil',
   'ReservaFácil',
   'PlugGuest',
-  'Plug Guest',
+  'Plugue Guest',
   'Plugue Reservas',
 ]);
 

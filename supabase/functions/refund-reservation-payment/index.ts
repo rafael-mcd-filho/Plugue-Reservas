@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
     const paymentToken = typeof body.payment_token === "string" ? body.payment_token : null;
     const description = typeof body.description === "string" && body.description.trim()
       ? body.description.trim().slice(0, 255)
-      : "Estorno solicitado pelo painel Plugue Guest";
+      : "Estorno solicitado pelo painel Plug Guest";
     const requestedValue = Number(body.value ?? 0);
 
     if (!companyId) return jsonResponse({ error: "Empresa obrigatoria" }, 400);
