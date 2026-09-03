@@ -1,6 +1,8 @@
 -- PGlite regression harness.
--- Apply 20260819110000_add_company_billing_overdue_warning.sql at the marker,
--- then run the fixtures and assertions below it. No production data is used.
+-- Apply 20260819110000_add_company_billing_overdue_warning.sql and the warning
+-- portion of 20260903120000_change_billing_overdue_warning_to_three_days.sql at
+-- the marker, then run the fixtures and assertions below it. No production data
+-- is used.
 
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
@@ -230,14 +232,14 @@ BEGIN
 END;
 $$;
 
--- Five overdue days, paid/cancelled old invoices and a future open invoice do
+-- Two overdue days, paid/cancelled old invoices and a future open invoice do
 -- not qualify. This also exercises admin access.
 INSERT INTO public.company_billing_invoices (id, company_id, status, due_date)
 SELECT
   '30000000-0000-4000-8000-000000000001'::uuid,
   '20000000-0000-4000-8000-000000000001'::uuid,
   'PENDING',
-  (now() AT TIME ZONE 'America/Fortaleza')::date - 5
+  (now() AT TIME ZONE 'America/Fortaleza')::date - 2
 UNION ALL
 SELECT
   '30000000-0000-4000-8000-000000000002'::uuid,
@@ -277,12 +279,12 @@ BEGIN
   IF _billing_enabled IS DISTINCT FROM true
     OR _show_warning IS DISTINCT FROM false
   THEN
-    RAISE EXCEPTION 'Five-day/paid/cancelled/future fixture was misclassified';
+    RAISE EXCEPTION 'Two-day/paid/cancelled/future fixture was misclassified';
   END IF;
 END;
 $$;
 
--- The exact six-day boundary qualifies for every supported open status.
+-- The exact three-day boundary qualifies for every supported open status.
 DO $$
 DECLARE
   _status text;
@@ -297,7 +299,7 @@ BEGIN
     UPDATE public.company_billing_invoices
     SET
       status = _status,
-      due_date = (now() AT TIME ZONE 'America/Fortaleza')::date - 6
+      due_date = (now() AT TIME ZONE 'America/Fortaleza')::date - 3
     WHERE id = '30000000-0000-4000-8000-000000000001';
 
     SELECT warning.show_overdue_warning
@@ -307,7 +309,7 @@ BEGIN
     ) AS warning;
 
     IF _show_warning IS DISTINCT FROM true THEN
-      RAISE EXCEPTION 'Open status % failed at the six-day boundary', _status;
+      RAISE EXCEPTION 'Open status % failed at the three-day boundary', _status;
     END IF;
   END LOOP;
 END;

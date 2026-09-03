@@ -26,7 +26,7 @@ export default function OverdueBillingBanner({
             className="mt-0.5 h-4 w-4 shrink-0 sm:mt-0"
           />
           <p className="min-w-0 text-sm font-medium leading-snug">
-            Há faturas vencidas há 6 dias ou mais. Regularize o pagamento para evitar a suspensão da conta.
+            Há faturas vencidas há 3 dias ou mais. Regularize o pagamento para evitar a suspensão da conta.
           </p>
         </div>
 

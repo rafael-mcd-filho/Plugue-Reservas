@@ -309,7 +309,7 @@ export default function AdminIntegrations() {
                 <div>
                   <Label htmlFor="platform-billing-enabled" className="cursor-pointer font-semibold">Exibir Financeiro nas empresas</Label>
                   <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                    Quando ativo, empresas vinculadas passam a visualizar faturas, badge de atraso e o aviso após seis dias completos.
+                    Quando ativo, empresas vinculadas passam a visualizar faturas, badge de atraso e o aviso após três dias completos.
                   </p>
                 </div>
                 <Switch

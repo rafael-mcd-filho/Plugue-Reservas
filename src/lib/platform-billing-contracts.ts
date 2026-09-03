@@ -1,6 +1,6 @@
 export const PLATFORM_BILLING_DESCRIPTION_MARKER = '[PLUGUEGUEST]' as const;
 export const PLATFORM_BILLING_SYNC_INTERVAL_HOURS = 4 as const;
-export const PLATFORM_BILLING_OVERDUE_POPUP_DAYS = 6 as const;
+export const PLATFORM_BILLING_OVERDUE_POPUP_DAYS = 3 as const;
 
 export type PlatformBillingEnvironment = 'sandbox' | 'production';
 export type CompanyBillingLinkStatus = 'pending_validation' | 'active' | 'error' | 'disabled';

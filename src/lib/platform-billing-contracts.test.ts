@@ -17,7 +17,7 @@ describe('platform-billing-contracts', () => {
   it('keeps the rollout constants fixed', () => {
     expect(PLATFORM_BILLING_DESCRIPTION_MARKER).toBe('[PLUGUEGUEST]');
     expect(PLATFORM_BILLING_SYNC_INTERVAL_HOURS).toBe(4);
-    expect(PLATFORM_BILLING_OVERDUE_POPUP_DAYS).toBe(6);
+    expect(PLATFORM_BILLING_OVERDUE_POPUP_DAYS).toBe(3);
   });
 
   it('exposes only masked token metadata to the frontend', () => {

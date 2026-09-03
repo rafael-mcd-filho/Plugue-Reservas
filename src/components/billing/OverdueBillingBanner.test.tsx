@@ -29,7 +29,7 @@ describe('OverdueBillingBanner', () => {
     const warning = screen.getByRole('status');
     expect(warning).toHaveAttribute('aria-live', 'polite');
     expect(warning).toHaveAttribute('aria-atomic', 'true');
-    expect(warning).toHaveTextContent('Há faturas vencidas há 6 dias ou mais');
+    expect(warning).toHaveTextContent('Há faturas vencidas há 3 dias ou mais');
     expect(warning).toHaveTextContent('evitar a suspensão da conta');
     expect(screen.queryByRole('link', { name: /ver faturas/i })).not.toBeInTheDocument();
     expect(container.querySelector('svg[aria-hidden="true"]')).toBeInTheDocument();

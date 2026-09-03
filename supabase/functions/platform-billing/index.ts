@@ -528,7 +528,7 @@ function calculateSummary(
     oldest_overdue_days: oldestOverdueDays,
     next_due_date: nextDueDate,
     next_due_amount: nextDueAmount,
-    show_overdue_popup: typeof oldestOverdueDays === "number" && oldestOverdueDays >= 6,
+    show_overdue_popup: typeof oldestOverdueDays === "number" && oldestOverdueDays >= 3,
   };
 }
 

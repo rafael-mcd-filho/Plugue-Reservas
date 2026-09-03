@@ -210,7 +210,7 @@ batch (at most the already-running batch of four requests can finish).
 6. Verify an admin from another company cannot access the pilot company.
 7. Exercise the manual-sync five-minute cooldown.
 8. Confirm amounts, due dates and paid statuses in the company panel.
-9. Test the six-day overdue threshold using the `America/Fortaleza` date.
+9. Test the three-day overdue threshold using the `America/Fortaleza` date.
 10. Save/set the Production token; this intentionally disables the module and
     invalidates Sandbox links/cache.
 11. Revalidate Production Customer IDs, run manual pilot syncs and compare.
