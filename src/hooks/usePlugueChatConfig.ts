@@ -22,6 +22,7 @@ export interface PlugueChatTemplate {
   enabled: boolean;
   template_id: string;
   template_name: string | null;
+  post_visit_include_review_link?: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +103,7 @@ export function useUpsertPlugueChatTemplate() {
       enabled: boolean;
       template_id: string;
       template_name?: string | null;
+      post_visit_include_review_link?: boolean | null;
     }) => {
       const { error } = await supabase
         .from('pluguechat_automation_templates' as any)

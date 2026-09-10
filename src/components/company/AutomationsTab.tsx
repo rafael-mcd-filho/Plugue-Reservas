@@ -16,6 +16,8 @@ import WhatsAppMessageHistory from './WhatsAppMessageHistory';
 import { type AutomationSetting, useAutomationSettings, useUpsertAutomation } from '@/hooks/useAutomations';
 import { useWhatsAppChannel } from '@/hooks/useWhatsAppChannel';
 import { WHATSAPP_AUTOMATIONS } from '@/lib/whatsapp-automations';
+import { useCompanyNpsActivation } from '@/hooks/useCompanyNpsActivation';
+import PostVisitReviewAvailability from './PostVisitReviewAvailability';
 
 interface Props {
   companyId: string;
@@ -42,6 +44,8 @@ function buildAutomationState(automations: AutomationSetting[] | undefined): Aut
 export default function AutomationsTab({ companyId }: Props) {
   const { data: channel, isLoading: channelLoading } = useWhatsAppChannel(companyId);
   const isPlugueChat = channel === 'pluguechat_official';
+  const { data: npsConfig, isPending: npsLoading, isError: npsError } = useCompanyNpsActivation(companyId);
+  const reviewsAvailable = !npsLoading && !npsError && npsConfig?.enabled === true;
 
   const { data: automations, isLoading: automationsLoading } = useAutomationSettings(companyId);
   const upsertAutomation = useUpsertAutomation();
@@ -149,6 +153,7 @@ export default function AutomationsTab({ companyId }: Props) {
                           <CardDescription>{automation.description}</CardDescription>
                         </div>
                         <Switch
+                          aria-label={`Ativar ${automation.label}`}
                           checked={state.enabled}
                           disabled={upsertAutomation.isPending}
                           onCheckedChange={(checked) => void handleToggle(automation.type, checked)}
@@ -156,7 +161,7 @@ export default function AutomationsTab({ companyId }: Props) {
                       </div>
 
                       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        {automation.variables.map((variable) => (
+                        {automation.variables.filter((variable) => variable !== 'link_avaliacao' || reviewsAvailable).map((variable) => (
                           <span key={variable} className="rounded-full bg-muted px-2.5 py-1 font-medium">
                             {'{'}
                             {variable}
@@ -167,6 +172,18 @@ export default function AutomationsTab({ companyId }: Props) {
                     </CardHeader>
 
                     <CardContent className="space-y-3">
+                      {automation.type === 'post_visit' && (
+                        <div className="space-y-2">
+                          <PostVisitReviewAvailability
+                            active={reviewsAvailable} loading={npsLoading} error={npsError}
+                            usesReview={state.message_template.includes('{link_avaliacao}')}
+                          />
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            Na API não oficial, {'{link_avaliacao}'} recebe o endereço completo da avaliação.
+                            {' '}Para enviar apenas o agradecimento, não inclua essa variável nem o convite de avaliação no texto.
+                          </p>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <Label>Modelo da mensagem</Label>
                         <Textarea

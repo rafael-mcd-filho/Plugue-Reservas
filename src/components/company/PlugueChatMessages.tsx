@@ -5,17 +5,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { type PlugueChatTemplate, usePlugueChatTemplates, useUpsertPlugueChatTemplate } from '@/hooks/usePlugueChatConfig';
 import type { WhatsAppChannel } from '@/hooks/useWhatsAppChannel';
-import { PLUGUECHAT_AUTOMATIONS } from '@/lib/pluguechat-automations';
+import { getPlugueChatAutomationParameters, PLUGUECHAT_AUTOMATIONS } from '@/lib/pluguechat-automations';
+import { useCompanyNpsActivation } from '@/hooks/useCompanyNpsActivation';
+import PostVisitReviewAvailability from './PostVisitReviewAvailability';
 
 interface Props {
   companyId: string;
   activeChannel: WhatsAppChannel;
 }
 
-type TemplateLocalState = Record<string, { enabled: boolean; template_id: string; template_name: string }>;
+type TemplateLocalState = Record<string, {
+  enabled: boolean;
+  template_id: string;
+  template_name: string;
+  post_visit_include_review_link: boolean | null;
+}>;
 
 function buildTemplateState(templates: PlugueChatTemplate[] | undefined): TemplateLocalState {
   const next: TemplateLocalState = {};
@@ -26,6 +34,7 @@ function buildTemplateState(templates: PlugueChatTemplate[] | undefined): Templa
       enabled: existing?.enabled ?? false,
       template_id: existing?.template_id ?? '',
       template_name: existing?.template_name ?? '',
+      post_visit_include_review_link: existing ? existing.post_visit_include_review_link ?? null : false,
     };
   }
 
@@ -34,6 +43,8 @@ function buildTemplateState(templates: PlugueChatTemplate[] | undefined): Templa
 
 export default function PlugueChatMessages({ companyId, activeChannel }: Props) {
   const { data: templates, isLoading } = usePlugueChatTemplates(companyId);
+  const { data: npsConfig, isPending: npsLoading, isError: npsError } = useCompanyNpsActivation(companyId);
+  const reviewsAvailable = !npsLoading && !npsError && npsConfig?.enabled === true;
   const upsert = useUpsertPlugueChatTemplate();
   const [localState, setLocalState] = useState<TemplateLocalState>({});
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
@@ -54,6 +65,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
       enabled: state.enabled,
       template_id: state.template_id,
       template_name: state.template_name || null,
+      ...(type === 'post_visit' ? { post_visit_include_review_link: state.post_visit_include_review_link } : {}),
     });
   };
 
@@ -65,7 +77,11 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
     setLocalState((prev) => ({ ...prev, [type]: next }));
 
     upsert.mutate(
-      { company_id: companyId, type, enabled: checked, template_id: current.template_id, template_name: current.template_name || null },
+      {
+        company_id: companyId, type, enabled: checked,
+        template_id: current.template_id, template_name: current.template_name || null,
+        ...(type === 'post_visit' ? { post_visit_include_review_link: current.post_visit_include_review_link } : {}),
+      },
       {
         onError: () => setLocalState((prev) => ({ ...prev, [type]: current })),
       },
@@ -92,7 +108,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
       <div>
         <h3 className="text-lg font-semibold">Automações PlugueChat</h3>
         <p className="text-sm text-muted-foreground">
-          Informe o ID do template aprovado na Meta para cada automação. Os parâmetros enviados são fixos por tipo.
+          Informe o ID do template aprovado na Meta para cada automação. No pós-visita, indique se esse template usa avaliação.
         </p>
       </div>
 
@@ -113,6 +129,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                   <CardDescription>{automation.description}</CardDescription>
                 </div>
                 <Switch
+                  aria-label={`Ativar ${automation.label}`}
                   checked={state.enabled}
                   disabled={upsert.isPending}
                   onCheckedChange={(checked) => void handleToggle(automation.type, checked)}
@@ -120,9 +137,11 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
               </div>
 
               <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">Parâmetros enviados pelo sistema:</p>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {automation.type === 'post_visit' ? 'Variáveis disponíveis:' : 'Parâmetros enviados pelo sistema:'}
+                </p>
                 <div className="flex flex-wrap gap-2">
-                  {automation.parameters.map((param) => (
+                  {getPlugueChatAutomationParameters(automation.type, reviewsAvailable).map((param) => (
                     <span key={param} className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
                       {param}
                     </span>
@@ -132,6 +151,52 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
             </CardHeader>
 
             <CardContent className="space-y-3">
+              {automation.type === 'post_visit' && (
+                <div className="space-y-3">
+                  <PostVisitReviewAvailability
+                    active={reviewsAvailable} loading={npsLoading} error={npsError}
+                    usesReview={state.post_visit_include_review_link} official
+                  />
+                  <p id="post-visit-review-label" className="text-sm font-medium">Este template utiliza a variável de avaliação?</p>
+                  <RadioGroup
+                    aria-labelledby="post-visit-review-label"
+                    aria-describedby="post-visit-review-help"
+                    value={state.post_visit_include_review_link === null ? '' : state.post_visit_include_review_link ? 'with_review' : 'without_review'}
+                    disabled={upsert.isPending}
+                    onValueChange={(value) => setLocalState((prev) => ({
+                      ...prev,
+                      post_visit: { ...prev.post_visit, post_visit_include_review_link: value === 'with_review' },
+                    }))}
+                  >
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem id="post-visit-without-review" value="without_review" />
+                      <Label htmlFor="post-visit-without-review">Não — somente nome e data</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem id="post-visit-with-review" value="with_review" disabled={!reviewsAvailable} />
+                      <Label htmlFor="post-visit-with-review">Sim — inclui o código da avaliação</Label>
+                    </div>
+                  </RadioGroup>
+                  <p id="post-visit-review-help" className="text-xs leading-relaxed text-muted-foreground">
+                    Ative ou desative as avaliações somente na tela Avaliações. A escolha acima descreve o template aprovado; não ativa a funcionalidade.
+                    {' '}Ao escolher e salvar “Sim”, no PlugueChat, link_avaliacao recebe apenas o código após /avaliacao/. O endereço completo até /avaliacao/ deve estar no template aprovado, com o slug da sua empresa.
+                    {' '}Na API não oficial, a variável continua recebendo o link completo.
+                  </p>
+                  {state.post_visit_include_review_link === null ? (
+                    <p role="status" className="text-xs leading-relaxed text-warning">
+                      Configuração antiga não revisada: o envio anterior está preservado, incluindo link completo ou vazio, até escolher e salvar “Sim” ou “Não”. Confira as variáveis e o ID do template aprovado antes de mudar o formato.
+                    </p>
+                  ) : state.post_visit_include_review_link ? (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Se não houver código de avaliação, esta mensagem não será enviada com campo vazio. A coleta de avaliações precisa estar ativa no momento do check-in para gerar novos códigos.
+                    </p>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Use um template sem variável ou botão de avaliação. Nenhum código de avaliação será enviado, mesmo se já existir. Para mudar de formato, informe o ID do template correspondente e salve.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor={`tid-${automation.type}`}>Template ID</Label>

@@ -56,7 +56,7 @@ export const PLUGUECHAT_AUTOMATIONS: PlugueChatAutomationDefinition[] = [
     label: 'Pós-visita',
     description: 'Enviada no dia seguinte à visita.',
     icon: Star,
-    parameters: ['nome', 'data'],
+    parameters: ['nome', 'data', 'link_avaliacao'],
   },
   {
     type: 'no_show_message',
@@ -88,3 +88,8 @@ export const PLUGUECHAT_TYPE_LABELS: Record<string, string> = Object.fromEntries
 export const PLUGUECHAT_PARAMETER_MAP: Record<string, string[]> = Object.fromEntries(
   PLUGUECHAT_AUTOMATIONS.map((a) => [a.type, a.parameters]),
 );
+
+export function getPlugueChatAutomationParameters(type: string, includeReviewLink: boolean | null): string[] {
+  if (type === 'post_visit' && includeReviewLink === false) return ['nome', 'data'];
+  return PLUGUECHAT_PARAMETER_MAP[type] ?? [];
+}

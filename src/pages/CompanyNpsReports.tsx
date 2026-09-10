@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
+import { useCompanyNpsActivation } from '@/hooks/useCompanyNpsActivation';
 
 const PERIOD_OPTIONS = [
   { value: '30', label: 'Últimos 30 dias' },
@@ -86,11 +87,6 @@ interface ReviewDetail {
     guest_phone: string | null;
     date: string;
   } | null;
-}
-
-interface CompanyNpsConfig {
-  company_id: string;
-  enabled: boolean;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -406,20 +402,7 @@ export default function CompanyNpsReports() {
   const prevFromDate = format(subDays(new Date(), Number(period) * 2), 'yyyy-MM-dd');
   const prevToDate   = format(subDays(new Date(), Number(period) + 1), 'yyyy-MM-dd');
 
-  const { data: npsConfig, isLoading: npsConfigLoading } = useQuery<CompanyNpsConfig | null>({
-    queryKey: ['company-nps-activation', companyId],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from('company_nps_configs')
-        .select('company_id, enabled')
-        .eq('company_id', companyId!)
-        .maybeSingle();
-
-      if (error) throw error;
-      return (data ?? null) as CompanyNpsConfig | null;
-    },
-    enabled: !!companyId,
-  });
+  const { data: npsConfig, isLoading: npsConfigLoading } = useCompanyNpsActivation(companyId);
 
   const npsActive = npsConfig?.enabled ?? false;
 
@@ -600,8 +583,8 @@ export default function CompanyNpsReports() {
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {npsActive
-                ? 'Novos check-ins geram links de avaliação automaticamente.'
-                : 'A tela está liberada, mas novos check-ins ainda não geram links de avaliação.'}
+                ? 'Novos check-ins geram links de avaliação. A variável fica disponível nas duas integrações de WhatsApp; usá-la no pós-visita é opcional.'
+                : 'Novos check-ins não geram links e a variável fica indisponível nas automações. O pós-visita sem avaliação continua funcionando.'}
             </p>
           </div>
           <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-medium ${npsActive ? 'bg-success/10 text-success' : 'bg-amber-100 text-amber-800'}`}>
