@@ -163,7 +163,7 @@ describe('AutomationsTab', () => {
     expect(getPostVisitCard().queryByText('{link_avaliacao}', { exact: true })).not.toBeInTheDocument();
     expect(getPostVisitCard().getByText('{nome}', { exact: true })).toBeInTheDocument();
     expect(getPostVisitCard().getByText('{data}', { exact: true })).toBeInTheDocument();
-    expect(getPostVisitCard().getByText(/O pós-visita sem avaliação continua funcionando/)).toBeInTheDocument();
+    expect(getPostVisitCard().queryByText(/avaliaç/i)).not.toBeInTheDocument();
     expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getPostVisitCard().getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     expect(getPostVisitCard().getByRole('switch')).not.toBeDisabled();
@@ -178,14 +178,14 @@ describe('AutomationsTab', () => {
     }));
   });
 
-  it('warns about a saved review dependency when disabled without deleting the variable or disabling the automation', async () => {
+  it('hides review guidance when disabled without deleting the saved message or disabling the automation', async () => {
     useCompanyNpsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     const message = 'Olá, {nome}! Avalie sua visita: {link_avaliacao}';
     renderPostVisit(message);
 
     expect(getPostVisitCard().queryByText('{link_avaliacao}', { exact: true })).not.toBeInTheDocument();
-    expect(getPostVisitCard().getByRole('alert')).toHaveTextContent('Este modelo utiliza avaliação, mas as avaliações estão desativadas');
-    expect(getPostVisitCard().getByRole('alert')).toHaveTextContent('retirar a variável e o convite de avaliação do texto');
+    expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getPostVisitCard().queryByText(/recebe o endereço completo da avaliação/)).not.toBeInTheDocument();
     expect(getPostVisitCard().getByRole('textbox')).toHaveValue(message);
     expect(getPostVisitCard().getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     expect(mutateAsyncMock).not.toHaveBeenCalled();
@@ -197,14 +197,15 @@ describe('AutomationsTab', () => {
   });
 
   it.each([
-    { label: 'loading', isPending: true, isError: false, role: 'status', message: 'Verificando a disponibilidade' },
-    { label: 'failed refresh', isPending: false, isError: true, role: 'alert', message: 'Não foi possível consultar' },
-  ])('hides the variable when availability is $label even with a cached enabled value', ({ isPending, isError, role, message }) => {
+    { label: 'loading', isPending: true, isError: false },
+    { label: 'failed refresh', isPending: false, isError: true },
+  ])('hides all review UI when availability is $label even with a cached enabled value', ({ isPending, isError }) => {
     useCompanyNpsActivationMock.mockReturnValue({ data: { enabled: true }, isPending, isError });
     renderPostVisit();
 
     expect(getPostVisitCard().queryByText('{link_avaliacao}', { exact: true })).not.toBeInTheDocument();
-    expect(getPostVisitCard().getByRole(role)).toHaveTextContent(message);
+    expect(getPostVisitCard().queryByText(/avaliaç/i)).not.toBeInTheDocument();
+    expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getPostVisitCard().getByRole('textbox')).not.toBeDisabled();
     expect(getPostVisitCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
     expect(getPostVisitCard().getByRole('switch')).toHaveAttribute('aria-checked', 'true');
@@ -219,7 +220,8 @@ describe('AutomationsTab', () => {
     useCompanyNpsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     rerender(<AutomationsTab companyId="company-1" />);
     expect(getPostVisitCard().queryByText('{link_avaliacao}', { exact: true })).not.toBeInTheDocument();
-    expect(getPostVisitCard().getByRole('alert')).toHaveTextContent('as avaliações estão desativadas');
+    expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getPostVisitCard().queryByText(/recebe o endereço completo da avaliação/)).not.toBeInTheDocument();
     expect(getPostVisitCard().getByRole('textbox')).toHaveValue(draft);
     expect(getPostVisitCard().getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     expect(mutateAsyncMock).not.toHaveBeenCalled();
@@ -232,14 +234,14 @@ describe('AutomationsTab', () => {
     expect(mutateAsyncMock).not.toHaveBeenCalled();
   });
 
-  it('updates the dependency warning when the operator removes the variable, without modifying the text automatically', () => {
+  it('keeps review guidance hidden while the operator edits a saved message with reviews disabled', () => {
     useCompanyNpsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     renderPostVisit('Olá, {nome}! Avalie: {link_avaliacao}');
-    expect(getPostVisitCard().getByRole('alert')).toBeInTheDocument();
+    expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
 
     fireEvent.change(getPostVisitCard().getByRole('textbox'), { target: { value: 'Olá, {nome}! Obrigado pela visita.' } });
     expect(getPostVisitCard().queryByRole('alert')).not.toBeInTheDocument();
-    expect(getPostVisitCard().getByText(/O pós-visita sem avaliação continua funcionando/)).toBeInTheDocument();
+    expect(getPostVisitCard().queryByText(/recebe o endereço completo da avaliação/)).not.toBeInTheDocument();
     expect(getPostVisitCard().getByRole('textbox')).toHaveValue('Olá, {nome}! Obrigado pela visita.');
     expect(mutateAsyncMock).not.toHaveBeenCalled();
   });

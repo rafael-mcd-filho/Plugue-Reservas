@@ -14,6 +14,7 @@ Status no fechamento deste documento: migration aplicada e confirmada no histór
 - PlugueChat configurado como **Não — somente nome e data**: envia só esses dois parâmetros, independentemente da ativação das avaliações.
 - PlugueChat configurado como **Sim — inclui o código da avaliação**: envia nome, data e apenas o token após `/avaliacao/`. O endereço completo até essa parte, incluindo o slug da empresa, deve estar no template aprovado.
 - A escolha Sim/Não descreve o formato do template; não ativa avaliações. É necessário conferir o ID e as variáveis aprovadas antes de salvar. O sistema não consulta ou troca templates externos.
+- Quando as avaliações estão desativadas, carregando ou indisponíveis, toda a interface específica de avaliação fica oculta nas duas integrações: variável, explicações, avisos e escolha Sim/Não. Permanecem somente os campos normais da automação. O conteúdo e o formato previamente salvos são preservados e reaparecem sem alteração quando as avaliações voltam a ficar disponíveis.
 - No contrato novo, mensagens que precisam de avaliação só são enfileiradas se a coleta estiver ativa e existir link/token válido. Falta de configuração ou falha na consulta é sinalizada; não se envia um campo obrigatório vazio. Mensagens sem avaliação continuam.
 - A consulta de ativação é feita uma vez por lote, não por destinatário.
 

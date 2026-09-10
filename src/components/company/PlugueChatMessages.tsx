@@ -108,7 +108,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
       <div>
         <h3 className="text-lg font-semibold">Automações PlugueChat</h3>
         <p className="text-sm text-muted-foreground">
-          Informe o ID do template aprovado na Meta para cada automação. No pós-visita, indique se esse template usa avaliação.
+          Informe o ID do template aprovado na Meta para cada automação.
         </p>
       </div>
 
@@ -151,7 +151,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {automation.type === 'post_visit' && (
+              {automation.type === 'post_visit' && reviewsAvailable && (
                 <div className="space-y-3">
                   <PostVisitReviewAvailability
                     active={reviewsAvailable} loading={npsLoading} error={npsError}

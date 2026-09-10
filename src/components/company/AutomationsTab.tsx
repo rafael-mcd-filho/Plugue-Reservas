@@ -172,7 +172,7 @@ export default function AutomationsTab({ companyId }: Props) {
                     </CardHeader>
 
                     <CardContent className="space-y-3">
-                      {automation.type === 'post_visit' && (
+                      {automation.type === 'post_visit' && reviewsAvailable && (
                         <div className="space-y-2">
                           <PostVisitReviewAvailability
                             active={reviewsAvailable} loading={npsLoading} error={npsError}

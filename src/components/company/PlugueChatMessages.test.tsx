@@ -197,7 +197,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
       .toBeInTheDocument();
   });
 
-  it('keeps name/date templates usable with reviews disabled and does not let users opt into review usage', () => {
+  it('keeps name/date templates usable and hides all review UI when reviews are disabled', () => {
     npsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     renderWithTemplates([makeTemplate(false)]);
 
@@ -205,12 +205,10 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
     expect(getCard().getByText('nome', { exact: true })).toBeInTheDocument();
     expect(getCard().getByText('data', { exact: true })).toBeInTheDocument();
-    expect(getCard().getByText(/O pós-visita sem avaliação continua funcionando/)).toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
-    expect(getReviewRadios().withReview).toBeDisabled();
-    expect(getReviewRadios().withoutReview).not.toBeDisabled();
-    fireEvent.click(getReviewRadios().withReview);
-    expect(getReviewRadios().withoutReview).toHaveAttribute('aria-checked', 'true');
+    expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
+    expect(getCard().queryByText('Este template utiliza a variável de avaliação?')).not.toBeInTheDocument();
+    expect(getCard().queryByText(/No PlugueChat|Na API não oficial/)).not.toBeInTheDocument();
     expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
     expect(screen.getByRole('switch', { name: 'Ativar Pós-visita' })).not.toBeDisabled();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
@@ -220,22 +218,16 @@ describe('PlugueChatMessages post-visit review contract', () => {
     }));
   });
 
-  it.each([true, null])('warns about disabled review dependencies without rewriting the saved contract: %s', (mode) => {
+  it.each([true, null])('hides review UI when disabled without rewriting the saved contract: %s', (mode) => {
     npsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     renderWithTemplates([makeTemplate(mode)]);
 
     expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
-    expect(getCard().getByRole('alert')).toHaveTextContent(mode === true
-      ? 'Este template utiliza avaliação, mas as avaliações estão desativadas'
-      : 'Avaliações desativadas e formato deste template ainda não revisado');
-    if (mode === null) {
-      expect(getCard().getByRole('alert')).toHaveTextContent('O envio antigo está preservado');
-      expect(getCard().getByRole('status')).toHaveTextContent('até escolher e salvar');
-    }
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('status')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
+    expect(getCard().queryByText('Este template utiliza a variável de avaliação?')).not.toBeInTheDocument();
     expect(getCard().getByLabelText('Template ID')).toHaveValue('post_visit_existing');
-    expect(getReviewRadios().withReview).toHaveAttribute('aria-checked', mode === true ? 'true' : 'false');
-    expect(getReviewRadios().withoutReview).toHaveAttribute('aria-checked', 'false');
-    expect(getReviewRadios().withReview).toBeDisabled();
     expect(mutateMock).not.toHaveBeenCalled();
 
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
@@ -246,25 +238,26 @@ describe('PlugueChatMessages post-visit review contract', () => {
   });
 
   it.each([
-    { label: 'loading', isPending: true, isError: false, role: 'status', message: 'Verificando a disponibilidade' },
-    { label: 'failed refresh', isPending: false, isError: true, role: 'alert', message: 'Não foi possível consultar' },
-  ])('withholds the review variable while availability is $label, even with cached enabled state', ({ isPending, isError, role, message }) => {
+    { label: 'loading', isPending: true, isError: false },
+    { label: 'failed refresh', isPending: false, isError: true },
+  ])('hides all review UI while availability is $label, even with cached enabled state', ({ isPending, isError }) => {
     npsActivationMock.mockReturnValue({ data: { enabled: true }, isPending, isError });
     renderWithTemplates([makeTemplate(false)]);
 
     expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
-    expect(getCard().getByRole(role)).toHaveTextContent(message);
-    expect(getReviewRadios().withReview).toBeDisabled();
-    expect(getReviewRadios().withoutReview).toHaveAttribute('aria-checked', 'true');
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('status')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
     expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
     expect(mutateMock).not.toHaveBeenCalled();
   });
 
-  it('preserves the legacy contract even when review availability cannot be read', () => {
+  it('hides review UI and preserves the legacy contract when availability cannot be read', () => {
     npsActivationMock.mockReturnValue({ data: undefined, isPending: false, isError: true });
     renderWithTemplates([makeTemplate(null)]);
-    expect(getCard().getByRole('alert')).toHaveTextContent('O envio do template antigo permanece no formato anterior');
-    expect(getCard().getByRole('alert')).not.toHaveTextContent('não são enfileirados');
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('status')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
     expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({ post_visit_include_review_link: null }));
   });
@@ -278,9 +271,8 @@ describe('PlugueChatMessages post-visit review contract', () => {
     npsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
     expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
-    expect(getCard().getByRole('alert')).toHaveTextContent('as avaliações estão desativadas');
-    expect(getReviewRadios().withReview).toHaveAttribute('aria-checked', 'true');
-    expect(getReviewRadios().withReview).toBeDisabled();
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
     expect(getCard().getByLabelText('Template ID')).toHaveValue('unsaved_review_template');
     expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Unsaved draft');
     expect(mutateMock).not.toHaveBeenCalled();
