@@ -42,7 +42,7 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
-import { ReservationStatusBadge } from '@/components/StatusBadge';
+import { ReservationStatusBadge, ReservationTableBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import ReservationOperationalFilterControl from '@/components/ReservationOperationalFilterControl';
 import {
@@ -56,6 +56,7 @@ import {
   matchesReservationOperationalFilter,
   type ReservationOperationalFilter,
 } from '@/lib/reservation-operational-filter';
+import { getReservationTableBadge, type ReservationTableRef } from '@/lib/reservation-table-badge';
 import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -325,6 +326,27 @@ export default function Reservations() {
     enabled: !!companyId,
     refetchInterval: 30000,
   });
+
+  const { data: companyTables = [] } = useQuery({
+    queryKey: ['reservation-tables', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('restaurant_tables' as any)
+        .select('id, number, section')
+        .eq('company_id', companyId)
+        .order('number', { ascending: true });
+
+      if (error) throw error;
+      return (data as any[]) as Array<ReservationTableRef & { id: string }>;
+    },
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const tableById = useMemo(
+    () => new Map(companyTables.map((table) => [table.id, table] as const)),
+    [companyTables],
+  );
 
   const { data: leadCreatedAtByPhone = {}, isFetching: leadCreatedAtByPhoneLoading } = useQuery({
     queryKey: ['reservation-export-lead-created-at', companyId],
@@ -2251,6 +2273,12 @@ export default function Reservations() {
               <div className="overflow-hidden rounded-xl border border-border">
                 {dayModalReservations.map((reservation, index) => {
                   const paidPayment = getPaidReservationPayment(reservation);
+                  const tableBadge = getReservationTableBadge({
+                    tableId: reservation.table_id,
+                    table: reservation.table_id ? tableById.get(reservation.table_id) ?? null : null,
+                    createdInMode: reservation.created_in_mode,
+                    status: reservation.status,
+                  });
 
                   return (
                     <div
@@ -2282,6 +2310,7 @@ export default function Reservations() {
 
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             <ReservationStatusBadge status={reservation.status} />
+                            {tableBadge && <ReservationTableBadge badge={tableBadge} />}
                             {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                           </div>
 
@@ -2358,6 +2387,7 @@ export default function Reservations() {
                             {reservation.guest_name}
                           </span>
                           <ReservationStatusBadge status={reservation.status} />
+                          {tableBadge && <ReservationTableBadge badge={tableBadge} />}
                           {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">

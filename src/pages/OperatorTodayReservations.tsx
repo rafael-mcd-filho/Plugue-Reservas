@@ -6,7 +6,7 @@ import { AlertTriangle, Ban, CalendarCheck, CheckCircle2, ChevronDown, ChevronsD
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
-import { ReservationStatusBadge } from '@/components/StatusBadge';
+import { ReservationStatusBadge, ReservationTableBadge } from '@/components/StatusBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +26,7 @@ import { Switch } from '@/components/ui/switch';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
+import { getReservationTableBadge } from '@/lib/reservation-table-badge';
 import { cn } from '@/lib/utils';
 import type { ReservationStatus } from '@/types/restaurant';
 import { normalizeBrazilPhoneDigits, normalizePhoneDigits } from '@/lib/validation';
@@ -861,6 +862,20 @@ export default function OperatorTodayReservations() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const reservationTableById = useMemo(
+    () => new Map(tables.map((table) => [table.id, table] as const)),
+    [tables],
+  );
+
+  const getTableBadgeForReservation = (reservation: Reservation, group: ReservationSlotGroup) =>
+    getReservationTableBadge({
+      tableId: reservation.table_id,
+      table: reservation.table_id ? reservationTableById.get(reservation.table_id) ?? null : null,
+      createdInMode: reservation.created_in_mode,
+      availabilityMode: group.capacitySlot?.availabilityMode ?? null,
+      status: reservation.status,
+    });
+
   const findPendingDuplicateReservations = (checkedReservation: Reservation) => {
     const phoneMatchKey = getReservationPhoneMatchKey(checkedReservation);
     if (!phoneMatchKey) return [];
@@ -1177,8 +1192,9 @@ export default function OperatorTodayReservations() {
     duplicateNoShowMutation.mutate(duplicateNoShowReservations);
   };
 
-  const renderPendingReservationItem = (reservation: Reservation) => {
+  const renderPendingReservationItem = (reservation: Reservation, group: ReservationSlotGroup) => {
     const lateMinutes = getLateMinutes(reservation, now);
+    const tableBadge = getTableBadgeForReservation(reservation, group);
     const visibleOccasion = getVisibleOccasionLabel(reservation.occasion);
     const hasSecondaryMeta = Boolean(visibleOccasion || reservation.notes);
     const reservationActionPending = statusMutation.isPending
@@ -1227,6 +1243,7 @@ export default function OperatorTodayReservations() {
               <span className="tabular-nums">{reservation.party_size}</span>
               <Users className="h-3.5 w-3.5" />
             </span>
+            {tableBadge && <ReservationTableBadge badge={tableBadge} variant="chip" />}
             {visibleOccasion && (
               <span
                 className="max-w-[11rem] truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground sm:max-w-[14rem] sm:text-xs"
@@ -1289,7 +1306,8 @@ export default function OperatorTodayReservations() {
     );
   };
 
-  const renderProcessedReservationItem = (reservation: Reservation) => {
+  const renderProcessedReservationItem = (reservation: Reservation, group: ReservationSlotGroup) => {
+    const tableBadge = getTableBadgeForReservation(reservation, group);
     const visibleOccasion = getVisibleOccasionLabel(reservation.occasion);
     const hasSecondaryMeta = Boolean(visibleOccasion || reservation.notes);
 
@@ -1332,6 +1350,8 @@ export default function OperatorTodayReservations() {
               <span className="tabular-nums">{reservation.party_size}</span>
               <Users className="h-3.5 w-3.5" />
             </span>
+
+            {tableBadge && <ReservationTableBadge badge={tableBadge} variant="chip" />}
 
             {visibleOccasion && (
               <span
@@ -1413,7 +1433,7 @@ export default function OperatorTodayReservations() {
       listKey: string;
       emptyTitle: string;
       emptyDescription: string;
-      renderItem: (reservation: Reservation) => JSX.Element;
+      renderItem: (reservation: Reservation, group: ReservationSlotGroup) => JSX.Element;
       accent?: 'primary' | 'neutral';
     },
   ) => {
@@ -1513,7 +1533,7 @@ export default function OperatorTodayReservations() {
               {groupIsExpanded && (
                 <div className="divide-y divide-black/[0.05]">
                   {group.reservations.length > 0 ? (
-                    group.reservations.map((reservation) => options.renderItem(reservation))
+                    group.reservations.map((reservation) => options.renderItem(reservation, group))
                   ) : (
                     <div className="px-3 py-4 text-sm text-muted-foreground">
                       Nenhuma reserva nesta faixa.

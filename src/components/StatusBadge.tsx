@@ -1,4 +1,6 @@
+import { Table2 } from 'lucide-react';
 import { getReservationStatusLabel, normalizeReservationStatus, type ReservationStatusInput } from '@/lib/reservation-status';
+import type { ReservationTableBadgeInfo, ReservationTableBadgeTone } from '@/lib/reservation-table-badge';
 import { cn } from '@/lib/utils';
 import type { ReservationStatus, TableStatus } from '@/types/restaurant';
 
@@ -27,6 +29,40 @@ export function ReservationStatusBadge({ status }: { status: ReservationStatusIn
   return (
     <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', config.className)}>
       {getReservationStatusLabel(normalizedStatus)}
+    </span>
+  );
+}
+
+const reservationTableToneConfig: Record<ReservationTableBadgeTone, string> = {
+  assigned: 'bg-muted text-muted-foreground border-border',
+  unassigned: 'bg-amber-50 text-amber-800 border-amber-200',
+};
+
+// 'badge' acompanha os demais badges arredondados das listas de reservas;
+// 'chip' acompanha os chips quadrados da tela do operador.
+const reservationTableVariantConfig = {
+  badge: 'rounded-full border px-2.5 py-0.5 text-xs font-medium',
+  chip: 'rounded-md border px-1.5 py-0.5 text-[11px] font-semibold sm:text-xs',
+} as const;
+
+export function ReservationTableBadge({
+  badge,
+  variant = 'badge',
+}: {
+  badge: ReservationTableBadgeInfo;
+  variant?: keyof typeof reservationTableVariantConfig;
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1',
+        reservationTableVariantConfig[variant],
+        reservationTableToneConfig[badge.tone],
+      )}
+      title={badge.tone === 'unassigned' ? 'Reserva sem mesa atribuída' : badge.label}
+    >
+      <Table2 className="h-3 w-3" />
+      {badge.label}
     </span>
   );
 }
