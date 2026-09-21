@@ -343,7 +343,7 @@ export default function ReservationTableAssignment({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-4">
+    <div className="w-full min-w-0 max-w-full rounded-lg border border-border bg-muted/20 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
           <Table2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -383,7 +383,7 @@ export default function ReservationTableAssignment({
       )}
 
       {open && (
-        <div id={`reservation-table-selector-${reservationId}`} className="mt-3 space-y-3 border-t border-border pt-3">
+        <div id={`reservation-table-selector-${reservationId}`} className="mt-3 min-w-0 space-y-3 border-t border-border pt-3">
           <div
             className={cn(
               'rounded-md border px-2.5 py-2',
@@ -416,7 +416,7 @@ export default function ReservationTableAssignment({
             />
           </div>
 
-          <p className="flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+          <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
             <Info className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
             Cada mesa selecionada fica ocupada por inteiro.
           </p>
@@ -452,18 +452,20 @@ export default function ReservationTableAssignment({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 w-full justify-start border-success/25 bg-success-soft/50 px-2.5 text-xs text-success hover:bg-success-soft"
+                  className="h-8 min-w-0 w-full justify-start overflow-hidden border-success/25 bg-success-soft/50 px-2.5 text-xs text-success hover:bg-success-soft"
                   disabled={assignMutation.isPending}
                   onClick={applySuggestion}
                 >
                   <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />
-                  Usar sugestão · {suggestedOptions.length} {suggestedOptions.length === 1 ? 'mesa' : 'mesas'} · {suggestedCapacity} lugares
+                  <span className="min-w-0 truncate">
+                    Usar sugestão · {suggestedOptions.length} {suggestedOptions.length === 1 ? 'mesa' : 'mesas'} · {suggestedCapacity} lugares
+                  </span>
                 </Button>
               )}
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className="sr-only">Selecione as mesas desta reserva</legend>
-                <div className="grid max-h-[18rem] gap-1.5 overflow-y-auto pr-1 overscroll-contain">
+                <div className="grid min-w-0 grid-cols-1 max-h-[18rem] gap-1.5 overflow-x-hidden overflow-y-auto pr-1 overscroll-contain">
                   {displayedOptions.map((option) => {
                     const isAssigned = assignedTableIds.has(option.table_id);
                     const isSelected = draftTableIds.has(option.table_id);
@@ -479,7 +481,7 @@ export default function ReservationTableAssignment({
                         key={option.table_id}
                         htmlFor={inputId}
                         className={cn(
-                          'flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-left transition-[border-color,background-color] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1',
+                          'flex min-h-10 w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-md border px-3 py-2 text-left transition-[border-color,background-color] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1',
                           isSelected
                             ? 'border-primary/45 bg-primary-soft/45'
                             : selectable
@@ -555,7 +557,7 @@ export default function ReservationTableAssignment({
             </p>
           )}
 
-          <div className="flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:justify-between">
+          <div className="flex min-w-0 flex-col-reverse gap-2 border-t border-border pt-3 md:flex-row md:flex-wrap md:justify-between">
             <Button
               type="button"
               variant="ghost"
@@ -566,7 +568,7 @@ export default function ReservationTableAssignment({
             >
               Alocar depois
             </Button>
-            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <div className="flex min-w-0 flex-col-reverse gap-2 md:flex-row">
               <Button type="button" variant="outline" size="sm" disabled={assignMutation.isPending} onClick={cancelSelection}>
                 Cancelar
               </Button>

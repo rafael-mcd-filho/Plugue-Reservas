@@ -559,7 +559,7 @@ export default function ReservationDetailsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-4xl overflow-x-hidden overflow-y-auto">
+        <DialogContent className="max-h-[85dvh] min-w-0 w-auto max-w-none overflow-x-hidden overflow-y-auto sm:w-[calc(100vw-3rem)] sm:max-w-4xl">
           <DialogHeader className="space-y-3">
             {onBackToList && (
               <div className="flex justify-start">
@@ -607,7 +607,7 @@ export default function ReservationDetailsDialog({
               Carregando detalhes da reserva...
             </div>
           ) : reservation ? (
-            <div className="space-y-5 pt-2">
+            <div className="min-w-0 space-y-5 pt-2">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
