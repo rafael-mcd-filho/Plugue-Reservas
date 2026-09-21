@@ -69,6 +69,7 @@ function renderAvailability(
         companyId="company-1"
         date="2026-09-23"
         slot={slot}
+        canCreateReservation
         showOccupied={false}
         onShowOccupiedChange={vi.fn()}
         minSeats={0}
@@ -159,5 +160,18 @@ describe('CalendarSlotAvailability', () => {
       partySize: 4,
       remainingCapacity: 5,
     });
+  });
+
+  it('mantém a disponibilidade visível sem oferecer ações de reserva em modo somente leitura', () => {
+    const { onReserve } = renderAvailability({
+      ...tablesSlot,
+      availabilityMode: 'capacity',
+      remainingCapacity: 5,
+    }, { canCreateReservation: false });
+
+    expect(screen.getByText('5 de 186')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '2 pessoas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Outro… (até 5)' })).not.toBeInTheDocument();
+    expect(onReserve).not.toHaveBeenCalled();
   });
 });

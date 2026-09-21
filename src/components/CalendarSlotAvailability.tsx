@@ -33,6 +33,7 @@ export interface CalendarSlotAvailabilitySlot {
 
 interface CalendarSlotAvailabilityProps {
   companyId: string;
+  canCreateReservation: boolean;
   /** yyyy-MM-dd */
   date: string;
   slot: CalendarSlotAvailabilitySlot;
@@ -76,11 +77,13 @@ function CapacitySlotAvailability({
   date,
   slot,
   booking,
+  canCreateReservation,
   onReserve,
 }: {
   date: string;
   slot: CalendarSlotAvailabilitySlot;
   booking: SlotBookingState;
+  canCreateReservation: boolean;
   onReserve: (preset: ManualReservationPreset) => void;
 }) {
   const remainingCapacity = getSlotRemainingCapacity(slot);
@@ -112,35 +115,37 @@ function CapacitySlotAvailability({
 
       {booking.blockedReason && <BookingBlockedNotice reason={booking.blockedReason} />}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Reservar para</span>
-        {CAPACITY_QUICK_PARTY_SIZES.map((size) => (
+      {canCreateReservation && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Reservar para</span>
+          {CAPACITY_QUICK_PARTY_SIZES.map((size) => (
+            <Button
+              key={size}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs"
+              disabled={!!booking.blockedReason || size > booking.maxPartySize}
+              onClick={() => reserve(size)}
+            >
+              {size} pessoas
+            </Button>
+          ))}
           <Button
-            key={size}
             type="button"
             variant="outline"
             size="sm"
             className="h-8 px-3 text-xs"
-            disabled={!!booking.blockedReason || size > booking.maxPartySize}
-            onClick={() => reserve(size)}
+            disabled={!!booking.blockedReason}
+            onClick={() => reserve(Math.max(Math.min(2, booking.maxPartySize), 1))}
           >
-            {size} pessoas
+            Outro…
+            {!booking.blockedReason && booking.maxPartySize < MANUAL_RESERVATION_MAX_PARTY_SIZE
+              ? ` (até ${booking.maxPartySize})`
+              : ''}
           </Button>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 px-3 text-xs"
-          disabled={!!booking.blockedReason}
-          onClick={() => reserve(Math.max(Math.min(2, booking.maxPartySize), 1))}
-        >
-          Outro…
-          {!booking.blockedReason && booking.maxPartySize < MANUAL_RESERVATION_MAX_PARTY_SIZE
-            ? ` (até ${booking.maxPartySize})`
-            : ''}
-        </Button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -148,17 +153,20 @@ function CapacitySlotAvailability({
 function TableAvailabilityRow({
   option,
   booking,
+  canCreateReservation,
   occupiedTimeRange,
   onReserveTable,
   onOpenReservation,
 }: {
   option: SlotTableOption;
   booking: SlotBookingState;
+  canCreateReservation: boolean;
   occupiedTimeRange: string | undefined;
   onReserveTable: (option: SlotTableOption) => void;
   onOpenReservation: (reservationId: string) => void;
 }) {
-  const canReserve = option.available
+  const canReserve = canCreateReservation
+    && option.available
     && !booking.blockedReason
     && getTableMaxPartySize(option.capacity, booking.maxPartySize) > 0;
   const canOpenReservation = !option.available
@@ -214,6 +222,7 @@ function TableAvailabilityRow({
 
 function TableSlotAvailability({
   companyId,
+  canCreateReservation,
   date,
   slot,
   booking,
@@ -309,17 +318,19 @@ function TableSlotAvailability({
             </>
           )}
         </p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          disabled={!!booking.blockedReason}
-          title="O sistema escolhe a menor mesa livre que comporta o grupo. Sem mesa livre, a reserva fica para alocar depois."
-          onClick={reserveWithAutomaticTable}
-        >
-          Reservar com mesa automática
-        </Button>
+        {canCreateReservation && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={!!booking.blockedReason}
+            title="O sistema escolhe a menor mesa livre que comporta o grupo. Sem mesa livre, a reserva fica para alocar depois."
+            onClick={reserveWithAutomaticTable}
+          >
+            Reservar com mesa automática
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -361,9 +372,13 @@ function TableSlotAvailability({
       {booking.blockedReason && <BookingBlockedNotice reason={booking.blockedReason} />}
 
       {tablesQuery.isLoading ? (
-        <div className="flex items-center justify-center gap-2 rounded-lg border border-border bg-background py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Carregando mesas...
+        <div
+          className="flex items-center justify-center gap-2 rounded-lg border border-border bg-background py-6 text-sm text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Carregando mesas…
         </div>
       ) : tablesQuery.isError ? (
         <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-4 py-5 text-center">
@@ -413,6 +428,7 @@ function TableSlotAvailability({
                         key={option.tableId}
                         option={option}
                         booking={booking}
+                        canCreateReservation={canCreateReservation}
                         occupiedTimeRange={option.conflictReservationId
                           ? reservationTimeRanges[option.conflictReservationId]
                           : undefined}
@@ -445,6 +461,7 @@ export default function CalendarSlotAvailability(props: CalendarSlotAvailability
         date={props.date}
         slot={props.slot}
         booking={booking}
+        canCreateReservation={props.canCreateReservation}
         onReserve={props.onReserve}
       />
     );

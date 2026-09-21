@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CheckCircle2, Loader2, Table2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -77,6 +77,12 @@ function getNextHalfHourDate() {
 
 function createManualReservationForm(preset?: ManualReservationPreset | null): ManualReservationForm {
   const nextReservationAt = getNextHalfHourDate();
+  const presetLimit = Math.min(
+    preset?.table?.capacity ?? MANUAL_RESERVATION_MAX_PARTY_SIZE,
+    preset?.remainingCapacity ?? MANUAL_RESERVATION_MAX_PARTY_SIZE,
+    MANUAL_RESERVATION_MAX_PARTY_SIZE,
+  );
+  const requestedPartySize = preset?.partySize ?? 2;
 
   return {
     guest_name: '',
@@ -85,7 +91,7 @@ function createManualReservationForm(preset?: ManualReservationPreset | null): M
     guest_birthdate: '',
     date: preset?.date ?? format(nextReservationAt, 'yyyy-MM-dd'),
     time: preset?.time ?? format(nextReservationAt, 'HH:mm'),
-    party_size: String(preset?.partySize ?? 2),
+    party_size: String(Math.max(Math.min(requestedPartySize, presetLimit), 1)),
     occasion: '',
     notes: '',
   };
@@ -108,17 +114,26 @@ export default function ManualReservationDialog({
     () => createManualReservationForm(preset),
   );
   const [wasOpen, setWasOpen] = useState(open);
+  const appliedLeadPrefillRef = useRef<{
+    phone: string;
+    guest_name: string | null;
+    guest_email: string | null;
+    guest_birthdate: string | null;
+  } | null>(null);
   const qc = useQueryClient();
   const presetTable = preset?.table ?? null;
-  const maxPartySize = presetTable
-    ? Math.min(presetTable.capacity, MANUAL_RESERVATION_MAX_PARTY_SIZE)
-    : MANUAL_RESERVATION_MAX_PARTY_SIZE;
+  const maxPartySize = Math.min(
+    presetTable?.capacity ?? MANUAL_RESERVATION_MAX_PARTY_SIZE,
+    preset?.remainingCapacity ?? MANUAL_RESERVATION_MAX_PARTY_SIZE,
+    MANUAL_RESERVATION_MAX_PARTY_SIZE,
+  );
   const lockSchedule = !!presetTable && !!preset?.date && !!preset?.time;
 
   // Reinicia o formulario a cada abertura, ja com os valores do preset, sem
   // renderizar um quadro com os dados da abertura anterior.
   if (open !== wasOpen) {
     setWasOpen(open);
+    appliedLeadPrefillRef.current = null;
     if (open) {
       setManualReservationForm(createManualReservationForm(preset));
     }
@@ -136,15 +151,53 @@ export default function ManualReservationDialog({
     && manualReservationPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
 
   useEffect(() => {
-    if (!open || !manualReservationLead) return;
+    const appliedPrefill = appliedLeadPrefillRef.current;
+    if (!appliedPrefill || appliedPrefill.phone === manualReservationPhoneDigits) return;
 
     setManualReservationForm((current) => ({
       ...current,
-      guest_name: manualReservationLead.full_name || current.guest_name,
-      guest_email: manualReservationLead.email || current.guest_email,
-      guest_birthdate: manualReservationLead.birthdate || current.guest_birthdate,
+      guest_name: appliedPrefill.guest_name != null && current.guest_name === appliedPrefill.guest_name
+        ? ''
+        : current.guest_name,
+      guest_email: appliedPrefill.guest_email != null && current.guest_email === appliedPrefill.guest_email
+        ? ''
+        : current.guest_email,
+      guest_birthdate: appliedPrefill.guest_birthdate != null
+        && current.guest_birthdate === appliedPrefill.guest_birthdate
+        ? ''
+        : current.guest_birthdate,
     }));
-  }, [open, manualReservationLead]);
+    appliedLeadPrefillRef.current = null;
+  }, [manualReservationPhoneDigits]);
+
+  useEffect(() => {
+    if (
+      !open
+      || !manualReservationLead
+      || manualReservationLead.phone_normalized !== manualReservationPhoneDigits
+      || appliedLeadPrefillRef.current?.phone === manualReservationPhoneDigits
+    ) return;
+
+    setManualReservationForm((current) => {
+      const appliedName = !current.guest_name ? manualReservationLead.full_name : null;
+      const appliedEmail = !current.guest_email ? manualReservationLead.email : null;
+      const appliedBirthdate = !current.guest_birthdate ? manualReservationLead.birthdate : null;
+
+      appliedLeadPrefillRef.current = {
+        phone: manualReservationPhoneDigits,
+        guest_name: appliedName,
+        guest_email: appliedEmail,
+        guest_birthdate: appliedBirthdate,
+      };
+
+      return {
+        ...current,
+        guest_name: appliedName || current.guest_name,
+        guest_email: appliedEmail || current.guest_email,
+        guest_birthdate: appliedBirthdate || current.guest_birthdate,
+      };
+    });
+  }, [manualReservationLead, manualReservationPhoneDigits, open]);
 
   const createReservationMutation = useMutation({
     mutationFn: async () => {
@@ -170,6 +223,14 @@ export default function ManualReservationDialog({
 
       if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > MANUAL_RESERVATION_MAX_PARTY_SIZE) {
         throw new Error('Informe uma quantidade válida de pessoas.');
+      }
+
+      if (preset?.remainingCapacity != null && parsedPartySize > preset.remainingCapacity) {
+        throw new Error(
+          preset.remainingCapacity === 1
+            ? 'Resta apenas 1 vaga neste horário.'
+            : `Restam apenas ${preset.remainingCapacity} vagas neste horário.`,
+        );
       }
 
       if (presetTable && parsedPartySize > presetTable.capacity) {
@@ -227,6 +288,9 @@ export default function ManualReservationDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Nova reserva manual</DialogTitle>
+          <DialogDescription>
+            Preencha os dados do cliente e confirme a reserva para o horário selecionado.
+          </DialogDescription>
         </DialogHeader>
 
         <form
@@ -380,7 +444,7 @@ export default function ManualReservationDialog({
                 name="party_size"
                 type="number"
                 min="1"
-                max={maxPartySize}
+                max={Math.max(maxPartySize, 1)}
                 value={manualReservationForm.party_size}
                 onChange={(event) =>
                   setManualReservationForm((current) => ({ ...current, party_size: event.target.value }))
@@ -388,7 +452,7 @@ export default function ManualReservationDialog({
                 required
               />
               {presetTable ? (
-                <p className="text-xs text-muted-foreground">Até {presetTable.capacity} pessoas nesta mesa.</p>
+                <p className="text-xs text-muted-foreground">Até {maxPartySize} pessoas nesta mesa e horário.</p>
               ) : preset?.remainingCapacity != null && (
                 <p className="text-xs text-muted-foreground">
                   {preset.remainingCapacity === 1 ? 'Resta 1 vaga' : `Restam ${preset.remainingCapacity} vagas`} neste horário.

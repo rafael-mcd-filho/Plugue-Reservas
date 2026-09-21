@@ -8,6 +8,10 @@ const supabaseMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
 }));
 
+const crmLeadPrefillMocks = vi.hoisted(() => ({
+  useCrmLeadPrefill: vi.fn(),
+}));
+
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     rpc: supabaseMocks.rpc,
@@ -17,7 +21,7 @@ vi.mock('@/integrations/supabase/client', () => ({
 
 vi.mock('@/hooks/useCrmLeadPrefill', () => ({
   MIN_CRM_LEAD_PREFILL_PHONE_DIGITS: 10,
-  useCrmLeadPrefill: () => ({ data: null, isFetching: false }),
+  useCrmLeadPrefill: crmLeadPrefillMocks.useCrmLeadPrefill,
 }));
 
 vi.mock('sonner', () => ({
@@ -57,6 +61,8 @@ describe('ManualReservationDialog', () => {
     supabaseMocks.rpc.mockResolvedValue({ data: { id: 'reservation-1' }, error: null });
     supabaseMocks.invoke.mockReset();
     supabaseMocks.invoke.mockResolvedValue({ data: null, error: null });
+    crmLeadPrefillMocks.useCrmLeadPrefill.mockReset();
+    crmLeadPrefillMocks.useCrmLeadPrefill.mockReturnValue({ data: null, isFetching: false });
   });
 
   it('cria a reserva na mesa escolhida, com data e horário travados', async () => {
@@ -91,6 +97,7 @@ describe('ManualReservationDialog', () => {
 
     expect(screen.getByLabelText('Data *')).toHaveValue('2026-09-23');
     expect(screen.getByLabelText('Horário *')).toHaveValue('20:00');
+    expect(screen.getByLabelText('Pessoas *')).toHaveValue(5);
     expect(screen.getByText('Restam 5 vagas neste horário.')).toBeInTheDocument();
 
     fillGuest();
@@ -99,8 +106,74 @@ describe('ManualReservationDialog', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
     expect(supabaseMocks.rpc).toHaveBeenCalledWith('create_panel_reservation', expect.objectContaining({
       _time: '20:00:00',
-      _party_size: 6,
+      _party_size: 5,
       _table_id: null,
     }));
+  });
+
+  it('remove dados autopreenchidos quando o telefone muda para outro sem lead', async () => {
+    crmLeadPrefillMocks.useCrmLeadPrefill.mockImplementation((_companyId, phoneDigits) => ({
+      data: phoneDigits === '11999998888'
+        ? {
+          id: 'lead-a',
+          full_name: 'Ana Souza',
+          phone: '11999998888',
+          phone_normalized: '11999998888',
+          email: 'ana@example.com',
+          birthdate: '1990-05-12',
+        }
+        : null,
+      isFetching: false,
+    }));
+
+    renderDialog({ date: '2026-09-23', time: '20:00', partySize: 2 });
+
+    fireEvent.change(screen.getByLabelText('WhatsApp *'), { target: { value: '11999998888' } });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Nome *')).toHaveValue('Ana Souza');
+      expect(screen.getByLabelText('Email')).toHaveValue('ana@example.com');
+      expect(screen.getByLabelText('Data de nascimento')).toHaveValue('1990-05-12');
+    });
+
+    fireEvent.change(screen.getByLabelText('WhatsApp *'), { target: { value: '11888887777' } });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Nome *')).toHaveValue('');
+      expect(screen.getByLabelText('Email')).toHaveValue('');
+      expect(screen.getByLabelText('Data de nascimento')).toHaveValue('');
+    });
+  });
+
+  it('preserva dados editados manualmente ao trocar o telefone autopreenchido', async () => {
+    crmLeadPrefillMocks.useCrmLeadPrefill.mockImplementation((_companyId, phoneDigits) => ({
+      data: phoneDigits === '11999998888'
+        ? {
+          id: 'lead-a',
+          full_name: 'Ana Souza',
+          phone: '11999998888',
+          phone_normalized: '11999998888',
+          email: 'ana@example.com',
+          birthdate: '1990-05-12',
+        }
+        : null,
+      isFetching: false,
+    }));
+
+    renderDialog({ date: '2026-09-23', time: '20:00', partySize: 2 });
+
+    fireEvent.change(screen.getByLabelText('WhatsApp *'), { target: { value: '11999998888' } });
+    await waitFor(() => expect(screen.getByLabelText('Nome *')).toHaveValue('Ana Souza'));
+
+    fireEvent.change(screen.getByLabelText('Nome *'), { target: { value: 'Nome revisado' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'novo@example.com' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1991-06-13' } });
+    fireEvent.change(screen.getByLabelText('WhatsApp *'), { target: { value: '11888887777' } });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Nome *')).toHaveValue('Nome revisado');
+      expect(screen.getByLabelText('Email')).toHaveValue('novo@example.com');
+      expect(screen.getByLabelText('Data de nascimento')).toHaveValue('1991-06-13');
+    });
   });
 });

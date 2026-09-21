@@ -52,6 +52,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 import { supabase } from '@/integrations/supabase/client';
 import { getSlotBookingState } from '@/lib/calendar-slot-availability';
 import {
@@ -577,6 +578,8 @@ function mapCapacityRowToSlot(row: AdminCapacityRow): CalendarCapacitySlot {
 
 export default function CalendarView() {
   const { companyId, slug } = useCompanySlug();
+  const { hasPermission } = useCompanyPermissions();
+  const canCreateReservations = hasPermission('reservations_view');
   const qc = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
@@ -626,6 +629,7 @@ export default function CalendarView() {
   const {
     data: capacityRows = [],
     isLoading: capacityRowsLoading,
+    isPlaceholderData: capacityRowsPlaceholder,
     isError: capacityError,
   } = useQuery({
     queryKey: ['calendar-day-capacity', companyId, selectedDateStr],
@@ -665,7 +669,12 @@ export default function CalendarView() {
     refetchInterval: 30 * 1000,
   });
 
-  const { data: publicSchedule, isLoading: scheduleLoading, isError: scheduleError } = useQuery({
+  const {
+    data: publicSchedule,
+    isLoading: scheduleLoading,
+    isPlaceholderData: schedulePlaceholder,
+    isError: scheduleError,
+  } = useQuery({
     queryKey: ['calendar-public-schedule', companyId, selectedDateStr],
     queryFn: async () => {
       if (!companyId || !selectedDateStr) throw new Error('Data não selecionada.');
@@ -839,7 +848,10 @@ export default function CalendarView() {
     });
   };
 
-  const capacityLoading = capacityRowsLoading || scheduleLoading;
+  const capacityLoading = capacityRowsLoading
+    || scheduleLoading
+    || capacityRowsPlaceholder
+    || schedulePlaceholder;
   const dayEmptyMessage = 'Nenhuma reserva ativa nesta data';
   const scheduleWarningVisible = capacityError || scheduleError;
   const blockedWithoutSlots = publicSchedule?.source === 'blocked' && daySlots.length === 0;
@@ -855,6 +867,7 @@ export default function CalendarView() {
   };
 
   const openManualReservation = (preset: ManualReservationPreset) => {
+    if (!canCreateReservations) return;
     setManualReservationPreset(preset);
     setManualReservationOpen(true);
   };
@@ -866,6 +879,8 @@ export default function CalendarView() {
   // No modo por mesas o atalho leva a lista de mesas; no modo por capacidade a
   // faixa e a unidade reservavel, entao o modal abre direto.
   const reserveFromSlotHeader = (slot: CalendarCapacitySlot) => {
+    if (!canCreateReservations) return;
+
     if (slot.availabilityMode === 'capacity') {
       const { maxPartySize } = getSlotBookingState(slot);
       openManualReservation({
@@ -1463,20 +1478,22 @@ export default function CalendarView() {
                               <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
                             </div>
                           </button>
-                          <div className="shrink-0 py-2 pr-3">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 gap-1 px-2 text-[11px]"
-                              disabled={!!slotBooking.blockedReason}
-                              title={slotBooking.blockedReason ?? undefined}
-                              onClick={() => reserveFromSlotHeader(slot)}
-                            >
-                              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                              Reservar
-                            </Button>
-                          </div>
+                          {canCreateReservations && (
+                            <div className="shrink-0 py-2 pr-3">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 gap-1 px-2 text-[11px]"
+                                disabled={!!slotBooking.blockedReason}
+                                title={slotBooking.blockedReason ?? undefined}
+                                onClick={() => reserveFromSlotHeader(slot)}
+                              >
+                                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                                Reservar
+                              </Button>
+                            </div>
+                          )}
                         </div>
 
                         {isExpanded && (
@@ -1512,6 +1529,7 @@ export default function CalendarView() {
                             {activePanelTab === 'availability' ? (
                               <CalendarSlotAvailability
                                 companyId={companyId ?? ''}
+                                canCreateReservation={canCreateReservations}
                                 date={selectedDateStr}
                                 slot={slot}
                                 showOccupied={availabilityShowOccupied}
@@ -1610,7 +1628,7 @@ export default function CalendarView() {
       </div>
 
       <ManualReservationDialog
-        open={manualReservationOpen}
+        open={canCreateReservations && manualReservationOpen}
         onOpenChange={setManualReservationOpen}
         companyId={companyId}
         preset={manualReservationPreset}
