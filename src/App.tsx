@@ -23,7 +23,8 @@ const DemandConversionReport = lazyWithReload(() => import("@/pages/DemandConver
 const AttendanceLossesReport = lazyWithReload(() => import("@/pages/AttendanceLossesReport"));
 const OccupancyCapacityReport = lazyWithReload(() => import("@/pages/OccupancyCapacityReport"));
 const CustomerRecurrenceReport = lazyWithReload(() => import("@/pages/CustomerRecurrenceReport"));
-const Reservations = lazyWithReload(() => import("@/pages/Reservations"));
+const ReservationsOverview = lazyWithReload(() => import("@/pages/ReservationsOverview"));
+const ReservationsList = lazyWithReload(() => import("@/pages/ReservationsList"));
 const TableMap = lazyWithReload(() => import("@/pages/TableMap"));
 const CalendarView = lazyWithReload(() => import("@/pages/CalendarView"));
 const Companies = lazyWithReload(() => import("@/pages/Companies"));
@@ -269,7 +270,7 @@ function CompanyAdminHome() {
   }
 
   if (slug && hasPermission("calendar_view")) {
-    return <Navigate to={`/${slug}/admin/calendario`} replace />;
+    return <Navigate to={`/${slug}/admin/reservas/calendario`} replace />;
   }
 
   if (slug && hasPermission("waitlist_view")) {
@@ -277,6 +278,12 @@ function CompanyAdminHome() {
   }
 
   return <Navigate to="/acesso-negado" replace />;
+}
+
+function LegacyCalendarRedirect() {
+  const { slug } = useParams<{ slug: string }>();
+
+  return <Navigate to={`/${slug}/admin/reservas/calendario`} replace />;
 }
 
 const App = () => (
@@ -552,7 +559,29 @@ const App = () => (
                     allowedRoles={["admin", "operator", "superadmin"]}
                     requiredCompanyPermission="reservations_view"
                   >
-                    <Reservations />
+                    <ReservationsOverview />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/reservas/lista"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "operator", "superadmin"]}
+                    requiredCompanyPermission="reservations_view"
+                  >
+                    <ReservationsList />
+                  </CompanyAdminRoute>
+                }
+              />
+              <Route
+                path="/:slug/admin/reservas/calendario"
+                element={
+                  <CompanyAdminRoute
+                    allowedRoles={["admin", "operator", "superadmin"]}
+                    requiredCompanyPermission="calendar_view"
+                  >
+                    <CalendarView />
                   </CompanyAdminRoute>
                 }
               />
@@ -569,14 +598,7 @@ const App = () => (
               />
               <Route
                 path="/:slug/admin/calendario"
-                element={
-                  <CompanyAdminRoute
-                    allowedRoles={["admin", "operator", "superadmin"]}
-                    requiredCompanyPermission="calendar_view"
-                  >
-                    <CalendarView />
-                  </CompanyAdminRoute>
-                }
+                element={<LegacyCalendarRedirect />}
               />
               <Route
                 path="/:slug/admin/automacoes"

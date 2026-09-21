@@ -1634,31 +1634,33 @@ export default function OperatorTodayReservations() {
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <CardTitle className="text-base">Aguardando chegada</CardTitle>
-                    <div className="flex h-7 items-center gap-1.5 rounded bg-muted/20 px-2">
-                      <Switch
-                        id="hide-empty-reservation-slots"
-                        checked={hideEmptyReservationSlots}
-                        onCheckedChange={setHideEmptyReservationSlots}
-                        className="scale-75"
-                      />
-                      <Label
-                        htmlFor="hide-empty-reservation-slots"
-                        className="cursor-pointer whitespace-nowrap text-[11px] font-medium text-muted-foreground"
+                    <div className="inline-flex shrink-0 items-center gap-2">
+                      <div className="flex h-7 items-center gap-1.5 rounded bg-muted/20 px-2">
+                        <Switch
+                          id="hide-empty-reservation-slots"
+                          checked={hideEmptyReservationSlots}
+                          onCheckedChange={setHideEmptyReservationSlots}
+                          className="scale-75"
+                        />
+                        <Label
+                          htmlFor="hide-empty-reservation-slots"
+                          className="cursor-pointer whitespace-nowrap text-[11px] font-medium text-muted-foreground"
+                        >
+                          Ocultar vazias
+                        </Label>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                        onClick={toggleAllPending}
+                        disabled={hasActiveSearch || pendingExpansionKeys.length === 0}
                       >
-                        Ocultar vazias
-                      </Label>
+                        {allPendingExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {allPendingExpanded ? 'Recolher todas' : 'Expandir todas'}
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                      onClick={toggleAllPending}
-                      disabled={hasActiveSearch || pendingExpansionKeys.length === 0}
-                    >
-                      {allPendingExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
-                      {allPendingExpanded ? 'Recolher todas' : 'Expandir todas'}
-                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">Clique em uma faixa para ver as reservas.</p>
                 </div>

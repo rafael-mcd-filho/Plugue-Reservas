@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, eachDayOfInterval, format, isToday, parseISO, startOfDay, subDays } from 'date-fns';
+import { eachDayOfInterval, format, isToday, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Ban,
@@ -37,7 +37,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -77,9 +76,13 @@ import {
 import type { ReservationStatus } from '@/types/restaurant';
 import type { DateRange } from 'react-day-picker';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
-import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
+import ManualReservationDialog from '@/components/ManualReservationDialog';
+import {
+  getReservationsOverviewDateRange,
+  type ReservationsOverviewRangeMode,
+  type ReservationsView,
+} from '@/lib/reservations-view';
 
-type CalendarRangeMode = 'future' | 'past';
 type ReservationRemovalAction = 'cancel' | 'delete';
 type ReservationEntryMethodFilterValue = 'all' | ReservationOriginKey;
 
@@ -145,18 +148,6 @@ function createCompanionForm(values?: Partial<ReservationCompanionForm>): Reserv
   };
 }
 
-interface ManualReservationForm {
-  guest_name: string;
-  guest_phone: string;
-  guest_email: string;
-  guest_birthdate: string;
-  date: string;
-  time: string;
-  party_size: string;
-  occasion: string;
-  notes: string;
-}
-
 const RESERVATION_STATUS_OPTIONS: Array<{ value: ReservationStatus; label: string }> = [
   { value: 'pending_payment', label: 'Aguardando pagamento' },
   { value: 'confirmed', label: 'Confirmada' },
@@ -197,34 +188,144 @@ function formatReservationStatusLabel(status: ReservationStatus) {
   return getReservationStatusLabel(status);
 }
 
-function getNextHalfHourDate() {
-  const next = new Date();
-  next.setSeconds(0, 0);
-
-  const minutes = next.getMinutes();
-  const roundedMinutes = minutes === 0 || minutes === 30 ? minutes : minutes < 30 ? 30 : 60;
-  next.setMinutes(roundedMinutes);
-
-  return next;
+function ReservationListLoadingBar({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn('motion-safe:animate-pulse rounded-md bg-muted', className)}
+    />
+  );
 }
 
-function createManualReservationForm(): ManualReservationForm {
-  const nextReservationAt = getNextHalfHourDate();
+function ReservationListLoadingState() {
+  return (
+    <div className="space-y-6" aria-busy="true">
+      <p className="sr-only" role="status" aria-live="polite">
+        Carregando reservas…
+      </p>
 
-  return {
-    guest_name: '',
-    guest_phone: '',
-    guest_email: '',
-    guest_birthdate: '',
-    date: format(nextReservationAt, 'yyyy-MM-dd'),
-    time: format(nextReservationAt, 'HH:mm'),
-    party_size: '2',
-    occasion: '',
-    notes: '',
-  };
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Lista de reservas</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Pesquise, filtre e gerencie o histórico da unidade
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3" aria-hidden="true">
+          <ReservationListLoadingBar className="h-10 w-40 rounded-lg" />
+          <ReservationListLoadingBar className="h-10 w-32 rounded-lg" />
+        </div>
+      </div>
+
+      <section className="space-y-4" aria-label="Carregando lista de reservas">
+        <div
+          className="flex flex-col gap-3 xl:flex-row xl:items-center"
+          aria-hidden="true"
+        >
+          <ReservationListLoadingBar className="h-10 min-w-0 flex-1 rounded-lg" />
+          <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-64" />
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-[170px]" />
+            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-[220px]" />
+            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-40" />
+            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-48" />
+          </div>
+        </div>
+
+        <div
+          className="flex h-12 items-center gap-4 rounded-xl border border-border bg-card px-4 shadow-sm"
+          aria-hidden="true"
+        >
+          <ReservationListLoadingBar className="h-3.5 w-28" />
+          <ReservationListLoadingBar className="h-3.5 w-24" />
+          <ReservationListLoadingBar className="hidden h-3.5 w-32 sm:block" />
+        </div>
+
+        <Card
+          className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
+          aria-hidden="true"
+        >
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-muted/55">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Reserva
+                  </TableHead>
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Criada em
+                  </TableHead>
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Cliente
+                  </TableHead>
+                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:table-cell">
+                    Pessoas
+                  </TableHead>
+                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:table-cell">
+                    Ocasião
+                  </TableHead>
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Ações
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <TableRow key={index} className="border-border bg-card hover:bg-card">
+                    <TableCell className="px-4 py-3">
+                      <div className="space-y-2">
+                        <ReservationListLoadingBar className="h-3.5 w-20" />
+                        <ReservationListLoadingBar className="h-2.5 w-12" />
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
+                      <div className="space-y-2">
+                        <ReservationListLoadingBar className="h-3.5 w-20" />
+                        <ReservationListLoadingBar className="h-2.5 w-12" />
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
+                      <div className="space-y-2">
+                        <ReservationListLoadingBar className={cn('h-3.5', index % 3 === 0 ? 'w-36' : 'w-28')} />
+                        <ReservationListLoadingBar className="h-2.5 w-24" />
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden px-4 py-3 sm:table-cell">
+                      <ReservationListLoadingBar className="mx-auto h-3.5 w-6" />
+                    </TableCell>
+                    <TableCell className="hidden px-4 py-3 lg:table-cell">
+                      <ReservationListLoadingBar className="h-3.5 w-20" />
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
+                      <ReservationListLoadingBar className="mx-auto h-6 w-20 rounded-full" />
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
+                      <div className="flex justify-center gap-1.5">
+                        <ReservationListLoadingBar className="h-8 w-20 rounded-lg" />
+                        <ReservationListLoadingBar className="h-8 w-8 rounded-lg" />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      </section>
+    </div>
+  );
 }
 
-export default function Reservations() {
+interface ReservationsProps {
+  view: ReservationsView;
+}
+
+export default function Reservations({ view }: ReservationsProps) {
   const { companyId, slug } = useCompanySlug();
   const { hasPermission } = useCompanyPermissions();
   const qc = useQueryClient();
@@ -234,7 +335,7 @@ export default function Reservations() {
   const [entryMethodFilter, setEntryMethodFilter] = useState<ReservationEntryMethodFilterValue>('all');
   const [reservationListRange, setReservationListRange] = useState<DateRange | undefined>();
   const [dateFilterMode, setDateFilterMode] = useState<'reservation' | 'created'>('reservation');
-  const [calendarRangeMode, setCalendarRangeMode] = useState<CalendarRangeMode>('future');
+  const [calendarRangeMode, setCalendarRangeMode] = useState<ReservationsOverviewRangeMode>('future');
   const [editDialog, setEditDialog] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [dataEditDialog, setDataEditDialog] = useState(false);
@@ -257,7 +358,6 @@ export default function Reservations() {
   const [companionForms, setCompanionForms] = useState<ReservationCompanionForm[]>([]);
   const [loadingCompanions, setLoadingCompanions] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
-  const [manualReservationForm, setManualReservationForm] = useState<ManualReservationForm>(createManualReservationForm);
   const [dayModal, setDayModal] = useState<string | null>(null);
   const [reservationRemovalFlow, setReservationRemovalFlow] = useState<ReservationRemovalFlow | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -270,27 +370,7 @@ export default function Reservations() {
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 15;
   const canDeleteReservations = hasPermission('reservations_delete');
-  const manualReservationPhoneDigits = useMemo(
-    () => normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
-    [manualReservationForm.guest_phone],
-  );
-  const {
-    data: manualReservationLead,
-    isFetching: manualReservationLeadLoading,
-  } = useCrmLeadPrefill(companyId, manualReservationPhoneDigits, createDialog);
-  const showManualReservationLeadLookup = createDialog
-    && manualReservationPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
-
-  useEffect(() => {
-    if (!createDialog || !manualReservationLead) return;
-
-    setManualReservationForm((current) => ({
-      ...current,
-      guest_name: manualReservationLead.full_name || current.guest_name,
-      guest_email: manualReservationLead.email || current.guest_email,
-      guest_birthdate: manualReservationLead.birthdate || current.guest_birthdate,
-    }));
-  }, [createDialog, manualReservationLead]);
+  const overviewDateRange = getReservationsOverviewDateRange(calendarRangeMode);
 
   const handleOperationalFilterChange = (value: ReservationOperationalFilter) => {
     setOperationalFilter(value);
@@ -299,6 +379,7 @@ export default function Reservations() {
 
   const invalidateReservationQueries = () => {
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
+    qc.invalidateQueries({ queryKey: ['reservation-export-source', companyId] });
     qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
     qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['reservation-companions'] });
@@ -306,17 +387,31 @@ export default function Reservations() {
   };
 
   const { data: reservations = [], isLoading } = useQuery({
-    queryKey: ['reservations', companyId],
+    queryKey: [
+      'reservations',
+      companyId,
+      view,
+      view === 'overview' ? overviewDateRange.startKey : null,
+      view === 'overview' ? overviewDateRange.endKey : null,
+    ],
     queryFn: async () => {
-      const data = await fetchAllSupabasePages<Reservation>((from, to) =>
-        supabase
+      const data = await fetchAllSupabasePages<Reservation>((from, to) => {
+        let query = supabase
           .from('reservations' as any)
           .select('*, reservation_payments(id,status,paid_at,billing_type,charged_amount,base_amount)')
-          .eq('company_id', companyId)
+          .eq('company_id', companyId);
+
+        if (view === 'overview') {
+          query = query
+            .gte('date', overviewDateRange.startKey)
+            .lte('date', overviewDateRange.endKey);
+        }
+
+        return query
           .order('date', { ascending: true })
           .order('time', { ascending: true })
-          .range(from, to),
-      );
+          .range(from, to);
+      });
 
       return data.map((reservation) => ({
         ...reservation,
@@ -325,6 +420,32 @@ export default function Reservations() {
     },
     enabled: !!companyId,
     refetchInterval: 30000,
+  });
+
+  const {
+    data: exportSourceReservations = [],
+    isFetching: exportReservationsLoading,
+    isError: exportReservationsError,
+    refetch: refetchExportReservations,
+  } = useQuery({
+    queryKey: ['reservation-export-source', companyId],
+    queryFn: async () => {
+      const data = await fetchAllSupabasePages<Reservation>((from, to) =>
+        supabase
+          .from('reservations' as any)
+          .select('*')
+          .eq('company_id', companyId)
+          .order('date', { ascending: false })
+          .order('time', { ascending: false })
+          .range(from, to),
+      );
+
+      return data.map((reservation) => ({
+        ...reservation,
+        status: normalizeReservationStatus(reservation.status),
+      }));
+    },
+    enabled: !!companyId && exportDialogOpen && exportSearchTriggered,
   });
 
   const { data: companyTables = [] } = useQuery({
@@ -348,7 +469,12 @@ export default function Reservations() {
     [companyTables],
   );
 
-  const { data: leadCreatedAtByPhone = {}, isFetching: leadCreatedAtByPhoneLoading } = useQuery({
+  const {
+    data: leadCreatedAtByPhone = {},
+    isFetching: leadCreatedAtByPhoneLoading,
+    isError: leadCreatedAtByPhoneError,
+    refetch: refetchLeadCreatedAtByPhone,
+  } = useQuery({
     queryKey: ['reservation-export-lead-created-at', companyId],
     queryFn: async () => {
       const [reservationResult, companionResult, waitlistResult, waitlistCompanionResult] = await Promise.all([
@@ -406,7 +532,7 @@ export default function Reservations() {
 
       return map;
     },
-    enabled: !!companyId && exportDialogOpen,
+    enabled: !!companyId && exportDialogOpen && exportSearchTriggered,
   });
 
   const calendarReservationsByDate = useMemo(() => {
@@ -583,75 +709,6 @@ export default function Reservations() {
     onError: (err: any) => toast.error(`Erro: ${err.message}`),
   });
 
-  const createReservationMutation = useMutation({
-    mutationFn: async () => {
-      const parsedPartySize = Number.parseInt(manualReservationForm.party_size, 10);
-      const guestPhoneError = getPhoneValidationMessage(manualReservationForm.guest_phone, 'o WhatsApp do cliente', true);
-      const guestEmailError = getEmailValidationMessage(manualReservationForm.guest_email, 'o e-mail do cliente');
-
-      if (!manualReservationForm.guest_name.trim() || !manualReservationForm.guest_phone.trim()) {
-        throw new Error('Informe nome e WhatsApp do cliente.');
-      }
-
-      if (guestPhoneError) {
-        throw new Error(guestPhoneError);
-      }
-
-      if (guestEmailError) {
-        throw new Error(guestEmailError);
-      }
-
-      if (!manualReservationForm.date || !manualReservationForm.time) {
-        throw new Error('Informe data e horário da reserva.');
-      }
-
-      if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) {
-        throw new Error('Informe uma quantidade válida de pessoas.');
-      }
-
-      // Criacao via RPC segura: valida capacidade/limites e auto-atribui a
-      // menor mesa livre no modo por mesas, em vez de inserir direto com
-      // table_id nulo (Fase 4). _allow_unassigned mantem a criacao possivel
-      // mesmo sem mesa livre, marcando a reserva como "alocar depois".
-      const { data, error } = await (supabase.rpc as any)('create_panel_reservation', {
-        _company_id: companyId,
-        _date: manualReservationForm.date,
-        _time: `${manualReservationForm.time}:00`,
-        _party_size: parsedPartySize,
-        _guest_name: manualReservationForm.guest_name.trim(),
-        _guest_phone: normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
-        _guest_email: normalizeEmail(manualReservationForm.guest_email) || null,
-        _guest_birthdate: manualReservationForm.guest_birthdate || null,
-        _occasion: manualReservationForm.occasion.trim() || null,
-        _notes: manualReservationForm.notes.trim() || null,
-        _table_id: null,
-        _allow_unassigned: true,
-        _assignment_note: null,
-        _status: 'confirmed',
-      });
-
-      if (error) throw error;
-      return (Array.isArray(data) ? data[0] : data) as Reservation;
-    },
-    onSuccess: (createdReservation) => {
-      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
-      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
-      qc.invalidateQueries({ queryKey: ['leads-reservations', companyId] });
-      toast.success('Reserva criada manualmente.');
-      setCreateDialog(false);
-      setManualReservationForm(createManualReservationForm());
-
-      supabase.functions.invoke('reservation-events', {
-        body: {
-          event: 'reservation_created',
-          reservation: { id: createdReservation.id },
-        },
-      }).catch((error) => console.warn('Reservation events error:', error));
-    },
-    onError: (err: any) => toast.error(`Erro: ${err.message}`),
-  });
-
   const sortedReservations = useMemo(() => {
     return [...reservations].sort((left, right) => {
       const dateCompare = right.date.localeCompare(left.date);
@@ -711,8 +768,16 @@ export default function Reservations() {
     setListPage(1);
   }, [search, statusFilter, operationalFilter, entryMethodFilter, reservationListRange, dateFilterMode]);
 
+  const sortedExportReservations = useMemo(
+    () => [...exportSourceReservations].sort((left, right) => {
+      const dateCompare = right.date.localeCompare(left.date);
+      return dateCompare !== 0 ? dateCompare : right.time.localeCompare(left.time);
+    }),
+    [exportSourceReservations],
+  );
+
   const exportedReservations = useMemo(() => {
-    return sortedReservations.filter((reservation) => {
+    return sortedExportReservations.filter((reservation) => {
       if (exportStatuses.length > 0 && !exportStatuses.includes(reservation.status)) {
         return false;
       }
@@ -739,7 +804,7 @@ export default function Reservations() {
     exportReservationRange,
     exportStatuses,
     leadCreatedAtByPhone,
-    sortedReservations,
+    sortedExportReservations,
   ]);
 
   const exportedReservationsSummary = useMemo(() => {
@@ -752,14 +817,14 @@ export default function Reservations() {
       })),
     };
   }, [exportedReservations]);
+  const exportDataLoading = exportReservationsLoading || leadCreatedAtByPhoneLoading;
+  const exportDataError = exportReservationsError || leadCreatedAtByPhoneError;
 
   const calendarDays = useMemo(() => {
-    const today = startOfDay(new Date());
-    const range =
-      calendarRangeMode === 'future'
-        ? { start: today, end: addDays(today, 14) }
-        : { start: subDays(today, 14), end: today };
-    const days = eachDayOfInterval(range);
+    const days = eachDayOfInterval({
+      start: overviewDateRange.start,
+      end: overviewDateRange.end,
+    });
 
     return days.map((day) => {
       const dateString = format(day, 'yyyy-MM-dd');
@@ -772,7 +837,7 @@ export default function Reservations() {
         totalGuests: dayReservations.reduce((sum, reservation) => sum + reservation.party_size, 0),
       };
     });
-  }, [calendarRangeMode, calendarReservationsByDate]);
+  }, [calendarReservationsByDate, overviewDateRange.end, overviewDateRange.start]);
 
   const dayModalReservations = useMemo(() => {
     if (!dayModal) return [];
@@ -913,6 +978,16 @@ export default function Reservations() {
     setExportSearchTriggered(false);
   };
 
+  const searchExportReservations = () => {
+    if (!exportSearchTriggered) {
+      setExportSearchTriggered(true);
+      return;
+    }
+
+    refetchExportReservations();
+    refetchLeadCreatedAtByPhone();
+  };
+
   const toggleExportStatus = (status: ReservationStatus, checked: boolean) => {
     setExportStatuses((current) =>
       checked ? [...current, status] : current.filter((value) => value !== status),
@@ -982,7 +1057,6 @@ export default function Reservations() {
   };
 
   const openCreateDialog = () => {
-    setManualReservationForm(createManualReservationForm());
     setCreateDialog(true);
   };
 
@@ -1073,11 +1147,18 @@ export default function Reservations() {
   };
 
   if (isLoading) {
+    if (view === 'list') {
+      return <ReservationListLoadingState />;
+    }
+
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" aria-busy="true">
+        <p className="sr-only" role="status" aria-live="polite">
+          Carregando visão geral de reservas…
+        </p>
         <div className="h-9 w-40 animate-pulse rounded-lg bg-muted" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7">
-          {Array.from({ length: 14 }).map((_, index) => (
+          {Array.from({ length: 15 }).map((_, index) => (
             <div key={index} className="h-28 animate-pulse rounded-2xl bg-muted" />
           ))}
         </div>
@@ -1089,9 +1170,13 @@ export default function Reservations() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">Reservas</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            {view === 'overview' ? 'Visão geral de reservas' : 'Lista de reservas'}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gerencie todas as reservas da unidade
+            {view === 'overview'
+              ? 'Acompanhe rapidamente os próximos ou últimos 15 dias'
+              : 'Pesquise, filtre e gerencie o histórico da unidade'}
           </p>
         </div>
 
@@ -1107,23 +1192,8 @@ export default function Reservations() {
         </div>
       </div>
 
-      <Tabs defaultValue="calendar" className="space-y-6">
-        <TabsList className="h-auto rounded-xl border border-border bg-card p-1">
-          <TabsTrigger
-            value="calendar"
-            className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-          >
-            Calendario
-          </TabsTrigger>
-          <TabsTrigger
-            value="list"
-            className="rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-          >
-            Lista
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="calendar" className="space-y-4">
+      {view === 'overview' ? (
+        <section className="space-y-4" aria-label="Visão geral de reservas em 15 dias">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               {calendarRangeMode === 'future' ? 'Próximos 15 dias' : 'Últimos 15 dias'}
@@ -1191,9 +1261,9 @@ export default function Reservations() {
               </button>
             ))}
           </div>
-        </TabsContent>
-
-        <TabsContent value="list" className="space-y-4">
+        </section>
+      ) : (
+        <section className="space-y-4" aria-label="Lista de reservas">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1480,8 +1550,8 @@ export default function Reservations() {
               </div>
             )}
           </Card>
-        </TabsContent>
-      </Tabs>
+        </section>
+      )}
 
       <Dialog
         open={exportDialogOpen}
@@ -1550,24 +1620,47 @@ export default function Reservations() {
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-muted-foreground">
-                {leadCreatedAtByPhoneLoading && exportLeadCreatedRange?.from
-                  ? 'Carregando base de leads para aplicar o filtro de criação.'
-                  : 'Os filtros podem ser usados juntos. O resumo só aparece depois de Buscar.'}
+                {exportDataLoading
+                  ? 'Buscando reservas e dados de leads…'
+                  : 'Os dados completos são carregados somente depois de Buscar.'}
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="ghost" onClick={clearExportFilters}>
                   Limpar filtros
                 </Button>
                 <Button
-                  onClick={() => setExportSearchTriggered(true)}
-                  disabled={leadCreatedAtByPhoneLoading && !!exportLeadCreatedRange?.from}
+                  onClick={searchExportReservations}
+                  disabled={exportDataLoading}
                 >
-                  Buscar
+                  {exportDataLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {exportDataLoading ? 'Buscando…' : 'Buscar'}
                 </Button>
               </div>
             </div>
 
             {exportSearchTriggered && (
+              exportDataLoading ? (
+                <div className="flex items-center gap-2 rounded-2xl border border-border bg-muted/20 p-5 text-sm text-muted-foreground" role="status">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Buscando reservas para exportação…
+                </div>
+              ) : exportDataError ? (
+                <div className="flex flex-col gap-3 rounded-2xl border border-destructive/25 bg-destructive-soft/40 p-5 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                  <p className="text-sm text-destructive">
+                    Não foi possível carregar os dados da exportação. Tente novamente.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      refetchExportReservations();
+                      refetchLeadCreatedAtByPhone();
+                    }}
+                  >
+                    Tentar novamente
+                  </Button>
+                </div>
+              ) : (
               <div className="space-y-4 rounded-2xl border border-border bg-muted/20 p-5">
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-xl border border-border bg-card p-4">
@@ -1615,6 +1708,7 @@ export default function Reservations() {
                   </Button>
                 </div>
               </div>
+              )
             )}
           </div>
         </DialogContent>
@@ -1932,199 +2026,15 @@ export default function Reservations() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <ManualReservationDialog
         open={createDialog}
-        onOpenChange={(open) => {
-          setCreateDialog(open);
-          if (!open) {
-            setManualReservationForm(createManualReservationForm());
-          }
+        onOpenChange={setCreateDialog}
+        companyId={companyId}
+        onCreated={() => {
+          invalidateReservationQueries();
+          qc.invalidateQueries({ queryKey: ['leads-reservations', companyId] });
         }}
-      >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Nova reserva manual</DialogTitle>
-          </DialogHeader>
-
-          <form
-            className="space-y-4 pt-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              createReservationMutation.mutate();
-            }}
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-name">Nome *</Label>
-                <Input
-                  id="manual-reservation-name"
-                  name="guest_name"
-                  value={manualReservationForm.guest_name}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, guest_name: event.target.value }))
-                  }
-                  placeholder="Nome do cliente"
-                  autoComplete="name"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-phone">WhatsApp *</Label>
-                <Input
-                  id="manual-reservation-phone"
-                  name="guest_phone"
-                  type="tel"
-                  value={manualReservationForm.guest_phone}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, guest_phone: formatBrazilPhone(event.target.value) }))
-                  }
-                  placeholder="(11) 99999-9999"
-                  autoComplete="tel"
-                  inputMode="tel"
-                  maxLength={15}
-                  required
-                />
-                {showManualReservationLeadLookup && (manualReservationLeadLoading || manualReservationLead) && (
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-                    {manualReservationLeadLoading ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Buscando lead pelo WhatsApp...</span>
-                      </>
-                    ) : manualReservationLead ? (
-                      <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-                        <span>
-                          Lead encontrado{manualReservationLead.full_name ? `: ${manualReservationLead.full_name}` : ''}. Dados preenchidos.
-                        </span>
-                      </>
-                    ) : null}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-email">Email</Label>
-                <Input
-                  id="manual-reservation-email"
-                  name="guest_email"
-                  type="email"
-                  value={manualReservationForm.guest_email}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, guest_email: event.target.value }))
-                  }
-                  placeholder="cliente@email.com"
-                  autoComplete="email"
-                  inputMode="email"
-                  spellCheck={false}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-birthdate">Data de nascimento</Label>
-                <Input
-                  id="manual-reservation-birthdate"
-                  name="guest_birthdate"
-                  type="date"
-                  value={manualReservationForm.guest_birthdate}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, guest_birthdate: event.target.value }))
-                  }
-                  autoComplete="bday"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-date">Data *</Label>
-                <Input
-                  id="manual-reservation-date"
-                  name="date"
-                  type="date"
-                  value={manualReservationForm.date}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, date: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-time">Horário *</Label>
-                <Input
-                  id="manual-reservation-time"
-                  name="time"
-                  type="time"
-                  value={manualReservationForm.time}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, time: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-party-size">Pessoas *</Label>
-                <Input
-                  id="manual-reservation-party-size"
-                  name="party_size"
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={manualReservationForm.party_size}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, party_size: event.target.value }))
-                  }
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="manual-reservation-occasion">Ocasião</Label>
-                <Input
-                  id="manual-reservation-occasion"
-                  name="occasion"
-                  value={manualReservationForm.occasion}
-                  onChange={(event) =>
-                    setManualReservationForm((current) => ({ ...current, occasion: event.target.value }))
-                  }
-                  placeholder="Ex: aniversário"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="manual-reservation-notes">Observações</Label>
-              <Textarea
-                id="manual-reservation-notes"
-                name="notes"
-                value={manualReservationForm.notes}
-                onChange={(event) =>
-                  setManualReservationForm((current) => ({ ...current, notes: event.target.value }))
-                }
-                placeholder="Preferências do cliente, restrições, observações internas..."
-                rows={4}
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-              A reserva será criada como <span className="font-medium text-foreground">Confirmada</span>. O check-in e os acompanhantes podem ser registrados depois, no dia do atendimento.
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={() => setCreateDialog(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={createReservationMutation.isPending}>
-                {createReservationMutation.isPending ? 'Criando...' : 'Criar reserva'}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      />
 
       <Dialog
         open={reservationRemovalFlow?.step === 'choose'}

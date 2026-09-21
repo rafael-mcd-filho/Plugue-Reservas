@@ -124,6 +124,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [reportsNavOpen, setReportsNavOpen] = useState(() => (
     location.pathname.includes('/admin/relatorios/')
   ));
+  const [reservationsNavOpen, setReservationsNavOpen] = useState(() => (
+    location.pathname.includes('/admin/reservas')
+  ));
   const [settingsNavOpen, setSettingsNavOpen] = useState(() => (
     location.pathname.includes('/admin/configuracoes')
   ));
@@ -189,14 +192,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           requiredPermission: 'checkins_view',
         },
         {
-          label: 'Reservas',
-          description: 'Filtros e status',
-          icon: CalendarDays,
-          path: `/${slug}/admin/reservas`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'reservations_view',
-        },
-        {
           label: 'Mesas',
           description: 'Capacidade e ocupa\u00E7\u00E3o',
           icon: Grid3X3,
@@ -205,20 +200,41 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           showFor: ['admin', 'operator', 'superadmin'],
         },
         {
-          label: 'Calend\u00E1rio',
-          description: 'Agenda do dia',
-          icon: CalendarDays,
-          path: `/${slug}/admin/calendario`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'calendar_view',
-        },
-        {
           label: 'Lista de Espera',
           description: 'Fila e chamadas',
           icon: ClipboardList,
           path: `/${slug}/admin/fila`,
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'waitlist_view',
+        },
+      ]
+    : [];
+
+  const companyReservationsNavItems: NavItem[] = slug
+    ? [
+        {
+          label: 'Vis\u00E3o geral',
+          description: 'Pr\u00F3ximos 15 dias',
+          icon: CalendarDays,
+          path: `/${slug}/admin/reservas`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'reservations_view',
+        },
+        {
+          label: 'Lista',
+          description: 'Filtros e hist\u00F3rico',
+          icon: ClipboardList,
+          path: `/${slug}/admin/reservas/lista`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'reservations_view',
+        },
+        {
+          label: 'Calend\u00E1rio',
+          description: 'Agenda do dia',
+          icon: CalendarDays,
+          path: `/${slug}/admin/reservas/calendario`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'calendar_view',
         },
       ]
     : [];
@@ -444,6 +460,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
+  const visibleReservationsNavItems = companyReservationsNavItems.filter((item) => {
+    if (!rolesLoaded) return false;
+    if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
+    if (permissionsLoading && item.requiredPermission) return false;
+    if (!hasCompanyPermission(item.requiredPermission)) return false;
+    return true;
+  });
+
   const visibleManagementNavItems = companyManagementNavItems.filter((item) => {
     if (!rolesLoaded) return false;
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
@@ -476,6 +500,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const visibleNavItems = [
     ...visiblePrimaryNavItems,
     ...visibleReportsNavItems,
+    ...visibleReservationsNavItems,
     ...visibleManagementNavItems,
     ...visibleSettingsNavItems,
   ];
@@ -497,6 +522,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const activeNavItem = visibleNavItems.find((item) => isNavItemActive(item)) ?? null;
   const isReportsNavActive = visibleReportsNavItems.some((item) => isNavItemActive(item));
+  const isReservationsNavActive = visibleReservationsNavItems.some((item) => isNavItemActive(item));
   const isSettingsNavActive = visibleSettingsNavItems.some((item) => isNavItemActive(item));
   const isProfileRoute = location.pathname === profilePath;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
@@ -532,6 +558,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     const reportsPath = `/${slug}/admin/relatorios`;
     if (location.pathname === reportsPath || location.pathname.startsWith(`${reportsPath}/`)) {
       setReportsNavOpen(true);
+    }
+
+    const reservationsPath = `/${slug}/admin/reservas`;
+    if (location.pathname === reservationsPath || location.pathname.startsWith(`${reservationsPath}/`)) {
+      setReservationsNavOpen(true);
     }
 
     const settingsPath = `/${slug}/admin/configuracoes`;
@@ -736,6 +767,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     isActive: isReportsNavActive,
   });
 
+  const renderReservationsNavGroup = () => renderNavGroup({
+    label: 'Reservas',
+    icon: CalendarDays,
+    items: visibleReservationsNavItems,
+    open: reservationsNavOpen,
+    onOpenChange: setReservationsNavOpen,
+    isActive: isReservationsNavActive,
+  });
+
   const renderSettingsNavGroup = () => renderNavGroup({
     label: 'Configura\u00E7\u00F5es',
     icon: Settings,
@@ -823,6 +863,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <div className="space-y-1">
                   {visibleCompanyDashboardItem && renderNavLink(visibleCompanyDashboardItem)}
                   {renderReportsNavGroup()}
+                  {renderReservationsNavGroup()}
                   {visibleCompanyPrimaryNavItemsWithoutDashboard.map(renderNavLink)}
                 </div>
               </div>

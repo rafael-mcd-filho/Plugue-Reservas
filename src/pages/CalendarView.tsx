@@ -22,10 +22,13 @@ import {
   ChevronsUpDown,
   Eye,
   Loader2,
+  Plus,
   Table2,
   Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import CalendarSlotAvailability from '@/components/CalendarSlotAvailability';
+import ManualReservationDialog, { type ManualReservationPreset } from '@/components/ManualReservationDialog';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
@@ -50,6 +53,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
+import { getSlotBookingState } from '@/lib/calendar-slot-availability';
 import {
   buildReservationCalendarDayMetrics,
   type ReservationCalendarMetricRow,
@@ -72,6 +76,7 @@ type ReservationAvailabilityMode = 'tables' | 'capacity';
 type PublicReservationScheduleSource = 'blocked' | 'date_specific' | 'date_range' | 'weekly' | 'default';
 type SlotHealth = 'available' | 'near_full' | 'full' | 'over_capacity' | 'blocked' | 'configuration';
 type CalendarMetricMode = 'guests' | 'reservations';
+type SlotPanelTab = 'reservations' | 'availability';
 
 const WEEKDAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 
@@ -384,6 +389,14 @@ function isNowWithinCalendarSlot(slot: CalendarCapacitySlot, selectedDate: Date 
   return currentMinutes >= slotStart && currentMinutes < slotStart + slot.durationMinutes;
 }
 
+function getSlotReservationTimeRanges(slot: CalendarCapacitySlot) {
+  return Object.fromEntries(slot.reservations.map(({ reservation }) => {
+    const start = toTimeKey(reservation.time);
+    const duration = reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES;
+    return [reservation.id, `${start}–${minutesToTime(timeToMinutes(start) + duration)}`];
+  }));
+}
+
 function isEditableStatus(status: ReservationStatus) {
   return EDITABLE_STATUS_VALUES.includes(status);
 }
@@ -569,7 +582,7 @@ export default function CalendarView() {
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [calendarMetricMode, setCalendarMetricMode] = useState<CalendarMetricMode>('guests');
   const [expandedSlotTimes, setExpandedSlotTimes] = useState<Set<string>>(() => new Set());
-  const [hideEmptyCapacitySlots, setHideEmptyCapacitySlots] = useState(false);
+  const [hideEmptyCapacitySlots, setHideEmptyCapacitySlots] = useState(true);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [detailsReservation, setDetailsReservation] = useState<Reservation | null>(null);
   const [statusDialogReservation, setStatusDialogReservation] = useState<Reservation | null>(null);
@@ -578,6 +591,11 @@ export default function CalendarView() {
   const [editStatus, setEditStatus] = useState<ReservationStatus>('confirmed');
   const [checkedInPartySize, setCheckedInPartySize] = useState('1');
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
+  const [slotPanelTabs, setSlotPanelTabs] = useState<Record<string, SlotPanelTab>>({});
+  const [availabilityShowOccupied, setAvailabilityShowOccupied] = useState(false);
+  const [availabilityMinSeats, setAvailabilityMinSeats] = useState(0);
+  const [manualReservationOpen, setManualReservationOpen] = useState(false);
+  const [manualReservationPreset, setManualReservationPreset] = useState<ManualReservationPreset | null>(null);
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const calendarMonthDays = useMemo(() => getCalendarMonthDays(calendarMonth), [calendarMonth]);
@@ -586,10 +604,12 @@ export default function CalendarView() {
 
   useEffect(() => {
     setExpandedSlotTimes(new Set());
+    setSlotPanelTabs({});
   }, [selectedDateStr]);
 
   const invalidateReservationQueries = () => {
     qc.invalidateQueries({ queryKey: ['calendar-day-capacity', companyId] });
+    qc.invalidateQueries({ queryKey: ['calendar-slot-tables', companyId] });
     qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
     qc.invalidateQueries({ queryKey: ['reservations', companyId] });
     qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
@@ -827,6 +847,38 @@ export default function CalendarView() {
   const openDetails = (reservation: Reservation) => {
     setDetailsReservation(reservation);
     setDetailsDialogOpen(true);
+  };
+
+  const openSlotReservationDetails = (slot: CalendarCapacitySlot, reservationId: string) => {
+    const slotReservation = slot.reservations.find(({ reservation }) => reservation.id === reservationId);
+    if (slotReservation) openDetails(slotReservation.reservation);
+  };
+
+  const openManualReservation = (preset: ManualReservationPreset) => {
+    setManualReservationPreset(preset);
+    setManualReservationOpen(true);
+  };
+
+  const selectSlotPanelTab = (slotTime: string, tab: SlotPanelTab) => {
+    setSlotPanelTabs((current) => ({ ...current, [slotTime]: tab }));
+  };
+
+  // No modo por mesas o atalho leva a lista de mesas; no modo por capacidade a
+  // faixa e a unidade reservavel, entao o modal abre direto.
+  const reserveFromSlotHeader = (slot: CalendarCapacitySlot) => {
+    if (slot.availabilityMode === 'capacity') {
+      const { maxPartySize } = getSlotBookingState(slot);
+      openManualReservation({
+        date: selectedDateStr,
+        time: slot.time,
+        partySize: Math.max(Math.min(2, maxPartySize), 1),
+        remainingCapacity: slot.capacityLimit != null ? slot.remainingCapacity : null,
+      });
+      return;
+    }
+
+    setExpandedSlotTimes((prev) => new Set(prev).add(slot.time));
+    selectSlotPanelTab(slot.time, 'availability');
   };
 
   const openStatusDialog = (reservation: Reservation, status?: ReservationStatus) => {
@@ -1120,34 +1172,36 @@ export default function CalendarView() {
                   <div className="flex flex-wrap items-center gap-2">
                     <CardTitle className="text-lg">
                       {selectedDate
-                        ? `Capacidade em ${format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}`
+                        ? `Capacidade em ${format(selectedDate, 'EEEE, dd/MM', { locale: ptBR })}`
                         : 'Selecione uma data'}
                     </CardTitle>
-                    <div className="flex h-7 items-center gap-1.5 rounded bg-muted/20 px-2">
-                      <Switch
-                        id="hide-empty-capacity-slots"
-                        checked={hideEmptyCapacitySlots}
-                        onCheckedChange={setHideEmptyCapacitySlots}
-                        className="scale-75"
-                      />
-                      <Label
-                        htmlFor="hide-empty-capacity-slots"
-                        className="cursor-pointer whitespace-nowrap text-[11px] font-medium text-muted-foreground"
+                    <div className="inline-flex shrink-0 items-center gap-2">
+                      <div className="flex h-7 items-center gap-1.5 rounded bg-muted/20 px-2">
+                        <Switch
+                          id="hide-empty-capacity-slots"
+                          checked={hideEmptyCapacitySlots}
+                          onCheckedChange={setHideEmptyCapacitySlots}
+                          className="scale-75"
+                        />
+                        <Label
+                          htmlFor="hide-empty-capacity-slots"
+                          className="cursor-pointer whitespace-nowrap text-[11px] font-medium text-muted-foreground"
+                        >
+                          Ocultar vazias
+                        </Label>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                        onClick={toggleAllSlots}
+                        disabled={expandableSlotKeys.length === 0}
                       >
-                        Ocultar vazias
-                      </Label>
+                        {allSlotsExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {allSlotsExpanded ? 'Recolher todas' : 'Expandir todas'}
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                      onClick={toggleAllSlots}
-                      disabled={expandableSlotKeys.length === 0}
-                    >
-                      {allSlotsExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
-                      {allSlotsExpanded ? 'Recolher todas' : 'Expandir todas'}
-                    </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Horários ativos do dia com ocupação e reservas relacionadas.
@@ -1304,6 +1358,8 @@ export default function CalendarView() {
                     const showSlotHealthBadge = slot.health !== 'available';
                     const hasDifferentOccupancy = slot.occupyingReservationCount !== slot.arrivalReservationCount
                       || slot.occupiedGuests !== slot.arrivalGuests;
+                    const slotBooking = getSlotBookingState(slot);
+                    const activePanelTab = slotPanelTabs[slot.time] ?? (slot.reservations.length > 0 ? 'reservations' : 'availability');
 
                     return (
                       <section
@@ -1314,169 +1370,232 @@ export default function CalendarView() {
                           slotIsCurrent && 'ring-primary/20',
                         )}
                       >
-                        <button
-                          type="button"
-                          aria-expanded={isExpanded}
-                          onClick={() => toggleSlot(slot.time)}
+                        <div
                           className={cn(
-                            'grid w-full gap-2 px-3 py-2 text-left transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start',
+                            'flex items-start transition',
                             slotIsCurrent ? 'bg-primary/[0.05]' : 'bg-muted/[0.08]',
                             isExpanded && 'border-b border-black/[0.04]',
                             !isExpanded && 'hover:bg-muted/15',
                           )}
                         >
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-stretch gap-2.5">
-                              <div className={cn('w-1 min-h-9 rounded-full', getSlotFillClassName(slot))} />
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-base font-semibold leading-tight tracking-tight text-foreground">
-                                    {slot.time} - {slot.endTime}
-                                  </p>
-                                  {slotIsCurrent && (
-                                    <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-primary">
-                                      Agora
+                          <button
+                            type="button"
+                            aria-expanded={isExpanded}
+                            onClick={() => toggleSlot(slot.time)}
+                            className="grid min-w-0 flex-1 gap-2 px-3 py-2 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 items-stretch gap-2.5">
+                                <div className={cn('w-1 min-h-9 rounded-full', getSlotFillClassName(slot))} />
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-base font-semibold leading-tight tracking-tight text-foreground">
+                                      {slot.time} - {slot.endTime}
+                                    </p>
+                                    {slotIsCurrent && (
+                                      <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-primary">
+                                        Agora
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                    <span className="flex items-center gap-1">
+                                      <CalendarCheck className="h-3.5 w-3.5 text-primary" />
+                                      <span className="tabular-nums">{slot.arrivalReservationCount}</span>
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Users className="h-3.5 w-3.5 text-info" />
+                                      <span className="tabular-nums">{slot.arrivalGuests}</span>
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex w-full min-w-0 items-start gap-2 sm:justify-end">
+                              <div className="w-full min-w-0 space-y-1.5 sm:min-w-[15rem]">
+                                <div className="flex items-center justify-between gap-3 text-[11px] leading-none text-muted-foreground">
+                                  <span className="truncate">
+                                    <span className="font-medium text-foreground">{slot.occupiedGuests}</span>
+                                    {' / '}
+                                    {formatCapacity(slot.capacityLimit)} pessoas
+                                  </span>
+                                  <span className="font-semibold tabular-nums text-foreground">{slot.fillPercent}%</span>
+                                </div>
+                                <div className={cn('h-1.5 overflow-hidden rounded-full', getSlotTrackClassName(slot))}>
+                                  <div
+                                    className={cn('h-full rounded-full transition-[width]', getSlotFillClassName(slot))}
+                                    style={{ width: `${progressValue}%` }}
+                                  />
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                    {modeLabel}
+                                  </span>
+                                  <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+                                    Reservas {slot.arrivalReservationCount}
+                                  </span>
+                                  <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+                                    Vagas {formatCapacity(slot.remainingCapacity)}
+                                  </span>
+                                  {slot.availabilityMode === 'tables' && (
+                                    <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+                                      Mesas {slot.availableTableCount}/{slot.totalTableCount}
+                                    </span>
+                                  )}
+                                  {slot.unassignedReservationCount > 0 && (
+                                    <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                                      {slot.unassignedReservationCount} sem mesa
+                                    </span>
+                                  )}
+                                  {slot.reservationLimit && (
+                                    <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+                                      Limite {slot.reservationLimit} reservas
+                                    </span>
+                                  )}
+                                  {showSlotHealthBadge && (
+                                    <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', getSlotHealthClassName(slot))}>
+                                      {getSlotHealthLabel(slot)}
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <CalendarCheck className="h-3.5 w-3.5 text-primary" />
-                                    <span className="tabular-nums">{slot.arrivalReservationCount}</span>
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <Users className="h-3.5 w-3.5 text-info" />
-                                    <span className="tabular-nums">{slot.arrivalGuests}</span>
-                                  </span>
-                                </div>
                               </div>
+                              <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
                             </div>
+                          </button>
+                          <div className="shrink-0 py-2 pr-3">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-[11px]"
+                              disabled={!!slotBooking.blockedReason}
+                              title={slotBooking.blockedReason ?? undefined}
+                              onClick={() => reserveFromSlotHeader(slot)}
+                            >
+                              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                              Reservar
+                            </Button>
                           </div>
-
-                          <div className="flex w-full min-w-0 items-start gap-2 sm:justify-end">
-                            <div className="w-full min-w-0 space-y-1.5 sm:min-w-[15rem]">
-                              <div className="flex items-center justify-between gap-3 text-[11px] leading-none text-muted-foreground">
-                                <span className="truncate">
-                                  <span className="font-medium text-foreground">{slot.occupiedGuests}</span>
-                                  {' / '}
-                                  {formatCapacity(slot.capacityLimit)} pessoas
-                                </span>
-                                <span className="font-semibold tabular-nums text-foreground">{slot.fillPercent}%</span>
-                              </div>
-                              <div className={cn('h-1.5 overflow-hidden rounded-full', getSlotTrackClassName(slot))}>
-                                <div
-                                  className={cn('h-full rounded-full transition-[width]', getSlotFillClassName(slot))}
-                                  style={{ width: `${progressValue}%` }}
-                                />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                  {modeLabel}
-                                </span>
-                                <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-                                  Reservas {slot.arrivalReservationCount}
-                                </span>
-                                <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-                                  Vagas {formatCapacity(slot.remainingCapacity)}
-                                </span>
-                                {slot.availabilityMode === 'tables' && (
-                                  <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-                                    Mesas {slot.availableTableCount}/{slot.totalTableCount}
-                                  </span>
-                                )}
-                                {slot.unassignedReservationCount > 0 && (
-                                  <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                                    {slot.unassignedReservationCount} sem mesa
-                                  </span>
-                                )}
-                                {slot.reservationLimit && (
-                                  <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-                                    Limite {slot.reservationLimit} reservas
-                                  </span>
-                                )}
-                                {showSlotHealthBadge && (
-                                  <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', getSlotHealthClassName(slot))}>
-                                    {getSlotHealthLabel(slot)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
-                          </div>
-                        </button>
+                        </div>
 
                         {isExpanded && (
                           <div className="border-t border-border/70 bg-muted/10 px-3 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background px-3 py-2 text-xs">
-                              <div>
-                                <p className="text-xs text-muted-foreground">Reservas da faixa</p>
-                                <p className="mt-0.5 font-semibold tabular-nums">{formatReservationCountLabel(slot.arrivalReservationCount)} / {formatGuestCountLabel(slot.arrivalGuests)}</p>
-                              </div>
-                              {hasDifferentOccupancy && (
-                                <div className="rounded-md bg-muted/45 px-2.5 py-1.5">
-                                  <p className="text-xs text-muted-foreground">Ocupação simultânea</p>
-                                  <p className="mt-0.5 font-semibold tabular-nums">{formatReservationCountLabel(slot.occupyingReservationCount)} / {formatGuestCountLabel(slot.occupiedGuests)}</p>
-                                </div>
-                              )}
+                            <div
+                              role="tablist"
+                              aria-label={`Visão da faixa ${slot.time}`}
+                              className="mb-3 inline-flex max-w-full rounded-md bg-muted p-0.5 text-xs font-semibold"
+                            >
+                              {(['reservations', 'availability'] as const).map((tab) => (
+                                <button
+                                  key={tab}
+                                  type="button"
+                                  role="tab"
+                                  aria-selected={activePanelTab === tab}
+                                  onClick={() => selectSlotPanelTab(slot.time, tab)}
+                                  className={cn(
+                                    'h-7 truncate rounded px-3 transition',
+                                    activePanelTab === tab
+                                      ? 'bg-background text-foreground shadow-sm'
+                                      : 'text-muted-foreground hover:text-foreground',
+                                  )}
+                                >
+                                  {tab === 'reservations'
+                                    ? `Reservas (${slot.reservations.length})`
+                                    : slot.availabilityMode === 'capacity'
+                                      ? `Disponibilidade · ${formatCapacity(slot.remainingCapacity)} vagas`
+                                      : `Disponibilidade · ${slot.availableTableCount} livres`}
+                                </button>
+                              ))}
                             </div>
 
-                            {slot.reservations.length === 0 ? (
-                              <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma reserva nesta faixa.</p>
+                            {activePanelTab === 'availability' ? (
+                              <CalendarSlotAvailability
+                                companyId={companyId ?? ''}
+                                date={selectedDateStr}
+                                slot={slot}
+                                showOccupied={availabilityShowOccupied}
+                                onShowOccupiedChange={setAvailabilityShowOccupied}
+                                minSeats={availabilityMinSeats}
+                                onMinSeatsChange={setAvailabilityMinSeats}
+                                reservationTimeRanges={getSlotReservationTimeRanges(slot)}
+                                onReserve={openManualReservation}
+                                onOpenReservation={(reservationId) => openSlotReservationDetails(slot, reservationId)}
+                              />
                             ) : (
-                              <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
-                                {slot.reservations.map((slotReservation, index) => {
-                                  const reservation = slotReservation.reservation;
-                                  const detail = reservation.occasion || reservation.notes;
-                                  const paidPayment = getPaidReservationPayment(reservation);
-
-                                  return (
-                                    <div
-                                      key={reservation.id}
-                                      className={cn(
-                                        'px-3 py-2.5',
-                                        index !== slot.reservations.length - 1 && 'border-b border-border/70',
-                                      )}
-                                    >
-                                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex flex-wrap items-center gap-2">
-                                            <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-semibold tabular-nums text-primary">
-                                              {reservation.time.slice(0, 5)}
-                                            </span>
-                                            <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
-                                            <ReservationStatusBadge status={reservation.status} />
-                                            {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
-                                          </div>
-                                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                            <PhoneWhatsAppLink
-                                              phone={reservation.guest_phone}
-                                              companyId={reservation.company_id}
-                                              slug={slug}
-                                              reservation={reservation}
-                                              phoneClassName="text-xs text-muted-foreground"
-                                              linkMode="button"
-                                            />
-                                            <span>{formatGuestCountLabel(reservation.party_size)}</span>
-                                            <span>{reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES} min</span>
-                                            <span className="inline-flex items-center gap-1">
-                                              <Table2 className="h-3.5 w-3.5" />
-                                              {reservation.created_in_mode === 'capacity' ? 'Por capacidade' : getTableLabel(slotReservation.table)}
-                                            </span>
-                                            {detail && <span className="min-w-0 truncate">{detail}</span>}
-                                          </div>
-                                        </div>
-
-                                        <div className="flex flex-wrap gap-1.5 lg:justify-end">
-                                          <Button type="button" variant="outline" size="sm" onClick={() => openDetails(reservation)}>
-                                            <Eye className="mr-1.5 h-3.5 w-3.5" />
-                                            Detalhes
-                                          </Button>
-                                        </div>
-                                      </div>
+                              <>
+                                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background px-3 py-2 text-xs">
+                                  <div>
+                                    <p className="text-xs text-muted-foreground">Reservas da faixa</p>
+                                    <p className="mt-0.5 font-semibold tabular-nums">{formatReservationCountLabel(slot.arrivalReservationCount)} / {formatGuestCountLabel(slot.arrivalGuests)}</p>
+                                  </div>
+                                  {hasDifferentOccupancy && (
+                                    <div className="rounded-md bg-muted/45 px-2.5 py-1.5">
+                                      <p className="text-xs text-muted-foreground">Ocupação simultânea</p>
+                                      <p className="mt-0.5 font-semibold tabular-nums">{formatReservationCountLabel(slot.occupyingReservationCount)} / {formatGuestCountLabel(slot.occupiedGuests)}</p>
                                     </div>
-                                  );
-                                })}
-                              </div>
+                                  )}
+                                </div>
+
+                                {slot.reservations.length === 0 ? (
+                                  <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma reserva nesta faixa.</p>
+                                ) : (
+                                  <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
+                                    {slot.reservations.map((slotReservation, index) => {
+                                      const reservation = slotReservation.reservation;
+                                      const detail = reservation.occasion || reservation.notes;
+                                      const paidPayment = getPaidReservationPayment(reservation);
+
+                                      return (
+                                        <div
+                                          key={reservation.id}
+                                          className={cn(
+                                            'px-3 py-2.5',
+                                            index !== slot.reservations.length - 1 && 'border-b border-border/70',
+                                          )}
+                                        >
+                                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                            <div className="min-w-0 flex-1">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-semibold tabular-nums text-primary">
+                                                  {reservation.time.slice(0, 5)}
+                                                </span>
+                                                <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
+                                                <ReservationStatusBadge status={reservation.status} />
+                                                {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
+                                              </div>
+                                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                                <PhoneWhatsAppLink
+                                                  phone={reservation.guest_phone}
+                                                  companyId={reservation.company_id}
+                                                  slug={slug}
+                                                  reservation={reservation}
+                                                  phoneClassName="text-xs text-muted-foreground"
+                                                  linkMode="button"
+                                                />
+                                                <span>{formatGuestCountLabel(reservation.party_size)}</span>
+                                                <span>{reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES} min</span>
+                                                <span className="inline-flex items-center gap-1">
+                                                  <Table2 className="h-3.5 w-3.5" />
+                                                  {reservation.created_in_mode === 'capacity' ? 'Por capacidade' : getTableLabel(slotReservation.table)}
+                                                </span>
+                                                {detail && <span className="min-w-0 truncate">{detail}</span>}
+                                              </div>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-1.5 lg:justify-end">
+                                              <Button type="button" variant="outline" size="sm" onClick={() => openDetails(reservation)}>
+                                                <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                                Detalhes
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         )}
@@ -1489,6 +1608,17 @@ export default function CalendarView() {
           </Card>
         </div>
       </div>
+
+      <ManualReservationDialog
+        open={manualReservationOpen}
+        onOpenChange={setManualReservationOpen}
+        companyId={companyId}
+        preset={manualReservationPreset}
+        onCreated={() => {
+          invalidateReservationQueries();
+          qc.invalidateQueries({ queryKey: ['leads-reservations', companyId] });
+        }}
+      />
 
       <ReservationDetailsDialog
         open={detailsDialogOpen}
