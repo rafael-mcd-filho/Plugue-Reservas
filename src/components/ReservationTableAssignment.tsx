@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, Info, Lightbulb, Loader2, Table2 } from 'lucide-react';
+import { AlertTriangle, Info, Lightbulb, Loader2, Table2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -383,10 +383,10 @@ export default function ReservationTableAssignment({
       )}
 
       {open && (
-        <div id={`reservation-table-selector-${reservationId}`} className="mt-4 space-y-4 border-t border-border pt-4">
+        <div id={`reservation-table-selector-${reservationId}`} className="mt-3 space-y-3 border-t border-border pt-3">
           <div
             className={cn(
-              'rounded-lg border p-3',
+              'rounded-md border px-2.5 py-2',
               hasEnoughCapacity
                 ? 'border-success/20 bg-success-soft/70'
                 : 'border-warning/30 bg-warning-soft/70',
@@ -395,8 +395,8 @@ export default function ReservationTableAssignment({
             aria-atomic="true"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold text-foreground">
-                {draftCapacity} de {requiredCapacity} lugares selecionados
+              <p className="text-xs font-semibold tabular-nums text-foreground">
+                {draftCapacity}/{requiredCapacity} lugares
               </p>
               <p className={cn(
                 'text-xs font-medium',
@@ -410,18 +410,16 @@ export default function ReservationTableAssignment({
               </p>
             </div>
             <Progress
-              className="mt-2 h-2 bg-background/80"
+              className="mt-1.5 h-1.5 bg-background/80"
               value={Math.min(100, (draftCapacity / requiredCapacity) * 100)}
               aria-label={`${draftCapacity} de ${requiredCapacity} lugares selecionados`}
             />
           </div>
 
-          <div className="flex items-start gap-2 rounded-lg border border-primary/15 bg-primary-soft/45 px-3 py-2.5 text-xs text-foreground">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-            <p>
-              Cada mesa selecionada fica bloqueada por inteiro durante a reserva. Lugares de folga não ficam disponíveis para outro grupo.
-            </p>
-          </div>
+          <p className="flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+            <Info className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            Cada mesa selecionada fica ocupada por inteiro.
+          </p>
 
           {optionsQuery.isLoading || assignmentsQuery.isLoading ? (
             <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground" role="status">
@@ -454,18 +452,18 @@ export default function ReservationTableAssignment({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="w-full justify-start border-success/25 bg-success-soft/50 text-success hover:bg-success-soft"
+                  className="h-8 w-full justify-start border-success/25 bg-success-soft/50 px-2.5 text-xs text-success hover:bg-success-soft"
                   disabled={assignMutation.isPending}
                   onClick={applySuggestion}
                 >
-                  <Lightbulb aria-hidden="true" />
+                  <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />
                   Usar sugestão · {suggestedOptions.length} {suggestedOptions.length === 1 ? 'mesa' : 'mesas'} · {suggestedCapacity} lugares
                 </Button>
               )}
 
-              <fieldset className="space-y-2">
+              <fieldset>
                 <legend className="sr-only">Selecione as mesas desta reserva</legend>
-                <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1 overscroll-contain sm:grid-cols-2">
+                <div className="grid max-h-[18rem] gap-1.5 overflow-y-auto pr-1 overscroll-contain">
                   {displayedOptions.map((option) => {
                     const isAssigned = assignedTableIds.has(option.table_id);
                     const isSelected = draftTableIds.has(option.table_id);
@@ -481,9 +479,9 @@ export default function ReservationTableAssignment({
                         key={option.table_id}
                         htmlFor={inputId}
                         className={cn(
-                          'flex min-h-16 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-[border-color,background-color,box-shadow] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2',
+                          'flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-left transition-[border-color,background-color] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1',
                           isSelected
-                            ? 'border-primary/45 bg-primary-soft/55 shadow-sm'
+                            ? 'border-primary/45 bg-primary-soft/45'
                             : selectable
                               ? 'cursor-pointer border-border bg-background hover:border-primary/30 hover:bg-muted/30'
                               : 'cursor-not-allowed border-border bg-muted/20 opacity-60',
@@ -496,30 +494,36 @@ export default function ReservationTableAssignment({
                           onCheckedChange={(checked) => toggleTable(option.table_id, checked === true)}
                           aria-describedby={descriptionId}
                         />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="font-medium text-foreground">{formatTableLabel(option)}</span>
-                            <span className="text-xs tabular-nums text-muted-foreground">
-                              {option.capacity} {option.capacity === 1 ? 'lugar' : 'lugares'}
-                            </span>
-                          </span>
-                          <span id={descriptionId} className="mt-0.5 block text-xs">
-                            {option.assignmentOnly
-                              ? <span className="text-warning-foreground">Fora do mapa ativo; desmarque para remover</span>
-                              : !option.available
-                                ? <span className="text-destructive">{option.conflict_guest_name ? `Ocupada por ${option.conflict_guest_name}` : 'Ocupada neste horário'}</span>
-                                : isAssigned
-                                  ? <span className="text-primary">Atribuída atualmente</span>
-                                  : <span className="text-muted-foreground">Disponível</span>}
+                        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">{formatTableLabel(option)}</span>
+                          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {option.capacity} {option.capacity === 1 ? 'lugar' : 'lugares'}
                           </span>
                         </span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          {isSuggested && (
+                        <span id={descriptionId} className="flex min-w-0 max-w-[48%] shrink-0 items-center justify-end gap-1.5 text-xs">
+                          {option.assignmentOnly ? (
+                            <span className="truncate text-warning-foreground" title="Fora do mapa ativo; desmarque para remover">
+                              Fora do mapa
+                            </span>
+                          ) : !option.available ? (
+                            <span
+                              className="truncate text-destructive"
+                              title={option.conflict_guest_name ? `Ocupada por ${option.conflict_guest_name}` : 'Ocupada neste horário'}
+                            >
+                              {option.conflict_guest_name ? `Ocupada · ${option.conflict_guest_name}` : 'Ocupada'}
+                            </span>
+                          ) : isAssigned ? (
+                            <span className="rounded border border-primary/20 bg-primary-soft px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                              Atual
+                            </span>
+                          ) : (
+                            <span className="sr-only">Disponível</span>
+                          )}
+                          {isSuggested && !isAssigned && option.available && (
                             <span className="rounded border border-success/25 bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-success">
                               Sugestão
                             </span>
                           )}
-                          {isSelected && <Check className="h-4 w-4 text-primary" aria-hidden="true" />}
                         </span>
                       </label>
                     );
