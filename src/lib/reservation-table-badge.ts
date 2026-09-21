@@ -13,6 +13,11 @@ export interface ReservationTableBadgeInfo {
   tone: ReservationTableBadgeTone;
 }
 
+export interface OccupiedTableLabel {
+  label: string;
+  title: string;
+}
+
 export interface ReservationTableBadgeInput {
   tableId: string | null;
   table: ReservationTableRef | null;
@@ -25,6 +30,24 @@ export interface ReservationTableBadgeInput {
 
 export function formatReservationTableLabel(table: ReservationTableRef) {
   return table.section ? `Mesa ${table.number} · ${table.section}` : `Mesa ${table.number}`;
+}
+
+export function formatOccupiedTableLabel(guestName?: string | null): OccupiedTableLabel {
+  const normalizedGuestName = guestName?.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedGuestName) {
+    return {
+      label: 'Ocupada',
+      title: 'Ocupada neste horário',
+    };
+  }
+
+  const [firstName] = normalizedGuestName.split(' ');
+
+  return {
+    label: `Ocupada ${firstName}`,
+    title: `Ocupada por ${normalizedGuestName}`,
+  };
 }
 
 export function getReservationTableBadge({

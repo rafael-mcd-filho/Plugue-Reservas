@@ -21,6 +21,7 @@ import {
   orderSelectedTableIds,
   type TableCombinationOption,
 } from '@/lib/reservation-table-selection';
+import { formatOccupiedTableLabel } from '@/lib/reservation-table-badge';
 import { cn } from '@/lib/utils';
 
 interface ReservationTableOption extends TableCombinationOption {
@@ -469,6 +470,7 @@ export default function ReservationTableAssignment({
                   {displayedOptions.map((option) => {
                     const isAssigned = assignedTableIds.has(option.table_id);
                     const isSelected = draftTableIds.has(option.table_id);
+                    const occupiedLabel = formatOccupiedTableLabel(option.conflict_guest_name);
                     // A mesa pode ter ficado indisponível após a abertura do editor.
                     // Ainda assim, uma seleção local precisa poder ser removida.
                     const selectable = option.available || isSelected;
@@ -510,9 +512,10 @@ export default function ReservationTableAssignment({
                           ) : !option.available ? (
                             <span
                               className="truncate text-destructive"
-                              title={option.conflict_guest_name ? `Ocupada por ${option.conflict_guest_name}` : 'Ocupada neste horário'}
+                              title={occupiedLabel.title}
+                              aria-label={occupiedLabel.title}
                             >
-                              {option.conflict_guest_name ? `Ocupada · ${option.conflict_guest_name}` : 'Ocupada'}
+                              {occupiedLabel.label}
                             </span>
                           ) : isAssigned ? (
                             <span className="rounded border border-primary/20 bg-primary-soft px-1.5 py-0.5 text-[10px] font-semibold text-primary">

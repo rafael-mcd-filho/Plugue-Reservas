@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { getReservationTableBadge } from '@/lib/reservation-table-badge';
+import { formatOccupiedTableLabel, getReservationTableBadge } from '@/lib/reservation-table-badge';
+
+describe('formatOccupiedTableLabel', () => {
+  it('mostra apenas o primeiro nome e preserva o nome completo no titulo', () => {
+    expect(formatOccupiedTableLabel('  Jaiclesia   Misiam de Rezende  ')).toEqual({
+      label: 'Ocupada Jaiclesia',
+      title: 'Ocupada por Jaiclesia Misiam de Rezende',
+    });
+  });
+
+  it('usa uma mensagem generica quando o nome nao esta disponivel', () => {
+    expect(formatOccupiedTableLabel('   ')).toEqual({
+      label: 'Ocupada',
+      title: 'Ocupada neste horário',
+    });
+    expect(formatOccupiedTableLabel(null)).toEqual({
+      label: 'Ocupada',
+      title: 'Ocupada neste horário',
+    });
+  });
+});
 
 describe('getReservationTableBadge', () => {
   it('mostra numero e secao da mesa atribuida', () => {

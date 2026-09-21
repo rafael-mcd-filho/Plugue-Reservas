@@ -559,7 +559,7 @@ export default function ReservationDetailsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85dvh] min-w-0 w-auto max-w-none overflow-x-hidden overflow-y-auto sm:w-[calc(100vw-3rem)] sm:max-w-4xl">
+        <DialogContent className="left-1/2 right-auto max-h-[85dvh] w-[calc(100vw-2rem)] min-w-0 max-w-[34rem] -translate-x-1/2 overflow-x-hidden overflow-y-auto sm:w-[calc(100vw-3rem)] sm:max-w-2xl">
           <DialogHeader className="space-y-3">
             {onBackToList && (
               <div className="flex justify-start">
