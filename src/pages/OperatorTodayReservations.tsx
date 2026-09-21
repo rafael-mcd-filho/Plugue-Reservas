@@ -34,9 +34,9 @@ import { normalizeBrazilPhoneDigits, normalizePhoneDigits } from '@/lib/validati
 const DEFAULT_RESERVATION_DURATION_MINUTES = 30;
 const RECENT_PENDING_PAYMENT_GRACE_MS = 2 * 60 * 1000;
 const OPERATOR_RESERVATION_SELECT =
-  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, duration_minutes, created_in_mode, reservation_payments(id,status,expires_at)';
+  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, duration_minutes, created_in_mode, reservation_table_assignments(table_id), reservation_payments(id,status,expires_at)';
 const OPERATOR_RESERVATION_LEGACY_SELECT =
-  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, reservation_payments(id,status)';
+  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, reservation_table_assignments(table_id), reservation_payments(id,status)';
 
 type ReservationAvailabilityMode = 'tables' | 'capacity';
 type PublicReservationScheduleSource = 'blocked' | 'date_specific' | 'date_range' | 'weekly' | 'default';
@@ -69,6 +69,7 @@ interface Reservation {
   updated_at: string;
   duration_minutes: number | null;
   created_in_mode?: ReservationAvailabilityMode | string | null;
+  reservation_table_assignments?: Array<{ table_id: string }> | null;
   reservation_payments?: ReservationPaymentInfo[] | null;
 }
 
@@ -507,6 +508,19 @@ function getScopedTables(tables: RestaurantTableRow[], tableMaps: TableMapRow[],
   return tableMaps.length === 0 ? availableTables : [];
 }
 
+function getReservationTableIds(reservation: Reservation) {
+  const ids = new Set(
+    (reservation.reservation_table_assignments ?? [])
+      .map((assignment) => assignment.table_id)
+      .filter(Boolean),
+  );
+
+  // Compatibilidade durante o rollout: reservas antigas continuam expondo a
+  // mesa principal em reservations.table_id ate o backfill da associacao.
+  if (reservation.table_id) ids.add(reservation.table_id);
+  return Array.from(ids);
+}
+
 function buildOperatorCapacitySlots({
   selectedDate,
   dayReservations,
@@ -590,11 +604,10 @@ function buildOperatorCapacitySlots({
     const arrivalFillPercent = capacityLimit > 0 ? Math.min(Math.round((arrivalGuests / capacityLimit) * 100), 999) : 0;
     const occupiedTableIds = new Set(
       capacityReservations
-        .map((reservation) => reservation.reservation.table_id)
-        .filter((tableId): tableId is string => Boolean(tableId)),
+        .flatMap((reservation) => getReservationTableIds(reservation.reservation)),
     );
     const unassignedReservationCount = availabilityMode === 'tables'
-      ? capacityReservations.filter((reservation) => !reservation.reservation.table_id).length
+      ? capacityReservations.filter((reservation) => getReservationTableIds(reservation.reservation).length === 0).length
       : 0;
     const unavailableReason = availability?.unavailableReason ?? null;
     const isBlocked = schedule?.source === 'blocked' || unavailableReason === 'blocked';

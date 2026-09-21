@@ -388,7 +388,7 @@ function isEditableStatus(status: ReservationStatus) {
   return EDITABLE_STATUS_VALUES.includes(status);
 }
 
-// --- Fase 1: integracao com get_admin_reservation_day_capacity ---
+// --- Fase 1: integração com a capacidade diária enriquecida por mesas ---
 // O calculo de capacidade por horario passou a ser feito no banco. Aqui apenas
 // mapeamos o retorno da RPC para as mesmas estruturas que a UI ja consome.
 
@@ -610,7 +610,7 @@ export default function CalendarView() {
   } = useQuery({
     queryKey: ['calendar-day-capacity', companyId, selectedDateStr],
     queryFn: async () => {
-      const { data, error } = await (supabase.rpc as any)('get_admin_reservation_day_capacity', {
+      const { data, error } = await (supabase.rpc as any)('get_admin_reservation_day_capacity_with_tables', {
         _company_id: companyId,
         _date: selectedDateStr,
       });

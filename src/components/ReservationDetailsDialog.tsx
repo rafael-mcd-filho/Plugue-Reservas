@@ -685,7 +685,6 @@ export default function ReservationDetailsDialog({
                   date={reservation.date}
                   time={reservation.time}
                   partySize={reservation.party_size}
-                  initialTableId={reservation.table_id ?? null}
                 />
               )}
 
