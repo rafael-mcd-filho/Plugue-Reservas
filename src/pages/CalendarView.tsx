@@ -1041,7 +1041,7 @@ export default function CalendarView() {
           <p className="mt-1 text-sm text-muted-foreground">Selecione um dia para acompanhar vagas, ocupação e reservas por horário.</p>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[430px_minmax(0,1fr)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[430px_minmax(0,1fr)]">
           <div className="space-y-3">
             <Card className="rounded-lg border border-border/60 shadow-sm">
               <CardContent className="p-2.5">

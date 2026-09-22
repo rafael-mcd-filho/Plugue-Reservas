@@ -205,7 +205,7 @@ function TableAvailabilityRow({
               className={cn('h-2 w-2 shrink-0 rounded-full', option.available ? 'bg-emerald-500' : 'bg-slate-300')}
               aria-hidden="true"
             />
-            <span className="truncate">{statusLabel}</span>
+            <span className="min-w-0 truncate">{statusLabel}</span>
           </p>
         </div>
         {canReserve ? (
