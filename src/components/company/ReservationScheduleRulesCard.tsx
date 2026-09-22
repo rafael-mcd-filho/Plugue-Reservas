@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  CalendarClock,
+  Archive,
+  ArchiveRestore,
   CalendarIcon,
   CalendarRange,
+  ChevronDown,
   Clock,
   Copy,
   CopyPlus,
@@ -37,6 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Calendar } from '@/components/ui/calendar';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -45,21 +48,46 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import {
   useArchiveReservationScheduleRule,
+  useArchivedReservationScheduleRules,
+  useDeleteReservationScheduleRule,
+  useReservationScheduleRuleUsage,
   useReservationScheduleRules,
+  useRestoreReservationScheduleRule,
   useSaveReservationScheduleRule,
+  type ArchivedReservationScheduleRule,
   type ReservationAvailabilityMode,
   type ReservationScheduleRule,
   type ReservationScheduleRuleBlock,
   type ReservationScheduleRuleScope,
+  type ReservationScheduleRuleSlot,
 } from '@/hooks/useReservationScheduleRules';
 import {
   generateReservationScheduleSlots,
   normalizeReservationScheduleSlot,
   sortReservationScheduleSlotSettings,
 } from '@/lib/reservation-schedule';
+import {
+  getReservationScheduleRuleStatus,
+  getReservationScheduleRuleStatusLabel,
+  partitionReservationScheduleRulesByEnd,
+  type ReservationScheduleRuleStatus,
+} from '@/lib/reservation-schedule-rule-status';
+import {
+  formatScheduleSlotLimitsDetail,
+  formatShortWeekdaysLabel,
+  summarizeScheduleSlotLimits,
+} from '@/lib/reservation-schedule-rule-summary';
 import { cn } from '@/lib/utils';
 
-const CARD_CLASS = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
+type RuleActionMode = 'archive' | 'delete';
+type RuleActionTarget = Pick<ReservationScheduleRule, 'id' | 'name'>;
+
+const DEFAULT_RULE_PRIORITY = 100;
+// active:scale-100 desliga o "pulo" que o Button aplica por padrao no clique.
+const ICON_ACTION_CLASS = 'h-7 w-7 active:scale-100';
+const SECTION_TRIGGER_CLASS = 'flex h-auto w-full items-center justify-between gap-3 rounded-none px-3 py-2.5 text-left hover:bg-muted/20 active:scale-100';
+
+const CARD_CLASS ='rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
 const BADGE_CLASS = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
 const FIELD_CLASS = 'h-10 min-w-0 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 
@@ -425,13 +453,7 @@ function getWeekdayLabel(weekdays: number[] | null | undefined, emptyLabel = 'Ne
   return selected.length > 0 ? selected.map((day) => day.longLabel).join(', ') : emptyLabel;
 }
 
-function getRuleScopeLabel(scope: ReservationScheduleRuleScope) {
-  if (scope === 'weekly') return 'Semanal';
-  if (scope === 'date_specific') return 'Data específica';
-  return 'Período';
-}
-
-function getRulePeriodLabel(rule: ReservationScheduleRule) {
+function getRulePeriodLabel(rule: Pick<ReservationScheduleRule, 'scope' | 'start_date' | 'end_date'>) {
   if (rule.scope === 'weekly') return 'Recorrente semanal';
   if (rule.scope === 'date_specific') return rule.start_date ? formatDate(rule.start_date) : '';
   if (!rule.start_date || !rule.end_date) return '';
@@ -444,20 +466,17 @@ function getPublishDate(rule: Pick<ReservationScheduleRule, 'publish_at'>) {
   return Number.isNaN(publishDate.getTime()) ? null : publishDate;
 }
 
-function isRuleScheduled(rule: ReservationScheduleRule) {
-  const publishDate = getPublishDate(rule);
-  return rule.enabled && !!publishDate && publishDate.getTime() > Date.now();
-}
-
-function getRuleStatusLabel(rule: ReservationScheduleRule) {
-  if (!rule.enabled) return 'Rascunho';
-  return isRuleScheduled(rule) ? 'Programada' : 'Ativa';
-}
-
 function getRulePublishLabel(rule: ReservationScheduleRule) {
   const publishDate = getPublishDate(rule);
   if (!publishDate) return 'Entrada imediata';
   return `Entrada em vigor em ${format(publishDate, 'dd/MM/yyyy', { locale: ptBR })}`;
+}
+
+function getArchivedAtLabel(archivedAt: string | null) {
+  if (!archivedAt) return 'arquivada';
+  const archivedDate = new Date(archivedAt);
+  if (Number.isNaN(archivedDate.getTime())) return 'arquivada';
+  return `arquivada em ${format(archivedDate, 'dd/MM/yyyy', { locale: ptBR })}`;
 }
 
 function getAvailabilityModeLabel(mode: ReservationAvailabilityMode | null | undefined) {
@@ -472,13 +491,6 @@ function getBlocksDescription(scope: ReservationScheduleRuleScope) {
   if (scope === 'date_specific') return 'A data da regra usa os horários do bloco.';
   if (scope === 'date_range') return 'Use blocos para diferenciar dias e horários dentro do período.';
   return 'Use blocos para separar dias da semana com horários diferentes.';
-}
-
-function formatMinutesLabel(minutes: number | null | undefined) {
-  if (!minutes) return '';
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  if (minutes < 60) return `${minutes}min`;
-  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`;
 }
 
 function toNumberOrNull(value: string) {
@@ -1197,6 +1209,150 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
   );
 }
 
+function RuleStatusBadge({ status }: { status: ReservationScheduleRuleStatus }) {
+  return (
+    <Badge
+      variant={status === 'active' ? 'secondary' : 'outline'}
+      className={cn(
+        'shrink-0 px-1.5 py-0 text-[10px] font-medium',
+        status === 'scheduled' && 'border-primary/30 bg-primary/5 text-primary',
+        (status === 'expired' || status === 'archived') && 'border-[rgba(0,0,0,0.12)] bg-muted/40 text-muted-foreground',
+      )}
+    >
+      {getReservationScheduleRuleStatusLabel(status)}
+    </Badge>
+  );
+}
+
+function SlotChips({ slots, showDetails, className }: {
+  slots: ReservationScheduleRuleSlot[];
+  showDetails: boolean;
+  className?: string;
+}) {
+  if (slots.length === 0) {
+    return <p className={cn('text-[11px] italic text-muted-foreground', className)}>Sem horários configurados.</p>;
+  }
+
+  return (
+    <div className={cn('flex flex-wrap gap-1', className)}>
+      {slots.map((slot) => (
+        <span
+          key={slot.id}
+          className="rounded-md border border-primary/15 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-primary"
+        >
+          {slot.time.slice(0, 5)}
+          {showDetails && formatScheduleSlotLimitsDetail(slot)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RuleCard({ rule, onEdit, onDuplicate, onArchive }: {
+  rule: ReservationScheduleRule;
+  onEdit: (rule: ReservationScheduleRule) => void;
+  onDuplicate: (rule: ReservationScheduleRule) => void;
+  onArchive: (rule: ReservationScheduleRule) => void;
+}) {
+  const blocks = rule.reservation_schedule_rule_blocks?.length
+    ? rule.reservation_schedule_rule_blocks
+    : getInitialBlocks(rule).map((block, index) => ({
+        id: block.clientId,
+        rule_id: rule.id,
+        name: block.name,
+        weekdays: block.weekdays,
+        availability_mode: block.availability_mode,
+        sort_order: (index + 1) * 10,
+        created_at: rule.created_at,
+        updated_at: rule.updated_at,
+        reservation_schedule_rule_slots: block.slots.map((slot, slotIndex) => ({
+          id: `${block.clientId}-${slot.time}`,
+          rule_id: rule.id,
+          block_id: block.clientId,
+          time: slot.time,
+          sort_order: (slotIndex + 1) * 10,
+          duration_minutes: toNumberOrNull(slot.duration_minutes),
+          max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),
+          max_reservations_per_slot: toNumberOrNull(slot.max_reservations_per_slot),
+          max_guests_per_slot: toNumberOrNull(slot.max_guests_per_slot),
+          created_at: rule.created_at,
+        })),
+      }));
+
+  // Com um bloco unico o contexto dele cabe na linha da regra e o sub-card some.
+  const singleBlock = blocks.length === 1 ? blocks[0] : null;
+  const singleBlockLimits = singleBlock ? summarizeScheduleSlotLimits(singleBlock.reservation_schedule_rule_slots) : null;
+  const publishDate = getPublishDate(rule);
+
+  const metaParts = [
+    rule.scope === 'weekly' && singleBlock
+      ? formatShortWeekdaysLabel(singleBlock.weekdays)
+      : getRulePeriodLabel(rule),
+    singleBlock ? getAvailabilityModeLabel(singleBlock.availability_mode) : null,
+    singleBlockLimits,
+    publishDate ? `em vigor em ${format(publishDate, 'dd/MM/yyyy', { locale: ptBR })}` : null,
+    rule.priority !== DEFAULT_RULE_PRIORITY ? `prioridade ${rule.priority}` : null,
+  ].filter(Boolean);
+
+  return (
+    <article className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="truncate text-sm font-semibold text-foreground">{rule.name}</p>
+            <RuleStatusBadge status={getReservationScheduleRuleStatus(rule)} />
+          </div>
+          <p className="text-xs text-muted-foreground">{metaParts.join(' · ')}</p>
+
+          {singleBlock ? (
+            <SlotChips
+              slots={singleBlock.reservation_schedule_rule_slots}
+              showDetails={!singleBlockLimits}
+            />
+          ) : (
+            <div className="space-y-1.5">
+              {blocks.map((block) => {
+                const blockLimits = summarizeScheduleSlotLimits(block.reservation_schedule_rule_slots);
+                const blockMeta = [
+                  rule.scope === 'date_specific' ? null : formatShortWeekdaysLabel(block.weekdays),
+                  getAvailabilityModeLabel(block.availability_mode),
+                  blockLimits,
+                ].filter(Boolean);
+
+                return (
+                  <div key={block.id} className="rounded-lg border border-primary/10 bg-white px-2.5 py-1.5">
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      <span className="font-semibold text-foreground">{block.name}</span>
+                      {blockMeta.length > 0 && ` · ${blockMeta.join(' · ')}`}
+                    </p>
+                    <SlotChips
+                      slots={block.reservation_schedule_rule_slots}
+                      showDetails={!blockLimits}
+                      className="mt-1"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center">
+          <Button type="button" size="icon" variant="ghost" className={cn(ICON_ACTION_CLASS, 'text-muted-foreground hover:text-foreground')} onClick={() => onEdit(rule)} aria-label={`Editar ${rule.name}`}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button type="button" size="icon" variant="ghost" className={cn(ICON_ACTION_CLASS, 'text-muted-foreground hover:text-foreground')} onClick={() => onDuplicate(rule)} aria-label={`Duplicar ${rule.name}`}>
+            <Copy className="h-4 w-4" />
+          </Button>
+          <Button type="button" size="icon" variant="ghost" className={cn(ICON_ACTION_CLASS, 'text-destructive hover:text-destructive')} onClick={() => onArchive(rule)} aria-label={`Arquivar ${rule.name}`}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function RuleList({ title, description, rules, onEdit, onDuplicate, onArchive }: {
   title: string;
   description: string;
@@ -1205,6 +1361,10 @@ function RuleList({ title, description, rules, onEdit, onDuplicate, onArchive }:
   onDuplicate: (rule: ReservationScheduleRule) => void;
   onArchive: (rule: ReservationScheduleRule) => void;
 }) {
+  const [showExpired, setShowExpired] = useState(false);
+  // Excecoes com data passada nao mudam mais os horarios: saem da lista principal.
+  const { current, expired } = useMemo(() => partitionReservationScheduleRulesByEnd(rules), [rules]);
+
   return (
     <section className="space-y-3">
       <div>
@@ -1218,119 +1378,184 @@ function RuleList({ title, description, rules, onEdit, onDuplicate, onArchive }:
         </p>
       ) : (
         <div className="space-y-2">
-          {rules.map((rule) => {
-            const blocks = rule.reservation_schedule_rule_blocks?.length
-              ? rule.reservation_schedule_rule_blocks
-              : getInitialBlocks(rule).map((block, index) => ({
-                  id: block.clientId,
-                  rule_id: rule.id,
-                  name: block.name,
-                  weekdays: block.weekdays,
-                  availability_mode: block.availability_mode,
-                  sort_order: (index + 1) * 10,
-                  created_at: rule.created_at,
-                  updated_at: rule.updated_at,
-                  reservation_schedule_rule_slots: block.slots.map((slot, slotIndex) => ({
-                    id: `${block.clientId}-${slot.time}`,
-                    rule_id: rule.id,
-                    block_id: block.clientId,
-                    time: slot.time,
-                    sort_order: (slotIndex + 1) * 10,
-                    duration_minutes: toNumberOrNull(slot.duration_minutes),
-                    max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),
-                    max_reservations_per_slot: toNumberOrNull(slot.max_reservations_per_slot),
-                    max_guests_per_slot: toNumberOrNull(slot.max_guests_per_slot),
-                    created_at: rule.created_at,
-                  })),
-                }));
+          {current.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-[rgba(0,0,0,0.12)] bg-muted/10 px-4 py-5 text-center text-sm text-muted-foreground">
+              Nenhuma regra em vigor nesta seção.
+            </p>
+          ) : (
+            current.map((rule) => (
+              <RuleCard
+                key={rule.id}
+                rule={rule}
+                onEdit={onEdit}
+                onDuplicate={onDuplicate}
+                onArchive={onArchive}
+              />
+            ))
+          )}
 
-            return (
-              <article key={rule.id} className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground">{rule.name}</p>
-                      <Badge
-                        variant={rule.enabled && !isRuleScheduled(rule) ? 'secondary' : 'outline'}
-                        className={cn(
-                          'px-2 py-0.5 text-[10px]',
-                          isRuleScheduled(rule) && 'border-primary/30 bg-primary/5 text-primary',
-                        )}
-                      >
-                        {getRuleStatusLabel(rule)}
-                      </Badge>
-                      <Badge variant="outline" className="px-2 py-0.5 text-[10px]">
-                        {getRuleScopeLabel(rule.scope)}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground">Prioridade {rule.priority}</span>
-                    </div>
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {rule.scope === 'weekly' ? <CalendarClock className="h-3.5 w-3.5" /> : <CalendarRange className="h-3.5 w-3.5" />}
-                      {getRulePeriodLabel(rule)}
-                    </p>
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <CalendarIcon className="h-3.5 w-3.5" />
-                      {getRulePublishLabel(rule)}
-                    </p>
-                    <div className="space-y-2">
-                      {blocks.map((block) => (
-                        <div key={block.id} className="rounded-lg border border-primary/10 bg-white px-3 py-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-semibold text-foreground">{block.name}</span>
-                            {rule.scope !== 'date_specific' && (
-                              <span className="text-[11px] text-muted-foreground">{getWeekdayLabel(block.weekdays, 'Todos os dias')}</span>
-                            )}
-                            <Badge variant="outline" className="px-2 py-0.5 text-[10px]">
-                              {getAvailabilityModeLabel(block.availability_mode)}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {block.reservation_schedule_rule_slots.map((slot) => (
-                              <span key={slot.id} className="rounded-full border border-primary/10 bg-muted/10 px-2 py-1 text-[11px] font-semibold text-primary">
-                                {slot.time.slice(0, 5)}
-                                {slot.duration_minutes != null && ` · ${formatMinutesLabel(slot.duration_minutes)}`}
-                                {slot.max_party_size_per_reservation != null && ` · até ${slot.max_party_size_per_reservation} pessoas`}
-                                {slot.max_reservations_per_slot != null && ` · ${slot.max_reservations_per_slot} reservas`}
-                                {slot.max_guests_per_slot != null && ` · cap. ${slot.max_guests_per_slot}`}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onEdit(rule)} aria-label={`Editar ${rule.name}`}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onDuplicate(rule)} aria-label={`Duplicar ${rule.name}`}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => onArchive(rule)} aria-label={`Arquivar ${rule.name}`}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+          {expired.length > 0 && (
+            <Collapsible
+              open={showExpired}
+              onOpenChange={setShowExpired}
+              className="overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/10"
+            >
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" className={SECTION_TRIGGER_CLASS}>
+                  <span className="min-w-0 text-sm font-semibold text-foreground">
+                    Encerradas
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      já passaram e não alteram mais os horários
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px]">
+                      {expired.length}
+                    </Badge>
+                    <ChevronDown className={cn('h-4 w-4', showExpired && 'rotate-180')} />
+                  </span>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-2 border-t border-[rgba(0,0,0,0.08)] p-2.5">
+                  {expired.map((rule) => (
+                    <RuleCard
+                      key={rule.id}
+                      rule={rule}
+                      onEdit={onEdit}
+                      onDuplicate={onDuplicate}
+                      onArchive={onArchive}
+                    />
+                  ))}
                 </div>
-              </article>
-            );
-          })}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
       )}
     </section>
   );
 }
 
+function ArchivedRulesSection({ companyId, usage, onRestore, onDelete, pendingId }: {
+  companyId: string;
+  usage: Map<string, number> | null;
+  onRestore: (rule: ArchivedReservationScheduleRule) => void;
+  onDelete: (rule: ArchivedReservationScheduleRule) => void;
+  pendingId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: archivedRules = [] } = useArchivedReservationScheduleRules(companyId);
+
+  if (archivedRules.length === 0) return null;
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/10"
+    >
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="ghost" className={SECTION_TRIGGER_CLASS}>
+          <span className="flex min-w-0 items-center gap-2">
+            <Archive className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 text-sm font-semibold text-foreground">
+              Arquivadas
+              <span className="ml-2 font-normal text-muted-foreground">fora do ar, prontas para restaurar</span>
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px]">
+              {archivedRules.length}
+            </Badge>
+            <ChevronDown className={cn('h-4 w-4', open && 'rotate-180')} />
+          </span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="space-y-1.5 border-t border-[rgba(0,0,0,0.08)] p-2.5">
+          {archivedRules.map((rule) => {
+            const linkedReservations = usage?.get(rule.id) ?? 0;
+            const canDelete = !!usage && linkedReservations === 0;
+
+            return (
+              <article key={rule.id} className="rounded-lg border border-[rgba(0,0,0,0.08)] bg-white px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="truncate text-sm font-semibold text-foreground">{rule.name}</p>
+                      <RuleStatusBadge status="archived" />
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {[
+                        getRulePeriodLabel(rule),
+                        getArchivedAtLabel(rule.archived_at),
+                        linkedReservations > 0
+                          ? `${linkedReservations} ${linkedReservations === 1 ? 'reserva' : 'reservas'} no histórico`
+                          : null,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1.5 px-2 text-xs active:scale-100"
+                      disabled={pendingId === rule.id}
+                      onClick={() => onRestore(rule)}
+                    >
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                      Restaurar
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className={cn(ICON_ACTION_CLASS, 'text-destructive hover:text-destructive')}
+                        disabled={pendingId === rule.id}
+                        onClick={() => onDelete(rule)}
+                        aria-label={`Excluir ${rule.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export function ReservationScheduleRulesCard({ companyId }: { companyId: string }) {
   const { data: rules = [], isLoading } = useReservationScheduleRules(companyId);
+  const { data: ruleUsage } = useReservationScheduleRuleUsage(companyId);
   const saveMutation = useSaveReservationScheduleRule();
   const archiveMutation = useArchiveReservationScheduleRule();
+  const restoreMutation = useRestoreReservationScheduleRule();
+  const deleteMutation = useDeleteReservationScheduleRule();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<ReservationScheduleRule | null>(null);
-  const [archivingRule, setArchivingRule] = useState<ReservationScheduleRule | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ rule: RuleActionTarget; mode: RuleActionMode } | null>(null);
 
   const weeklyRules = useMemo(() => rules.filter((rule) => rule.scope === 'weekly'), [rules]);
   const exceptionRules = useMemo(() => rules.filter((rule) => rule.scope !== 'weekly'), [rules]);
+  // Excluir apaga o vinculo das reservas com a regra que publicou o horario,
+  // entao so vale para regras que nunca geraram reserva. Sem a contagem em maos
+  // a exclusao nao e oferecida.
+  const usage = ruleUsage ?? null;
+  const pendingLinkedReservations = pendingAction && usage ? usage.get(pendingAction.rule.id) ?? 0 : 0;
+  const pendingCanDelete = !!usage && pendingLinkedReservations === 0;
+  const actionPending = archiveMutation.isPending || deleteMutation.isPending || restoreMutation.isPending;
+  const pendingRuleId = (restoreMutation.isPending ? restoreMutation.variables?.id : null)
+    ?? (deleteMutation.isPending ? deleteMutation.variables?.id : null)
+    ?? null;
 
   async function duplicateRule(rule: ReservationScheduleRule) {
     const duplicateForm = getInitialForm(rule);
@@ -1382,7 +1607,7 @@ export function ReservationScheduleRulesCard({ companyId }: { companyId: string 
                 rules={weeklyRules}
                 onEdit={setEditingRule}
                 onDuplicate={duplicateRule}
-                onArchive={setArchivingRule}
+                onArchive={(rule) => setPendingAction({ rule, mode: 'archive' })}
               />
               <RuleList
                 title="Exceções"
@@ -1390,7 +1615,14 @@ export function ReservationScheduleRulesCard({ companyId }: { companyId: string 
                 rules={exceptionRules}
                 onEdit={setEditingRule}
                 onDuplicate={duplicateRule}
-                onArchive={setArchivingRule}
+                onArchive={(rule) => setPendingAction({ rule, mode: 'archive' })}
+              />
+              <ArchivedRulesSection
+                companyId={companyId}
+                usage={usage}
+                pendingId={pendingRuleId}
+                onRestore={(rule) => restoreMutation.mutate({ id: rule.id, companyId })}
+                onDelete={(rule) => setPendingAction({ rule, mode: 'delete' })}
               />
             </>
           )}
@@ -1411,28 +1643,62 @@ export function ReservationScheduleRulesCard({ companyId }: { companyId: string 
         />
       )}
 
-      <AlertDialog open={!!archivingRule} onOpenChange={(nextOpen) => {
-        if (!nextOpen) setArchivingRule(null);
+      <AlertDialog open={!!pendingAction} onOpenChange={(nextOpen) => {
+        if (!nextOpen) setPendingAction(null);
       }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Arquivar regra?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingAction?.mode === 'delete' ? 'Excluir regra definitivamente?' : 'Arquivar regra?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              A regra deixará de alterar os horários públicos. O histórico será preservado.
+              {pendingAction?.mode === 'delete' ? (
+                <>
+                  A regra e os horários dela serão apagados. Não é possível desfazer.
+                </>
+              ) : (
+                <>
+                  A regra deixará de alterar os horários públicos e vai para Arquivadas, de onde você pode restaurá-la.
+                  <span className="mt-2 block">
+                    {pendingCanDelete && 'Como ela nunca gerou reservas, também dá para excluir de vez.'}
+                    {pendingLinkedReservations > 0
+                      && `Ela já gerou ${pendingLinkedReservations} ${pendingLinkedReservations === 1 ? 'reserva' : 'reservas'} e por isso não pode ser excluída: as reservas perderiam o vínculo com o horário que as originou.`}
+                  </span>
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            {pendingAction?.mode === 'archive' && pendingCanDelete && (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
+                disabled={actionPending}
+                onClick={() => {
+                  if (!pendingAction) return;
+                  deleteMutation.mutate({ id: pendingAction.rule.id, companyId });
+                  setPendingAction(null);
+                }}
+              >
+                Excluir definitivamente
+              </Button>
+            )}
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={archiveMutation.isPending}
+              disabled={actionPending}
               onClick={() => {
-                if (!archivingRule) return;
-                archiveMutation.mutate({ id: archivingRule.id, companyId });
-                setArchivingRule(null);
+                if (!pendingAction) return;
+                if (pendingAction.mode === 'delete') {
+                  deleteMutation.mutate({ id: pendingAction.rule.id, companyId });
+                } else {
+                  archiveMutation.mutate({ id: pendingAction.rule.id, companyId });
+                }
+                setPendingAction(null);
               }}
             >
-              Arquivar
+              {pendingAction?.mode === 'delete' ? 'Excluir' : 'Arquivar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

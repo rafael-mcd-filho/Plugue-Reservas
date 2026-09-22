@@ -53,6 +53,13 @@ export interface ReservationScheduleRule {
   reservation_schedule_rule_slots: ReservationScheduleRuleSlot[];
 }
 
+// A lista de arquivadas nao precisa dos blocos: mostra apenas identificacao,
+// periodo e a data em que a regra saiu do ar.
+export type ArchivedReservationScheduleRule = Pick<
+  ReservationScheduleRule,
+  'id' | 'company_id' | 'name' | 'scope' | 'start_date' | 'end_date' | 'enabled' | 'priority' | 'publish_at' | 'archived_at' | 'created_at'
+>;
+
 export interface ReservationScheduleRuleDraft {
   id?: string;
   company_id: string;
@@ -82,6 +89,14 @@ function getErrorMessage(error: unknown) {
   return typeof error === 'object' && error !== null && 'message' in error
     ? String((error as { message?: unknown }).message ?? '')
     : '';
+}
+
+function invalidateScheduleRuleQueries(queryClient: ReturnType<typeof useQueryClient>, companyId: string) {
+  queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rules', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rules-archived', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rule-usage', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['public-reservation-schedule', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-preview', companyId] });
 }
 
 export function useReservationScheduleRules(companyId: string | null | undefined) {
@@ -115,6 +130,47 @@ export function useReservationScheduleRules(companyId: string | null | undefined
   });
 }
 
+export function useArchivedReservationScheduleRules(companyId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['reservation-schedule-rules-archived', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservation_schedule_rules' as any)
+        .select('id, company_id, name, scope, start_date, end_date, enabled, priority, publish_at, archived_at, created_at')
+        .eq('company_id', companyId)
+        .not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data ?? []) as unknown as ArchivedReservationScheduleRule[];
+    },
+    enabled: !!companyId,
+  });
+}
+
+// Quantas reservas cada regra ja publicou. Regra sem reserva pode ser excluida
+// de vez; com reservas, apagar apagaria o vinculo de origem delas.
+export function useReservationScheduleRuleUsage(companyId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['reservation-schedule-rule-usage', companyId],
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as any)('get_reservation_schedule_rule_usage', {
+        _company_id: companyId,
+      });
+
+      if (error) throw error;
+
+      const usage = new Map<string, number>();
+      ((data ?? []) as Array<{ rule_id: string; reservations_count: number | null }>).forEach((row) => {
+        usage.set(row.rule_id, Number(row.reservations_count ?? 0));
+      });
+      return usage;
+    },
+    enabled: !!companyId,
+  });
+}
+
 export function useSaveReservationScheduleRule() {
   const queryClient = useQueryClient();
 
@@ -142,9 +198,7 @@ export function useSaveReservationScheduleRule() {
       return { id: data as string, companyId: draft.company_id, editing: !!draft.id };
     },
     onSuccess: ({ companyId, editing }) => {
-      queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rules', companyId] });
-      queryClient.invalidateQueries({ queryKey: ['public-reservation-schedule', companyId] });
-      queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-preview', companyId] });
+      invalidateScheduleRuleQueries(queryClient, companyId);
       toast.success(editing ? 'Regra atualizada.' : 'Regra criada.');
     },
     onError: (error) => {
@@ -166,13 +220,55 @@ export function useArchiveReservationScheduleRule() {
       return companyId;
     },
     onSuccess: (companyId) => {
-      queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rules', companyId] });
-      queryClient.invalidateQueries({ queryKey: ['public-reservation-schedule', companyId] });
-      queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-preview', companyId] });
+      invalidateScheduleRuleQueries(queryClient, companyId);
       toast.success('Regra arquivada.');
     },
     onError: (error) => {
       toast.error(getErrorMessage(error) || 'Não foi possível arquivar a regra.');
+    },
+  });
+}
+
+export function useRestoreReservationScheduleRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, companyId }: { id: string; companyId: string }) => {
+      const { error } = await (supabase.rpc as any)('restore_reservation_schedule_rule', {
+        _rule_id: id,
+      });
+
+      if (error) throw error;
+      return companyId;
+    },
+    onSuccess: (companyId) => {
+      invalidateScheduleRuleQueries(queryClient, companyId);
+      toast.success('Regra restaurada como rascunho. Ative quando quiser usar.');
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error) || 'Não foi possível restaurar a regra.');
+    },
+  });
+}
+
+export function useDeleteReservationScheduleRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, companyId }: { id: string; companyId: string }) => {
+      const { error } = await (supabase.rpc as any)('delete_reservation_schedule_rule', {
+        _rule_id: id,
+      });
+
+      if (error) throw error;
+      return companyId;
+    },
+    onSuccess: (companyId) => {
+      invalidateScheduleRuleQueries(queryClient, companyId);
+      toast.success('Regra excluída.');
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error) || 'Não foi possível excluir a regra.');
     },
   });
 }
