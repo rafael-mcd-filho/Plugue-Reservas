@@ -1336,7 +1336,8 @@ export default function OperatorTodayReservations() {
           hasSecondaryMeta ? 'gap-3' : 'gap-2',
         )}
       >
-        <div className="flex h-9 w-12 items-center justify-center rounded-md bg-muted text-sm font-semibold tracking-tight text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+        {/* Etiqueta branca: separa o horário da reserva do bege da faixa. */}
+        <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold tracking-tight text-foreground">
           {reservation.time.slice(0, 5)}
         </div>
 
@@ -1389,8 +1390,9 @@ export default function OperatorTodayReservations() {
     );
   };
 
+  // Só a leitura de ocupação da faixa: modo, vagas e contagem de mesas são
+  // configuração da casa, não ajudam quem está recebendo o cliente.
   const renderCapacitySlotSummary = (slot: OperatorCapacitySlot) => {
-    const modeLabel = slot.availabilityMode === 'capacity' ? 'Por capacidade' : 'Por mesas';
     const fillWidth = `${Math.min(slot.fillPercent, 100)}%`;
 
     return (
@@ -1408,34 +1410,20 @@ export default function OperatorTodayReservations() {
           <div className={cn('h-full rounded-full', getSlotFillClassName(slot))} style={{ width: fillWidth }} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {modeLabel}
-          </span>
-          <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-            Vagas {formatCapacity(slot.remainingCapacity)}
-          </span>
-          {slot.availabilityMode === 'tables' && (
-            <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-              Mesas {slot.availableTableCount}/{slot.totalTableCount}
-            </span>
-          )}
-          {slot.unassignedReservationCount > 0 && (
-            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-              {slot.unassignedReservationCount} sem mesa
-            </span>
-          )}
-          {slot.reservationLimit != null && (
-            <span className="rounded border border-black/[0.05] bg-background/70 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-              Limite {slot.reservationLimit} reservas
-            </span>
-          )}
-          {slot.health !== 'available' && (
-            <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', getSlotHealthClassName(slot))}>
-              {getSlotHealthLabel(slot)}
-            </span>
-          )}
-        </div>
+        {(slot.unassignedReservationCount > 0 || slot.health !== 'available') && (
+          <div className="flex flex-wrap items-center gap-1">
+            {slot.unassignedReservationCount > 0 && (
+              <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                {slot.unassignedReservationCount} sem mesa
+              </span>
+            )}
+            {slot.health !== 'available' && (
+              <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-semibold', getSlotHealthClassName(slot))}>
+                {getSlotHealthLabel(slot)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -1463,7 +1451,6 @@ export default function OperatorTodayReservations() {
       <div className="space-y-2.5">
         {groups.map((group) => {
           const slotIsCurrent = options.accent === 'primary' && isNowWithinSlot(group, now);
-          const capacitySlot = group.capacitySlot;
           const groupExpansionKey = `${options.listKey}:${group.key}`;
           const groupIsExpanded = hasActiveSearch || expandedReservationGroupKeys.has(groupExpansionKey);
 
@@ -1488,6 +1475,8 @@ export default function OperatorTodayReservations() {
               >
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-stretch gap-2.5">
+                    {/* Faixa em tom neutro; o âmbar fica reservado para a faixa
+                        da hora atual, que é o que o operador precisa achar. */}
                     <div
                       className={cn(
                         'w-1 min-h-9 rounded-full',
@@ -1495,7 +1484,7 @@ export default function OperatorTodayReservations() {
                           ? 'bg-amber-500'
                           : slotIsCurrent
                             ? 'bg-primary'
-                            : 'bg-primary/70',
+                            : 'bg-foreground/25',
                       )}
                     />
                     <div className="min-w-0">
@@ -1528,9 +1517,9 @@ export default function OperatorTodayReservations() {
                   </div>
                 </div>
 
-                {capacitySlot ? (
+                {group.capacitySlot ? (
                   <div className="flex w-full min-w-0 items-start gap-2 sm:justify-end">
-                    {renderCapacitySlotSummary(capacitySlot)}
+                    {renderCapacitySlotSummary(group.capacitySlot)}
                     <ChevronDown className={cn('mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform', groupIsExpanded && 'rotate-180')} />
                   </div>
                 ) : (

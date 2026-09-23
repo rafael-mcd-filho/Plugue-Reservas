@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, AlertTriangle, Ban, ChevronDown, ChevronLeft, Copy, ExternalLink, Eye, Loader2, Pencil, Star, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Ban, CalendarDays, CalendarPlus, CheckCircle2, ChevronDown, ChevronLeft, Clock3, Copy, Eye, Link2, Loader2, Pencil, Star, UserCheck, Users, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationTableAssignment from '@/components/ReservationTableAssignment';
@@ -303,6 +303,49 @@ export default function ReservationDetailsDialog({
     : '';
   const visibleOccasion = getVisibleOccasionLabel(reservation?.occasion);
 
+  const detailFields = useMemo(() => {
+    if (!reservation) return [];
+
+    const fields: Array<{ label: string; value: string; icon: LucideIcon }> = [
+      // Formato curto: por extenso a data truncava na largura da coluna.
+      { label: 'Data', value: format(new Date(`${reservation.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR }), icon: CalendarDays },
+      { label: 'Horário', value: reservation.time.slice(0, 5), icon: Clock3 },
+      { label: 'Pessoas reservadas', value: String(reservation.party_size), icon: Users },
+    ];
+
+    if (reservation.checked_in_party_size) {
+      fields.push({ label: 'Pessoas presentes', value: String(reservation.checked_in_party_size), icon: UserCheck });
+    }
+
+    fields.push({
+      label: 'Criada em',
+      value: format(new Date(reservation.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }),
+      icon: CalendarPlus,
+    });
+
+    if (reservation.checked_in_at) {
+      fields.push({
+        label: 'Check-in',
+        value: format(new Date(reservation.checked_in_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }),
+        icon: CheckCircle2,
+      });
+    }
+
+    // A origem afiliada vivia num cartão próprio no rodapé; como é só um par de
+    // rótulo e valor, cabe aqui com os demais.
+    if (reservation.origin_affiliate_name) {
+      fields.push({
+        label: 'Origem afiliada',
+        value: reservation.origin_affiliate_code
+          ? `${reservation.origin_affiliate_name} · ${reservation.origin_affiliate_code}`
+          : reservation.origin_affiliate_name,
+        icon: Link2,
+      });
+    }
+
+    return fields;
+  }, [reservation]);
+
   useEffect(() => {
     if (!open) {
       setEventHistoryOpen(false);
@@ -467,10 +510,6 @@ export default function ReservationDetailsDialog({
     toast.success('Link de avaliação copiado!');
   };
 
-  const openTrackingLink = () => {
-    if (!trackingUrl) return;
-    window.open(trackingUrl, '_blank', 'noopener,noreferrer');
-  };
 
   const renderTimelineItems = (items: ReservationTimelineItem[], emptyMessage: string) => {
     if (timelineLoading) {
@@ -575,26 +614,65 @@ export default function ReservationDetailsDialog({
                 </Button>
               </div>
             )}
-            <DialogTitle className="text-left">Detalhes da reserva</DialogTitle>
+            {/* O nome do cliente é o título: "Detalhes da reserva" só repetia o
+                que a tela inteira já é. */}
+            {/* pr-10 reserva o canto do botão de fechar, que é absoluto. */}
+            <div className="flex flex-col gap-2 pr-10 text-left sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 space-y-1">
+                <DialogTitle className="text-left text-lg leading-tight">
+                  {reservation ? reservation.guest_name : 'Detalhes da reserva'}
+                </DialogTitle>
+                {reservation && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <PhoneWhatsAppLink
+                      phone={reservation.guest_phone}
+                      companyId={companyId}
+                      slug={slug}
+                      reservation={reservation}
+                      phoneClassName="text-sm text-muted-foreground"
+                    />
+                    {reservation.guest_email && (
+                      <span className="truncate text-sm text-muted-foreground">{reservation.guest_email}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {reservation && (
+                <div className="shrink-0 sm:pt-0.5">
+                  <ReservationStatusBadge status={reservation.status} />
+                </div>
+              )}
+            </div>
+
+            {/* Uma barra só: antes as ações ficavam em três alturas da tela. */}
             {actions ? (
               <div className="flex flex-wrap gap-2 pt-1">{actions}</div>
-            ) : reservation && (onEdit || onStatusChange || onCancel) ? (
-              <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap">
+            ) : reservation ? (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 {onEdit && (
-                  <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onEdit(reservation)}>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => onEdit(reservation)}>
                     <Pencil className="h-3.5 w-3.5" />
-                    Editar reserva
+                    Editar
                   </Button>
                 )}
                 {onStatusChange && (
-                  <Button type="button" variant="outline" size="sm" className="w-full justify-start sm:w-auto" onClick={() => onStatusChange(reservation)}>
+                  <Button type="button" variant="outline" size="sm" onClick={() => onStatusChange(reservation)}>
                     Alterar status
                   </Button>
                 )}
+                {trackingUrl && (
+                  <>
+                    <span aria-hidden="true" className="mx-0.5 hidden h-6 w-px bg-border sm:block" />
+                    <Button type="button" variant="outline" size="sm" className="gap-2" onClick={copyTrackingLink}>
+                      <Copy className="h-3.5 w-3.5" />
+                      Copiar link
+                    </Button>
+                  </>
+                )}
                 {onCancel && reservation.status === 'confirmed' && (
-                  <Button type="button" variant="destructive" size="sm" className="w-full justify-start gap-2 sm:w-auto" onClick={() => onCancel(reservation)}>
+                  <Button type="button" variant="destructive" size="sm" className="gap-2 sm:ml-auto" onClick={() => onCancel(reservation)}>
                     <Ban className="h-3.5 w-3.5" />
-                    Cancelar reserva
+                    Cancelar
                   </Button>
                 )}
               </div>
@@ -607,25 +685,24 @@ export default function ReservationDetailsDialog({
               Carregando detalhes da reserva...
             </div>
           ) : reservation ? (
-            <div className="min-w-0 space-y-5 pt-2">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="space-y-1">
-                  <p className="text-lg font-semibold text-foreground">{reservation.guest_name}</p>
-                  <PhoneWhatsAppLink
-                    phone={reservation.guest_phone}
-                    companyId={companyId}
-                    slug={slug}
-                    reservation={reservation}
-                    phoneClassName="text-sm text-muted-foreground"
-                  />
-                  {reservation.guest_email && (
-                    <p className="text-sm text-muted-foreground">{reservation.guest_email}</p>
+            <div className="min-w-0 space-y-4 pt-2">
+              {/* Observação e ocasião sobem para o topo: é o que a operação lê
+                  antes de sentar a mesa. */}
+              {(reservation.notes || visibleOccasion) && (
+                <div className="space-y-2">
+                  {reservation.notes && (
+                    <div className="rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800">Observações</p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">{reservation.notes}</p>
+                    </div>
+                  )}
+                  {visibleOccasion && (
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">Ocasião:</span> {visibleOccasion}
+                    </p>
                   )}
                 </div>
-                <div className="sm:pt-0.5">
-                  <ReservationStatusBadge status={reservation.status} />
-                </div>
-              </div>
+              )}
 
               {reservation.status === 'paid_after_expiration' && (
                 <div className="rounded-lg border border-warning/40 bg-warning-soft/40 p-3 text-sm">
@@ -641,42 +718,19 @@ export default function ReservationDetailsDialog({
                 </div>
               )}
 
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Data</p>
-                  <p className="mt-1 font-medium text-foreground">
-                    {format(new Date(`${reservation.date}T12:00:00`), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Horário</p>
-                  <p className="mt-1 font-medium text-foreground">{reservation.time.slice(0, 5)}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Pessoas reservadas</p>
-                  <p className="mt-1 font-medium text-foreground">{reservation.party_size}</p>
-                </div>
-                {reservation.checked_in_party_size && (
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Pessoas presentes</p>
-                    <p className="mt-1 font-medium text-foreground">{reservation.checked_in_party_size}</p>
+              {/* Seis valores curtos cabiam em seis cartões com borda; numa grade
+                  de chave/valor ocupam menos de metade da altura. */}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-border bg-muted/20 px-3.5 py-3 text-sm">
+                {detailFields.map((field) => (
+                  <div key={field.label} className="min-w-0">
+                    <dt className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <field.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                      <span className="truncate">{field.label}</span>
+                    </dt>
+                    <dd className="mt-0.5 truncate pl-5 font-medium text-foreground" title={field.value}>{field.value}</dd>
                   </div>
-                )}
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Criada em</p>
-                  <p className="mt-1 font-medium text-foreground">
-                    {format(new Date(reservation.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                  </p>
-                </div>
-                {reservation.checked_in_at && (
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Check-in</p>
-                    <p className="mt-1 font-medium text-foreground">
-                      {format(new Date(reservation.checked_in_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                    </p>
-                  </div>
-                )}
-              </div>
+                ))}
+              </dl>
 
               {companyId && reservation.created_in_mode !== 'capacity' && (
                 <ReservationTableAssignment
@@ -686,23 +740,6 @@ export default function ReservationDetailsDialog({
                   time={reservation.time}
                   partySize={reservation.party_size}
                 />
-              )}
-
-              {(visibleOccasion || reservation.notes) && (
-                <div className="space-y-3">
-                  {visibleOccasion && (
-                    <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Ocasião</p>
-                      <p className="mt-1 font-medium text-foreground">{visibleOccasion}</p>
-                    </div>
-                  )}
-                  {reservation.notes && (
-                    <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Observações</p>
-                      <p className="mt-1 whitespace-pre-wrap text-foreground">{reservation.notes}</p>
-                    </div>
-                  )}
-                </div>
               )}
 
               {canViewEventHistory && (
@@ -946,58 +983,27 @@ export default function ReservationDetailsDialog({
                 </div>
               )}
 
-              <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-muted/20 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">Link de acompanhamento</p>
-                    {reservation.origin_affiliate_name && (
-                      <div className="pt-2">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem afiliada</p>
-                        <p className="mt-1 text-sm text-foreground">
-                          {reservation.origin_affiliate_name}
-                          {reservation.origin_affiliate_code ? ` · ${reservation.origin_affiliate_code}` : ''}
-                        </p>
-                      </div>
+              {/* O link de acompanhamento virou ação no cabeçalho; aqui fica só o
+                  de avaliação, que tem estado próprio para mostrar. */}
+              {reviewUrl && (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3.5 py-3">
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                    <Star className="h-4 w-4 fill-current" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">Link de avaliação</p>
+                    {effectiveReviewStatus === 'submitted' ? (
+                      <p className="text-xs text-success">Avaliação já respondida pelo cliente.</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Disponível para envio ao cliente.</p>
                     )}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={copyTrackingLink}>
-                    <Copy className="h-4 w-4" />
+                  <Button type="button" variant="outline" size="sm" className="shrink-0 gap-2 bg-background" onClick={copyReviewLink}>
+                    <Copy className="h-3.5 w-3.5" />
                     Copiar
                   </Button>
-                  <Button type="button" variant="outline" className="w-full gap-2 sm:w-auto" onClick={openTrackingLink}>
-                    <ExternalLink className="h-4 w-4" />
-                    Abrir link
-                  </Button>
                 </div>
-                </div>
-
-                {reviewUrl && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
-                        <Star className="h-4 w-4 fill-current" />
-                      </span>
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <p className="text-sm font-medium text-foreground">Link de avaliação</p>
-                        {effectiveReviewStatus === 'submitted' ? (
-                          <p className="text-xs text-success">Avaliação já respondida pelo cliente.</p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">Disponível para envio ao cliente.</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Button type="button" variant="outline" className="w-full gap-2 bg-background sm:w-auto" onClick={copyReviewLink}>
-                        <Copy className="h-4 w-4" />
-                        Copiar link
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           ) : (
             <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">

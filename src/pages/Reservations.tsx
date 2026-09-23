@@ -57,6 +57,7 @@ import {
 } from '@/lib/reservation-operational-filter';
 import { getReservationTableBadge, type ReservationTableRef } from '@/lib/reservation-table-badge';
 import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
+import { getReservationsOverviewIntensity } from '@/lib/reservations-overview';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -839,6 +840,12 @@ export default function Reservations({ view }: ReservationsProps) {
     });
   }, [calendarReservationsByDate, overviewDateRange.end, overviewDateRange.start]);
 
+  // Referência da barra de intensidade: o dia mais cheio do período.
+  const overviewBusiestCount = useMemo(
+    () => calendarDays.reduce((busiest, day) => Math.max(busiest, day.reservationCount), 0),
+    [calendarDays],
+  );
+
   const dayModalReservations = useMemo(() => {
     if (!dayModal) return [];
     return (calendarReservationsByDate.get(dayModal) ?? []).sort((left, right) => left.time.localeCompare(right.time));
@@ -1157,7 +1164,7 @@ export default function Reservations({ view }: ReservationsProps) {
           Carregando visão geral de reservas…
         </p>
         <div className="h-9 w-40 animate-pulse rounded-lg bg-muted" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {Array.from({ length: 15 }).map((_, index) => (
             <div key={index} className="h-28 animate-pulse rounded-2xl bg-muted" />
           ))}
@@ -1195,10 +1202,6 @@ export default function Reservations({ view }: ReservationsProps) {
       {view === 'overview' ? (
         <section className="space-y-4" aria-label="Visão geral de reservas em 15 dias">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">
-              {calendarRangeMode === 'future' ? 'Próximos 15 dias' : 'Últimos 15 dias'}
-            </p>
-
             <ReservationOperationalFilterControl
               value={operationalFilter}
               onChange={handleOperationalFilterChange}
@@ -1225,41 +1228,75 @@ export default function Reservations({ view }: ReservationsProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7">
-            {calendarDays.map((day) => (
-              <button
-                key={day.dateString}
-                onClick={() => setDayModal(day.dateString)}
-                className={cn(
-                  'rounded-xl border p-4 text-left transition-all hover:border-primary/40 hover:shadow-sm',
-                  isToday(day.date) ? 'border-primary bg-primary-soft/50' : 'border-border bg-card',
-                  day.reservationCount === 0 && 'opacity-70',
-                )}
-              >
-                <div className="text-xs uppercase text-muted-foreground">
-                  {format(day.date, 'EEE', { locale: ptBR })}
-                </div>
-                <div className="mt-1 text-xl font-semibold text-foreground">
-                  {format(day.date, 'dd')}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {format(day.date, 'MMM', { locale: ptBR })}
-                </div>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {calendarDays.map((day) => {
+              const empty = day.reservationCount === 0;
+              const weekend = [0, 6].includes(day.date.getDay());
+              const intensity = getReservationsOverviewIntensity(day.reservationCount, overviewBusiestCount);
+              const today = isToday(day.date);
 
-                <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-1.5">
-                    <Clock3 className="h-3.5 w-3.5 text-primary" />
-                    <span className="font-medium text-foreground">{day.reservationCount}</span>
-                    reservas
+              return (
+                <button
+                  key={day.dateString}
+                  onClick={() => setDayModal(day.dateString)}
+                  className={cn(
+                    'group relative overflow-hidden rounded-xl border px-3 pb-3 pt-2.5 text-left transition-all hover:border-primary/40 hover:shadow-sm',
+                    today ? 'border-primary bg-primary-soft/50' : 'border-border bg-card',
+                    empty && !today && 'border-dashed bg-card/60',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={cn(
+                      'truncate text-[15px] font-semibold capitalize leading-tight',
+                      empty ? 'text-muted-foreground' : 'text-foreground',
+                    )}>
+                      {format(day.date, 'EEEE', { locale: ptBR }).replace('-feira', '')}
+                    </p>
+
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {today ? (
+                        <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground">
+                          Hoje
+                        </span>
+                      ) : weekend ? (
+                        // Fim de semana marcado ao lado da data, não no fundo:
+                        // mantém um tom de cartão só na grade inteira.
+                        <span
+                          aria-hidden="true"
+                          title="Fim de semana"
+                          className="h-1.5 w-1.5 rounded-full bg-info"
+                        />
+                      ) : null}
+                      <span className="text-[11px] text-muted-foreground">{format(day.date, 'dd/MM')}</span>
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Users className="h-3.5 w-3.5 text-info" />
-                    <span className="font-medium text-foreground">{day.totalGuests}</span>
-                    pessoas
+
+                  {/* Dia vazio mantém as duas linhas, em tom apagado: a leitura da
+                      grade continua na mesma altura, sem os zeros competindo. */}
+                  <div className={cn('mt-2 space-y-1', empty && 'opacity-55')}>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5 shrink-0 text-primary" />
+                      <span className="text-sm font-semibold leading-none text-foreground">{day.reservationCount}</span>
+                      reservas
+                    </p>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Users className="h-3.5 w-3.5 shrink-0 text-info" />
+                      <span className="text-sm font-semibold leading-none text-foreground">{day.totalGuests}</span>
+                      pessoas
+                    </p>
                   </div>
-                </div>
-              </button>
-            ))}
+
+
+                  {/* Barra de intensidade: o volume do dia contra o dia mais cheio do período. */}
+                  <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1 bg-border/40">
+                    <span
+                      className={cn('block h-full rounded-r-full transition-all', today ? 'bg-primary' : 'bg-primary/55')}
+                      style={{ width: `${intensity * 100}%` }}
+                    />
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
       ) : (
@@ -2190,6 +2227,74 @@ export default function Reservations({ view }: ReservationsProps) {
                     status: reservation.status,
                   });
 
+                  // Cada reserva tem a mesma anatomia: as informações ocupam
+                  // sempre a mesma posição, independentemente do tamanho do nome.
+                  const timeChip = (
+                    <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
+                      {reservation.time.slice(0, 5)}
+                    </div>
+                  );
+
+                  const metaLine = (
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {/* O telefone não quebra no meio; se faltar espaço, a linha
+                          inteira passa para baixo em vez de transbordar. */}
+                      <span className="whitespace-nowrap">
+                        <PhoneWhatsAppLink
+                          phone={reservation.guest_phone}
+                          companyId={reservation.company_id}
+                          slug={slug}
+                          reservation={reservation}
+                          phoneClassName="text-xs text-muted-foreground"
+                        />
+                      </span>
+                      <span className="inline-flex shrink-0 items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        {reservation.party_size}
+                      </span>
+                      {reservation.occasion && <span className="truncate">{reservation.occasion}</span>}
+                    </div>
+                  );
+
+                  const actions = (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {reservation.status === 'confirmed' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                          onClick={() => openCheckIn(reservation)}
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Check-in
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg"
+                        aria-label="Ver reserva"
+                        onClick={() => {
+                          setDayModal(null);
+                          openDetails(reservation, { returnDay: dayModal });
+                        }}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      {canDeleteReservations && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                          aria-label="Excluir reserva"
+                          onClick={() => openReservationRemovalFlow(reservation.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  );
+
                   return (
                     <div
                       key={reservation.id}
@@ -2198,161 +2303,64 @@ export default function Reservations({ view }: ReservationsProps) {
                         index !== dayModalReservations.length - 1 && 'border-b border-border/60',
                       )}
                     >
-                    <div className="sm:hidden">
-                      <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3">
-                        <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
-                          {reservation.time.slice(0, 5)}
-                        </div>
+                      {/* Mobile: três linhas fixas — identificação, marcadores e contato. */}
+                      <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 sm:hidden">
+                        {timeChip}
 
-                        <div className="min-w-0">
-                          <span
-                            className="block text-sm font-semibold leading-snug text-foreground"
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                            }}
-                            title={reservation.guest_name}
-                          >
-                            {reservation.guest_name}
-                          </span>
-
-                          <div className="mt-1 flex flex-wrap gap-1.5">
+                        <div className="min-w-0 space-y-1.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={reservation.guest_name}>
+                              {reservation.guest_name}
+                            </span>
                             <ReservationStatusBadge status={reservation.status} />
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
                             {tableBadge && <ReservationTableBadge badge={tableBadge} />}
                             {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                           </div>
 
-                          <div className="mt-2 flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                                <PhoneWhatsAppLink
-                                  phone={reservation.guest_phone}
-                                  companyId={reservation.company_id}
-                                  slug={slug}
-                                  reservation={reservation}
-                                  phoneClassName="text-xs text-muted-foreground"
-                                />
-                                <span className="inline-flex items-center gap-1">
-                                  <Users className="h-3 w-3" />
-                                  {reservation.party_size}
-                                </span>
-                                {reservation.occasion && <span>{reservation.occasion}</span>}
-                              </div>
-                            </div>
-
-                            <div className="flex shrink-0 items-center gap-1.5">
-                              {reservation.status === 'confirmed' && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
-                                  onClick={() => openCheckIn(reservation)}
-                                >
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                  Check-in
-                                </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg"
-                                aria-label="Ver reserva"
-                                onClick={() => {
-                                  setDayModal(null);
-                                  openDetails(reservation, { returnDay: dayModal });
-                                }}
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-                              {canDeleteReservations && (
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                                  aria-label="Excluir reserva"
-                                  onClick={() => openReservationRemovalFlow(reservation.id)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
+                          {/* Contato e ações em linhas separadas: lado a lado, o
+                              telefone não encolhe e transborda sobre os botões. */}
+                          {metaLine}
+                          <div className="flex justify-end">{actions}</div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="hidden items-center gap-3 sm:flex">
-                      <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary">
-                        {reservation.time.slice(0, 5)}
-                      </div>
+                      {/* Desktop: colunas fixas, então status e mesa ficam alinhados
+                          entre as linhas mesmo com nomes de tamanhos diferentes. */}
+                      <div className="hidden items-center gap-3 sm:flex">
+                        {timeChip}
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span
-                            className="truncate text-sm font-semibold text-foreground"
-                            title={reservation.guest_name}
-                          >
+                        {/* Só esta coluna encolhe; o nome trunca e os marcadores
+                            descem para a linha de contato quando falta largura. */}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-foreground" title={reservation.guest_name}>
                             {reservation.guest_name}
-                          </span>
+                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {metaLine}
+                            <span className="flex items-center gap-1.5 lg:hidden">
+                              <ReservationStatusBadge status={reservation.status} />
+                              {tableBadge && <ReservationTableBadge badge={tableBadge} />}
+                              {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Em telas largas viram colunas de largura fixa, para os
+                            marcadores ficarem alinhados entre todas as linhas. */}
+                        <div className="hidden w-28 shrink-0 lg:block">
                           <ReservationStatusBadge status={reservation.status} />
+                        </div>
+
+                        <div className="hidden w-52 shrink-0 items-center gap-1.5 overflow-hidden lg:flex">
                           {tableBadge && <ReservationTableBadge badge={tableBadge} />}
                           {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                         </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                          <PhoneWhatsAppLink
-                            phone={reservation.guest_phone}
-                            companyId={reservation.company_id}
-                            slug={slug}
-                            reservation={reservation}
-                            phoneClassName="text-xs text-muted-foreground"
-                          />
-                          <span className="inline-flex items-center gap-1">
-                            <Users className="h-3 w-3" />
-                            {reservation.party_size}
-                          </span>
-                          {reservation.occasion && <span>{reservation.occasion}</span>}
-                        </div>
-                      </div>
 
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {reservation.status === 'confirmed' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 gap-1.5 rounded-lg px-3 text-xs"
-                            onClick={() => openCheckIn(reservation)}
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Check-in
-                          </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg"
-                          aria-label="Ver reserva"
-                          onClick={() => {
-                            setDayModal(null);
-                            openDetails(reservation, { returnDay: dayModal });
-                          }}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                        {canDeleteReservations && (
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                            aria-label="Excluir reserva"
-                            onClick={() => openReservationRemovalFlow(reservation.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
+                        {actions}
                       </div>
-                    </div>
                     </div>
                   );
                 })}
