@@ -31,3 +31,34 @@ export function normalizeReservationLateToleranceMinutes(value: number | null | 
   if (!Number.isFinite(parsed)) return DEFAULT_RESERVATION_LATE_TOLERANCE_MINUTES;
   return Math.max(0, Math.min(120, Math.round(parsed)));
 }
+
+// Decide se o modal público segue sozinho depois de a pessoa tocar num horário.
+// Avançar cedo demais levaria ao formulário sem mesa reservada; nunca avançar
+// devolveria o clique extra que o avanço automático veio remover.
+export type ReservationAdvanceDecision = 'wait' | 'advance' | 'cancel';
+
+export interface ReservationTimeAdvanceInput {
+  /** Ainda procurando mesa para o horário escolhido. */
+  isCheckingTable: boolean;
+  /** Horário e mesa confirmados: dá para preencher os dados. */
+  canContinue: boolean;
+  /** A busca terminou e não sobrou mesa. */
+  hasNoTableAvailable: boolean;
+  /** A consulta de disponibilidade falhou. */
+  hasAvailabilityError: boolean;
+  /** O horário deixou de estar disponível enquanto era verificado. */
+  isSlotUnavailable: boolean;
+}
+
+export function resolveReservationTimeAdvance({
+  isCheckingTable,
+  canContinue,
+  hasNoTableAvailable,
+  hasAvailabilityError,
+  isSlotUnavailable,
+}: ReservationTimeAdvanceInput): ReservationAdvanceDecision {
+  if (isCheckingTable) return 'wait';
+  if (canContinue) return 'advance';
+  if (hasNoTableAvailable || hasAvailabilityError || isSlotUnavailable) return 'cancel';
+  return 'wait';
+}

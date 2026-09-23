@@ -12,7 +12,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck, Plus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -36,7 +36,7 @@ import {
   normalizePublicReservationExitPromptTextSize,
   renderPublicReservationExitPromptText,
 } from '@/lib/publicReservationExitPrompt';
-import { buildLargePartyWhatsappUrl, isLargePartyReservation, normalizeLargePartyThreshold } from '@/lib/reservation-flow';
+import { buildLargePartyWhatsappUrl, isLargePartyReservation, normalizeLargePartyThreshold, resolveReservationTimeAdvance } from '@/lib/reservation-flow';
 import { filterPastTimeSlotsForDate } from '@/lib/reservation-slots';
 import { sortReservationScheduleSlots } from '@/lib/reservation-schedule';
 import { createReservationPayment } from '@/lib/asaas-prepayment-api';
@@ -61,6 +61,7 @@ interface ReservationModalProps {
   slug: string;
   companyId: string;
   companyName: string;
+  companyLogoUrl?: string | null;
   companyWhatsapp?: string | null;
   openingHours: OpeningHour[];
   reservationDuration?: number;
@@ -252,6 +253,9 @@ function getDateWindowOffsetForDate(value: string | null | undefined) {
   return Math.max(0, Math.floor(diffDays / DATE_WINDOW_SIZE) * DATE_WINDOW_SIZE);
 }
 
+// Nomes das etapas, usados no indicador de progresso do cabeçalho.
+const RESERVATION_STEP_LABELS = ['Data', 'Horário', 'Dados'];
+
 function buildDateWindow(offset: number) {
   const baseDate = new Date();
   baseDate.setHours(12, 0, 0, 0);
@@ -264,6 +268,7 @@ export default function ReservationModal({
   slug,
   companyId,
   companyName,
+  companyLogoUrl,
   companyWhatsapp,
   reservationDuration = 30,
   largePartyThreshold,
@@ -285,6 +290,11 @@ export default function ReservationModal({
   const [selectedTableId, setSelectedTableId] = useState('');
   const [selectedTableMapId, setSelectedTableMapId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
+  // Marcam que a pessoa escolheu e o fluxo deve seguir sozinho assim que a
+  // disponibilidade daquela escolha estiver confirmada.
+  const [pendingDateAdvance, setPendingDateAdvance] = useState(false);
+  const [pendingTimeAdvance, setPendingTimeAdvance] = useState(false);
+  const [observationOpen, setObservationOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
   const [dateWindowOffset, setDateWindowOffset] = useState(() => getDateWindowOffsetForDate(initialDate));
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
@@ -307,6 +317,7 @@ export default function ReservationModal({
   const [showExitRecoveryPrompt, setShowExitRecoveryPrompt] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const prefillRequestIdRef = useRef(0);
+  const dateSelectTrackedRef = useRef(false);
   const slotAvailabilityRequestIdRef = useRef(0);
   const tableAvailabilityRequestIdRef = useRef(0);
   const lastPrefillLookupRef = useRef('');
@@ -358,7 +369,11 @@ export default function ReservationModal({
     setPrefillStatus('idle');
     setIdentityFieldsCollapsed(false);
     setShowExitRecoveryPrompt(false);
+    setPendingDateAdvance(false);
+    setPendingTimeAdvance(false);
+    setObservationOpen(false);
     prefillRequestIdRef.current = 0;
+    dateSelectTrackedRef.current = false;
     slotAvailabilityRequestIdRef.current += 1;
     tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
@@ -801,6 +816,15 @@ export default function ReservationModal({
   const handleDateSelect = (date: Date | undefined) => {
     setSelectedDate(date);
     resetAvailabilitySelection();
+    if (!date) return;
+
+    // date_select passa a marcar a escolha da data, não o clique em "Continuar".
+    // Só a primeira escolha da jornada conta: trocar de data não gera evento novo.
+    if (!dateSelectTrackedRef.current) {
+      dateSelectTrackedRef.current = true;
+      onStepChange?.('date_select');
+    }
+    setPendingDateAdvance(true);
   };
 
   const handlePartySizeChange = (nextSize: number) => {
@@ -816,6 +840,9 @@ export default function ReservationModal({
     setResolvedTableLookupKey('');
     setTableAvailabilityError(null);
     tableAvailabilityRequestIdRef.current += 1;
+    // O avanço espera a mesa ser confirmada; se não houver, a pessoa continua
+    // aqui para ver o aviso em vez de cair no formulário sem reserva possível.
+    setPendingTimeAdvance(!!time);
   };
 
   const closeImmediately = () => {
@@ -1251,19 +1278,17 @@ export default function ReservationModal({
       return 'Buscando cadastro para esse WhatsApp...';
     }
 
+    // Cadastro encontrado já tem o aviso verde logo abaixo; em repouso o campo
+    // fala por si, então a linha de ajuda só aparece quando há o que dizer.
     if (customerFoundForCurrentPhone) {
-      return 'Cadastro encontrado. Se precisar, voce ainda pode editar seus dados.';
+      return '';
     }
 
     if (prefillStatus === 'not_found') {
-      return 'Ainda não encontramos cadastro. Preencha seus dados para continuar.';
+      return 'Sem cadastro ainda: preencha seus dados abaixo.';
     }
 
-    if (whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS) {
-      return 'Digite o WhatsApp completo com DDD. A busca acontece automaticamente.';
-    }
-
-    return 'Digite o WhatsApp completo com DDD. Se houver cadastro, os dados aparecem automaticamente.';
+    return '';
   })();
 
   const getSlotStatus = (slot: string): 'available' | 'low' | 'full' => {
@@ -1300,16 +1325,46 @@ export default function ReservationModal({
     && !isCheckingSelectedTable
     && !tableAvailabilityError;
 
-  const handleDateContinue = () => {
-    if (!selectedDate || isPreparingDateAvailability) return;
+  // Avanço automático: tocar na data leva para os horários assim que eles ficam
+  // prontos. O botão continua existindo para quem volta e só quer seguir.
+  useEffect(() => {
+    if (!pendingDateAdvance) return;
+    if (step !== 1 || !selectedDate || isLargeParty) {
+      setPendingDateAdvance(false);
+      return;
+    }
+    if (isPreparingDateAvailability) return;
+    setPendingDateAdvance(false);
     setStep(2);
-    onStepChange?.('date_select');
-  };
+  }, [isLargeParty, isPreparingDateAvailability, pendingDateAdvance, selectedDate, step]);
 
-  const handleTimeContinue = () => {
-    if (!canContinueToForm) return;
-    setStep(3);
-  };
+  useEffect(() => {
+    if (!pendingTimeAdvance) return;
+    if (step !== 2 || !selectedTime) {
+      setPendingTimeAdvance(false);
+      return;
+    }
+    const decision = resolveReservationTimeAdvance({
+      isCheckingTable: isCheckingSelectedTable,
+      canContinue: canContinueToForm,
+      hasNoTableAvailable: showNoTableAvailability,
+      hasAvailabilityError: !!tableAvailabilityError,
+      isSlotUnavailable: selectedSlotAvailability?.isAvailable === false,
+    });
+
+    if (decision === 'wait') return;
+    setPendingTimeAdvance(false);
+    if (decision === 'advance') setStep(3);
+  }, [
+    canContinueToForm,
+    isCheckingSelectedTable,
+    pendingTimeAdvance,
+    selectedSlotAvailability?.isAvailable,
+    selectedTime,
+    showNoTableAvailability,
+    step,
+    tableAvailabilityError,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -1324,33 +1379,63 @@ export default function ReservationModal({
         className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]"
       >
         <DialogHeader className={showExitRecoveryPrompt ? 'sr-only' : 'px-12'}>
+          {/* O nome da casa sai do título: ele já está na página atrás do modal,
+              e em duas linhas roubava altura de todas as etapas. */}
           <DialogTitle className={cn('mx-auto max-w-full text-center text-lg font-bold leading-snug', showExitRecoveryPrompt ? 'text-white' : 'text-foreground')}>
             {showExitRecoveryPrompt
               ? 'Tem certeza que quer parar por aqui?'
               : step === 4
                 ? 'Reserva Confirmada!'
-                : `Reservar Mesa — ${companyName}`}
+                : 'Reservar mesa'}
           </DialogTitle>
           {!showExitRecoveryPrompt && step !== 4 && (
-            <div className="flex items-center justify-center gap-2 pt-2" role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={3} aria-label={`Passo ${step} de 3`}>
-              {[1, 2, 3].map(s => (
-                <div
-                  key={s}
-                  className={cn(
-                    'h-2 rounded-full transition-[width,background-color] duration-200',
-                    s === step ? 'w-8 bg-primary' : s < step ? 'w-6 bg-primary/50' : 'w-6 bg-muted'
-                  )}
-                />
-              ))}
-            </div>
+            <>
+              <p className="text-center text-xs text-muted-foreground">{companyName}</p>
+              {/* Etapas nomeadas: saber quanto falta segura quem pensa em desistir. */}
+              <div
+                className="grid grid-cols-3 gap-2 pt-1.5"
+                role="progressbar"
+                aria-valuenow={step}
+                aria-valuemin={1}
+                aria-valuemax={3}
+                aria-label={`Passo ${step} de 3`}
+              >
+                {RESERVATION_STEP_LABELS.map((label, index) => {
+                  const stepNumber = index + 1;
+                  return (
+                    <div key={label} className="space-y-1">
+                      <div
+                        className={cn(
+                          'h-1 rounded-full transition-colors duration-200',
+                          stepNumber < step ? 'bg-primary/50' : stepNumber === step ? 'bg-primary' : 'bg-muted',
+                        )}
+                      />
+                      <p className={cn(
+                        'text-center text-[10px] font-medium leading-none',
+                        stepNumber === step ? 'text-foreground' : 'text-muted-foreground',
+                      )}>
+                        {label}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </DialogHeader>
 
         {showExitRecoveryPrompt ? (
           <div className="animate-fade-in px-2 pb-1 pt-3">
-            <div className="mx-auto flex max-w-md flex-col items-center gap-7 text-center">
-              <div className="space-y-6">
-                <h2 className="mx-auto flex max-w-full flex-col items-center font-serif text-[clamp(1.28rem,4.6vw,1.82rem)] font-semibold leading-[0.98] tracking-[-0.03em] text-foreground">
+            <div className="mx-auto flex max-w-md flex-col items-center gap-6 text-center">
+              <div className="space-y-5">
+                {/* A logo lembra de qual casa é a mesa que ela está prestes a largar. */}
+                <span className="mx-auto flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary-soft text-lg font-semibold text-primary shadow-sm">
+                  {companyLogoUrl
+                    ? <img src={companyLogoUrl} alt="" className="h-full w-full object-cover" />
+                    : companyName.slice(0, 1).toUpperCase()}
+                </span>
+
+                <h2 className="mx-auto flex max-w-full flex-col items-center font-serif text-[clamp(1.5rem,6vw,2.2rem)] font-semibold leading-[0.98] tracking-[-0.03em] text-foreground">
                   <span className="block whitespace-nowrap">Tem certeza que quer</span>
                   <span className="mt-1 block text-primary">parar por aqui?</span>
                 </h2>
@@ -1368,10 +1453,31 @@ export default function ReservationModal({
                 </div>
               </div>
 
+              {/* O que ela perde ao sair, com o dado da própria escolha. */}
+              {selectedDate && selectedTime && (
+                <div className="w-full rounded-xl border border-primary/25 bg-primary/5 px-4 py-3">
+                  <p className="flex items-center justify-center gap-2 text-sm font-semibold text-foreground">
+                    <CalendarIcon className="h-4 w-4 shrink-0 text-primary" />
+                    <span>
+                      {format(selectedDate, "EEE, dd/MM", { locale: ptBR }).replace('.', '')} · {selectedTime} · {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
+                    </span>
+                  </p>
+                  {/* Escassez só quando o horário escolhido realmente está no fim. */}
+                  {selectedSlotIsLow && (
+                    <p className="mt-1.5 flex items-center justify-center gap-1.5 text-xs font-semibold text-amber-800">
+                      <Flame className="h-3.5 w-3.5 shrink-0" />
+                      {selectedSlotRemainingCapacity === 1
+                        ? `Resta ${selectedSlotMode === 'capacity' ? '1 lugar' : '1 mesa'} neste horário`
+                        : `Restam ${selectedSlotRemainingCapacity} ${selectedSlotMode === 'capacity' ? 'lugares' : 'mesas'} neste horário`}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="w-full space-y-2.5">
                 <Button
                   type="button"
-                  className="animate-attention-pulse-fast h-[3.35rem] w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground shadow-[0_18px_34px_rgba(201,129,58,0.28)] ring-1 ring-primary/20 transition-[transform,box-shadow,background-color] duration-150 hover:bg-primary/95 hover:shadow-[0_20px_40px_rgba(201,129,58,0.34)]"
+                  className="animate-attention-pulse-fast h-[3.5rem] w-full rounded-xl bg-[linear-gradient(180deg,hsl(30_55%_54%)_0%,hsl(30_51%_46%)_100%)] text-base font-semibold text-primary-foreground shadow-[0_18px_34px_rgba(201,129,58,0.32)] ring-1 ring-primary/25 transition-[transform,box-shadow,filter] duration-150 hover:shadow-[0_22px_44px_rgba(201,129,58,0.38)] hover:brightness-105"
                   onClick={() => setShowExitRecoveryPrompt(false)}
                 >
                   Quero garantir minha vaga
@@ -1389,18 +1495,18 @@ export default function ReservationModal({
             </div>
           </div>
         ) : step === 1 && (
-          <div className="animate-fade-in space-y-4 pt-2">
-            <p className="text-sm text-muted-foreground text-center">Escolha a data e número de pessoas</p>
-
-            <div className="flex items-center justify-center gap-3">
-              <span className="text-sm font-medium text-foreground">Pessoas</span>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" className="h-8 w-8" type="button"
+          <div className="animate-fade-in space-y-3 pt-2">
+            {/* Rótulo à esquerda e controle único: antes eram três botões soltos
+                centralizados, competindo com a grade de datas. */}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Pessoas</span>
+              <div className="flex items-center gap-1 rounded-full border border-border bg-muted/30 p-1">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
                   aria-label="Diminuir número de pessoas"
                   disabled={selectedPartySize <= 1}
                   onClick={() => handlePartySizeChange(selectedPartySize - 1)}>-</Button>
-                <span id="reservation-party-size-value" className="w-8 text-center font-semibold" aria-live="polite">{selectedPartySize}</span>
-                <Button variant="outline" size="icon" className="h-8 w-8" type="button"
+                <span id="reservation-party-size-value" className="w-9 text-center text-lg font-semibold tabular-nums" aria-live="polite">{selectedPartySize}</span>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
                   aria-label="Aumentar número de pessoas"
                   disabled={selectedPartySize >= 20}
                   onClick={() => handlePartySizeChange(selectedPartySize + 1)}>+</Button>
@@ -1441,7 +1547,7 @@ export default function ReservationModal({
 
             {!isLargeParty && (!showCalendar ? (
               <>
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div className="grid grid-cols-3 gap-2">
                     {dateWindowDays.map(date => {
                     const closed = isDayClosed(date);
@@ -1450,61 +1556,92 @@ export default function ReservationModal({
                     return (
                       <button key={date.toISOString()} disabled={closed} onClick={() => handleDateSelect(date)}
                         className={cn(
-                          'relative flex h-[5.625rem] min-w-0 flex-col items-center justify-center overflow-hidden rounded-md border p-3 text-sm transition-[border-color,background-color,color] duration-150',
+                          'relative flex h-[4.75rem] min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border p-2 text-sm transition-[border-color,background-color,color,box-shadow] duration-150',
                           closed
-                            ? 'cursor-not-allowed border-border bg-muted/30 text-muted-foreground opacity-75'
+                            ? 'cursor-not-allowed border-border/60 bg-muted/40 text-muted-foreground/70'
                             : isSelected
-                              ? 'border-primary bg-primary/10 text-primary font-semibold'
-                              : 'border-border hover:border-primary/50 text-foreground'
+                              ? 'border-primary bg-primary text-primary-foreground shadow-[0_6px_16px_rgba(201,129,58,0.28)]'
+                              : 'border-border bg-card text-foreground hover:border-primary/50 hover:shadow-sm'
                         )}>
-                        <span className={cn(
-                          'block h-4 w-full truncate text-center text-[11px] font-semibold uppercase leading-4',
-                          todayLabel && !closed ? 'text-primary/70' : 'text-muted-foreground',
-                          isSelected && 'text-primary'
-                        )}>
-                          {todayLabel || format(date, 'EEE', { locale: ptBR })}
-                        </span>
-                        <span className="block h-7 w-8 text-center text-lg font-bold leading-7 tabular-nums">{format(date, 'dd')}</span>
+                        {/* Hoje e amanhã ganham etiqueta; os demais mostram só o
+                            dia da semana, no mesmo lugar, para a grade não dançar. */}
+                        {todayLabel && !closed ? (
+                          <span className={cn(
+                            'rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide',
+                            isSelected ? 'bg-white/25 text-primary-foreground' : 'bg-primary/12 text-primary',
+                          )}>
+                            {todayLabel}
+                          </span>
+                        ) : (
+                          <span className={cn(
+                            'block w-full truncate text-center text-[10px] font-semibold uppercase leading-none tracking-wide',
+                            isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground',
+                          )}>
+                            {format(date, 'EEE', { locale: ptBR })}
+                          </span>
+                        )}
+                        <span className="block text-center text-[1.375rem] font-bold leading-none tabular-nums">{format(date, 'dd')}</span>
                         {closed ? (
-                          <span className="inline-flex h-4 max-w-full items-center justify-center truncate rounded-full border border-destructive/20 bg-destructive-soft px-1.5 text-[9px] font-semibold uppercase leading-4 text-destructive">
+                          <span className="inline-flex max-w-full items-center justify-center truncate rounded-full border border-destructive/20 bg-destructive-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none text-destructive">
                             Fechado
                           </span>
                         ) : (
-                          <span className="block h-4 text-xs leading-4 text-muted-foreground">{format(date, 'MMM', { locale: ptBR })}</span>
+                          <span className={cn(
+                            'block text-[10px] font-medium uppercase leading-none tracking-wide',
+                            isSelected ? 'text-primary-foreground/75' : 'text-muted-foreground/70',
+                          )}>
+                            {todayLabel ? format(date, 'EEE', { locale: ptBR }) : format(date, 'MMM', { locale: ptBR }).replace('.', '')}
+                          </span>
                         )}
                       </button>
                     );
                     })}
                   </div>
 
-                  <div className="grid grid-cols-[2.5rem_minmax(5.25rem,1fr)_2.5rem] items-center gap-1 rounded-lg border border-border/70 bg-muted/20 px-2 py-2 min-[360px]:grid-cols-[minmax(5.75rem,6.75rem)_minmax(5.25rem,1fr)_minmax(5.75rem,6.75rem)]">
+                  {/* Navegação da janela de datas, com o calendário ao lado para
+                      quem precisa de uma data fora dos seis dias visíveis. */}
+                  <div className="flex items-center gap-2">
+                    <div className="grid flex-1 grid-cols-[2.5rem_minmax(5.25rem,1fr)_2.5rem] items-center gap-1 rounded-lg border border-border/70 bg-muted/20 px-2 py-2 min-[360px]:grid-cols-[minmax(5.75rem,6.75rem)_minmax(5.25rem,1fr)_minmax(5.75rem,6.75rem)]">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100"
+                        aria-label="Mostrar 6 dias anteriores"
+                        disabled={dateWindowOffset === 0}
+                        onClick={() => handleDateWindowChange('previous')}
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5 shrink-0 min-[360px]:mr-1" />
+                        <span className="hidden min-[360px]:inline">Anteriores</span>
+                      </Button>
+                      <span className="flex h-8 min-w-0 items-center justify-center truncate px-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
+                        {dateWindowLabel}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100"
+                        aria-label="Mostrar próximos 6 dias"
+                        onClick={() => handleDateWindowChange('next')}
+                      >
+                        <span className="hidden min-[360px]:inline">Próximos</span>
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 min-[360px]:ml-1" />
+                      </Button>
+                    </div>
+
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 min-w-0 justify-center px-1 text-xs"
-                      aria-label="Mostrar 6 dias anteriores"
-                      disabled={dateWindowOffset === 0}
-                      onClick={() => handleDateWindowChange('previous')}
+                      variant="outline"
+                      size="icon"
+                      className="h-[2.75rem] w-11 shrink-0 text-primary active:scale-100"
+                      aria-label="Escolher outra data no calendário"
+                      onClick={handleOpenCalendar}
                     >
-                      <ArrowLeft className="h-3.5 w-3.5 shrink-0 min-[360px]:mr-1" />
-                      <span className="hidden min-[360px]:inline">Anteriores</span>
-                    </Button>
-                    <span className="flex h-8 min-w-0 items-center justify-center truncate px-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
-                      {dateWindowLabel}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 min-w-0 justify-center px-1 text-xs"
-                      aria-label="Mostrar próximos 6 dias"
-                      onClick={() => handleDateWindowChange('next')}
-                    >
-                      <span className="hidden min-[360px]:inline">Próximos</span>
-                      <ArrowRight className="h-3.5 w-3.5 shrink-0 min-[360px]:ml-1" />
+                      <CalendarIcon className="h-4 w-4" />
                     </Button>
                   </div>
+
                 </div>
 
                 {/* Show selected calendar date if outside the current quick-select window */}
@@ -1516,10 +1653,6 @@ export default function ReservationModal({
                     </span>
                   </div>
                 )}
-
-                <Button variant="ghost" className="w-full text-primary" onClick={handleOpenCalendar}>
-                  <CalendarIcon className="h-4 w-4 mr-2" /> Escolher outra data
-                </Button>
               </>
             ) : (
               <div className="flex flex-col items-center gap-3">
@@ -1535,18 +1668,19 @@ export default function ReservationModal({
               </div>
             ))}
 
+            {/* Sem botão, o rodapé é quem diz o que fazer: tocar na data avança,
+                inclusive quando é a mesma data já escolhida. */}
             {!isLargeParty && (
-              <div className="space-y-1">
-                <Button className="w-full" disabled={!selectedDate || isPreparingDateAvailability}
-                  onClick={handleDateContinue}>
-                  {isPreparingDateAvailability && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {isPreparingDateAvailability ? 'Preparando horarios...' : 'Continuar'}
-                  {!isPreparingDateAvailability && <ArrowRight className="h-4 w-4 ml-2" />}
-                </Button>
-                {!selectedDate && (
-                  <p className="text-xs text-muted-foreground text-center">Selecione uma data para continuar</p>
+              <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
+                {pendingDateAdvance && isPreparingDateAvailability ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Preparando horários...
+                  </>
+                ) : (
+                  'Selecione uma data para continuar'
                 )}
-              </div>
+              </p>
             )}
           </div>
         )}
@@ -1631,7 +1765,7 @@ export default function ReservationModal({
                           urgencySlots.length > 0 ? 'text-amber-800' : 'text-muted-foreground',
                         )}>
                           {urgencySlots.length > 0
-                            ? 'Outros clientes estão reservando ao mesmo tempo. Confirme agora para garantir sua mesa.'
+                            ? 'Outros clientes estão reservando ao mesmo tempo. Conclua sua reserva o quanto antes para garantir sua mesa.'
                             : 'Escolha uma opção para garantir sua mesa. A disponibilidade muda conforme novas reservas entram.'}
                         </p>
                       </div>
@@ -1665,6 +1799,7 @@ export default function ReservationModal({
                     return (
                       <button key={time} onClick={() => { if (!isFull) handleTimeSelect(time); }}
                         disabled={isFull}
+                        aria-pressed={selectedTime === time}
                         className={cn(
                           'relative h-10 w-[calc(33.333%-4px)] rounded-md border px-2 py-0.5 text-xs transition-[border-color,background-color,color] duration-150 sm:h-11 sm:w-[calc(25%-6px)] sm:text-[13px]',
                           isFull && 'opacity-40 cursor-not-allowed bg-muted',
@@ -1672,7 +1807,12 @@ export default function ReservationModal({
                           status === 'low' && selectedTime !== time && !isFull && 'border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400'
                         )}>
                         <span className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap leading-none">
-                          <Clock className="h-3.5 w-3.5" />{time}
+                          {/* Sem o botão de continuar, o próprio horário mostra que
+                              a mesa está sendo verificada. */}
+                          {selectedTime === time && isCheckingSelectedTable
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Clock className="h-3.5 w-3.5" />}
+                          {time}
                         </span>
                         {slotBadge && (
                           <span className="pointer-events-none absolute inset-x-1 bottom-px flex items-center justify-center">
@@ -1709,17 +1849,18 @@ export default function ReservationModal({
               </div>
             )}
 
-            <div className="space-y-1">
-              <Button className="w-full" disabled={!canContinueToForm}
-                onClick={handleTimeContinue}>
-                {isCheckingSelectedTable && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isCheckingSelectedTable ? 'Verificando mesa...' : 'Continuar'}
-                {!isCheckingSelectedTable && <ArrowRight className="h-4 w-4 ml-2" />}
-              </Button>
-              {!selectedTime && (
-                <p className="text-xs text-muted-foreground text-center">Selecione um horário para continuar</p>
+            {/* Sem botão: tocar no horário avança quando a mesa é confirmada.
+                O rodapé assume o aviso que o botão dava enquanto verificava. */}
+            <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
+              {isCheckingSelectedTable ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Confirmando disponibilidade...
+                </>
+              ) : (
+                'Selecione um horário para continuar'
               )}
-            </div>
+            </p>
           </div>
         )}
 
@@ -1729,15 +1870,32 @@ export default function ReservationModal({
             <Button variant="ghost" size="sm" type="button" onClick={() => setStep(2)}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
-            <p className="text-sm text-muted-foreground text-center">
-              {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime} · {selectedPartySize} pessoas
-            </p>
 
-            <p className="text-xs text-muted-foreground">* Campos obrigatórios</p>
+            {/* O que está sendo confirmado ganha peso: é a última chance de notar
+                um horário trocado antes de preencher tudo. */}
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 shrink-0 px-2 text-xs font-semibold text-primary active:scale-100"
+                onClick={() => setStep(2)}
+              >
+                Alterar
+              </Button>
+            </div>
 
             <div className="space-y-3">
               <div>
-                <Label htmlFor="public-reservation-whatsapp" className="text-sm font-medium">WhatsApp *</Label>
+                <Label htmlFor="public-reservation-whatsapp" className="text-sm font-medium">WhatsApp</Label>
                 <div className="flex gap-2">
                   <Input
                     id="public-reservation-whatsapp"
@@ -1765,10 +1923,12 @@ export default function ReservationModal({
                   <span>Cadastro encontrado. Ajuste os dados abaixo apenas se precisar.</span>
                 </div>
               )}
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-                {prefillStatus === 'searching' && <Loader2 className="h-3 w-3 animate-spin" />}
-                <span>{whatsappHelperText}</span>
-              </p>
+              {whatsappHelperText && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                  {prefillStatus === 'searching' && <Loader2 className="h-3 w-3 animate-spin" />}
+                  <span>{whatsappHelperText}</span>
+                </p>
+              )}
               {shouldCollapseIdentityFields && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -1812,27 +1972,29 @@ export default function ReservationModal({
                 </div>
               )}
               <div className={cn(shouldCollapseIdentityFields && 'hidden')}>
-                <Label htmlFor="public-reservation-name" className="text-sm font-medium">Nome Completo *</Label>
+                {/* Rótulo só para leitor de tela: o texto dentro do campo já diz o
+                    que preencher, e cada rótulo a menos é uma linha a menos. */}
+                <Label htmlFor="public-reservation-name" className="sr-only">Nome completo</Label>
                 <Input
                   id="public-reservation-name"
                   name="guest_name"
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Seu nome"
+                  placeholder="Digite seu nome completo"
                   required
                   maxLength={100}
                   autoComplete="name"
                 />
               </div>
               <div className={cn(shouldCollapseIdentityFields && 'hidden')}>
-                <Label htmlFor="public-reservation-email" className="text-sm font-medium">E-mail</Label>
+                <Label htmlFor="public-reservation-email" className="sr-only">E-mail (opcional)</Label>
                 <Input
                   id="public-reservation-email"
                   name="guest_email"
                   type="email"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="seu@email.com"
+                  placeholder="Seu e-mail (opcional)"
                   maxLength={255}
                   autoComplete="email"
                   inputMode="email"
@@ -1840,7 +2002,7 @@ export default function ReservationModal({
                 />
               </div>
               <div className={cn('space-y-2', shouldCollapseIdentityFields && 'hidden')} role="group" aria-labelledby="public-reservation-birthdate-label">
-                <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de Nascimento *</p>
+                <p id="public-reservation-birthdate-label" className="text-sm font-medium text-foreground">Data de nascimento</p>
                 <div className="grid grid-cols-3 gap-1.5 xs:gap-2">
                   <Select
                     value={form.birthdate ? form.birthdate.split('-')[2] : ''}
@@ -1893,21 +2055,38 @@ export default function ReservationModal({
                 </div>
               </div>
               <div>
-                <Label className="text-sm font-medium">Ocasião</Label>
+                <Label htmlFor="public-reservation-occasion-trigger" className="sr-only">Ocasião (opcional)</Label>
                 <Select value={form.occasion} onValueChange={v => setForm(f => ({ ...f, occasion: v }))}>
                   <SelectTrigger id="public-reservation-occasion-trigger" aria-label="Selecionar ocasião da reserva">
-                    <SelectValue placeholder="Selecione..." />
+                    <SelectValue placeholder="Selecione uma ocasião (opcional)" />
                   </SelectTrigger>
                   <SelectContent>
                     {OCCASIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-sm font-medium">Observação</Label>
-                <Textarea id="public-reservation-observation" name="notes" value={form.observation} onChange={e => setForm(f => ({ ...f, observation: e.target.value }))}
-                  placeholder="Alguma observação especial?" maxLength={500} rows={3} />
-              </div>
+              {/* Observação começa recolhida: é o campo menos usado e o que mais
+                  alonga o formulário. Já preenchida, abre sozinha. */}
+              {observationOpen || form.observation ? (
+                <div>
+                  <Label htmlFor="public-reservation-observation" className="text-sm font-medium">
+                    Observação <span className="font-normal text-muted-foreground">(opcional)</span>
+                  </Label>
+                  <Textarea id="public-reservation-observation" name="notes" value={form.observation} onChange={e => setForm(f => ({ ...f, observation: e.target.value }))}
+                    placeholder="Alguma observação especial?" maxLength={500} rows={3} autoFocus={observationOpen && !form.observation} />
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 justify-start gap-1.5 px-2 text-sm font-medium text-primary active:scale-100"
+                  onClick={() => setObservationOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Adicionar observação
+                </Button>
+              )}
             </div>
 
             <p className="text-xs text-muted-foreground text-center">

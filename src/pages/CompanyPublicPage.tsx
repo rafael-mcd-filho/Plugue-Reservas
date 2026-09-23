@@ -1491,6 +1491,7 @@ export default function CompanyPublicPage() {
           slug={slug ?? ''}
           companyId={company.id}
           companyName={company.name}
+          companyLogoUrl={company.logo_url}
           companyWhatsapp={company.whatsapp}
           openingHours={openingHours}
           reservationDuration={(company as any).reservation_duration ?? 30}
