@@ -130,6 +130,21 @@ describe('useFunnelTracking reliability', () => {
     expect(invokedPayloads().filter((payload) => payload.event_name === 'booking_started')).toHaveLength(1);
   });
 
+  it('returns the local tracking snapshot immediately while the network is pending', async () => {
+    const pendingRequest = deferred<ReturnType<typeof successfulResponse>>();
+    mocks.invoke.mockReturnValue(pendingRequest.promise);
+
+    const { result } = renderHook(() => useFunnelTracking('company-a', 'company-a'));
+    await settleEffects();
+
+    const snapshot = result.current.getImmediateTrackingSnapshot();
+
+    expect(snapshot.company_id).toBe('company-a');
+    expect(snapshot.company_slug).toBe('company-a');
+    expect(snapshot.anonymous_id).toBeTruthy();
+    expect(snapshot.session_id).toBeNull();
+  });
+
   it('shares one durable session claim across independent hook instances', async () => {
     const pendingPings: Array<{
       body: TrackingEventPayload;

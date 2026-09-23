@@ -531,7 +531,7 @@ export default function CompanyPublicPage() {
     enabled: slugIsValid && !company && !isLoading,
   });
 
-  const { trackStep, startJourney, getTrackingSnapshot, clearJourney } = useFunnelTracking(company?.id, slug);
+  const { trackStep, startJourney, getImmediateTrackingSnapshot, clearJourney } = useFunnelTracking(company?.id, slug);
 
   useFaviconOverride(
     isLoading ? undefined : company?.logo_url ?? null,
@@ -580,6 +580,8 @@ export default function CompanyPublicPage() {
       return (data ?? []) as BlockedDate[];
     },
     enabled: !!company?.id,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: false,
   });
 
   const { data: publicNotice } = useQuery({
@@ -1500,7 +1502,7 @@ export default function CompanyPublicPage() {
           initialDate={null}
           initialPartySize={2}
           onStepChange={(step) => trackStep(step)}
-          getTrackingSnapshot={getTrackingSnapshot}
+          getTrackingSnapshot={getImmediateTrackingSnapshot}
           clearTrackingJourney={clearJourney}
           exitRecoveryEnabled={publicReservationExitPromptEnabled}
           exitRecoveryPrimaryText={publicReservationExitPromptPrimaryText}

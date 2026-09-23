@@ -52,6 +52,8 @@ export interface ReservationPaymentRuleDraft {
 
 export interface CreateReservationPaymentRequest {
   company_id: string;
+  /** New clients let the Edge finish non-payment reservations in the same call. */
+  complete_without_payment?: boolean;
   reservation: {
     id?: string;
     table_id: string | null;
@@ -84,6 +86,7 @@ export type CreateReservationPaymentResponse = {
   requires_payment: boolean;
   reason?: 'feature_disabled' | 'no_rule';
   reservation_id?: string;
+  reservation_created?: boolean;
   payment_token?: string;
   payment_url?: string;
   expires_at?: string;

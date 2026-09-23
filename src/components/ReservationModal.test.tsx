@@ -85,6 +85,42 @@ describe('ReservationModal', () => {
     });
 
     supabaseMocks.rpc.mockImplementation((name: string) => {
+      if (name === 'get_public_reservation_schedule_range') {
+        return Promise.resolve({ data: [], error: null });
+      }
+      if (name === 'get_public_reservation_booking_context') {
+        return Promise.resolve({
+          data: [{
+            schedule_source: 'default',
+            schedule_rule_id: null,
+            schedule_rule_name: null,
+            schedule_block_id: null,
+            schedule_block_name: null,
+            schedule_slots: ['18:00'],
+            schedule_max_party_size_per_reservation: 8,
+            schedule_availability_mode: 'tables',
+            schedule_default_duration_minutes: 60,
+            time_slot: '18:00:00',
+            total_tables: 1,
+            occupied_tables: 0,
+            available_tables: 1,
+            available: true,
+            unavailable_reason: null,
+            reservation_count: 0,
+            max_party_size_per_reservation: 8,
+            max_reservations_per_slot: 1,
+            availability_mode: 'tables',
+            duration_minutes: 60,
+            max_guests_per_slot: null,
+            recommended_table_id: 'table-1',
+            recommended_table_number: 1,
+            recommended_table_capacity: 4,
+            recommended_table_section: 'Salao',
+            recommended_table_map_id: 'map-1',
+          }],
+          error: null,
+        });
+      }
       if (name === 'get_public_reservation_schedule') {
         return Promise.resolve({
           data: [{
@@ -123,7 +159,7 @@ describe('ReservationModal', () => {
     });
   });
 
-  it('reutiliza a disponibilidade ao voltar e selecionar o mesmo horario', async () => {
+  it('reutiliza a disponibilidade e a mesa recomendada ao voltar para o mesmo horario', async () => {
     renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
 
     const tomorrowLabel = await screen.findByText(/Amanh/);
@@ -133,7 +169,9 @@ describe('ReservationModal', () => {
     fireEvent.click(timeButton);
 
     await screen.findByLabelText('WhatsApp');
-    expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_occupied_table_ids')).toHaveLength(1);
+    expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_occupied_table_ids')).toHaveLength(0);
+    expect(supabaseMocks.from.mock.calls.filter(([table]) => table === 'table_maps')).toHaveLength(0);
+    expect(supabaseMocks.from.mock.calls.filter(([table]) => table === 'restaurant_tables')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: /Voltar/ }));
     await screen.findByText(/Selecione um hor.rio para continuar/);
@@ -141,8 +179,38 @@ describe('ReservationModal', () => {
 
     await screen.findByLabelText('WhatsApp');
     await waitFor(() => {
-      expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_occupied_table_ids')).toHaveLength(1);
+      expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_occupied_table_ids')).toHaveLength(0);
+      expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_public_reservation_booking_context')).toHaveLength(1);
     });
     expect(screen.queryByText(/Confirmando disponibilidade/)).not.toBeInTheDocument();
+  });
+
+  it('mantem o fluxo antigo como fallback durante o deploy da nova RPC', async () => {
+    const defaultRpcImplementation = supabaseMocks.rpc.getMockImplementation()!;
+    supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => {
+      if (name === 'get_public_reservation_booking_context') {
+        return Promise.resolve({
+          data: null,
+          error: {
+            code: 'PGRST202',
+            message: 'Could not find get_public_reservation_booking_context in the schema cache',
+          },
+        });
+      }
+      return defaultRpcImplementation(name, ...args);
+    });
+
+    renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
+
+    const tomorrowLabel = await screen.findByText(/Amanh/);
+    fireEvent.click(tomorrowLabel.closest('button')!);
+    fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+
+    await screen.findByLabelText('WhatsApp');
+    expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_public_reservation_schedule')).toHaveLength(1);
+    expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_public_reservation_availability')).toHaveLength(1);
+    expect(supabaseMocks.rpc.mock.calls.filter(([name]) => name === 'get_occupied_table_ids')).toHaveLength(1);
+    expect(supabaseMocks.from.mock.calls.filter(([table]) => table === 'table_maps')).toHaveLength(1);
+    expect(supabaseMocks.from.mock.calls.filter(([table]) => table === 'restaurant_tables')).toHaveLength(1);
   });
 });

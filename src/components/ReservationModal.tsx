@@ -70,7 +70,7 @@ interface ReservationModalProps {
   initialDate?: string | null;
   initialPartySize?: number;
   onStepChange?: (step: 'date_select' | 'time_select' | 'form_fill' | 'completed') => void;
-  getTrackingSnapshot?: () => Promise<TrackingSnapshot>;
+  getTrackingSnapshot?: () => TrackingSnapshot | Promise<TrackingSnapshot>;
   clearTrackingJourney?: () => void;
   exitRecoveryEnabled?: boolean;
   exitRecoveryPrimaryText?: string | null;
@@ -165,6 +165,9 @@ interface TableMapRow {
   priority: number;
 }
 
+const EMPTY_AVAILABLE_TABLES: AvailableTable[] = [];
+const EMPTY_TABLE_MAPS: TableMapRow[] = [];
+
 interface SlotAvailability {
   total: number;
   occupied: number;
@@ -177,6 +180,8 @@ interface SlotAvailability {
   availabilityMode: 'tables' | 'capacity';
   durationMinutes: number | null;
   maxGuestsPerSlot: number | null;
+  tableRecommendationResolved: boolean;
+  recommendedTable: AvailableTable | null;
 }
 
 interface PublicReservationSchedule {
@@ -191,15 +196,12 @@ interface PublicReservationSchedule {
   default_duration_minutes: number | null;
 }
 
-async function getPublicReservationSchedule(companyId: string, date: string): Promise<PublicReservationSchedule> {
-  const { data, error } = await (supabase.rpc as any)('get_public_reservation_schedule', {
-    _company_id: companyId,
-    _date: date,
-  });
+interface PublicReservationBookingContext {
+  schedule: PublicReservationSchedule;
+  slotAvailability: Record<string, SlotAvailability>;
+}
 
-  if (error) throw error;
-
-  const row = Array.isArray(data) ? data[0] : data;
+function normalizePublicReservationSchedule(row: any): PublicReservationSchedule {
   return {
     source: row?.source ?? 'default',
     rule_id: row?.rule_id ?? null,
@@ -215,6 +217,152 @@ async function getPublicReservationSchedule(companyId: string, date: string): Pr
       ? null
       : Number(row.default_duration_minutes),
   };
+}
+
+function normalizeBookingContextSchedule(row: any): PublicReservationSchedule {
+  return normalizePublicReservationSchedule({
+    source: row?.schedule_source,
+    rule_id: row?.schedule_rule_id,
+    rule_name: row?.schedule_rule_name,
+    block_id: row?.schedule_block_id,
+    block_name: row?.schedule_block_name,
+    slots: row?.schedule_slots,
+    max_party_size_per_reservation: row?.schedule_max_party_size_per_reservation,
+    availability_mode: row?.schedule_availability_mode,
+    default_duration_minutes: row?.schedule_default_duration_minutes,
+  });
+}
+
+function normalizeSlotAvailability(row: any): SlotAvailability {
+  const tableRecommendationResolved = Object.prototype.hasOwnProperty.call(row ?? {}, 'recommended_table_id');
+  const recommendedTableId = row?.recommended_table_id ? String(row.recommended_table_id) : '';
+
+  return {
+    total: Number(row?.total_tables) || 0,
+    occupied: Number(row?.occupied_tables) || 0,
+    available: Number(row?.available_tables) || 0,
+    isAvailable: Boolean(row?.available),
+    unavailableReason: row?.unavailable_reason ?? null,
+    reservationCount: Number(row?.reservation_count) || 0,
+    maxPartySizePerReservation: row?.max_party_size_per_reservation == null
+      ? null
+      : Number(row.max_party_size_per_reservation),
+    maxReservationsPerSlot: row?.max_reservations_per_slot == null
+      ? null
+      : Number(row.max_reservations_per_slot),
+    availabilityMode: row?.availability_mode === 'capacity' ? 'capacity' : 'tables',
+    durationMinutes: row?.duration_minutes == null ? null : Number(row.duration_minutes),
+    maxGuestsPerSlot: row?.max_guests_per_slot == null ? null : Number(row.max_guests_per_slot),
+    tableRecommendationResolved,
+    recommendedTable: recommendedTableId
+      ? {
+          id: recommendedTableId,
+          number: Number(row.recommended_table_number) || 0,
+          capacity: Number(row.recommended_table_capacity) || 0,
+          section: row.recommended_table_section ?? '',
+          table_map_id: row.recommended_table_map_id ? String(row.recommended_table_map_id) : '',
+        }
+      : null,
+  };
+}
+
+function isMissingPublicReservationRpc(error: any, functionName: string) {
+  const message = String(error?.message ?? '').toLowerCase();
+  return error?.code === 'PGRST202'
+    || error?.code === '42883'
+    || (message.includes(functionName.toLowerCase()) && (
+      message.includes('could not find')
+      || message.includes('does not exist')
+      || message.includes('schema cache')
+    ));
+}
+
+async function getPublicReservationSchedule(companyId: string, date: string): Promise<PublicReservationSchedule> {
+  const { data, error } = await (supabase.rpc as any)('get_public_reservation_schedule', {
+    _company_id: companyId,
+    _date: date,
+  });
+
+  if (error) throw error;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return normalizePublicReservationSchedule(row);
+}
+
+async function getPublicReservationSchedules(companyId: string, dates: string[]) {
+  if (dates.length === 0) return [];
+
+  const functionName = 'get_public_reservation_schedule_range';
+  const { data, error } = await (supabase.rpc as any)(functionName, {
+    _company_id: companyId,
+    _start_date: dates[0],
+    _end_date: dates[dates.length - 1],
+  });
+
+  if (!error) {
+    const schedulesByDate = new Map(
+      ((data as any[]) ?? []).map((row) => [
+        String(row.reservation_date),
+        normalizePublicReservationSchedule(row),
+      ]),
+    );
+    return dates.map((date) => ({
+      date,
+      schedule: schedulesByDate.get(date) ?? normalizePublicReservationSchedule(null),
+    }));
+  }
+
+  if (!isMissingPublicReservationRpc(error, functionName)) throw error;
+
+  return Promise.all(dates.map(async (date) => ({
+    date,
+    schedule: await getPublicReservationSchedule(companyId, date),
+  })));
+}
+
+async function getPublicReservationBookingContext(
+  companyId: string,
+  date: string,
+  partySize: number,
+): Promise<PublicReservationBookingContext> {
+  const functionName = 'get_public_reservation_booking_context';
+  const { data, error } = await (supabase.rpc as any)(functionName, {
+    _company_id: companyId,
+    _date: date,
+    _party_size: partySize,
+  });
+
+  if (!error) {
+    const rows = (data as any[]) ?? [];
+    const slotAvailability: Record<string, SlotAvailability> = {};
+    rows.forEach((row) => {
+      const timeKey = row.time_slot?.substring(0, 5) || '';
+      if (timeKey) slotAvailability[timeKey] = normalizeSlotAvailability(row);
+    });
+    return {
+      schedule: normalizeBookingContextSchedule(rows[0]),
+      slotAvailability,
+    };
+  }
+
+  if (!isMissingPublicReservationRpc(error, functionName)) throw error;
+
+  const [schedule, availabilityResult] = await Promise.all([
+    getPublicReservationSchedule(companyId, date),
+    (supabase.rpc as any)('get_public_reservation_availability', {
+      _company_id: companyId,
+      _date: date,
+      _party_size: partySize,
+    }),
+  ]);
+  if (availabilityResult.error) throw availabilityResult.error;
+
+  const slotAvailability: Record<string, SlotAvailability> = {};
+  ((availabilityResult.data as any[]) ?? []).forEach((row) => {
+    const timeKey = row.time_slot?.substring(0, 5) || '';
+    if (timeKey) slotAvailability[timeKey] = normalizeSlotAvailability(row);
+  });
+  return { schedule, slotAvailability };
 }
 
 interface UrgencySlot extends SlotAvailability {
@@ -298,12 +446,8 @@ export default function ReservationModal({
   const [calendarMonth, setCalendarMonth] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
   const [dateWindowOffset, setDateWindowOffset] = useState(() => getDateWindowOffsetForDate(initialDate));
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
-  const [slotAvailability, setSlotAvailability] = useState<Record<string, SlotAvailability>>({});
-  const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadingTables, setLoadingTables] = useState(false);
-  const [resolvedSlotLookupKey, setResolvedSlotLookupKey] = useState('');
   const [resolvedTableLookupKey, setResolvedTableLookupKey] = useState('');
-  const [slotAvailabilityError, setSlotAvailabilityError] = useState<string | null>(null);
   const [tableAvailabilityError, setTableAvailabilityError] = useState<string | null>(null);
   const [availabilityRetryToken, setAvailabilityRetryToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -318,7 +462,6 @@ export default function ReservationModal({
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const prefillRequestIdRef = useRef(0);
   const dateSelectTrackedRef = useRef(false);
-  const slotAvailabilityRequestIdRef = useRef(0);
   const tableAvailabilityRequestIdRef = useRef(0);
   const lastPrefillLookupRef = useRef('');
   const whatsappDigits = normalizePhone(form.whatsapp);
@@ -355,12 +498,8 @@ export default function ReservationModal({
     setCalendarMonth(initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
     setDateWindowOffset(getDateWindowOffsetForDate(initialDate));
     setAvailableTables([]);
-    setSlotAvailability({});
-    setLoadingSlots(false);
     setLoadingTables(false);
-    setResolvedSlotLookupKey('');
     setResolvedTableLookupKey('');
-    setSlotAvailabilityError(null);
     setTableAvailabilityError(null);
     setAvailabilityRetryToken(0);
     setConfirmedReservation(null);
@@ -374,7 +513,6 @@ export default function ReservationModal({
     setObservationOpen(false);
     prefillRequestIdRef.current = 0;
     dateSelectTrackedRef.current = false;
-    slotAvailabilityRequestIdRef.current += 1;
     tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
   }, [initialDate, initialPartySize, open]);
@@ -389,44 +527,8 @@ export default function ReservationModal({
     onStepChange?.('form_fill');
   }, [onStepChange, open, step]);
 
-  const { data: companyTableMaps = [], isLoading: tableMapsLoading } = useQuery({
-    queryKey: ['public-table-maps', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('table_maps' as any)
-        .select('id, name, is_default, is_enabled, active_from, active_to, priority')
-        .eq('company_id', companyId)
-        .order('is_default', { ascending: false })
-        .order('priority', { ascending: true });
-      if (error) throw error;
-      return (data as any[]) as TableMapRow[];
-    },
-    enabled: !!companyId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-    refetchOnMount: false,
-  });
-
-  const { data: allTables = [], isLoading: tablesLoading } = useQuery({
-    queryKey: ['public-available-tables', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('restaurant_tables' as any)
-        .select('id, number, capacity, section, table_map_id')
-        .eq('company_id', companyId)
-        .eq('status', 'available')
-        .order('capacity', { ascending: true });
-      if (error) throw error;
-      return (data as any[]) as AvailableTable[];
-    },
-    enabled: !!companyId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-    refetchOnMount: false,
-  });
-
   const { data: blockedDates = [] } = useQuery({
-    queryKey: ['blocked-dates-public', companyId],
+    queryKey: ['blocked-dates-public-page', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('blocked_dates' as any)
@@ -437,6 +539,8 @@ export default function ReservationModal({
       return data as any[];
     },
     enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: false,
   });
 
   const dateWindowDays = useMemo(() => buildDateWindow(dateWindowOffset), [dateWindowOffset]);
@@ -454,12 +558,7 @@ export default function ReservationModal({
 
   const { data: quickSchedules = [] } = useQuery({
     queryKey: ['public-reservation-schedules-preview', companyId, quickDateKeys.join(',')],
-    queryFn: () => Promise.all(
-      quickDateKeys.map(async (date) => ({
-        date,
-        schedule: await getPublicReservationSchedule(companyId, date),
-      })),
-    ),
+    queryFn: () => getPublicReservationSchedules(companyId, quickDateKeys),
     enabled: open && !!companyId,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
@@ -488,12 +587,7 @@ export default function ReservationModal({
     isFetching: calendarSchedulesLoading,
   } = useQuery({
     queryKey: ['public-reservation-schedules-calendar-preview', companyId, calendarPreviewDateKeys.join(',')],
-    queryFn: () => Promise.all(
-      calendarPreviewDateKeys.map(async (date) => ({
-        date,
-        schedule: await getPublicReservationSchedule(companyId, date),
-      })),
-    ),
+    queryFn: () => getPublicReservationSchedules(companyId, calendarPreviewDateKeys),
     enabled: open && showCalendar && !!companyId && calendarPreviewDateKeys.length > 0,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
@@ -508,18 +602,85 @@ export default function ReservationModal({
 
   const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const {
-    data: publicSchedule,
-    error: publicScheduleError,
-    isFetching: scheduleLoading,
-    refetch: refetchPublicSchedule,
+    data: bookingContext,
+    error: bookingContextError,
+    isFetching: bookingContextLoading,
+    refetch: refetchBookingContext,
   } = useQuery({
-    queryKey: ['public-reservation-schedule', companyId, selectedDateKey],
-    queryFn: () => getPublicReservationSchedule(companyId, selectedDateKey),
+    queryKey: ['public-reservation-booking-context', companyId, selectedDateKey, selectedPartySize],
+    queryFn: () => getPublicReservationBookingContext(companyId, selectedDateKey, selectedPartySize),
     enabled: open && !!companyId && !!selectedDateKey,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnMount: false,
+  });
+
+  const previewScheduleByDate = useMemo(() => {
+    const previews = new Map<string, PublicReservationSchedule>();
+    quickSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
+    calendarSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
+    return previews;
+  }, [calendarSchedules, quickSchedules]);
+
+  const publicSchedule = bookingContext?.schedule
+    ?? (selectedDateKey ? previewScheduleByDate.get(selectedDateKey) : undefined);
+  const slotAvailability = useMemo(
+    () => bookingContext?.slotAvailability ?? {},
+    [bookingContext?.slotAvailability],
+  );
+  const selectedSlotForTableLookup = selectedTime ? slotAvailability[selectedTime] : null;
+  const needsLegacyTableLookup = open
+    && !!companyId
+    && !!selectedDateKey
+    && !!selectedTime
+    && selectedSlotForTableLookup?.availabilityMode !== 'capacity'
+    && selectedSlotForTableLookup?.tableRecommendationResolved !== true;
+
+  // The combined RPC already recommends the table. These two larger reads are
+  // kept only as a rolling-deploy fallback while the new database function is
+  // not available yet, avoiding bandwidth contention on slower mobile links.
+  const { data: companyTableMapsData, isLoading: tableMapsLoading } = useQuery({
+    queryKey: ['public-table-maps', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('table_maps' as any)
+        .select('id, name, is_default, is_enabled, active_from, active_to, priority')
+        .eq('company_id', companyId)
+        .order('is_default', { ascending: false })
+        .order('priority', { ascending: true });
+      if (error) throw error;
+      return (data as any[]) as TableMapRow[];
+    },
+    enabled: needsLegacyTableLookup,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchOnMount: false,
   });
+  const companyTableMaps = companyTableMapsData ?? EMPTY_TABLE_MAPS;
+
+  const { data: allTablesData, isLoading: tablesLoading } = useQuery({
+    queryKey: ['public-available-tables', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('restaurant_tables' as any)
+        .select('id, number, capacity, section, table_map_id')
+        .eq('company_id', companyId)
+        .eq('status', 'available')
+        .order('capacity', { ascending: true });
+      if (error) throw error;
+      return (data as any[]) as AvailableTable[];
+    },
+    enabled: needsLegacyTableLookup,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+  });
+  const allTables = allTablesData ?? EMPTY_AVAILABLE_TABLES;
+  const scheduleLoading = bookingContextLoading && !publicSchedule;
+  const publicScheduleError = bookingContextError && !bookingContext ? bookingContextError : null;
+  const slotAvailabilityError = bookingContextError
+    ? 'Nao foi possivel atualizar os horarios agora.'
+    : null;
 
   const timeSlots = useMemo(() => {
     return filterPastTimeSlotsForDate(publicSchedule?.slots ?? [], selectedDate);
@@ -527,21 +688,19 @@ export default function ReservationModal({
   const schedulePartySizeLimit = publicSchedule?.max_party_size_per_reservation ?? null;
 
   const schedulePreviewByDate = useMemo(() => {
-    const previews = new Map<string, PublicReservationSchedule>();
-    quickSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
-    calendarSchedules.forEach((entry) => previews.set(entry.date, entry.schedule));
+    const previews = new Map(previewScheduleByDate);
 
     if (selectedDateKey && publicSchedule) {
       previews.set(selectedDateKey, publicSchedule);
     }
 
     return previews;
-  }, [calendarSchedules, publicSchedule, quickSchedules, selectedDateKey]);
+  }, [previewScheduleByDate, publicSchedule, selectedDateKey]);
 
   const slotLookupKey = useMemo(() => {
-    if (!selectedDateKey || timeSlots.length === 0) return '';
-    return [companyId, selectedDateKey, selectedPartySize, timeSlots.join(',')].join('|');
-  }, [companyId, selectedDateKey, selectedPartySize, timeSlots]);
+    if (!selectedDateKey) return '';
+    return [companyId, selectedDateKey, selectedPartySize].join('|');
+  }, [companyId, selectedDateKey, selectedPartySize]);
   const tableLookupKey = useMemo(() => {
     if (!selectedDateKey || !selectedTime) return '';
     return [companyId, selectedDateKey, selectedTime, selectedPartySize].join('|');
@@ -594,70 +753,6 @@ export default function ReservationModal({
     };
   }, [allTables, companyTableMaps.length, resolveActiveTableMap]);
 
-  // Fetch slot availability when date changes (for step 2 vacancy indicators)
-  useEffect(() => {
-    if (!selectedDate || !companyId || timeSlots.length === 0) {
-      slotAvailabilityRequestIdRef.current += 1;
-      setSlotAvailability({});
-      setResolvedSlotLookupKey('');
-      setSlotAvailabilityError(null);
-      setLoadingSlots(false);
-      return;
-    }
-    
-    const fetchSlotAvailability = async () => {
-      const requestId = ++slotAvailabilityRequestIdRef.current;
-      setLoadingSlots(true);
-      setSlotAvailabilityError(null);
-      try {
-        const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const { data: slotRows, error: slotAvailabilityRpcError } = await (supabase.rpc as any)('get_public_reservation_availability', {
-          _company_id: companyId,
-          _date: dateStr,
-          _party_size: selectedPartySize,
-        });
-        if (slotAvailabilityRpcError) throw slotAvailabilityRpcError;
-
-        const availability: Record<string, SlotAvailability> = {};
-        ((slotRows as any[]) || []).forEach((row: any) => {
-          const timeKey = row.time_slot?.substring(0, 5) || '';
-          if (!timeKey) return;
-          availability[timeKey] = {
-            total: Number(row.total_tables) || 0,
-            occupied: Number(row.occupied_tables) || 0,
-            available: Number(row.available_tables) || 0,
-            isAvailable: Boolean(row.available),
-            unavailableReason: row.unavailable_reason ?? null,
-            reservationCount: Number(row.reservation_count) || 0,
-            maxPartySizePerReservation: row.max_party_size_per_reservation == null
-              ? null
-              : Number(row.max_party_size_per_reservation),
-            maxReservationsPerSlot: row.max_reservations_per_slot == null
-              ? null
-              : Number(row.max_reservations_per_slot),
-            availabilityMode: row.availability_mode === 'capacity' ? 'capacity' : 'tables',
-            durationMinutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
-            maxGuestsPerSlot: row.max_guests_per_slot == null ? null : Number(row.max_guests_per_slot),
-          };
-        });
-        if (slotAvailabilityRequestIdRef.current !== requestId) return;
-        setSlotAvailability(availability);
-        setResolvedSlotLookupKey(slotLookupKey);
-      } catch (err) {
-        console.error('Error fetching slot availability:', err);
-        if (slotAvailabilityRequestIdRef.current === requestId) {
-          setSlotAvailabilityError('Nao foi possivel atualizar os horarios agora.');
-        }
-      } finally {
-        if (slotAvailabilityRequestIdRef.current === requestId) {
-          setLoadingSlots(false);
-        }
-      }
-    };
-
-    fetchSlotAvailability();
-  }, [selectedDate, companyId, selectedPartySize, timeSlots, slotLookupKey, availabilityRetryToken]);
-
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
     if (!selectedDate || !selectedTime) {
@@ -690,6 +785,19 @@ export default function ReservationModal({
       setAvailableTables([]);
       setSelectedTableId('');
       setSelectedTableMapId('');
+      setResolvedTableLookupKey(tableLookupKey);
+      setTableAvailabilityError(null);
+      setLoadingTables(false);
+      return;
+    }
+
+    const selectedSlot = slotAvailability[selectedTime];
+    if (selectedSlot?.tableRecommendationResolved) {
+      tableAvailabilityRequestIdRef.current += 1;
+      const recommendedTable = selectedSlot.recommendedTable;
+      setAvailableTables(recommendedTable ? [recommendedTable] : []);
+      setSelectedTableId(recommendedTable?.id ?? '');
+      setSelectedTableMapId(recommendedTable?.table_map_id ?? '');
       setResolvedTableLookupKey(tableLookupKey);
       setTableAvailabilityError(null);
       setLoadingTables(false);
@@ -769,12 +877,8 @@ export default function ReservationModal({
     setSelectedTableMapId('');
     setShowCalendar(false);
     setAvailableTables([]);
-    setSlotAvailability({});
-    setLoadingSlots(false);
     setLoadingTables(false);
-    setResolvedSlotLookupKey('');
     setResolvedTableLookupKey('');
-    setSlotAvailabilityError(null);
     setTableAvailabilityError(null);
     setAvailabilityRetryToken(0);
     setConfirmedReservation(null);
@@ -784,7 +888,6 @@ export default function ReservationModal({
     setIdentityFieldsCollapsed(false);
     setShowExitRecoveryPrompt(false);
     prefillRequestIdRef.current = 0;
-    slotAvailabilityRequestIdRef.current += 1;
     tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
   };
@@ -794,12 +897,8 @@ export default function ReservationModal({
     setSelectedTableId('');
     setSelectedTableMapId('');
     setAvailableTables([]);
-    setSlotAvailability({});
-    setResolvedSlotLookupKey('');
     setResolvedTableLookupKey('');
-    setSlotAvailabilityError(null);
     setTableAvailabilityError(null);
-    slotAvailabilityRequestIdRef.current += 1;
     tableAvailabilityRequestIdRef.current += 1;
   };
 
@@ -1126,6 +1225,7 @@ export default function ReservationModal({
 
       const paymentPreparation = await createReservationPayment({
         company_id: companyId,
+        complete_without_payment: true,
         reservation: reservationData,
       });
 
@@ -1140,12 +1240,17 @@ export default function ReservationModal({
         return;
       }
 
-      const { error } = await (supabase.rpc as any)('create_public_reservation', {
-        _reservation: reservationData,
-        _status: 'confirmed',
-      });
-      
-      if (error) throw error;
+      // Rolling-deploy compatibility: the optimized Edge creates non-payment
+      // reservations itself. Older deployments omit reservation_created, so
+      // the client safely falls back to the existing RPC.
+      if (!paymentPreparation.reservation_created) {
+        const { error } = await (supabase.rpc as any)('create_public_reservation', {
+          _reservation: reservationData,
+          _status: 'confirmed',
+        });
+
+        if (error) throw error;
+      }
 
       // Fire reservation events
       supabase.functions.invoke('reservation-events', {
@@ -1325,14 +1430,19 @@ export default function ReservationModal({
   };
 
   const isFetchingInitialSlotAvailability = !!slotLookupKey
-    && loadingSlots
-    && resolvedSlotLookupKey !== slotLookupKey;
+    && bookingContextLoading
+    && !bookingContext;
   const isPreparingDateAvailability = !!selectedDate
     && !isLargeParty
-    && (scheduleLoading || tablesLoading || tableMapsLoading || isFetchingInitialSlotAvailability);
+    && (scheduleLoading || isFetchingInitialSlotAvailability);
+  const selectedSlotUsesServerRecommendation = selectedSlotAvailability?.tableRecommendationResolved === true;
   const isCheckingSelectedTable = !!selectedTime
     && selectedSlotMode !== 'capacity'
-    && (tablesLoading || tableMapsLoading || loadingTables || resolvedTableLookupKey !== tableLookupKey);
+    && (
+      loadingTables
+      || resolvedTableLookupKey !== tableLookupKey
+      || (!selectedSlotUsesServerRecommendation && (tablesLoading || tableMapsLoading))
+    );
   const showNoTableAvailability = !!selectedTime
     && selectedSlotMode !== 'capacity'
     && !isCheckingSelectedTable
@@ -1729,7 +1839,7 @@ export default function ReservationModal({
                 <button
                   type="button"
                   className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
-                  onClick={() => refetchPublicSchedule()}
+                  onClick={() => refetchBookingContext()}
                 >
                   Tentar novamente
                 </button>
@@ -1738,7 +1848,7 @@ export default function ReservationModal({
               <p className="text-center text-sm text-destructive">Nenhum horário disponível para esta data.</p>
             ) : (
               <>
-                {loadingSlots && (
+                {bookingContextLoading && !!bookingContext && (
                   <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Atualizando disponibilidade...
@@ -1750,7 +1860,7 @@ export default function ReservationModal({
                     <button
                       type="button"
                       className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
-                      onClick={() => setAvailabilityRetryToken((value) => value + 1)}
+                      onClick={() => refetchBookingContext()}
                     >
                       Tentar novamente
                     </button>

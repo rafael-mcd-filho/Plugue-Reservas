@@ -20,6 +20,33 @@ function calculateRuleAmount(rule: any, partySize: number, key: "base_amount" | 
   return amount;
 }
 
+async function createConfirmedReservation(
+  supabaseAdmin: any,
+  companyId: string,
+  reservation: Record<string, unknown>,
+  reason: "feature_disabled" | "no_rule",
+) {
+  const { data, error } = await supabaseAdmin.rpc("create_public_reservation", {
+    _reservation: {
+      ...reservation,
+      company_id: companyId,
+      status: "confirmed",
+    },
+    _status: "confirmed",
+  });
+  if (error) throw new Error(error.message);
+
+  const created = Array.isArray(data) ? data[0] : data;
+  if (!created?.id) throw new Error("Reserva nao criada");
+
+  return jsonResponse({
+    requires_payment: false,
+    reason,
+    reservation_id: created.id,
+    reservation_created: true,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -34,6 +61,7 @@ Deno.serve(async (req) => {
     const companyId = typeof body.company_id === "string" ? body.company_id : null;
     const reservation = body.reservation ?? {};
     const dryRun = body.dry_run === true;
+    const completeWithoutPayment = body.complete_without_payment === true;
 
     if (!companyId) return jsonResponse({ error: "Empresa obrigatoria" }, 400);
     if (!reservation.date || !reservation.time || !reservation.guest_name || !reservation.guest_phone) {
@@ -48,6 +76,14 @@ Deno.serve(async (req) => {
     });
     if (featureError) throw new Error(featureError.message);
     if (featureEnabled !== true) {
+      if (!dryRun && completeWithoutPayment) {
+        return await createConfirmedReservation(
+          supabaseAdmin,
+          companyId,
+          reservation,
+          "feature_disabled",
+        );
+      }
       return jsonResponse({ requires_payment: false, reason: "feature_disabled" });
     }
 
@@ -65,6 +101,14 @@ Deno.serve(async (req) => {
 
     if (ruleError) throw new Error(ruleError.message);
     if (!rule) {
+      if (!dryRun && completeWithoutPayment) {
+        return await createConfirmedReservation(
+          supabaseAdmin,
+          companyId,
+          reservation,
+          "no_rule",
+        );
+      }
       return jsonResponse({ requires_payment: false, reason: "no_rule" });
     }
 

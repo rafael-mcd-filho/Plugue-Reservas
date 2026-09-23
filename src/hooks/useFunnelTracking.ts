@@ -1033,6 +1033,22 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
     );
   }, [companyId, companySlug, ensureSession, scope]);
 
+  // Reservation creation must never wait for analytics/network recovery. The
+  // journey is started in the background when the modal opens; submission uses
+  // the best locally persisted snapshot available at that exact moment.
+  const getImmediateTrackingSnapshot = useCallback((): TrackingSnapshot => {
+    const state: StoredTrackingState = scope
+      ? getOrCreateState(scope)
+      : {
+          anonymous_id: getVisitorId(),
+          company_id: companyId,
+          company_slug: companySlug,
+          session_id: null,
+          journey_id: null,
+        };
+    return buildSnapshot(state, companyId, companySlug);
+  }, [companyId, companySlug, getOrCreateState, scope]);
+
   const getOrStartConfirmedJourneyState = useCallback(async (
     sessionState: StoredTrackingState,
   ): Promise<StoredTrackingState | null> => {
@@ -1156,6 +1172,7 @@ export function useFunnelTracking(companyId: string | undefined, companySlug?: s
     trackStep,
     startJourney,
     getTrackingSnapshot,
+    getImmediateTrackingSnapshot,
     trackLeadCapture,
     clearJourney,
   };
