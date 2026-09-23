@@ -185,32 +185,28 @@ describe('CompanySettings — salvamento por página', () => {
     };
   });
 
-  it('grava apenas o horário de funcionamento na página Agenda', async () => {
+  it('grava apenas o horário de funcionamento na página Horários', async () => {
     await saveSection('agenda');
 
     expect(companyUpdatePayload()).toEqual(['opening_hours']);
     expect(db.upserts).toHaveLength(0);
   });
 
-  it('grava apenas os campos de reserva na página Reservas', async () => {
+  it('grava apenas as regras de reserva na página Regras de reservas', async () => {
     await saveSection('reservas');
 
+    // A recuperacao ao sair migrou para a pagina publica e nao entra mais aqui.
     expect(companyUpdatePayload()).toEqual([
       'large_party_whatsapp_threshold',
       'max_guests_per_slot',
-      'public_reservation_exit_prompt_primary_text',
-      'public_reservation_exit_prompt_primary_text_size',
-      'public_reservation_exit_prompt_secondary_text',
-      'public_reservation_exit_prompt_secondary_text_size',
       'reservation_duration',
       'reservation_late_tolerance_minutes',
       'reservation_slot_interval_minutes',
-      'show_public_reservation_exit_prompt',
     ]);
     expect(db.upserts).toHaveLength(0);
   });
 
-  it('grava cadastro, localização e pagamentos na página Empresa', async () => {
+  it('grava cadastro, localização e pagamentos na página Cadastro', async () => {
     await saveSection('empresa');
 
     expect(companyUpdatePayload()).toEqual([
@@ -235,7 +231,12 @@ describe('CompanySettings — salvamento por página', () => {
       'hero_media_url',
       'hero_media_urls',
       'public_header_style',
+      'public_reservation_exit_prompt_primary_text',
+      'public_reservation_exit_prompt_primary_text_size',
+      'public_reservation_exit_prompt_secondary_text',
+      'public_reservation_exit_prompt_secondary_text_size',
       'public_waitlist_enabled',
+      'show_public_reservation_exit_prompt',
       'show_public_sticky_reserve_button',
       'show_public_whatsapp_button',
     ]);
@@ -270,8 +271,24 @@ describe('CompanySettings — salvamento por página', () => {
     renderSection('pagina-publica');
 
     await screen.findByRole('button', { name: 'Salvar' });
-    await waitFor(() => expect(screen.getByLabelText('Ativar botão sticky reservar agora')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Mídia de fundo')).toBeInTheDocument());
     expect(screen.queryByText('Não salvo')).not.toBeInTheDocument();
+  });
+
+  it('separa a página pública em abas, uma por assunto', async () => {
+    renderSection('pagina-publica');
+
+    // Aparência é a aba inicial; os controles das outras só existem na sua aba.
+    await screen.findByText('Mídia de fundo');
+    expect(screen.queryByLabelText('Ativar botão sticky reservar agora')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Ações' }));
+    expect(await screen.findByLabelText('Ativar botão sticky reservar agora')).toBeInTheDocument();
+    expect(screen.queryByText('Mídia de fundo')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Mensagens' }));
+    expect(await screen.findByText('Aviso na página')).toBeInTheDocument();
+    expect(screen.getByText('Recuperação ao sair')).toBeInTheDocument();
   });
 
   it('mantém a marca escondida após salvar mesmo quando o valor gravado é normalizado', async () => {
@@ -314,7 +331,7 @@ describe('CompanySettings — salvamento por página', () => {
   it('redireciona a rota sem seção para Empresa', async () => {
     renderPath('/bar-do-teste/admin/configuracoes');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Empresa' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Cadastro' })).toBeInTheDocument();
   });
 
   it('mantém a página quando o usuário cancela a saída com alterações não salvas', async () => {
@@ -325,7 +342,7 @@ describe('CompanySettings — salvamento por página', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     fireEvent.click(screen.getByRole('link', { name: 'ir para agenda' }));
-    expect(screen.getByRole('heading', { level: 1, name: 'Empresa' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Cadastro' })).toBeInTheDocument();
     expect(screen.getByLabelText('Endereço completo')).toHaveValue('Rua Nova, 99');
   });
 
@@ -337,7 +354,7 @@ describe('CompanySettings — salvamento por página', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     fireEvent.click(screen.getByRole('link', { name: 'ir para agenda' }));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Agenda' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Horários' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('link', { name: 'ir para empresa' }));
     expect(await screen.findByLabelText('Endereço completo')).toHaveValue(COMPANY_ROW.address);

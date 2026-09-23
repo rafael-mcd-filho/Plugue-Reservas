@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -19,6 +19,7 @@ import {
   Video,
   Users,
   Copy,
+  Eye,
   Banknote,
   QrCode,
   Wallet,
@@ -27,12 +28,14 @@ import {
   LayoutTemplate,
   ChevronLeft,
   ChevronRight,
+  type LucideIcon,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -40,6 +43,7 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import type { Company } from '@/hooks/useCompanies';
+import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -135,7 +139,6 @@ const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-w
 const settingsFieldClassName = 'h-10 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsTextAreaClassName = 'rounded-xl border-[rgba(0,0,0,0.14)] bg-white shadow-none';
 const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
-const SHOW_LEGACY_RESERVATION_CAPACITY_SETTINGS = false;
 const SHOW_PUBLIC_WAITLIST_DIRECT_LINK_SETTINGS = false;
 const SHOW_PUBLIC_NOTICE_SETTINGS_IN_PUBLIC_TAB = false;
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -148,6 +151,23 @@ function WhatsAppIcon({ className }: { className?: string }) {
 
 const settingsFieldGroupClassName = 'flex min-w-0 flex-col gap-2';
 const settingsLabelClassName = 'flex min-h-5 items-center gap-1.5 leading-5';
+// A página pública reúne três assuntos independentes; cada um vira uma aba para
+// a tela caber sem rolagem longa.
+const PUBLIC_PAGE_TABS = [
+  { value: 'aparencia' as const, label: 'Aparência', icon: ImageIcon },
+  { value: 'acoes' as const, label: 'Ações', icon: MessageCircle },
+  { value: 'mensagens' as const, label: 'Mensagens', icon: Megaphone },
+];
+
+type PublicPageTab = (typeof PUBLIC_PAGE_TABS)[number]['value'];
+
+const PUBLIC_MESSAGE_PREVIEW_TABS = [
+  { value: 'aviso' as const, label: 'Aviso' },
+  { value: 'recuperacao' as const, label: 'Recuperação' },
+];
+
+type PublicMessagePreview = (typeof PUBLIC_MESSAGE_PREVIEW_TABS)[number]['value'];
+
 const PUBLIC_HEADER_STYLE_OPTIONS = [
   {
     value: 'classic' as const,
@@ -196,6 +216,166 @@ function PublicHeaderStylePreview({ variant }: { variant: 'classic' | 'modern' }
         <span className="mt-1 h-3 w-full rounded bg-white/90" />
         <span className="mt-0.5 h-3 w-full rounded bg-primary/80" />
       </div>
+    </div>
+  );
+}
+// Painel de configuração: cabeçalho enxuto e conteúdo sem padding próprio, para
+// que as linhas encostem nas bordas e as divisórias atravessem o cartão.
+function SettingsPanel({
+  icon: Icon,
+  title,
+  description,
+  action,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn('overflow-hidden rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]', className)}>
+      <header className="flex items-start justify-between gap-3 border-b border-[rgba(0,0,0,0.06)] px-4 py-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            {description && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</p>}
+          </div>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+// Uma configuração por linha: rótulo e explicação à esquerda, controle à direita.
+function SettingRow({
+  title,
+  description,
+  control,
+  children,
+}: {
+  title: string;
+  description?: string;
+  control?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="border-t border-[rgba(0,0,0,0.06)] px-4 py-3 first:border-t-0">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          {description && <p className="text-xs leading-snug text-muted-foreground">{description}</p>}
+        </div>
+        {control && <div className="shrink-0">{control}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Moldura de celular para as prévias: o que o visitante vê, no formato em que vê.
+function PhonePreviewFrame({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mx-auto w-full max-w-[15rem]">
+      <div className="overflow-hidden rounded-[1.75rem] border-[5px] border-[#17130f] bg-[#17130f] shadow-[0_18px_38px_rgba(30,18,6,0.2)]">
+        <div className="relative aspect-[9/16] overflow-hidden rounded-[1.3rem] bg-white">
+          {children}
+        </div>
+      </div>
+      <p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+// Prévia do topo público: junta mídia, estilo do topo e os botões flutuantes,
+// que hoje se configuram em telas diferentes sem nunca aparecerem juntos.
+function PublicHeroPreview({
+  variant,
+  mediaUrl,
+  mediaType,
+  logoUrl,
+  companyName,
+  showWhatsapp,
+  showSticky,
+}: {
+  variant: 'classic' | 'modern';
+  mediaUrl?: string;
+  mediaType: string;
+  logoUrl?: string;
+  companyName: string;
+  showWhatsapp: boolean;
+  showSticky: boolean;
+}) {
+  const media = mediaUrl ? (
+    mediaType === 'video' ? (
+      <video src={mediaUrl} className="h-full w-full object-cover" muted loop autoPlay playsInline />
+    ) : (
+      <img src={mediaUrl} alt="" className="h-full w-full object-cover" />
+    )
+  ) : null;
+
+  const logo = (
+    <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#8B2F2F] text-[10px] font-semibold text-white ring-2 ring-white/70">
+      {logoUrl ? <img src={logoUrl} alt="" className="h-full w-full object-cover" /> : companyName.slice(0, 1).toUpperCase()}
+    </span>
+  );
+
+  return (
+    <div className="relative h-full w-full">
+      {variant === 'modern' ? (
+        <div className="flex h-full flex-col bg-[#F5F1EA]">
+          <div className="relative h-[38%] overflow-hidden rounded-b-[1.1rem] bg-[linear-gradient(150deg,#7A3608_0%,#3A1B06_55%,#1C1108_100%)]">
+            {media}
+          </div>
+          <div className="-mt-4 flex flex-col items-center px-3">
+            {logo}
+            <p className="mt-1.5 max-w-full truncate text-[11px] font-semibold text-foreground">{companyName}</p>
+            <span className="mt-1 h-1 w-10 rounded-full bg-foreground/15" />
+            <div className="mt-3 w-full space-y-1.5">
+              <span className="block h-6 w-full rounded-lg bg-white shadow-sm" />
+              <span className="block h-6 w-full rounded-lg bg-primary" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="relative h-full bg-[linear-gradient(170deg,#130D06_0%,#1C1108_50%,#2E1800_100%)]">
+          {media && <div className="absolute inset-0 opacity-55">{media}</div>}
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,6,2,0.35)_0%,rgba(10,6,2,0.78)_78%)]" />
+          <div className="relative flex h-full flex-col items-center px-3 pt-8">
+            {logo}
+            <p className="mt-1.5 max-w-full truncate text-[11px] font-semibold text-white">{companyName}</p>
+            <span className="mt-1 h-1 w-10 rounded-full bg-[#F5D08A]/70" />
+            <div className="mt-auto w-full space-y-1.5 pb-3">
+              <span className="block h-6 w-full rounded-lg bg-white/92" />
+              <span className="block h-6 w-full rounded-lg bg-primary" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWhatsapp && (
+        <span className="absolute bottom-12 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-[#25D366] shadow-md">
+          <MessageCircle className="h-3.5 w-3.5 text-white" />
+        </span>
+      )}
+
+      {showSticky && (
+        <div className="absolute inset-x-0 bottom-0 border-t border-black/5 bg-white/95 px-3 py-2 backdrop-blur">
+          <span className="flex h-7 items-center justify-center rounded-lg bg-primary text-[10px] font-semibold text-primary-foreground">
+            Reservar agora
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -552,6 +732,9 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
   const [noticeText, setNoticeText] = useState('');
   const [noticeImageUrl, setNoticeImageUrl] = useState('');
   const [noticeActive, setNoticeActive] = useState(false);
+  const [publicPageTab, setPublicPageTab] = useState<PublicPageTab>('aparencia');
+  const [publicMessagePreview, setPublicMessagePreview] = useState<PublicMessagePreview>('aviso');
+  const [publicPreviewOpen, setPublicPreviewOpen] = useState(false);
   const [noticeActiveUntil, setNoticeActiveUntil] = useState('');
   const [uploadingNoticeImage, setUploadingNoticeImage] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -795,11 +978,6 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
         companyUpdate.max_guests_per_slot = maxGuestsPerSlot;
         companyUpdate.large_party_whatsapp_threshold = normalizeLargePartyThreshold(largePartyThreshold);
         companyUpdate.reservation_late_tolerance_minutes = normalizeReservationLateToleranceMinutes(reservationLateToleranceMinutes);
-        companyUpdate.show_public_reservation_exit_prompt = showPublicReservationExitPrompt;
-        companyUpdate.public_reservation_exit_prompt_primary_text = publicReservationExitPromptPrimaryText.replace(/\r\n/g, '\n');
-        companyUpdate.public_reservation_exit_prompt_primary_text_size = publicReservationExitPromptPrimaryTextSize;
-        companyUpdate.public_reservation_exit_prompt_secondary_text = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
-        companyUpdate.public_reservation_exit_prompt_secondary_text_size = publicReservationExitPromptSecondaryTextSize;
       }
 
       const originalHeroMediaUrls = getStoredHeroMediaUrls(company);
@@ -826,6 +1004,12 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
 
         companyUpdate.public_waitlist_enabled = publicWaitlistEnabled;
         companyUpdate.show_public_sticky_reserve_button = showPublicStickyReserveButton;
+        // A recuperacao ao sair e um aviso da pagina publica, nao uma regra de reserva.
+        companyUpdate.show_public_reservation_exit_prompt = showPublicReservationExitPrompt;
+        companyUpdate.public_reservation_exit_prompt_primary_text = publicReservationExitPromptPrimaryText.replace(/\r\n/g, '\n');
+        companyUpdate.public_reservation_exit_prompt_primary_text_size = publicReservationExitPromptPrimaryTextSize;
+        companyUpdate.public_reservation_exit_prompt_secondary_text = publicReservationExitPromptSecondaryText.replace(/\r\n/g, '\n');
+        companyUpdate.public_reservation_exit_prompt_secondary_text_size = publicReservationExitPromptSecondaryTextSize;
 
         if (savesHeroMedia) {
           companyUpdate.show_public_whatsapp_button = showPublicWhatsappButton === 'show';
@@ -968,6 +1152,17 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
   };
 
   const previewCompanyName = companyName || 'sua empresa';
+  // Exemplo do resumo que o modal real monta com a reserva em andamento. Usa uma
+  // data próxima para a prévia nunca parecer velha.
+  const previewReservationExample = useMemo(() => {
+    const exampleDate = new Date();
+    exampleDate.setDate(exampleDate.getDate() + 2);
+    const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' })
+      .format(exampleDate)
+      .replace('.', '');
+    const dayMonth = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(exampleDate);
+    return `${weekday}, ${dayMonth} · 20:00 · 2 pessoas`;
+  }, []);
   const previewReservationExitPromptPrimaryText = useMemo(
     () => getPublicReservationExitPromptTextValue(
       publicReservationExitPromptPrimaryText,
@@ -1309,6 +1504,97 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     );
   }
 
+  const publicPagePreview = (
+    publicPageTab === 'mensagens' ? (
+      <div className="space-y-2">
+        <div className="flex gap-1 rounded-lg border border-[rgba(0,0,0,0.08)] bg-muted/30 p-0.5">
+          {PUBLIC_MESSAGE_PREVIEW_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setPublicMessagePreview(tab.value)}
+              aria-pressed={publicMessagePreview === tab.value}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors active:scale-100',
+                publicMessagePreview === tab.value
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <PhonePreviewFrame label="Prévia">
+          <div className="flex h-full flex-col justify-center bg-[linear-gradient(180deg,#2a1c0e_0%,#150d06_100%)] p-3">
+            {publicMessagePreview === 'aviso' ? (
+              <div className="space-y-2 rounded-xl bg-white p-3 shadow-lg">
+                {noticeImageUrl && (
+                  <img src={noticeImageUrl} alt="" className="max-h-24 w-full rounded-lg object-cover" />
+                )}
+                <p className="whitespace-pre-line text-[11px] leading-snug text-foreground">
+                  {noticeText.trim() || 'O texto do aviso aparece aqui.'}
+                </p>
+                <span className="block h-6 rounded-lg bg-primary" />
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-xl bg-white px-3 py-4 text-center shadow-lg">
+                {/* A prévia acompanha o modal real: logo, título, textos, resumo
+                    da reserva e botão. */}
+                <span className="mx-auto flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary-soft text-xs font-semibold text-primary">
+                  {logoUrl
+                    ? <img src={logoUrl} alt="" className="h-full w-full object-cover" />
+                    : (companyName || 'E').slice(0, 1).toUpperCase()}
+                </span>
+                <p className="font-serif text-base font-semibold leading-tight text-foreground">
+                  Tem certeza que quer
+                  <span className="mt-0.5 block text-primary">parar por aqui?</span>
+                </p>
+                {/* As classes vêm do mesmo helper da página pública, senão o
+                    seletor de tamanho não teria efeito visível aqui. */}
+                {previewReservationExitPromptPrimaryText.trim() && (
+                  <p className={cn('scale-[0.72] transform-gpu', getPublicReservationExitPromptTextClassName('primary', previewReservationExitPromptPrimaryTextSize))}>
+                    {renderPublicReservationExitPromptText(previewReservationExitPromptPrimaryText, previewCompanyName, 'foreground')}
+                  </p>
+                )}
+                {previewReservationExitPromptSecondaryText.trim() && (
+                  <p className={cn('scale-[0.72] transform-gpu', getPublicReservationExitPromptTextClassName('secondary', previewReservationExitPromptSecondaryTextSize))}>
+                    {renderPublicReservationExitPromptText(previewReservationExitPromptSecondaryText, previewCompanyName)}
+                  </p>
+                )}
+                <div className="rounded-lg border border-primary/25 bg-primary/5 px-2 py-1.5">
+                  <p className="text-[10px] font-semibold text-foreground">
+                    {previewReservationExample}
+                  </p>
+                  <p className="mt-0.5 text-[9px] font-semibold text-amber-800">
+                    Restam 2 mesas neste horário
+                  </p>
+                </div>
+                <span className="flex h-8 items-center justify-center rounded-lg bg-[linear-gradient(180deg,hsl(30_55%_54%)_0%,hsl(30_51%_46%)_100%)] text-[10px] font-semibold text-primary-foreground shadow-sm">
+                  Quero garantir minha vaga
+                </span>
+                <p className="text-[10px] text-foreground/50 underline underline-offset-2">Sair mesmo assim</p>
+              </div>
+            )}
+          </div>
+        </PhonePreviewFrame>
+      </div>
+    ) : (
+      <PhonePreviewFrame label="Prévia no celular">
+        <PublicHeroPreview
+          variant={publicHeaderStyle}
+          mediaUrl={heroMediaUrls[0]}
+          mediaType={heroMediaType}
+          logoUrl={logoUrl}
+          companyName={companyName || 'Sua empresa'}
+          showWhatsapp={showPublicWhatsappButton === 'show' && !publicCustomizationLocked}
+          showSticky={showPublicStickyReserveButton}
+        />
+      </PhonePreviewFrame>
+    )
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -1320,8 +1606,9 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
             {COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section]} · {companyName}
           </p>
         </div>
-        {/* Disponibilidade nao tem campos proprios aqui: cada regra é salva no card dela. */}
-        {section !== 'disponibilidade' && (
+        {/* Disponibilidade salva cada regra no card dela; a página pública tem a
+            própria barra fixa no rodapé, para não repetir o botão duas vezes. */}
+        {section !== 'disponibilidade' && section !== 'pagina-publica' && (
           <div className="flex items-center gap-3 self-start">
             {hasUnsavedChanges && !saveMutation.isPending && (
               <span
@@ -1410,70 +1697,6 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
 
           <BlockedDatesTab companyId={companyId} />
 
-          {SHOW_LEGACY_RESERVATION_CAPACITY_SETTINGS && (
-            <div className="grid gap-4 xl:grid-cols-2">
-            <Card className={settingsCardClassName}>
-              <CardHeader className="space-y-0 pb-2">
-                <div className="flex items-start gap-3">
-                  <div className={settingsBadgeClassName}>
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg">Duração de cada reserva</CardTitle>
-                    <CardDescription>Intervalo entre os horários disponíveis.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">Duração</Label>
-                  <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
-                    <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="15">15 min</SelectItem>
-                      <SelectItem value="30">30 min</SelectItem>
-                      <SelectItem value="45">45 min</SelectItem>
-                      <SelectItem value="60">1 hora</SelectItem>
-                      <SelectItem value="90">1h30</SelectItem>
-                      <SelectItem value="120">2 horas</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className={settingsCardClassName}>
-              <CardHeader className="space-y-0 pb-2">
-                <div className="flex items-start gap-3">
-                  <div className={settingsBadgeClassName}>
-                    <Users className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg">Capacidade máxima / horário</CardTitle>
-                    <CardDescription>Total de pessoas por horário. 0 = sem limite.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="company-settings-max-guests" className="text-sm text-muted-foreground">Pessoas</Label>
-                  <Input
-                    id="company-settings-max-guests"
-                    name="max_guests_per_slot"
-                    type="number"
-                    min={0}
-                    value={maxGuestsPerSlot}
-                    onChange={(event) => setMaxGuestsPerSlot(Number(event.target.value))}
-                    className={settingsFieldClassName}
-                    placeholder="0"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-            </div>
-          )}
         </div>
       )}
 
@@ -1605,224 +1828,6 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
             </CardContent>
           </Card>
 
-          {featureFlags?.features.flow_protection !== false && <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <Info className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Recuperação ao sair</CardTitle>
-                  <CardDescription>Recupera a pessoa antes de fechar a reserva quando ela já escolheu data e horário.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-2">
-              <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-1">
-                  <Label className="text-base font-semibold">Ativar recuperação ao sair da reserva</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Se a pessoa já tiver escolhido data e horário, mostramos uma tela de recuperação antes de fechar o modal.
-                  </p>
-                  <p className="text-xs text-muted-foreground">Não aparece se a pessoa ainda não tiver selecionado o horário.</p>
-                </div>
-                <Switch
-                  checked={showPublicReservationExitPrompt}
-                  onCheckedChange={setShowPublicReservationExitPrompt}
-                  aria-label="Ativar confirmação ao sair do modal de reserva"
-                />
-              </div>
-
-              <div className="space-y-5 rounded-xl border border-[rgba(0,0,0,0.08)] bg-[linear-gradient(180deg,rgba(252,248,243,0.9)_0%,rgba(255,255,255,0.96)_100%)] p-4">
-                <div className="space-y-1">
-                  <Label className="text-base font-semibold">Modal de recuperação</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Edite os textos do modal e confira a prévia visual antes de salvar.
-                  </p>
-                </div>
-
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
-                  <div className="space-y-5">
-                    <div className="space-y-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <Label htmlFor="public-reservation-exit-primary-text" className="text-base font-semibold">
-                          Texto de apoio
-                        </Label>
-                        <Select
-                          value={publicReservationExitPromptPrimaryTextSize}
-                          onValueChange={(value) => setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
-                        >
-                          <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de apoio">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                          onClick={() => insertPublicReservationExitPromptToken('primary', '{empresa}')}
-                        >
-                          Empresa
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'b')}
-                        >
-                          B
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'u')}
-                        >
-                          U
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                          onClick={() => wrapPublicReservationExitPromptSelection('primary', 'bu')}
-                        >
-                          B+U
-                        </Button>
-                      </div>
-
-                      <Textarea
-                        id="public-reservation-exit-primary-text"
-                        ref={publicReservationExitPromptPrimaryTextRef}
-                        value={publicReservationExitPromptPrimaryText}
-                        onChange={(event) => setPublicReservationExitPromptPrimaryText(event.target.value)}
-                        rows={4}
-                        className={settingsTextAreaClassName}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <Label htmlFor="public-reservation-exit-secondary-text" className="text-base font-semibold">
-                          Texto de fechamento
-                        </Label>
-                        <Select
-                          value={publicReservationExitPromptSecondaryTextSize}
-                          onValueChange={(value) => setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(value, DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_SECONDARY_TEXT_SIZE))}
-                        >
-                          <SelectTrigger className="h-9 w-full rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none sm:w-40" aria-label="Selecionar tamanho do texto de fechamento">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                          onClick={() => insertPublicReservationExitPromptToken('secondary', '{empresa}')}
-                        >
-                          Empresa
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold"
-                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'b')}
-                        >
-                          B
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'u')}
-                        >
-                          U
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs font-semibold underline decoration-foreground/45 underline-offset-2"
-                          onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'bu')}
-                        >
-                          B+U
-                        </Button>
-                      </div>
-
-                      <Textarea
-                        id="public-reservation-exit-secondary-text"
-                        ref={publicReservationExitPromptSecondaryTextRef}
-                        value={publicReservationExitPromptSecondaryText}
-                        onChange={(event) => setPublicReservationExitPromptSecondaryText(event.target.value)}
-                        rows={3}
-                        className={settingsTextAreaClassName}
-                      />
-                    </div>
-
-                    <div className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 px-4 py-3">
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[1.55rem] border border-primary/25 bg-[linear-gradient(180deg,#fffdfa_0%,#fff8f0_100%)] p-4 shadow-[0_18px_36px_rgba(86,52,20,0.08)]">
-                    <div className="space-y-5 rounded-[1.2rem] border border-primary/18 bg-white/92 px-5 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-                      <div className="space-y-4">
-                        <h3 className="font-serif text-[clamp(1.22rem,4vw,1.72rem)] font-semibold leading-[1.02] tracking-[-0.03em] text-foreground">
-                          <span className="block whitespace-nowrap">Tem certeza que quer</span>
-                          <span className="mt-1 block text-primary">parar por aqui?</span>
-                        </h3>
-
-                        <div className="space-y-3">
-                          {previewReservationExitPromptPrimaryText.trim() && (
-                            <p className={getPublicReservationExitPromptTextClassName('primary', previewReservationExitPromptPrimaryTextSize)}>
-                              {renderPublicReservationExitPromptText(previewReservationExitPromptPrimaryText, previewCompanyName, 'foreground')}
-                            </p>
-                          )}
-
-                          {previewReservationExitPromptSecondaryText.trim() && (
-                            <p className={getPublicReservationExitPromptTextClassName('secondary', previewReservationExitPromptSecondaryTextSize)}>
-                              {renderPublicReservationExitPromptText(previewReservationExitPromptSecondaryText, previewCompanyName)}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        <div className="flex h-[3.15rem] items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-primary-foreground shadow-[0_16px_28px_rgba(201,129,58,0.22)]">
-                          Quero garantir minha vaga
-                        </div>
-                        <p className="text-sm font-medium text-foreground/60 underline decoration-foreground/35 underline-offset-4">
-                          Sair mesmo assim
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-dashed border-primary/18 bg-primary/5 px-3 py-2">
-                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary/80">
-                          Prévia
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>}
         </div>
       )}
 
@@ -2291,443 +2296,578 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
       )}
 
       {section === 'pagina-publica' && (
-        <div className="space-y-4">
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <ImageIcon className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Mídia de fundo do banner</CardTitle>
-                  <CardDescription>
-                    Foto ou vídeo exibido atrás do topo da página pública. Os botões de reserva, o título e o logo continuam sempre em destaque por cima da mídia.
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="relative">
-                  <input
-                    type="file"
-                    accept="image/*,video/mp4,video/webm"
-                    multiple
-                    onChange={handleHeroMediaUpload}
-                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
-                    aria-label="Selecionar imagens ou um vídeo para o banner"
-                    aria-describedby="hero-media-guidance"
-                    className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
-                    className="pointer-events-none gap-2 bg-white"
-                  >
-                    {uploadingHeroMedia ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : heroMediaType === 'video' ? (
-                      <Video className="h-4 w-4" />
-                    ) : (
-                      <ImageIcon className="h-4 w-4" />
-                    )}
-                    {uploadingHeroMedia
-                      ? `Enviando ${heroMediaType === 'image' ? 'imagens' : 'mídia'}...`
-                      : heroMediaUrls.length > 0
-                        ? 'Adicionar ou substituir mídia'
-                        : 'Enviar imagens ou vídeo'}
-                  </Button>
-                </div>
+        <div className="space-y-4 pb-2">
+          <div
+            role="tablist"
+            aria-label="Seções da página pública"
+            className="inline-flex w-full gap-1 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/30 p-1 sm:w-auto"
+          >
+            {PUBLIC_PAGE_TABS.map((tab) => {
+              const active = publicPageTab === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setPublicPageTab(tab.value)}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors active:scale-100 sm:flex-none sm:px-4',
+                    active
+                      ? 'bg-white text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <tab.icon className="h-4 w-4" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
 
-                {heroMediaType === 'image' && heroMediaUrls.length > 0 && (
-                  <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
-                    {heroMediaUrls.length} de {HERO_MEDIA_MAX_IMAGES} imagens
-                  </span>
-                )}
-              </div>
-
-              <p id="hero-media-guidance" className="text-xs leading-relaxed text-muted-foreground">
-                Escolha 1 vídeo ou até 4 imagens — os formatos não podem ser misturados. Imagem: recomendado 1920×1080px, até 5MB cada. Vídeo: MP4 ou WebM, 6 a 12 segundos em loop e sem áudio, até 15MB.
-              </p>
-
-              {heroMediaType === 'video' && heroMediaUrls[0] ? (
-                <div className="relative max-w-2xl overflow-hidden rounded-xl border border-[rgba(0,0,0,0.1)] bg-[#17130f] shadow-sm">
-                  <video
-                    src={heroMediaUrls[0]}
-                    className="max-h-72 w-full object-contain"
-                    muted
-                    loop
-                    autoPlay
-                    playsInline
-                  />
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-gradient-to-t from-black/80 via-black/55 to-transparent px-3 pb-3 pt-8 text-white">
-                    <span className="flex items-center gap-2 text-xs font-medium">
-                      <Video className="h-4 w-4" />
-                      Vídeo do banner
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
-                      onClick={() => removeHeroMedia(0)}
-                      aria-label="Remover vídeo do banner"
-                      className="h-8 gap-1.5 bg-white/95 text-destructive hover:bg-white"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Remover
-                    </Button>
-                  </div>
-                </div>
-              ) : heroMediaType === 'image' && heroMediaUrls.length > 0 ? (
-                <div className="grid max-w-4xl gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {heroMediaUrls.map((url, index) => (
-                    <article
-                      key={`${url}-${index}`}
-                      className={cn(
-                        'group overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md',
-                        index === 0 ? 'border-primary/45 ring-1 ring-primary/15' : 'border-[rgba(0,0,0,0.1)]',
-                      )}
-                    >
-                      <div className="relative aspect-video overflow-hidden bg-muted">
-                        <img
-                          src={url}
-                          alt={`Prévia da imagem ${index + 1} do banner`}
-                          className="h-full w-full object-cover"
-                        />
-                        <div className="absolute left-2 top-2 flex items-center gap-1.5">
-                          <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-black/70 px-1.5 text-[11px] font-semibold text-white backdrop-blur-sm">
-                            {index + 1}
+          <div className={cn(
+            'grid items-start gap-4',
+            // A aba de ações é só uma lista de interruptores: não há o que prever.
+            publicPageTab !== 'acoes' && 'lg:grid-cols-[minmax(0,1fr)_15rem] xl:grid-cols-[minmax(0,1fr)_17rem]',
+          )}>
+            <div className="min-w-0 space-y-4">
+              {publicPageTab === 'aparencia' && (
+                <>
+                  <SettingsPanel
+                    icon={ImageIcon}
+                    title="Mídia de fundo"
+                    description="Foto ou vídeo atrás do topo. Título, logo e botões continuam por cima."
+                    action={(
+                      <div className="flex items-center gap-2">
+                        {heroMediaType === 'image' && heroMediaUrls.length > 0 && (
+                          <span className="hidden rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:inline">
+                            {heroMediaUrls.length} de {HERO_MEDIA_MAX_IMAGES}
                           </span>
-                          {index === 0 && (
-                            <span className="rounded-full bg-primary px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground shadow-sm">
-                              Capa
-                            </span>
-                          )}
-                        </div>
+                        )}
+                        <InfoTooltip
+                          content="Escolha 1 vídeo ou até 4 imagens — os formatos não podem ser misturados. Imagem: 1920×1080px, até 5MB cada. Vídeo: MP4 ou WebM, 6 a 12 segundos em loop, sem áudio, até 15MB."
+                          ariaLabel="Requisitos da mídia de fundo"
+                          interaction="popover"
+                        />
                       </div>
-                      <div className="flex items-center justify-between gap-1 border-t border-border/70 p-1.5">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === 0}
-                            onClick={() => moveHeroImage(index, -1)}
-                            aria-label={`Mover imagem ${index + 1} para a esquerda`}
-                            className="h-8 w-8"
-                          >
-                            <ChevronLeft className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === heroMediaUrls.length - 1}
-                            onClick={() => moveHeroImage(index, 1)}
-                            aria-label={`Mover imagem ${index + 1} para a direita`}
-                            className="h-8 w-8"
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
-                          onClick={() => removeHeroMedia(index)}
-                          aria-label={`Remover imagem ${index + 1}`}
-                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex min-h-36 max-w-md items-center justify-center rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
-                  <p className="text-center text-xs text-muted-foreground">Nenhuma mídia de fundo enviada ainda.</p>
-                </div>
-              )}
-
-              {publicCustomizationLocked && (
-                <p className="text-xs text-muted-foreground">
-                  A mídia de fundo do banner fica bloqueada quando a página pública customizada está desativada.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <LayoutTemplate className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Estilo do topo da página</CardTitle>
-                  <CardDescription>
-                    Muda apenas o topo da página pública no celular. Horários, endereço, formas de pagamento e o botão do
-                    WhatsApp continuam iguais nos dois estilos, e no computador o topo é sempre o mesmo.
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-2">
-              <div className="grid gap-3 md:grid-cols-2">
-                {PUBLIC_HEADER_STYLE_OPTIONS.map((option) => {
-                  const selected = publicHeaderStyle === option.value;
-
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      disabled={publicCustomizationLocked}
-                      aria-pressed={selected}
-                      onClick={() => setPublicHeaderStyle(option.value)}
-                      className={cn(
-                        'flex flex-col gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                        selected
-                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                          : 'border-[rgba(0,0,0,0.08)] bg-muted/15 hover:bg-muted/30',
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-base font-semibold text-foreground">{option.label}</p>
-                          <p className="text-sm text-muted-foreground">{option.description}</p>
-                        </div>
-                        <span
-                          className={cn(
-                            'mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-                            selected ? 'border-primary' : 'border-muted-foreground/40',
-                          )}
-                        >
-                          {selected && <span className="h-2 w-2 rounded-full bg-primary" />}
-                        </span>
-                      </div>
-                      <PublicHeaderStylePreview variant={option.value} />
-                    </button>
-                  );
-                })}
-              </div>
-
-              {publicCustomizationLocked && (
-                <p className="text-xs text-muted-foreground">
-                  O estilo do topo fica bloqueado quando a página pública customizada está desativada.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <MessageCircle className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Ações e acessos do usuário</CardTitle>
-                  <CardDescription>Controles dos botões públicos e do acesso direto à fila de espera.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-2">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
-                  <div className="space-y-1">
-                    <Label className="text-base font-semibold">Botão do WhatsApp</Label>
-                    <p className="text-sm text-muted-foreground">Controla se o botão flutuante aparece na página pública.</p>
-                    {publicCustomizationLocked && (
-                      <p className="text-xs text-muted-foreground">O botão de WhatsApp fica bloqueado enquanto a feature estiver desativada.</p>
                     )}
-                  </div>
-                  <Switch
-                    checked={showPublicWhatsappButton === 'show'}
-                    onCheckedChange={(checked) => setShowPublicWhatsappButton(checked ? 'show' : 'hide')}
-                    disabled={publicCustomizationLocked}
-                    aria-label="Ativar botão do WhatsApp na página pública"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 px-4 py-4 md:flex-row md:items-start md:justify-between">
-                  <div className="space-y-1">
-                    <Label className="text-base font-semibold">Botão sticky "Reservar agora"</Label>
-                    <p className="text-sm text-muted-foreground">Aparece fixo no rodapé da versão mobile da página pública.</p>
-                  </div>
-                  <Switch
-                    checked={showPublicStickyReserveButton}
-                    onCheckedChange={setShowPublicStickyReserveButton}
-                    aria-label="Ativar botão sticky reservar agora"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/20 p-4">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <Label className="flex items-center gap-1.5 text-base font-semibold">
-                      <Users className="h-4 w-4" />
-                      Entrada pública na fila de espera
-                    </Label>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Este link não aparece na página pública. Só entra quem receber a URL direta.
-                    </p>
-                  </div>
-                  <Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />
-                </div>
-
-                <div className="flex flex-col gap-3 md:flex-row">
-                  <Input value={publicWaitlistUrl} readOnly className={cn('font-mono text-sm', settingsFieldClassName)} />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 shrink-0 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-4"
-                    onClick={copyPublicWaitlistUrl}
                   >
-                    <Copy className="h-4 w-4" />
-                    Copiar
-                  </Button>
-                </div>
+                    <div className="space-y-3 p-4">
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*,video/mp4,video/webm"
+                          multiple
+                          onChange={handleHeroMediaUpload}
+                          disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                          aria-label="Selecionar imagens ou um vídeo para o banner"
+                          className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                        />
+                        <div
+                          className={cn(
+                            'flex items-center justify-between gap-3 rounded-xl border border-dashed border-[rgba(0,0,0,0.16)] bg-muted/20 px-4 py-3 transition-colors',
+                            !publicCustomizationLocked && 'hover:border-primary/40 hover:bg-primary/5',
+                            publicCustomizationLocked && 'opacity-60',
+                          )}
+                        >
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-primary shadow-sm">
+                              {uploadingHeroMedia ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : heroMediaType === 'video' ? (
+                                <Video className="h-4 w-4" />
+                              ) : (
+                                <Upload className="h-4 w-4" />
+                              )}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {uploadingHeroMedia
+                                  ? 'Enviando...'
+                                  : heroMediaUrls.length > 0
+                                    ? 'Adicionar ou substituir mídia'
+                                    : 'Arraste ou clique para enviar'}
+                              </p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {heroMediaUrls.length > 0
+                                  ? `${heroMediaUrls.length} ${heroMediaType === 'video' ? 'vídeo' : heroMediaUrls.length === 1 ? 'imagem' : 'imagens'} no banner`
+                                  : '1 vídeo ou até 4 imagens'}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="hidden shrink-0 rounded-lg border border-[rgba(0,0,0,0.14)] bg-white px-3 py-1.5 text-xs font-semibold text-foreground sm:inline">
+                            Selecionar
+                          </span>
+                        </div>
+                      </div>
 
-                {!publicWaitlistEnabled && (
-                  <p className="text-xs text-muted-foreground">
-                    Quando desabilitado, quem acessar este link verá uma mensagem orientando a se dirigir à unidade para entrar na fila de espera.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                      {heroMediaType === 'video' && heroMediaUrls[0] ? (
+                        <div className="relative max-w-sm overflow-hidden rounded-xl border border-[rgba(0,0,0,0.1)] bg-[#17130f]">
+                          <video src={heroMediaUrls[0]} className="max-h-44 w-full object-contain" muted loop autoPlay playsInline />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="secondary"
+                            disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                            onClick={() => removeHeroMedia(0)}
+                            aria-label="Remover vídeo do banner"
+                            className="absolute right-2 top-2 h-7 w-7 bg-white/95 text-destructive hover:bg-white active:scale-100"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : heroMediaType === 'image' && heroMediaUrls.length > 0 ? (
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          {heroMediaUrls.map((url, index) => (
+                            <figure
+                              key={`${url}-${index}`}
+                              className={cn(
+                                'group relative overflow-hidden rounded-lg border bg-muted',
+                                index === 0 ? 'border-primary/45 ring-1 ring-primary/15' : 'border-[rgba(0,0,0,0.1)]',
+                              )}
+                            >
+                              <img src={url} alt={`Imagem ${index + 1} do banner`} className="aspect-video w-full object-cover" />
+                              {index === 0 && (
+                                <figcaption className="absolute left-1.5 top-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground">
+                                  Capa
+                                </figcaption>
+                              )}
+                              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/75 to-transparent px-1 pb-1 pt-5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                <div className="flex items-center gap-0.5">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === 0}
+                                    onClick={() => moveHeroImage(index, -1)}
+                                    aria-label={`Mover imagem ${index + 1} para a esquerda`}
+                                    className="h-6 w-6 text-white hover:bg-white/20 hover:text-white active:scale-100"
+                                  >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending || index === heroMediaUrls.length - 1}
+                                    onClick={() => moveHeroImage(index, 1)}
+                                    aria-label={`Mover imagem ${index + 1} para a direita`}
+                                    className="h-6 w-6 text-white hover:bg-white/20 hover:text-white active:scale-100"
+                                  >
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  disabled={publicCustomizationLocked || uploadingHeroMedia || saveMutation.isPending}
+                                  onClick={() => removeHeroMedia(index)}
+                                  aria-label={`Remover imagem ${index + 1}`}
+                                  className="h-6 w-6 text-white hover:bg-destructive/80 hover:text-white active:scale-100"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </figure>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </SettingsPanel>
 
-          {featureFlags?.features.active_communication !== false && <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <Megaphone className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Aviso na página pública</CardTitle>
-                  <CardDescription>Aviso temporário exibido como modal para visitantes enquanto estiver ativo.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="space-y-5 rounded-xl border border-amber-200/70 bg-amber-50/50 p-4">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <Label className="flex items-center gap-1.5 text-base font-semibold">
-                      <Megaphone className="h-4 w-4 text-primary" />
-                      Aviso na página pública
-                    </Label>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Apenas um aviso fica disponível por empresa e ele some automaticamente ao expirar.
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-sm">
-                    <span className="text-sm font-medium text-muted-foreground">Ativar agora</span>
-                    <Switch
-                      checked={noticeActive}
-                      onCheckedChange={setNoticeActive}
-                      disabled={publicCustomizationLocked}
-                      aria-label="Ativar aviso público"
-                    />
-                  </div>
-                </div>
+                  <SettingsPanel
+                    icon={LayoutTemplate}
+                    title="Estilo do topo"
+                    description="Vale para o celular. No computador o topo é sempre o mesmo."
+                  >
+                    <div className="grid gap-2 p-4 sm:grid-cols-2">
+                      {PUBLIC_HEADER_STYLE_OPTIONS.map((option) => {
+                        const selected = publicHeaderStyle === option.value;
 
-                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_16rem]">
-                  <div className="space-y-2">
-                    <Label htmlFor="company-settings-notice-text">Texto</Label>
-                    <Textarea
-                      id="company-settings-notice-text"
-                      value={noticeText}
-                      onChange={(event) => setNoticeText(event.target.value)}
-                      placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
-                      rows={5}
-                      disabled={publicCustomizationLocked}
-                      className={cn(settingsTextAreaClassName, 'min-h-[128px] resize-y bg-white')}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      O aviso pode ter apenas texto, apenas imagem, ou os dois.
-                    </p>
-                  </div>
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            disabled={publicCustomizationLocked}
+                            aria-pressed={selected}
+                            onClick={() => setPublicHeaderStyle(option.value)}
+                            className={cn(
+                              'flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                              selected
+                                ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                                : 'border-[rgba(0,0,0,0.08)] bg-muted/15 hover:bg-muted/30',
+                            )}
+                          >
+                            <span className="w-16 shrink-0">
+                              <PublicHeaderStylePreview variant={option.value} />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold text-foreground">{option.label}</span>
+                              <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{option.description}</span>
+                            </span>
+                            <span
+                              className={cn(
+                                'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                                selected ? 'border-primary' : 'border-muted-foreground/40',
+                              )}
+                            >
+                              {selected && <span className="h-2 w-2 rounded-full bg-primary" />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </SettingsPanel>
+                </>
+              )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="company-settings-notice-active-until">Data de expiração</Label>
-                    <Input
-                      id="company-settings-notice-active-until"
-                      type="datetime-local"
-                      value={noticeActiveUntil}
-                      onChange={(event) => setNoticeActiveUntil(event.target.value)}
-                      disabled={publicCustomizationLocked}
-                      min={toDateTimeLocalValue(new Date().toISOString())}
-                      className={settingsFieldClassName}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Depois desse horário o modal para de aparecer automaticamente.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <Label>Imagem</Label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleNoticeImageUpload}
-                        disabled={publicCustomizationLocked || uploadingNoticeImage}
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              {publicPageTab === 'acoes' && (
+                <SettingsPanel
+                  icon={MessageCircle}
+                  title="Botões e links públicos"
+                  description="O que aparece na página e o acesso direto à fila."
+                >
+                  <SettingRow
+                    title="Botão do WhatsApp"
+                    description="Flutuante, no canto da página pública."
+                    control={(
+                      <Switch
+                        checked={showPublicWhatsappButton === 'show'}
+                        onCheckedChange={(checked) => setShowPublicWhatsappButton(checked ? 'show' : 'hide')}
+                        disabled={publicCustomizationLocked}
+                        aria-label="Ativar botão do WhatsApp na página pública"
                       />
+                    )}
+                  />
+
+                  <SettingRow
+                    title='Botão "Reservar agora"'
+                    description="Fixo no rodapé da versão mobile."
+                    control={(
+                      <Switch
+                        checked={showPublicStickyReserveButton}
+                        onCheckedChange={setShowPublicStickyReserveButton}
+                        aria-label="Ativar botão sticky reservar agora"
+                      />
+                    )}
+                  />
+
+                  <SettingRow
+                    title="Entrada pública na fila de espera"
+                    description="Não aparece na página: só entra quem recebe a URL direta."
+                    control={<Switch checked={publicWaitlistEnabled} onCheckedChange={setPublicWaitlistEnabled} />}
+                  >
+                    <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
+                      <Input value={publicWaitlistUrl} readOnly className={cn('h-9 font-mono text-xs', settingsFieldClassName)} />
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={publicCustomizationLocked || uploadingNoticeImage}
-                        className="pointer-events-none gap-2 bg-white"
+                        className="h-9 shrink-0 gap-1.5 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs active:scale-100"
+                        onClick={copyPublicWaitlistUrl}
                       >
-                        {uploadingNoticeImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                        {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
+                        <Copy className="h-3.5 w-3.5" />
+                        Copiar
                       </Button>
                     </div>
-
-                    {noticeImageUrl && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        disabled={publicCustomizationLocked || uploadingNoticeImage}
-                        onClick={() => setNoticeImageUrl('')}
-                        className="gap-2 text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Remover
-                      </Button>
+                    {!publicWaitlistEnabled && (
+                      <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                        Desligado, quem abrir o link vê um aviso para procurar a unidade.
+                      </p>
                     )}
-                  </div>
+                  </SettingRow>
+                </SettingsPanel>
+              )}
 
-                  <div className="flex min-h-36 max-w-md items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgba(0,0,0,0.14)] bg-white p-3">
-                    {noticeImageUrl ? (
-                      <img
-                        src={noticeImageUrl}
-                        alt="Prévia do aviso público"
-                        className="max-h-48 w-full rounded-lg object-contain"
-                      />
-                    ) : (
-                      <p className="text-center text-xs text-muted-foreground">Nenhuma imagem enviada para o aviso.</p>
-                    )}
-                  </div>
+              {publicPageTab === 'mensagens' && (
+                <>
+                  {featureFlags?.features.active_communication !== false && (
+                    // Ao mexer em um bloco, a prévia salta para ele: a coluna mostra o que está sendo editado.
+                    <div onFocusCapture={() => setPublicMessagePreview('aviso')} onPointerDownCapture={() => setPublicMessagePreview('aviso')}>
+                    <SettingsPanel
+                      icon={Megaphone}
+                      title="Aviso na página"
+                      description="Modal temporário para quem visita. Um por empresa, some ao expirar."
+                      action={(
+                        <Switch
+                          checked={noticeActive}
+                          onCheckedChange={setNoticeActive}
+                          disabled={publicCustomizationLocked}
+                          aria-label="Ativar aviso público"
+                        />
+                      )}
+                    >
+                      <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="company-settings-notice-text" className="text-xs font-medium text-muted-foreground">
+                            Texto
+                          </Label>
+                          <Textarea
+                            id="company-settings-notice-text"
+                            value={noticeText}
+                            onChange={(event) => setNoticeText(event.target.value)}
+                            placeholder="Ex.: Hoje teremos menu especial. Reserve sua mesa com antecedência."
+                            rows={4}
+                            disabled={publicCustomizationLocked}
+                            className={cn(settingsTextAreaClassName, 'min-h-[104px] resize-y bg-white')}
+                          />
+                          <p className="text-[11px] text-muted-foreground">Pode ter só texto, só imagem, ou os dois.</p>
+                        </div>
 
-                  {publicCustomizationLocked && (
-                    <p className="text-xs text-muted-foreground">
-                      Avisos da página pública ficam bloqueados quando a página pública customizada está desativada.
-                    </p>
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="company-settings-notice-active-until" className="text-xs font-medium text-muted-foreground">
+                              Expira em
+                            </Label>
+                            <Input
+                              id="company-settings-notice-active-until"
+                              type="datetime-local"
+                              value={noticeActiveUntil}
+                              onChange={(event) => setNoticeActiveUntil(event.target.value)}
+                              disabled={publicCustomizationLocked}
+                              min={toDateTimeLocalValue(new Date().toISOString())}
+                              className={cn(settingsFieldClassName, 'h-9 text-xs')}
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground">Imagem</Label>
+                            {noticeImageUrl ? (
+                              <div className="group relative overflow-hidden rounded-lg border border-[rgba(0,0,0,0.1)] bg-muted">
+                                <img src={noticeImageUrl} alt="Prévia do aviso público" className="max-h-28 w-full object-contain" />
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="secondary"
+                                  disabled={publicCustomizationLocked || uploadingNoticeImage}
+                                  onClick={() => setNoticeImageUrl('')}
+                                  aria-label="Remover imagem do aviso"
+                                  className="absolute right-1.5 top-1.5 h-7 w-7 bg-white/95 text-destructive hover:bg-white active:scale-100"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="relative">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleNoticeImageUpload}
+                                  disabled={publicCustomizationLocked || uploadingNoticeImage}
+                                  aria-label="Enviar imagem do aviso"
+                                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                                />
+                                <div className="flex items-center gap-2 rounded-lg border border-dashed border-[rgba(0,0,0,0.16)] bg-muted/20 px-3 py-2.5">
+                                  {uploadingNoticeImage ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                  ) : (
+                                    <Upload className="h-4 w-4 text-primary" />
+                                  )}
+                                  <span className="text-xs font-medium text-foreground">
+                                    {uploadingNoticeImage ? 'Enviando...' : 'Enviar imagem'}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </SettingsPanel>
+                    </div>
                   )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>}
+
+                  {featureFlags?.features.flow_protection !== false && (
+                    <div onFocusCapture={() => setPublicMessagePreview('recuperacao')} onPointerDownCapture={() => setPublicMessagePreview('recuperacao')}>
+                    <SettingsPanel
+                      icon={Info}
+                      title="Recuperação ao sair"
+                      description="Aparece antes de fechar a reserva, quando data e horário já foram escolhidos."
+                      action={(
+                        <Switch
+                          checked={showPublicReservationExitPrompt}
+                          onCheckedChange={setShowPublicReservationExitPrompt}
+                          aria-label="Ativar confirmação ao sair do modal de reserva"
+                        />
+                      )}
+                    >
+                      <div className="space-y-4 p-4">
+                        <div className="space-y-1.5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <Label htmlFor="public-reservation-exit-primary-text" className="text-xs font-medium text-muted-foreground">
+                              Texto de apoio
+                            </Label>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-2 text-[11px] font-semibold active:scale-100"
+                                onClick={() => insertPublicReservationExitPromptToken('primary', '{empresa}')}
+                              >
+                                Empresa
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white p-0 text-[11px] font-bold active:scale-100"
+                                onClick={() => wrapPublicReservationExitPromptSelection('primary', 'b')}
+                                aria-label="Negrito no texto de apoio"
+                              >
+                                B
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white p-0 text-[11px] font-semibold underline underline-offset-2 active:scale-100"
+                                onClick={() => wrapPublicReservationExitPromptSelection('primary', 'u')}
+                                aria-label="Sublinhado no texto de apoio"
+                              >
+                                U
+                              </Button>
+                              <Select
+                                value={publicReservationExitPromptPrimaryTextSize}
+                                onValueChange={(value) => setPublicReservationExitPromptPrimaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
+                              >
+                                <SelectTrigger className="h-7 w-28 rounded-lg border-[rgba(0,0,0,0.14)] bg-white text-[11px] shadow-none" aria-label="Selecionar tamanho do texto de apoio">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <Textarea
+                            id="public-reservation-exit-primary-text"
+                            ref={publicReservationExitPromptPrimaryTextRef}
+                            value={publicReservationExitPromptPrimaryText}
+                            onChange={(event) => setPublicReservationExitPromptPrimaryText(event.target.value)}
+                            rows={2}
+                            className={cn(settingsTextAreaClassName, 'bg-white')}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <Label htmlFor="public-reservation-exit-secondary-text" className="text-xs font-medium text-muted-foreground">
+                              Texto de fechamento
+                            </Label>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-2 text-[11px] font-semibold active:scale-100"
+                                onClick={() => insertPublicReservationExitPromptToken('secondary', '{empresa}')}
+                              >
+                                Empresa
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white p-0 text-[11px] font-bold active:scale-100"
+                                onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'b')}
+                                aria-label="Negrito no texto de fechamento"
+                              >
+                                B
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-7 rounded-lg border-[rgba(0,0,0,0.14)] bg-white p-0 text-[11px] font-semibold underline underline-offset-2 active:scale-100"
+                                onClick={() => wrapPublicReservationExitPromptSelection('secondary', 'u')}
+                                aria-label="Sublinhado no texto de fechamento"
+                              >
+                                U
+                              </Button>
+                              <Select
+                                value={publicReservationExitPromptSecondaryTextSize}
+                                onValueChange={(value) => setPublicReservationExitPromptSecondaryTextSize(normalizePublicReservationExitPromptTextSize(value))}
+                              >
+                                <SelectTrigger className="h-7 w-28 rounded-lg border-[rgba(0,0,0,0.14)] bg-white text-[11px] shadow-none" aria-label="Selecionar tamanho do texto de fechamento">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PUBLIC_RESERVATION_EXIT_PROMPT_SIZE_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <Textarea
+                            id="public-reservation-exit-secondary-text"
+                            ref={publicReservationExitPromptSecondaryTextRef}
+                            value={publicReservationExitPromptSecondaryText}
+                            onChange={(event) => setPublicReservationExitPromptSecondaryText(event.target.value)}
+                            rows={2}
+                            className={cn(settingsTextAreaClassName, 'bg-white')}
+                          />
+                        </div>
+
+                        <p className="rounded-lg border border-[rgba(0,0,0,0.06)] bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                          {PUBLIC_RESERVATION_EXIT_PROMPT_TEXT_HELPER}
+                        </p>
+                      </div>
+                    </SettingsPanel>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Em telas largas a prévia acompanha a edição; abaixo disso ela abre
+                sob demanda, para não empurrar os campos para fora da tela. */}
+            {publicPageTab !== 'acoes' && (
+              <aside className="hidden lg:sticky lg:top-4 lg:block">
+                {publicPagePreview}
+              </aside>
+            )}
+          </div>
+
+          <div className="sticky bottom-0 z-10 -mx-4 flex items-center justify-between gap-3 border-t border-[rgba(0,0,0,0.08)] bg-background/92 px-4 py-3 backdrop-blur lg:-mx-5 lg:px-5">
+            <div className="flex min-w-0 items-center gap-2">
+              {publicPageTab !== 'acoes' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 shrink-0 gap-1.5 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-3 text-xs active:scale-100 lg:hidden"
+                  onClick={() => setPublicPreviewOpen(true)}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Ver prévia
+                </Button>
+              )}
+              <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                {hasUnsavedChanges ? 'Alterações ainda não salvas nesta página.' : 'Tudo salvo.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasUnsavedChanges && !saveMutation.isPending && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/80 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  Não salvo
+                </span>
+              )}
+              <Button
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending || uploadingHeroMedia}
+                className="h-9 gap-2 rounded-lg px-4 active:scale-100"
+              >
+                <Save className="h-4 w-4" />
+                {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
+              </Button>
+            </div>
+          </div>
+
+          <Dialog open={publicPreviewOpen} onOpenChange={setPublicPreviewOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="text-base">Prévia da página pública</DialogTitle>
+              </DialogHeader>
+              {publicPagePreview}
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </div>
