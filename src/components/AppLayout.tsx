@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, type SVGProps, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -117,6 +117,29 @@ function getFortalezaDateKey() {
 
 function formatRoleLabel(role: AppRole) {
   return ROLE_LABELS[role] ?? role;
+}
+
+// Numero fixo da equipe de suporte; nao vem do cadastro da empresa.
+const SUPPORT_WHATSAPP_NUMBER = '5584991079919';
+
+function buildSupportWhatsAppUrl(companyName: string) {
+  const message = `Olá, gostaria de suporte para minha conta: ${companyName}`;
+  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
+
+function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path
+        fill="currentColor"
+        d="M12 2.25a9.75 9.75 0 0 0-8.35 14.78L2.3 21.7l4.84-1.27A9.75 9.75 0 1 0 12 2.25Z"
+      />
+      <path
+        fill="white"
+        d="M9.25 6.65c-.23 0-.45.11-.63.31-.31.33-.82.83-.82 1.94s.81 2.18.92 2.33c.11.14 1.58 2.52 3.83 3.44 1.87.75 2.25.6 2.66.56.41-.04 1.32-.54 1.51-1.06.19-.53.19-.97.13-1.06-.05-.09-.19-.15-.39-.25-.2-.1-1.16-.57-1.34-.64-.18-.06-.31-.09-.45.12-.13.2-.52.63-.63.77-.12.13-.24.15-.43.05-.2-.1-.84-.31-1.6-1-.59-.53-.99-1.19-1.12-1.39-.12-.2-.02-.3.09-.4.09-.09.2-.23.3-.34.1-.11.13-.2.2-.32.07-.13.03-.25-.01-.34-.05-.1-.44-1.12-.61-1.53-.16-.39-.33-.4-.45-.4h-.38Z"
+      />
+    </svg>
+  );
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -1005,6 +1028,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   <User className="h-4 w-4" />
                   Meu perfil
                 </Link>
+              </Button>
+
+              <Button
+                asChild
+                variant="ghost"
+                className="mt-2 w-full justify-start gap-2 rounded-md text-sidebar-foreground/75 hover:bg-emerald-500/10 hover:text-emerald-400"
+              >
+                <a
+                  href={buildSupportWhatsAppUrl(companyName)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <WhatsAppIcon className="h-4 w-4 shrink-0 text-[#25D366]" />
+                  Suporte
+                </a>
               </Button>
 
               <Button
