@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  Briefcase,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -22,6 +23,7 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  MessageCircle,
   MessageSquareQuote,
   Pin,
   PinOff,
@@ -36,6 +38,7 @@ import {
   Users,
   UtensilsCrossed,
 } from 'lucide-react';
+import { isCompanyNavGroupActive } from '@/lib/company-nav-groups';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -64,7 +67,8 @@ import OverdueBillingBanner from '@/components/billing/OverdueBillingBanner';
 import OverdueBillingDialog from '@/components/billing/OverdueBillingDialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
-  COMPANY_SETTINGS_SECTIONS,
+  COMPANY_EXPERIENCE_SETTINGS_SECTIONS,
+  COMPANY_PROFILE_SETTINGS_SECTIONS,
   COMPANY_SETTINGS_SECTION_DESCRIPTIONS,
   COMPANY_SETTINGS_SECTION_LABELS,
   getCompanySettingsSectionPath,
@@ -121,15 +125,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { slug } = useParams<{ slug: string }>();
   const companyContext = useMaybeCompanySlug();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [reportsNavOpen, setReportsNavOpen] = useState(() => (
-    location.pathname.includes('/admin/relatorios/')
-  ));
-  const [reservationsNavOpen, setReservationsNavOpen] = useState(() => (
-    location.pathname.includes('/admin/reservas')
-  ));
-  const [settingsNavOpen, setSettingsNavOpen] = useState(() => (
-    location.pathname.includes('/admin/configuracoes')
-  ));
+  const [reportsNavOpen, setReportsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'reports'));
+  const [reservationsNavOpen, setReservationsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'reservations'));
+  const [settingsNavOpen, setSettingsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'settings'));
+  const [profileNavOpen, setProfileNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'profile'));
+  const [businessNavOpen, setBusinessNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'business'));
+  const [automationNavOpen, setAutomationNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'automation'));
   const [overdueBillingDialogOpen, setOverdueBillingDialogOpen] = useState(false);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -190,14 +191,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           path: `/${slug}/admin/check-ins`,
           showFor: ['operator'],
           requiredPermission: 'checkins_view',
-        },
-        {
-          label: 'Mesas',
-          description: 'Capacidade e ocupa\u00E7\u00E3o',
-          icon: Grid3X3,
-          path: `/${slug}/admin/mesas`,
-          requiredPermission: 'tables_view',
-          showFor: ['admin', 'operator', 'superadmin'],
         },
         {
           label: 'Lista de Espera',
@@ -280,25 +273,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       ]
     : [];
 
-  const companyManagementNavItems: NavItem[] = slug
+  // Gestao reune o que se acompanha por cliente e por acesso; automacoes reune o
+  // que dispara sozinho. Financeiro e Filiados seguem soltos.
+  const companyBusinessNavItems: NavItem[] = slug
     ? [
-        {
-          label: 'Automa\u00E7\u00F5es',
-          description: 'Envios autom\u00E1ticos via WhatsApp',
-          icon: Bot,
-          path: `/${slug}/admin/automacoes`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'automations_view',
-          requiredFeature: 'whatsapp_integration',
-        },
-        {
-          label: 'Financeiro',
-          description: 'Plano e faturas da unidade',
-          icon: ReceiptText,
-          path: `/${slug}/admin/financeiro`,
-          showFor: ['admin', 'superadmin'],
-          badgeCount: companyBillingSummary?.overdueCount ?? 0,
-        },
         {
           label: 'Pagamentos',
           description: 'Sinal Asaas por data',
@@ -318,7 +296,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           requiredFeature: 'nps_surveys',
         },
         {
-          label: 'Usu\u00E1rios',
+          label: 'Usuários',
           description: 'Acesso da unidade',
           icon: Users,
           path: `/${slug}/admin/usuarios`,
@@ -327,19 +305,25 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         },
         {
           label: 'Leads',
-          description: 'Clientes e hist\u00F3rico',
+          description: 'Clientes e histórico',
           icon: Contact,
           path: `/${slug}/admin/leads`,
           showFor: ['admin', 'operator', 'superadmin'],
           requiredPermission: 'leads_view',
         },
+      ]
+    : [];
+
+  const companyAutomationNavItems: NavItem[] = slug
+    ? [
         {
-          label: 'Filiados',
-          description: 'Links de indica\u00E7\u00E3o e origem',
-          icon: Link2,
-          path: `/${slug}/admin/filiados`,
+          label: 'Mensagens',
+          description: 'Envios automáticos via WhatsApp',
+          icon: MessageCircle,
+          path: `/${slug}/admin/automacoes`,
           showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'affiliates_view',
+          requiredPermission: 'automations_view',
+          requiredFeature: 'whatsapp_integration',
         },
         {
           label: 'Eventos',
@@ -352,15 +336,55 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       ]
     : [];
 
+  const companyManagementNavItems: NavItem[] = slug
+    ? [
+        {
+          label: 'Financeiro',
+          description: 'Plano e faturas da unidade',
+          icon: ReceiptText,
+          path: `/${slug}/admin/financeiro`,
+          showFor: ['admin', 'superadmin'],
+          badgeCount: companyBillingSummary?.overdueCount ?? 0,
+        },
+        {
+          label: 'Filiados',
+          description: 'Links de indicação e origem',
+          icon: Link2,
+          path: `/${slug}/admin/filiados`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'affiliates_view',
+        },
+      ]
+    : [];
+
+  // Empresa responde "como a casa funciona"; configuracoes, "o que o cliente
+  // encontra". As secoes sao as mesmas paginas de sempre, repartidas entre os
+  // dois grupos.
+  const buildSettingsNavItem = (section: CompanySettingsSection): NavItem => ({
+    label: COMPANY_SETTINGS_SECTION_LABELS[section],
+    description: COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section],
+    icon: COMPANY_SETTINGS_SECTION_ICONS[section],
+    path: getCompanySettingsSectionPath(slug ?? '', section),
+    showFor: ['admin', 'operator', 'superadmin'],
+    requiredPermission: 'settings_view',
+  });
+
+  const companyProfileNavItems: NavItem[] = slug
+    ? COMPANY_PROFILE_SETTINGS_SECTIONS.map(buildSettingsNavItem)
+    : [];
+
   const companySettingsNavItems: NavItem[] = slug
-    ? COMPANY_SETTINGS_SECTIONS.map((section) => ({
-        label: COMPANY_SETTINGS_SECTION_LABELS[section],
-        description: COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section],
-        icon: COMPANY_SETTINGS_SECTION_ICONS[section],
-        path: getCompanySettingsSectionPath(slug, section),
-        showFor: ['admin', 'operator', 'superadmin'],
-        requiredPermission: 'settings_view',
-      }))
+    ? [
+        ...COMPANY_EXPERIENCE_SETTINGS_SECTIONS.map(buildSettingsNavItem),
+        {
+          label: 'Mesas e Seções',
+          description: 'Mapas, seções e capacidade',
+          icon: Grid3X3,
+          path: `/${slug}/admin/mesas`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'tables_view',
+        },
+      ]
     : [];
 
   const superadminNavItems: NavItem[] = !slug
@@ -497,10 +521,30 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
+  // Mesma regra de papel, permissao e feature flag dos demais grupos.
+  const filterCompanyNavItems = (items: NavItem[]) => items.filter((item) => {
+    if (!rolesLoaded) return false;
+    if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
+    if (permissionsLoading && item.requiredPermission) return false;
+    if (!hasCompanyPermission(item.requiredPermission)) return false;
+    if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
+    if (companyFeatureFlags && item.requiredFeature) {
+      if (companyFeatureFlags.features[item.requiredFeature] === false) return false;
+    }
+    return true;
+  });
+
+  const visibleProfileNavItems = filterCompanyNavItems(companyProfileNavItems);
+  const visibleBusinessNavItems = filterCompanyNavItems(companyBusinessNavItems);
+  const visibleAutomationNavItems = filterCompanyNavItems(companyAutomationNavItems);
+
   const visibleNavItems = [
     ...visiblePrimaryNavItems,
     ...visibleReportsNavItems,
     ...visibleReservationsNavItems,
+    ...visibleProfileNavItems,
+    ...visibleBusinessNavItems,
+    ...visibleAutomationNavItems,
     ...visibleManagementNavItems,
     ...visibleSettingsNavItems,
   ];
@@ -524,6 +568,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const isReportsNavActive = visibleReportsNavItems.some((item) => isNavItemActive(item));
   const isReservationsNavActive = visibleReservationsNavItems.some((item) => isNavItemActive(item));
   const isSettingsNavActive = visibleSettingsNavItems.some((item) => isNavItemActive(item));
+  const isProfileNavActive = visibleProfileNavItems.some((item) => isNavItemActive(item));
+  const isBusinessNavActive = visibleBusinessNavItems.some((item) => isNavItemActive(item));
+  const isAutomationNavActive = visibleAutomationNavItems.some((item) => isNavItemActive(item));
   const isProfileRoute = location.pathname === profilePath;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
   const showHeaderContextBadges = !isOperatorPanel;
@@ -553,22 +600,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     document.title = systemName;
   }, [systemName]);
 
+  // Abrir o grupo que cobre a rota atual. Empresa e Configurações dividem as
+  // seções de /configuracoes, então o prefixo da URL não basta para decidir.
   useEffect(() => {
     if (!slug) return;
-    const reportsPath = `/${slug}/admin/relatorios`;
-    if (location.pathname === reportsPath || location.pathname.startsWith(`${reportsPath}/`)) {
-      setReportsNavOpen(true);
-    }
-
-    const reservationsPath = `/${slug}/admin/reservas`;
-    if (location.pathname === reservationsPath || location.pathname.startsWith(`${reservationsPath}/`)) {
-      setReservationsNavOpen(true);
-    }
-
-    const settingsPath = `/${slug}/admin/configuracoes`;
-    if (location.pathname === settingsPath || location.pathname.startsWith(`${settingsPath}/`)) {
-      setSettingsNavOpen(true);
-    }
+    if (isCompanyNavGroupActive(location.pathname, 'reports')) setReportsNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'reservations')) setReservationsNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'profile')) setProfileNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'settings')) setSettingsNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'business')) setBusinessNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'automation')) setAutomationNavOpen(true);
   }, [location.pathname, slug]);
 
   useEffect(() => {
@@ -785,6 +826,33 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     isActive: isSettingsNavActive,
   });
 
+  const renderProfileNavGroup = () => renderNavGroup({
+    label: 'Empresa',
+    icon: Building2,
+    items: visibleProfileNavItems,
+    open: profileNavOpen,
+    onOpenChange: setProfileNavOpen,
+    isActive: isProfileNavActive,
+  });
+
+  const renderBusinessNavGroup = () => renderNavGroup({
+    label: 'Gest\u00E3o',
+    icon: Briefcase,
+    items: visibleBusinessNavItems,
+    open: businessNavOpen,
+    onOpenChange: setBusinessNavOpen,
+    isActive: isBusinessNavActive,
+  });
+
+  const renderAutomationNavGroup = () => renderNavGroup({
+    label: 'Automa\u00E7\u00F5es',
+    icon: Bot,
+    items: visibleAutomationNavItems,
+    open: automationNavOpen,
+    onOpenChange: setAutomationNavOpen,
+    isActive: isAutomationNavActive,
+  });
+
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
       {mobileOpen && (
@@ -862,19 +930,28 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 </p>
                 <div className="space-y-1">
                   {visibleCompanyDashboardItem && renderNavLink(visibleCompanyDashboardItem)}
-                  {renderReportsNavGroup()}
                   {renderReservationsNavGroup()}
+                  {renderReportsNavGroup()}
                   {visibleCompanyPrimaryNavItemsWithoutDashboard.map(renderNavLink)}
                 </div>
               </div>
 
-              {(visibleManagementNavItems.length > 0 || visibleSettingsNavItems.length > 0) && (
+              {(
+                visibleBusinessNavItems.length > 0
+                || visibleAutomationNavItems.length > 0
+                || visibleManagementNavItems.length > 0
+                || visibleProfileNavItems.length > 0
+                || visibleSettingsNavItems.length > 0
+              ) && (
                 <div className="space-y-2">
                   <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-sidebar-foreground/32">
-                    Gestão
+                    Administração
                   </p>
                   <div className="space-y-1">
+                    {renderBusinessNavGroup()}
+                    {renderAutomationNavGroup()}
                     {visibleManagementNavItems.map(renderNavLink)}
+                    {renderProfileNavGroup()}
                     {renderSettingsNavGroup()}
                   </div>
                 </div>

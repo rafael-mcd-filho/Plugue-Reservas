@@ -8,21 +8,37 @@ export const COMPANY_SETTINGS_SECTIONS = [
 
 export type CompanySettingsSection = (typeof COMPANY_SETTINGS_SECTIONS)[number];
 
+// Como as seções aparecem no menu: o que descreve a casa fica em "Empresa"; o
+// que o cliente encontra na hora de reservar fica em "Configurações".
+export const COMPANY_PROFILE_SETTINGS_SECTIONS = [
+  'empresa',
+  'agenda',
+  'reservas',
+] as const satisfies readonly CompanySettingsSection[];
+
+export const COMPANY_EXPERIENCE_SETTINGS_SECTIONS = [
+  'disponibilidade',
+  'pagina-publica',
+] as const satisfies readonly CompanySettingsSection[];
+
 export const DEFAULT_COMPANY_SETTINGS_SECTION: CompanySettingsSection = 'empresa';
 
+// Os slugs seguem os antigos para nao quebrar links salvos; so os rotulos mudaram.
 export const COMPANY_SETTINGS_SECTION_LABELS: Record<CompanySettingsSection, string> = {
-  empresa: 'Empresa',
-  agenda: 'Agenda',
-  reservas: 'Reservas',
+  empresa: 'Cadastro',
+  agenda: 'Horários',
+  reservas: 'Regras de reservas',
   disponibilidade: 'Disponibilidade',
   'pagina-publica': 'Página Pública',
 };
 
+// As descricoes de Horarios, Regras e Disponibilidade se citam entre si: as tres
+// definem a grade publicada, e a precedencia nao e obvia sozinha.
 export const COMPANY_SETTINGS_SECTION_DESCRIPTIONS: Record<CompanySettingsSection, string> = {
-  empresa: 'Cadastro, localização e pagamentos',
-  agenda: 'Horários e datas bloqueadas',
-  reservas: 'Fluxo público de reservas',
-  disponibilidade: 'Regras de agenda por período',
+  empresa: 'Dados, localização e pagamentos',
+  agenda: 'Dias, horários e datas fechadas',
+  reservas: 'Padrões que a disponibilidade pode substituir',
+  disponibilidade: 'Substitui horários e padrões em datas e períodos',
   'pagina-publica': 'Mídia, textos e avisos',
 };
 
