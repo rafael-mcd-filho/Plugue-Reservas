@@ -19,7 +19,6 @@ import {
   AlertCircle,
   ArrowRight,
   CalendarDays,
-  Filter,
   MousePointerClick,
   Sparkles,
   UserRoundCheck,
@@ -35,11 +34,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
-import ReportMetricCard from '@/components/reports/ReportMetricCard';
+import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
-  type DemandConversionEntryFilter,
   getDemandConversionErrorMessage,
   useDemandConversionReport,
 } from '@/hooks/useDemandConversionReport';
@@ -98,23 +96,12 @@ function isDemandMetric(value: string | null): value is DemandEvolutionMetric {
   return value === 'reservations' || value === 'people';
 }
 
-function isEntryFilter(value: string | null): value is DemandConversionEntryFilter {
-  return value === 'all' || value === 'online' || value === 'affiliate' || value === 'manual' || value === 'waitlist';
-}
-
 function formatInteger(value: number) {
   return numberFormatter.format(Number.isFinite(value) ? value : 0);
 }
 
 function formatPercent(value: number) {
   return `${decimalFormatter.format(Number.isFinite(value) ? value : 0)}%`;
-}
-
-function formatRelativeComparison(current: number, previous: number) {
-  if (previous === 0) return current === 0 ? 'Sem mudança vs. período anterior' : 'Sem base no período anterior';
-  const change = ((current - previous) / previous) * 100;
-  const prefix = change > 0 ? '+' : '';
-  return `${prefix}${decimalFormatter.format(change)}% vs. período anterior`;
 }
 
 function formatPointComparison(current: number, previous: number) {
@@ -146,9 +133,7 @@ function formatTrendPeriod(value: string, granularity: ReportGranularity) {
 function ReportSkeleton() {
   return (
     <div className="space-y-4" aria-label="Carregando relatório" aria-busy="true">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-28 rounded-xl" />)}
-      </div>
+      <ReportKpiStripSkeleton count={4} />
       <Skeleton className="h-[390px] rounded-xl" />
       <Skeleton className="h-[380px] rounded-xl" />
       <Skeleton className="h-64 rounded-xl" />
@@ -165,9 +150,6 @@ export default function DemandConversionReport() {
     timeZone: companyTimeZone,
   });
   const uniqueOnly = searchParams.get('unique') === '1';
-  const entryMode: DemandConversionEntryFilter = isEntryFilter(searchParams.get('entry'))
-    ? searchParams.get('entry') as DemandConversionEntryFilter
-    : 'all';
   const evolutionLens: DemandEvolutionLens = isDemandLens(searchParams.get('analysis'))
     ? searchParams.get('analysis') as DemandEvolutionLens
     : 'journey';
@@ -195,7 +177,7 @@ export default function DemandConversionReport() {
     granularity: filters.granularity,
     page: 1,
     pageSize: DETAILS_PAGE_SIZE,
-    entryMode,
+    entryMode: 'all',
     enabled: companyTimeZoneResolved && !filters.rangeError,
   });
   const temporalQuery = useDemandTemporalAnalysis({
@@ -219,10 +201,6 @@ export default function DemandConversionReport() {
       : temporal?.entry_mode_created_trend ?? [],
     [evolutionLens, temporal?.entry_mode_created_trend, temporal?.entry_mode_visit_trend],
   );
-  const visitEntryTrend = useMemo(
-    () => temporal?.entry_mode_visit_trend ?? [],
-    [temporal?.entry_mode_visit_trend],
-  );
   const selectedEntrySummary = useMemo(() => {
     const origins = ENTRY_ORIGINS.map((origin) => ({
       ...origin,
@@ -242,10 +220,6 @@ export default function DemandConversionReport() {
     };
   }, [selectedEntryTrend]);
   const isEntryEvolution = evolutionLens === 'entry_created' || evolutionLens === 'entry_visit';
-  const visitEntryTrendHasData = visitEntryTrend.some((point) => (
-    point.online_reservations + point.affiliate_reservations
-    + point.manual_reservations + point.waitlist_reservations
-  ) > 0);
   const selectedEvolutionHasData = evolutionLens === 'journey'
     ? trendHasData
     : evolutionLens === 'created'
@@ -311,8 +285,8 @@ export default function DemandConversionReport() {
             <Alert><AlertCircle className="h-4 w-4" aria-hidden="true" /><AlertTitle>Dados preservados</AlertTitle><AlertDescription>A atualização falhou, então mantivemos a última leitura válida na tela.</AlertDescription></Alert>
           )}
 
-          <section aria-label="Resumo do período" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ReportMetricCard
+          <ReportKpiStrip aria-label="Resumo do período">
+            <ReportKpiTile
               label={uniqueOnly ? 'Visitantes no funil' : 'Sessões no funil'}
               value={formatInteger(report.summary.sessions)}
               detail="Funil web total; não muda com a forma de entrada"
@@ -320,51 +294,52 @@ export default function DemandConversionReport() {
                 ? 'Visitantes distintos que abriram a página de reserva no período. Cada pessoa conta uma vez, mesmo que volte várias vezes.'
                 : 'Sessões que abriram a página de reserva no período. A mesma pessoa pode gerar mais de uma sessão.'}
               comparison={report.comparison
-                ? formatRelativeComparison(report.summary.sessions, report.comparison.summary.sessions)
+                ? <ReportKpiDelta current={report.summary.sessions} previous={report.comparison.summary.sessions} />
                 : null}
               icon={MousePointerClick}
-              tone="info"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Reservas finalizadas"
               value={formatInteger(report.summary.completed)}
               detail={`${formatPercent(report.summary.overall_conversion_rate)} de conversão no funil web total`}
               explanation="Sessões que chegaram ao fim do funil e confirmaram a reserva. A taxa divide as finalizadas pelo total de sessões."
               comparison={report.comparison
-                ? formatPointComparison(
-                    report.summary.overall_conversion_rate,
-                    report.comparison.summary.overall_conversion_rate,
-                  )
+                ? (
+                  <ReportKpiDelta
+                    current={report.summary.overall_conversion_rate}
+                    previous={report.comparison.summary.overall_conversion_rate}
+                    percentagePoints
+                  />
+                )
                 : null}
               icon={UserRoundCheck}
-              tone="success"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Reservas criadas"
               value={formatInteger(report.summary.created_reservations)}
-              detail={entryMode === 'all' ? 'Por qualquer forma de entrada no período' : 'Na forma de entrada selecionada'}
+              detail="Por qualquer forma de entrada no período"
               explanation="Reservas registradas no período por qualquer caminho — site, painel, fila de espera ou filiado. Não se limita ao funil web."
               comparison={report.comparison
-                ? formatRelativeComparison(
-                    report.summary.created_reservations,
-                    report.comparison.summary.created_reservations,
-                  )
+                ? (
+                  <ReportKpiDelta
+                    current={report.summary.created_reservations}
+                    previous={report.comparison.summary.created_reservations}
+                  />
+                )
                 : null}
               icon={CalendarDays}
-              tone="primary"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Pessoas reservadas"
               value={formatInteger(report.summary.created_people)}
               detail={`Antecedência média de ${decimalFormatter.format(report.summary.average_lead_days)} dias`}
               explanation="Soma das pessoas de todas as reservas criadas no período. A antecedência média é a distância entre a criação e a data marcada."
               comparison={report.comparison
-                ? formatRelativeComparison(report.summary.created_people, report.comparison.summary.created_people)
+                ? <ReportKpiDelta current={report.summary.created_people} previous={report.comparison.summary.created_people} />
                 : null}
               icon={UsersRound}
-              tone="neutral"
             />
-          </section>
+          </ReportKpiStrip>
 
           <section className="space-y-4" aria-label="Funil e evolução da demanda">
             <div className="[&>*]:min-w-0">
@@ -675,130 +650,6 @@ export default function DemandConversionReport() {
             </CardContent>
           </Card>
 
-          <Card className="border-border shadow-sm">
-            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <CardTitle className="text-base">Formas de entrada</CardTitle>
-                <CardDescription>
-                  Os cartões filtram as análises de reservas criadas. A evolução abaixo usa a data marcada para a visita; o funil web permanece total.
-                </CardDescription>
-              </div>
-              <div className="inline-flex shrink-0 self-start rounded-md border border-border bg-muted/20 p-0.5" aria-label="Métrica das formas de entrada">
-                {(['reservations', 'people'] as DemandEvolutionMetric[]).map((metric) => (
-                  <button
-                    key={metric}
-                    type="button"
-                    className={cn(
-                      'rounded px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      evolutionMetric === metric ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                    )}
-                    aria-pressed={evolutionMetric === metric}
-                    onClick={() => updateParams({ metric: metric === 'reservations' ? null : metric })}
-                  >
-                    {metric === 'reservations' ? 'Reservas' : 'Pessoas'}
-                  </button>
-                ))}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {report.entry_modes.map((mode) => {
-                  const active = entryMode === mode.key;
-                  return (
-                    <button
-                      key={mode.key}
-                      type="button"
-                      onClick={() => updateParams({ entry: active ? null : mode.key })}
-                      className={cn(
-                        'rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        active ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40 hover:bg-muted/70',
-                      )}
-                      aria-pressed={active}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ENTRY_COLORS[mode.key] }} aria-hidden="true" />
-                          <span className="truncate">{mode.label}</span>
-                        </span>
-                        <Filter className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
-                      </div>
-                      <div className="mt-1 flex items-baseline gap-1.5">
-                        <span className="text-xl font-semibold tabular-nums">{formatInteger(mode.reservations)}</span>
-                        <span className="truncate text-[11px] text-muted-foreground">
-                          {formatPercent(mode.percentage)} · {formatInteger(mode.people)} pessoas
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <section
-                className="rounded-xl border border-border/70 bg-background/70 p-3"
-                aria-label="Evolução das formas de entrada"
-              >
-                <div className="mb-3">
-                  <h3 className="text-sm font-medium text-foreground">
-                    Forma de entrada por {filters.granularity === 'day' ? 'dia' : filters.granularity === 'week' ? 'semana' : 'mês'}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Uma barra empilhada por data da visita, mostrando como as reservas foram registradas.
-                  </p>
-                </div>
-
-                {temporalQuery.isError ? (
-                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
-                    <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
-                    <p className="mt-3 text-sm font-medium">Não foi possível carregar a evolução das formas de entrada</p>
-                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => temporalQuery.refetch()}>
-                      Tentar novamente
-                    </Button>
-                  </div>
-                ) : temporalQuery.isFetching && !temporal ? (
-                  <Skeleton className="h-[310px] w-full rounded-lg" />
-                ) : visitEntryTrendHasData ? (
-                  <div
-                    className="h-[310px] w-full"
-                    role="img"
-                    aria-label={`Formas de entrada por ${filters.granularity === 'day' ? 'dia' : filters.granularity === 'week' ? 'semana' : 'mês'}, em ${evolutionMetric === 'people' ? 'pessoas' : 'reservas'}`}
-                  >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={visitEntryTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                        <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                        <RechartsTooltip
-                          labelFormatter={(value) => formatDate(String(value))}
-                          formatter={(value: number, name: string) => [
-                            `${formatInteger(value)} ${evolutionMetric === 'people' ? 'pessoas' : 'reservas'}`,
-                            name,
-                          ]}
-                          contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
-                        />
-                        <Legend iconType="circle" iconSize={7} />
-                        {ENTRY_ORIGINS.map((origin) => (
-                          <Bar
-                            key={origin.key}
-                            dataKey={evolutionMetric === 'people' ? origin.peopleKey : origin.reservationsKey}
-                            name={origin.label}
-                            stackId="entry-mode-over-time"
-                            fill={ENTRY_COLORS[origin.key]}
-                            maxBarSize={48}
-                          />
-                        ))}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
-                    <CalendarDays className="h-8 w-8 text-muted-foreground/50" aria-hidden="true" />
-                    <p className="mt-3 text-sm font-medium">Nenhuma forma de entrada neste período</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Amplie o período para consultar a evolução.</p>
-                  </div>
-                )}
-              </section>
-            </CardContent>
-          </Card>
 
         </>
       )}

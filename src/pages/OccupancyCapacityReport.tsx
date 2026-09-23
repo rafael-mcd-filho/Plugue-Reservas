@@ -33,7 +33,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import ReportFilterBar from '@/components/reports/ReportFilterBar';
-import ReportMetricCard from '@/components/reports/ReportMetricCard';
+import { ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useOccupancyCapacityReport } from '@/hooks/useOccupancyCapacityReport';
@@ -176,9 +176,7 @@ function heatTone(rate: number): string {
 function ReportLoading() {
   return (
     <div className="space-y-4" aria-label={UI.loading} aria-busy="true">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-32 rounded-xl" />)}
-      </div>
+      <ReportKpiStripSkeleton count={5} />
       <Skeleton className="h-[360px] rounded-xl" />
       <div className="grid gap-5 xl:grid-cols-2">
         <Skeleton className="h-[340px] rounded-xl" />
@@ -474,48 +472,43 @@ export default function OccupancyCapacityReport() {
             <p>{UI.waitlistScope}</p>
           </div>
 
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Indicadores">
-            <ReportMetricCard
+          <ReportKpiStrip aria-label="Indicadores">
+            <ReportKpiTile
               label={UI.capacity}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatInteger(report.summary.published_capacity)}
               detail={qualityLabel(report.meta.capacity_history)}
               explanation={UI.capacityHelp}
               icon={CalendarRange}
-              tone="primary"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label={UI.pressure}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatPercent(report.summary.capacity_pressure_rate)}
               detail={report.meta.capacity_history === 'unavailable' ? UI.noBase : pressureComparisonDetail}
               explanation={UI.pressureHelp}
               icon={Users}
-              tone="warning"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label={UI.occupancy}
               value={report.meta.capacity_history === 'unavailable' ? '\u2014' : formatPercent(report.summary.check_in_capacity_rate)}
               detail={`${formatInteger(report.summary.checked_in_people)} ${UI.checkins}`}
               explanation={UI.occupancyHelp}
               icon={CheckCircle2}
-              tone="success"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label={UI.waitlist}
               value={formatInteger(report.summary.waitlist_entries)}
               detail={`${formatMinutes(report.summary.average_wait_minutes)} ${UI.waitlistDetail}`}
               explanation={UI.waitlistHelp}
               icon={Clock3}
-              tone="info"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label={UI.noShow}
               value={formatInteger(report.summary.no_show_reservations)}
               detail={`${formatInteger(report.summary.no_show_people)} pessoas \u00b7 ${UI.noShowDetail}`}
               explanation={UI.noShowHelp}
               icon={AlertCircle}
-              tone="danger"
             />
-          </section>
+          </ReportKpiStrip>
 
           <Card className="overflow-hidden border-border shadow-sm">
             <CardHeader className="space-y-3">

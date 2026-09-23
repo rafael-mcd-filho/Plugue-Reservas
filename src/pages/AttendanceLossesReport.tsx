@@ -18,15 +18,13 @@ import {
   CalendarX2,
   CheckCircle2,
   Clock3,
-  MessageCircle,
   ShieldAlert,
-  TicketCheck,
   UserMinus,
   Users,
   type LucideIcon,
 } from 'lucide-react';
 import ReportFilterBar from '@/components/reports/ReportFilterBar';
-import ReportMetricCard from '@/components/reports/ReportMetricCard';
+import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -42,7 +40,6 @@ import {
   ATTENDANCE_ENTRY_METHODS,
   ATTENDANCE_OUTCOMES,
   type AttendanceEntryMethodFilter,
-  type AttendanceLossesAssociation,
   type AttendanceLossesSegment,
   type AttendanceOutcomeFilter,
   type AttendanceSegmentDimension,
@@ -131,68 +128,10 @@ function formatSeriesPeriod(value: string, granularity: ReportGranularity): stri
   return format(parsed, 'dd/MM', { locale: ptBR });
 }
 
-function Trend({ current, previous, invert = false }: { current: number; previous: number; invert?: boolean }) {
-  const difference = current - previous;
-  const favorable = invert ? difference < 0 : difference > 0;
-  if (Math.abs(difference) < 0.05) {
-    return <span className="text-xs text-muted-foreground">Estável vs. período anterior</span>;
-  }
-
-  return (
-    <span className={cn('text-xs font-medium', favorable ? 'text-success' : 'text-destructive')}>
-      {difference > 0 ? '+' : '−'}{decimalFormatter.format(Math.abs(difference))} p.p. vs. anterior
-    </span>
-  );
-}
-
-function AssociationColumn({
-  title,
-  icon: Icon,
-  rows,
-  detail,
-}: {
-  title: string;
-  icon: LucideIcon;
-  rows: AttendanceLossesAssociation[];
-  detail: string;
-}) {
-  return (
-    <div className="rounded-xl bg-muted/40 p-3">
-      <div className="flex items-center gap-2">
-        <span className="rounded-lg bg-background p-1.5 text-primary">
-          <Icon className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <div className="min-w-0">
-          <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-          <p className="text-[11px] text-muted-foreground">{detail}</p>
-        </div>
-      </div>
-      <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
-        {rows.map((row) => (
-          <div key={row.key} className="rounded-lg bg-background px-3 py-2.5">
-            <p className="truncate text-xs font-medium text-foreground">{row.label}</p>
-            <div className="mt-1 flex items-baseline justify-between gap-2">
-              <span className="text-lg font-semibold tabular-nums text-foreground">{formatPercent(row.no_show_rate)}</span>
-              <span className="text-[11px] text-muted-foreground">no-show</span>
-            </div>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-              {formatInteger(row.reservations)} reservas · {formatInteger(row.attended)} comparecimentos
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ReportSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Carregando relatório">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 rounded-xl" />
-        ))}
-      </div>
+      <ReportKpiStripSkeleton count={5} />
       <Skeleton className="h-[340px] rounded-xl" />
       <div className="grid gap-5 xl:grid-cols-2">
         <Skeleton className="h-[340px] rounded-xl" />
@@ -373,54 +312,56 @@ export default function AttendanceLossesReport() {
             </Alert>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <ReportMetricCard
+          <ReportKpiStrip aria-label="Indicadores do período">
+            <ReportKpiTile
               label="Reservas no período"
               value={formatInteger(report.summary.reservations)}
               detail={`${formatInteger(report.summary.reserved_people)} pessoas reservadas`}
               explanation="Todas as reservas com data agendada dentro do período, no fuso da empresa, independentemente do resultado."
               icon={Users}
-              tone="primary"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Comparecimento"
               value={formatPercent(report.summary.attendance_rate)}
               detail={`${formatInteger(report.summary.attended)} reservas · ${formatInteger(report.summary.attended_people)} pessoas presentes`}
               explanation="Comparecimentos divididos por comparecimentos + no-shows. Reservas canceladas ou ainda abertas ficam fora da base."
               comparison={report.comparison
-                ? <Trend current={report.summary.attendance_rate} previous={report.comparison.attendance_rate} />
+                ? <ReportKpiDelta current={report.summary.attendance_rate} previous={report.comparison.attendance_rate} percentagePoints />
                 : null}
               icon={CheckCircle2}
-              tone="success"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="No-show"
               value={formatPercent(report.summary.no_show_rate)}
               detail={`${formatInteger(report.summary.no_show)} reservas sem comparecimento`}
               explanation="No-shows divididos por comparecimentos + no-shows. Canceladas e abertas ficam fora da taxa."
               comparison={report.comparison
-                ? <Trend current={report.summary.no_show_rate} previous={report.comparison.no_show_rate} invert />
+                ? (
+                  <ReportKpiDelta
+                    current={report.summary.no_show_rate}
+                    previous={report.comparison.no_show_rate}
+                    percentagePoints
+                    higherIsBetter={false}
+                  />
+                )
                 : null}
               icon={CalendarX2}
-              tone="danger"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Cancelamentos"
               value={formatInteger(report.summary.cancelled)}
               detail={`Taxa combinada de perdas: ${formatPercent(report.summary.loss_rate)}`}
               explanation="Reservas canceladas no período. A taxa de perdas soma cancelamentos e no-shows sobre o total de reservas."
               icon={Clock3}
-              tone="warning"
             />
-            <ReportMetricCard
+            <ReportKpiTile
               label="Pessoas em perdas"
               value={formatInteger(report.summary.lost_people)}
               detail="Ligadas a no-shows ou cancelamentos"
               explanation="Soma das pessoas das reservas que viraram no-show ou cancelamento. Não estima receita nem assentos não revendidos."
               icon={UserMinus}
-              tone="neutral"
             />
-          </div>
+          </ReportKpiStrip>
 
           <Card className="border-border shadow-sm">
             <CardHeader className="gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
@@ -624,30 +565,6 @@ export default function AttendanceLossesReport() {
               </CardContent>
             </Card>
           </div>
-
-          <Card className="border-border shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">Associações observadas</CardTitle>
-              <CardDescription>
-                Comparação descritiva entre grupos; diferenças não comprovam que WhatsApp ou pré-pagamento causaram o resultado.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 xl:grid-cols-2">
-              <AssociationColumn
-                title="WhatsApp antes do horário"
-                icon={MessageCircle}
-                rows={report.associations.whatsapp}
-                detail="Envios registrados como enviados por Evolution ou PlugueChat"
-              />
-              <AssociationColumn
-                title="Pré-pagamento"
-                icon={TicketCheck}
-                rows={report.associations.prepayment}
-                detail="Pagamento recebido antes do horário e ainda em estado pago"
-              />
-            </CardContent>
-          </Card>
-
         </>
       )}
 

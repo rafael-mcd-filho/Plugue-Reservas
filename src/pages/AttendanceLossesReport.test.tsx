@@ -165,11 +165,12 @@ describe('AttendanceLossesReport', () => {
     };
   });
 
-  it('labels associations as observational', () => {
+  it('no longer shows the observational associations block', () => {
     render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
 
-    expect(screen.getByText(/diferenças não comprovam que WhatsApp ou pré-pagamento causaram/)).toBeInTheDocument();
-    expect(screen.getByText(/Pagamento recebido antes do horário e ainda em estado pago/)).toBeInTheDocument();
+    expect(screen.queryByText('Associações observadas')).not.toBeInTheDocument();
+    expect(screen.queryByText(/diferenças não comprovam que WhatsApp ou pré-pagamento causaram/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Pagamento recebido antes do horário e ainda em estado pago/)).not.toBeInTheDocument();
   });
 
   it('summarizes expected, realized, losses and realization for the selected unit', () => {

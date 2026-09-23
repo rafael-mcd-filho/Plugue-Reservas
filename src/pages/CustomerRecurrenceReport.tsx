@@ -50,6 +50,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
 import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
+import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
@@ -69,7 +70,6 @@ import type { ReportGranularity } from '@/lib/report-filters';
 import { mapCrmLeadRowToProfile } from '@/lib/crm-lead-profile';
 import { cn } from '@/lib/utils';
 
-type KpiTone = 'primary' | 'success' | 'info' | 'warning' | 'neutral';
 
 const PAGE_SIZE = 12;
 const numberFormatter = new Intl.NumberFormat('pt-BR');
@@ -120,14 +120,6 @@ const FREQUENCY_META: Record<CustomerFrequencyBandKey, {
     color: 'hsl(var(--success))',
     badgeClassName: 'border-success/20 bg-success-soft text-success',
   },
-};
-
-const KPI_TONE_CLASSES: Record<KpiTone, string> = {
-  primary: 'bg-primary/10 text-primary',
-  success: 'bg-success-soft text-success',
-  info: 'bg-info-soft text-info',
-  warning: 'bg-warning-soft text-warning-foreground',
-  neutral: 'bg-muted text-muted-foreground',
 };
 
 function formatInteger(value: number): string {
@@ -189,144 +181,10 @@ function getVisiblePages(currentPage: number, totalPages: number): Array<number 
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
 }
 
-function TrendIndicator({
-  current,
-  previous,
-  percentagePoints = false,
-  comparisonLabel,
-}: {
-  current: number;
-  previous: number;
-  percentagePoints?: boolean;
-  comparisonLabel: string;
-}) {
-  const difference = current - previous;
-  const isEqual = Math.abs(difference) < 0.05;
-
-  if (isEqual) {
-    return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground" title={`Comparação com ${comparisonLabel}`}>
-        <Minus className="h-3.5 w-3.5" aria-hidden="true" />
-        <span>estável vs. anterior</span>
-      </div>
-    );
-  }
-
-  if (!percentagePoints && previous === 0) {
-    return (
-      <div className="text-xs text-muted-foreground" title={`Comparação com ${comparisonLabel}`}>
-        sem base anterior
-      </div>
-    );
-  }
-
-  const isPositive = difference > 0;
-  const displayValue = percentagePoints
-    ? `${decimalFormatter.format(Math.abs(difference))} p.p.`
-    : `${decimalFormatter.format(Math.abs((difference / previous) * 100))}%`;
-
-  return (
-    <div
-      className={cn('flex items-center gap-1 text-xs font-medium', isPositive ? 'text-success' : 'text-destructive')}
-      title={`Comparação com ${comparisonLabel}`}
-    >
-      {isPositive
-        ? <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-        : <ArrowDownRight className="h-3.5 w-3.5" aria-hidden="true" />}
-      <span>{isPositive ? 'aumento' : 'queda'} de {displayValue} vs. anterior</span>
-    </div>
-  );
-}
-
-function KpiCard({
-  className,
-  label,
-  value,
-  helper,
-  explanation,
-  icon: Icon,
-  tone,
-  current,
-  previous,
-  comparisonLabel,
-  percentagePoints,
-  comparisonEnabled = true,
-}: {
-  className?: string;
-  label: string;
-  value: string;
-  helper: string;
-  explanation: string;
-  icon: LucideIcon;
-  tone: KpiTone;
-  current: number;
-  previous: number;
-  comparisonLabel: string;
-  percentagePoints?: boolean;
-  comparisonEnabled?: boolean;
-}) {
-  return (
-    <Card className={cn(
-      'group min-w-0 border-border shadow-sm transition-[border-color,box-shadow] hover:border-primary/25 hover:shadow-md',
-      className,
-    )}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-1 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              <span>{label}</span>
-              <InfoTooltip
-                content={comparisonEnabled ? `${explanation} A variação abaixo compara com ${comparisonLabel}.` : explanation}
-                ariaLabel={`Como é calculado: ${label}`}
-                className="shrink-0 normal-case tracking-normal"
-                interaction="popover"
-              />
-            </div>
-            <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</p>
-          </div>
-          <div className={cn('rounded-lg p-2.5', KPI_TONE_CLASSES[tone])}>
-            <Icon className="h-4 w-4" aria-hidden="true" />
-          </div>
-        </div>
-        {comparisonEnabled && (
-          <div className="mt-3">
-            <TrendIndicator
-              current={current}
-              previous={previous}
-              percentagePoints={percentagePoints}
-              comparisonLabel={comparisonLabel}
-            />
-          </div>
-        )}
-        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{helper}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ReportSkeleton() {
   return (
     <div className="space-y-6" aria-label="Carregando relatório" aria-busy="true">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <Card
-            key={index}
-            className={index < 3 ? 'lg:col-span-2 xl:col-span-1' : 'lg:col-span-3 xl:col-span-1'}
-          >
-            <CardContent className="space-y-3 p-4">
-              <div className="flex justify-between gap-4">
-                <div className="space-y-3">
-                  <Skeleton className="h-3 w-24" />
-                  <Skeleton className="h-8 w-16" />
-                </div>
-                <Skeleton className="h-9 w-9" />
-              </div>
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-3 w-full" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <ReportKpiStripSkeleton count={5} />
       <div className="grid gap-6 xl:grid-cols-5">
         <Skeleton className="h-[390px] xl:col-span-3" />
         <Skeleton className="h-[390px] xl:col-span-2" />
@@ -506,6 +364,11 @@ export default function CustomerRecurrenceReport() {
   const comparisonLabel = report
     ? formatRangeLabel(report.comparison.period_start, report.comparison.period_end)
     : 'período anterior';
+  // A variação aparece curta ao lado do número; o período comparado fica na
+  // explicação, para o cartão não repetir "vs. anterior" cinco vezes.
+  const withComparisonHint = (explanation: string) => (reportFilters.comparisonEnabled
+    ? `${explanation} A variação ao lado do número compara com ${comparisonLabel}.`
+    : explanation);
   const visiblePages = getVisiblePages(displayedPage, totalPages);
 
   const visitSeriesData = useMemo(
@@ -663,74 +526,79 @@ export default function CustomerRecurrenceReport() {
                   <span className="font-semibold text-foreground">Como ler: </span>
                   <span><strong>recorrente</strong> já visitava antes do período; <strong>repetiu no período</strong> fez duas ou mais visitas dentro dele.</span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-5">
-                  <KpiCard
-                    className="lg:col-span-2 xl:col-span-1"
+                <ReportKpiStrip>
+                  <ReportKpiTile
                     label="Recorrentes"
                     value={formatInteger(report.summary.returning_customers)}
-                    helper="Já tinham uma visita antes do período"
-                    explanation="Clientes do período que já tinham pelo menos uma visita anterior registrada. É consultado todo o histórico disponível, sem limite de 30, 60 ou 90 dias."
+                    detail="Já tinham uma visita antes do período"
+                    explanation={withComparisonHint('Clientes do período que já tinham pelo menos uma visita anterior registrada. É consultado todo o histórico disponível, sem limite de 30, 60 ou 90 dias.')}
                     icon={UserCheck}
-                    tone="success"
-                    current={report.summary.returning_customers}
-                    previous={report.comparison.returning_customers}
-                    comparisonLabel={comparisonLabel}
-                    comparisonEnabled={reportFilters.comparisonEnabled}
+                    comparison={reportFilters.comparisonEnabled ? (
+                      <ReportKpiDelta
+                        current={report.summary.returning_customers}
+                        previous={report.comparison.returning_customers}
+                        comparisonLabel={comparisonLabel}
+                      />
+                    ) : null}
                   />
-                  <KpiCard
-                    className="lg:col-span-2 xl:col-span-1"
+                  <ReportKpiTile
                     label="Taxa de recorrência"
                     value={formatPercent(report.summary.recurrence_rate)}
-                    helper="Recorrentes entre todos os identificados"
-                    explanation="Recorrentes ÷ clientes identificados × 100. Exemplo: 7 recorrentes entre 368 identificados resultam em 1,9%."
+                    detail="Recorrentes entre todos os identificados"
+                    explanation={withComparisonHint('Recorrentes ÷ clientes identificados × 100. Exemplo: 7 recorrentes entre 368 identificados resultam em 1,9%.')}
                     icon={Repeat2}
-                    tone="success"
-                    current={report.summary.recurrence_rate}
-                    previous={report.comparison.recurrence_rate}
-                    comparisonLabel={comparisonLabel}
-                    percentagePoints
-                    comparisonEnabled={reportFilters.comparisonEnabled}
+                    comparison={reportFilters.comparisonEnabled ? (
+                      <ReportKpiDelta
+                        current={report.summary.recurrence_rate}
+                        previous={report.comparison.recurrence_rate}
+                        comparisonLabel={comparisonLabel}
+                        percentagePoints
+                      />
+                    ) : null}
                   />
-                  <KpiCard
-                    className="lg:col-span-2 xl:col-span-1"
+                  <ReportKpiTile
                     label="Novos clientes"
                     value={formatInteger(report.summary.new_customers)}
-                    helper="Primeira visita registrada no sistema"
-                    explanation="Clientes cuja primeira visita registrada aconteceu dentro do período. Quem veio duas vezes pela primeira vez ainda é considerado novo aqui."
+                    detail="Primeira visita registrada no sistema"
+                    explanation={withComparisonHint('Clientes cuja primeira visita registrada aconteceu dentro do período. Quem veio duas vezes pela primeira vez ainda é considerado novo aqui.')}
                     icon={UserPlus}
-                    tone="primary"
-                    current={report.summary.new_customers}
-                    previous={report.comparison.new_customers}
-                    comparisonLabel={comparisonLabel}
-                    comparisonEnabled={reportFilters.comparisonEnabled}
+                    comparison={reportFilters.comparisonEnabled ? (
+                      <ReportKpiDelta
+                        current={report.summary.new_customers}
+                        previous={report.comparison.new_customers}
+                        comparisonLabel={comparisonLabel}
+                      />
+                    ) : null}
                   />
-                  <KpiCard
-                    className="lg:col-span-3 xl:col-span-1"
+                  <ReportKpiTile
                     label="Repetiram no período"
                     value={formatInteger(report.summary.repeated_in_period)}
-                    helper={`${formatPercent(report.summary.repeat_rate)} fizeram 2 ou mais visitas`}
-                    explanation="Clientes com duas ou mais visitas dentro do intervalo selecionado, independentemente de já terem uma visita anterior."
+                    detail={`${formatPercent(report.summary.repeat_rate)} fizeram 2 ou mais visitas`}
+                    explanation={withComparisonHint('Clientes com duas ou mais visitas dentro do intervalo selecionado, independentemente de já terem uma visita anterior.')}
                     icon={CalendarClock}
-                    tone="info"
-                    current={report.summary.repeated_in_period}
-                    previous={report.comparison.repeated_in_period}
-                    comparisonLabel={comparisonLabel}
-                    comparisonEnabled={reportFilters.comparisonEnabled}
+                    comparison={reportFilters.comparisonEnabled ? (
+                      <ReportKpiDelta
+                        current={report.summary.repeated_in_period}
+                        previous={report.comparison.repeated_in_period}
+                        comparisonLabel={comparisonLabel}
+                      />
+                    ) : null}
                   />
-                  <KpiCard
-                    className="lg:col-span-3 xl:col-span-1"
+                  <ReportKpiTile
                     label="Visitas adicionais"
                     value={formatInteger(report.summary.additional_visits)}
-                    helper="Visitas além da primeira no intervalo"
-                    explanation="Soma das visitas além da primeira de cada cliente dentro do intervalo. Exemplo: três visitas do mesmo cliente geram duas visitas adicionais."
+                    detail="Visitas além da primeira no intervalo"
+                    explanation={withComparisonHint('Soma das visitas além da primeira de cada cliente dentro do intervalo. Exemplo: três visitas do mesmo cliente geram duas visitas adicionais.')}
                     icon={Repeat2}
-                    tone="warning"
-                    current={report.summary.additional_visits}
-                    previous={report.comparison.additional_visits}
-                    comparisonLabel={comparisonLabel}
-                    comparisonEnabled={reportFilters.comparisonEnabled}
+                    comparison={reportFilters.comparisonEnabled ? (
+                      <ReportKpiDelta
+                        current={report.summary.additional_visits}
+                        previous={report.comparison.additional_visits}
+                        comparisonLabel={comparisonLabel}
+                      />
+                    ) : null}
                   />
-                </div>
+                </ReportKpiStrip>
               </section>
 
               <Card className="min-w-0 border-border shadow-sm">

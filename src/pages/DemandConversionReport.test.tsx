@@ -197,7 +197,6 @@ describe('DemandConversionReport', () => {
     render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.getByText('Funil web total; não muda com a forma de entrada')).toBeInTheDocument();
-    expect(screen.getByText(/o funil web permanece total/)).toBeInTheDocument();
     expect(screen.getByText(/não depende de mesa ou seção/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '1–2 pessoas' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Funil de Reservas' })).toBeInTheDocument();
@@ -205,26 +204,14 @@ describe('DemandConversionReport', () => {
     expect(screen.getByText(/Taxa de conversão geral:/)).toHaveTextContent('30,0%');
   });
 
-  it('keeps the visit-date entry evolution visible inside the entry card', () => {
+  it('drops the entry-mode block, keeping the breakdown in the main chart lenses', () => {
     render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
 
-    const evolution = screen.getByRole('region', { name: 'Evolução das formas de entrada' });
-    expect(within(evolution).getByText('Forma de entrada por dia')).toBeInTheDocument();
-    expect(within(evolution).getByText(/Uma barra empilhada por data da visita/)).toBeInTheDocument();
-
-    let series = within(evolution).getAllByTestId('bar-series');
-    expect(series.map((element) => element.dataset.dataKey)).toEqual([
-      'online_reservations', 'affiliate_reservations', 'manual_reservations', 'waitlist_reservations',
-    ]);
-    expect(series.every((element) => element.dataset.stackId === 'entry-mode-over-time')).toBe(true);
-
-    const metricControl = screen.getByLabelText('Métrica das formas de entrada');
-    fireEvent.click(within(metricControl).getByRole('button', { name: 'Pessoas' }));
-
-    series = within(screen.getByRole('region', { name: 'Evolução das formas de entrada' })).getAllByTestId('bar-series');
-    expect(series.map((element) => element.dataset.dataKey)).toEqual([
-      'online_people', 'affiliate_people', 'manual_people', 'waitlist_people',
-    ]);
+    expect(screen.queryByText('Formas de entrada')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Evolução das formas de entrada' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Forma de entrada por dia')).not.toBeInTheDocument();
+    // A distribuição por forma de entrada continua acessível pelas lentes do gráfico principal.
+    expect(screen.getByRole('tab', { name: 'Entrada por visita' })).toBeInTheDocument();
   });
 
   it('does not expose the per-reservation listing', () => {
