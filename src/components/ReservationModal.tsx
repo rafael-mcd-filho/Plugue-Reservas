@@ -660,13 +660,18 @@ export default function ReservationModal({
 
   // Auto-assign best-fit table when time is selected
   useEffect(() => {
-    if (!selectedDate || !selectedTime || step !== 2) {
+    if (!selectedDate || !selectedTime) {
       tableAvailabilityRequestIdRef.current += 1;
       setResolvedTableLookupKey('');
       setTableAvailabilityError(null);
       setLoadingTables(false);
       return;
     }
+
+    // Keep the recently resolved table while the customer fills the form.
+    // Returning to step 2 with the same selection should not repeat the RPC,
+    // and an in-flight request must not be invalidated merely by changing step.
+    if (step !== 2) return;
     if (slotAvailability[selectedTime]?.isAvailable === false) {
       setAvailableTables([]);
       setSelectedTableId('');
@@ -692,6 +697,11 @@ export default function ReservationModal({
     }
 
     if (tablesLoading || tableMapsLoading) return;
+
+    if (resolvedTableLookupKey === tableLookupKey) {
+      setLoadingTables(false);
+      return;
+    }
 
     if (allTables.length === 0) {
       setAvailableTables([]);
@@ -748,7 +758,7 @@ export default function ReservationModal({
     };
 
     fetchAndAssignTable();
-  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, availabilityRetryToken, slotAvailability, publicSchedule?.availability_mode]);
+  }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, resolvedTableLookupKey, availabilityRetryToken, slotAvailability, publicSchedule?.availability_mode]);
 
   const handleReset = () => {
     setStep(1);
@@ -833,6 +843,15 @@ export default function ReservationModal({
   };
 
   const handleTimeSelect = (time: string) => {
+    // Clicking the already selected slot can happen just after returning from
+    // the form. Preserve its resolved (or in-flight) lookup: invalidating that
+    // request without changing selectedTime leaves no dependency to trigger a
+    // replacement request and would keep the UI loading forever.
+    if (time && time === selectedTime) {
+      setPendingTimeAdvance(true);
+      return;
+    }
+
     setSelectedTime(time);
     setSelectedTableId('');
     setSelectedTableMapId('');
@@ -1842,7 +1861,10 @@ export default function ReservationModal({
                 <button
                   type="button"
                   className="mt-1 font-semibold text-amber-950 underline underline-offset-2"
-                  onClick={() => setAvailabilityRetryToken((value) => value + 1)}
+                  onClick={() => {
+                    setResolvedTableLookupKey('');
+                    setAvailabilityRetryToken((value) => value + 1);
+                  }}
                 >
                   Tentar novamente
                 </button>
