@@ -64,6 +64,7 @@ interface ReservationTableAssignmentProps {
 interface AssignmentMutationVariables {
   tableIds: string[];
   allowUnassigned: boolean;
+  allowUnderCapacity?: boolean;
 }
 
 function formatTableLabel(option: Pick<ReservationTableOption, 'table_number' | 'section_code'>) {
@@ -99,6 +100,7 @@ export default function ReservationTableAssignment({
   const [draftTableIds, setDraftTableIds] = useState<Set<string>>(new Set());
   const [draftTouched, setDraftTouched] = useState(false);
   const [confirmUnassignedOpen, setConfirmUnassignedOpen] = useState(false);
+  const [confirmUnderCapacityOpen, setConfirmUnderCapacityOpen] = useState(false);
 
   const normalizedTime = time.length === 5 ? `${time}:00` : time;
   const requiredCapacity = Math.max(1, partySize);
@@ -256,12 +258,13 @@ export default function ReservationTableAssignment({
   };
 
   const assignMutation = useMutation({
-    mutationFn: async ({ tableIds, allowUnassigned }: AssignmentMutationVariables) => {
+    mutationFn: async ({ tableIds, allowUnassigned, allowUnderCapacity = false }: AssignmentMutationVariables) => {
       const { data, error } = await (supabase.rpc as any)('assign_reservation_tables', {
         _reservation_id: reservationId,
         _table_ids: tableIds,
         _allow_unassigned: allowUnassigned,
         _assignment_note: allowUnassigned ? 'Alocar mesas depois' : null,
+        _allow_under_capacity: allowUnderCapacity,
       });
 
       if (error) throw error;
@@ -276,9 +279,11 @@ export default function ReservationTableAssignment({
           : `${variables.tableIds.length === 1 ? 'Mesa atribuída' : `${variables.tableIds.length} mesas atribuídas`} com sucesso.`,
       );
       setDraftTouched(false);
+      setConfirmUnderCapacityOpen(false);
       setOpen(false);
     },
     onError: async (error: any) => {
+      setConfirmUnderCapacityOpen(false);
       await Promise.all([
         assignmentsQuery.refetch(),
         optionsQuery.refetch(),
@@ -323,15 +328,25 @@ export default function ReservationTableAssignment({
     setDraftTouched(true);
   };
 
-  const saveSelection = () => {
-    if (!hasEnoughCapacity || hasUnavailableDraftSelection || !hasDraftChanges || assignMutation.isPending) return;
-
+  const submitSelection = (allowUnderCapacity: boolean) => {
     const tableIds = orderSelectedTableIds(
       assignments,
       draftTableIds,
       displayedOptions.map((option) => option.table_id),
     );
-    assignMutation.mutate({ tableIds, allowUnassigned: false });
+    assignMutation.mutate({ tableIds, allowUnassigned: false, allowUnderCapacity });
+  };
+
+  const saveSelection = () => {
+    if (draftTableIds.size === 0 || hasUnavailableDraftSelection || !hasDraftChanges || assignMutation.isPending) return;
+
+    // Mesas abaixo do grupo são permitidas (cadeiras extras), mas só após confirmação.
+    if (!hasEnoughCapacity) {
+      setConfirmUnderCapacityOpen(true);
+      return;
+    }
+
+    submitSelection(false);
   };
 
   const allocateLater = () => {
@@ -579,7 +594,7 @@ export default function ReservationTableAssignment({
                 type="button"
                 size="sm"
                 disabled={
-                  !hasEnoughCapacity
+                  draftTableIds.size === 0
                   || hasUnavailableDraftSelection
                   || !hasDraftChanges
                   || assignmentsQuery.isLoading
@@ -599,6 +614,30 @@ export default function ReservationTableAssignment({
           </div>
         </div>
       )}
+
+      <AlertDialog open={confirmUnderCapacityOpen} onOpenChange={setConfirmUnderCapacityOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Salvar com lugares a menos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {draftTableIds.size === 1 ? 'A mesa selecionada tem' : `As ${draftTableIds.size} mesas selecionadas somam`} {draftCapacity} lugares, mas a reserva é de {requiredCapacity} pessoas. Faltam {remainingCapacity} {remainingCapacity === 1 ? 'lugar' : 'lugares'}; confirme apenas se a equipe vai acomodar o grupo (por exemplo, com cadeiras extras).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={assignMutation.isPending}>Revisar mesas</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={assignMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                submitSelection(true);
+              }}
+            >
+              {assignMutation.isPending && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+              Salvar mesmo assim
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmUnassignedOpen} onOpenChange={setConfirmUnassignedOpen}>
         <AlertDialogContent>

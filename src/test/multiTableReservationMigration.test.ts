@@ -470,6 +470,57 @@ describe('migration de atribuição multi-mesa', () => {
     `)).rejects.toThrow(/Reserva por capacidade nao utiliza mesa/i);
   });
 
+  describe('com capacidade abaixo do grupo confirmada', () => {
+    beforeEach(async () => {
+      const migration = await readFile(resolve(
+        'supabase/migrations/20260925130000_allow_under_capacity_table_assignment.sql',
+      ), 'utf8');
+      await database.exec(migration);
+    });
+
+    it('continua bloqueando sem a confirmação explícita', async () => {
+      await expect(database.query(`
+        SELECT *
+        FROM public.assign_reservation_tables(
+          '${RESERVATION_ID}', ARRAY['${TABLE_IDS[3]}']::uuid[], false, NULL
+        )
+      `)).rejects.toThrow(/somam 12 lugares, mas a reserva possui 40 pessoas/i);
+    });
+
+    it('salva e audita quando a equipe confirma lugares a menos', async () => {
+      const { rows } = await database.query(`
+        SELECT *
+        FROM public.assign_reservation_tables(
+          '${RESERVATION_ID}', ARRAY['${TABLE_IDS[3]}']::uuid[], false, NULL, true
+        )
+      `);
+
+      expect(rows[0]).toMatchObject({
+        primary_table_id: TABLE_IDS[3],
+        assigned_capacity: 12,
+        party_size: 40,
+        assignment_state: 'assigned',
+      });
+
+      const audit = await database.query(`
+        SELECT details
+        FROM public.reservation_audit_logs
+        WHERE reservation_id = '${RESERVATION_ID}'
+      `);
+      expect(audit.rows[0]).toMatchObject({
+        details: { assigned_capacity: 12, party_size: 40, under_capacity: true },
+      });
+    });
+
+    it('mantém o wrapper de mesa única funcionando', async () => {
+      await expect(database.query(`
+        SELECT * FROM public.assign_reservation_table(
+          '${SECOND_RESERVATION_ID}', '${TABLE_IDS[1]}', false, NULL
+        )
+      `)).resolves.toBeDefined();
+    });
+  });
+
   it('pode ser reaplicada sem renomear as RPCs existentes', async () => {
     const migration = await readFile(resolve(
       'supabase/migrations/20260919120000_add_multi_table_reservation_assignments.sql',
