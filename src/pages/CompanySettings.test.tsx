@@ -19,6 +19,7 @@ const COMPANY_ROW = {
   instagram: 'bardoteste',
   whatsapp: '(84) 99999-9999',
   show_public_whatsapp_button: true,
+  show_public_hero_reserve_button: true,
   show_public_sticky_reserve_button: true,
   show_public_reservation_exit_prompt: false,
   public_waitlist_enabled: false,
@@ -236,10 +237,51 @@ describe('CompanySettings — salvamento por página', () => {
       'public_reservation_exit_prompt_secondary_text',
       'public_reservation_exit_prompt_secondary_text_size',
       'public_waitlist_enabled',
+      'show_public_hero_reserve_button',
       'show_public_reservation_exit_prompt',
       'show_public_sticky_reserve_button',
       'show_public_whatsapp_button',
     ]);
+  });
+
+  it('salva o botão do topo independentemente do botão fixo', async () => {
+    renderSection('pagina-publica');
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ações' }));
+
+    const heroSwitch = screen.getByRole('switch', { name: 'Ativar botão reservar agora no topo' });
+    const stickySwitch = screen.getByRole('switch', { name: 'Ativar botão sticky reservar agora' });
+    expect(heroSwitch).toBeChecked();
+    expect(stickySwitch).toBeChecked();
+
+    fireEvent.click(heroSwitch);
+    expect(heroSwitch).not.toBeChecked();
+    expect(stickySwitch).toBeChecked();
+    expect(screen.getByText('Não salvo')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      show_public_hero_reserve_button: false,
+      show_public_sticky_reserve_button: true,
+    });
+  });
+
+  it('permite manter somente o botão do topo', async () => {
+    renderSection('pagina-publica');
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ações' }));
+
+    const heroSwitch = screen.getByRole('switch', { name: 'Ativar botão reservar agora no topo' });
+    const stickySwitch = screen.getByRole('switch', { name: 'Ativar botão sticky reservar agora' });
+    fireEvent.click(stickySwitch);
+    expect(heroSwitch).toBeChecked();
+    expect(stickySwitch).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      show_public_hero_reserve_button: true,
+      show_public_sticky_reserve_button: false,
+    });
   });
 
   it('marca "Não salvo" ao editar e limpa a marca depois de salvar', async () => {

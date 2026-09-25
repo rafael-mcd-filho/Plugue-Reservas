@@ -24,6 +24,7 @@ export interface Company {
   custom_public_page_enabled?: boolean | null;
   public_header_style?: 'classic' | 'modern' | null;
   show_public_whatsapp_button?: boolean | null;
+  show_public_hero_reserve_button?: boolean | null;
   show_public_sticky_reserve_button?: boolean | null;
   show_public_reservation_exit_prompt?: boolean | null;
   public_reservation_exit_prompt_primary_text?: string | null;

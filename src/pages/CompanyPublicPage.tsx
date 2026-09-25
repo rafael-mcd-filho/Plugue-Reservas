@@ -629,6 +629,7 @@ export default function CompanyPublicPage() {
   const acceptedPayments = Object.entries(paymentMethods).filter(([, accepted]) => accepted);
   const customPublicPageEnabled = company?.custom_public_page_enabled ?? true;
   const publicWhatsappButtonEnabled = (company as any)?.show_public_whatsapp_button ?? true;
+  const publicHeroReserveButtonEnabled = company?.show_public_hero_reserve_button ?? true;
   const publicStickyReserveButtonEnabled = (company as any)?.show_public_sticky_reserve_button ?? true;
   const publicReservationExitPromptEnabled = (company as any)?.show_public_reservation_exit_prompt ?? false;
   const publicReservationExitPromptPrimaryText = (company as any)?.public_reservation_exit_prompt_primary_text ?? null;
@@ -1015,16 +1016,18 @@ export default function CompanyPublicPage() {
                 </div>
               )}
 
-              <Button
-                className="group w-full animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90"
-                size="lg"
-                onMouseEnter={() => void preloadReservationModal()}
-                onFocus={() => void preloadReservationModal()}
-                onClick={handleOpenReservation}
-              >
-                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
-                Reservar agora
-              </Button>
+              {publicHeroReserveButtonEnabled && (
+                <Button
+                  className="group w-full animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90"
+                  size="lg"
+                  onMouseEnter={() => void preloadReservationModal()}
+                  onFocus={() => void preloadReservationModal()}
+                  onClick={handleOpenReservation}
+                >
+                  <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                  Reservar agora
+                </Button>
+              )}
             </div>
 
             {/* Desktop moderno repete a mesma hierarquia visual do mobile. */}
@@ -1076,16 +1079,18 @@ export default function CompanyPublicPage() {
                 </div>
               )}
 
-              <Button
-                className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
-                size="lg"
-                onMouseEnter={() => void preloadReservationModal()}
-                onFocus={() => void preloadReservationModal()}
-                onClick={handleOpenReservation}
-              >
-                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
-                Reservar agora
-              </Button>
+              {publicHeroReserveButtonEnabled && (
+                <Button
+                  className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-glow gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
+                  size="lg"
+                  onMouseEnter={() => void preloadReservationModal()}
+                  onFocus={() => void preloadReservationModal()}
+                  onClick={handleOpenReservation}
+                >
+                  <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                  Reservar agora
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1147,18 +1152,20 @@ export default function CompanyPublicPage() {
                 </div>
               </div>
 
-              <div className="mt-5 animate-slide-up [animation-delay:80ms]">
-                <Button
-                  className="group w-full animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
-                  size="lg"
-                  onMouseEnter={() => void preloadReservationModal()}
-                  onFocus={() => void preloadReservationModal()}
-                  onClick={handleOpenReservation}
-                >
-                  <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
-                  Reservar agora
-                </Button>
-              </div>
+              {publicHeroReserveButtonEnabled && (
+                <div className="mt-5 animate-slide-up [animation-delay:80ms]">
+                  <Button
+                    className="group w-full animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90"
+                    size="lg"
+                    onMouseEnter={() => void preloadReservationModal()}
+                    onFocus={() => void preloadReservationModal()}
+                    onClick={handleOpenReservation}
+                  >
+                    <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                    Reservar agora
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 hidden w-full animate-slide-up space-y-4 motion-reduce:animate-none md:block">
@@ -1192,16 +1199,18 @@ export default function CompanyPublicPage() {
                 </div>
               )}
 
-              <Button
-                className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
-                size="lg"
-                onMouseEnter={() => void preloadReservationModal()}
-                onFocus={() => void preloadReservationModal()}
-                onClick={handleOpenReservation}
-              >
-                <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
-                Reservar agora
-              </Button>
+              {publicHeroReserveButtonEnabled && (
+                <Button
+                  className="group mx-auto mt-4 w-full max-w-md animate-attention-pulse-fast gap-2 rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90 motion-reduce:animate-none"
+                  size="lg"
+                  onMouseEnter={() => void preloadReservationModal()}
+                  onFocus={() => void preloadReservationModal()}
+                  onClick={handleOpenReservation}
+                >
+                  <CalendarCheck className="h-5 w-5 transition-transform duration-150 group-hover:scale-110" />
+                  Reservar agora
+                </Button>
+              )}
             </div>
           </div>
         )}

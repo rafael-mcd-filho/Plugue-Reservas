@@ -306,6 +306,7 @@ function PublicHeroPreview({
   logoUrl,
   companyName,
   showWhatsapp,
+  showHeroReserve,
   showSticky,
 }: {
   variant: 'classic' | 'modern';
@@ -314,6 +315,7 @@ function PublicHeroPreview({
   logoUrl?: string;
   companyName: string;
   showWhatsapp: boolean;
+  showHeroReserve: boolean;
   showSticky: boolean;
 }) {
   const media = mediaUrl ? (
@@ -343,7 +345,7 @@ function PublicHeroPreview({
             <span className="mt-1 h-1 w-10 rounded-full bg-foreground/15" />
             <div className="mt-3 w-full space-y-1.5">
               <span className="block h-6 w-full rounded-lg bg-white shadow-sm" />
-              <span className="block h-6 w-full rounded-lg bg-primary" />
+              {showHeroReserve && <span className="block h-6 w-full rounded-lg bg-primary" />}
             </div>
           </div>
         </div>
@@ -357,14 +359,14 @@ function PublicHeroPreview({
             <span className="mt-1 h-1 w-10 rounded-full bg-[#F5D08A]/70" />
             <div className="mt-auto w-full space-y-1.5 pb-3">
               <span className="block h-6 w-full rounded-lg bg-white/92" />
-              <span className="block h-6 w-full rounded-lg bg-primary" />
+              {showHeroReserve && <span className="block h-6 w-full rounded-lg bg-primary" />}
             </div>
           </div>
         </div>
       )}
 
       {showWhatsapp && (
-        <span className="absolute bottom-12 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-[#25D366] shadow-md">
+        <span className={`absolute right-2 flex h-7 w-7 items-center justify-center rounded-full bg-[#25D366] shadow-md ${showSticky ? 'bottom-12' : 'bottom-3'}`}>
           <MessageCircle className="h-3.5 w-3.5 text-white" />
         </span>
       )}
@@ -382,7 +384,8 @@ function PublicHeroPreview({
 
 const MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_NOTICE_IMAGE_FILE_SIZE = 2 * 1024 * 1024;
-const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_urls, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT = 'description, logo_url, time_zone, hero_media_urls, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_hero_reserve_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
+const COMPANY_SETTINGS_SELECT_WITHOUT_HERO_RESERVE = COMPANY_SETTINGS_SELECT.replace('show_public_hero_reserve_button, ', '');
 const COMPANY_SETTINGS_SELECT_WITH_LEGACY_HERO_MEDIA = 'description, logo_url, time_zone, hero_media_url, hero_media_type, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot, public_header_style, large_party_whatsapp_threshold, reservation_late_tolerance_minutes, public_reservation_exit_prompt_primary_text, public_reservation_exit_prompt_primary_text_size, public_reservation_exit_prompt_secondary_text, public_reservation_exit_prompt_secondary_text_size';
 const COMPANY_SETTINGS_SELECT_WITH_EXIT_PROMPT = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, show_public_reservation_exit_prompt, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
 const COMPANY_SETTINGS_SELECT_WITH_STICKY = 'description, logo_url, time_zone, opening_hours, payment_methods, address, phone, instagram, whatsapp, show_public_whatsapp_button, show_public_sticky_reserve_button, public_waitlist_enabled, google_maps_url, reservation_duration, reservation_slot_interval_minutes, max_guests_per_slot';
@@ -414,6 +417,7 @@ const OPTIONAL_COMPANY_COLUMNS = [
   'public_reservation_exit_prompt_secondary_text',
   'public_reservation_exit_prompt_secondary_text_size',
   'show_public_reservation_exit_prompt',
+  'show_public_hero_reserve_button',
   'show_public_sticky_reserve_button',
   'large_party_whatsapp_threshold',
   'reservation_late_tolerance_minutes',
@@ -504,6 +508,7 @@ function buildCompanyFormValues(company: Company) {
     instagram: normalizeInstagramHandle(company.instagram),
     whatsapp: formatBrazilPhone(company.whatsapp),
     showPublicWhatsappButton: (company.show_public_whatsapp_button ?? true) ? 'show' : 'hide',
+    showPublicHeroReserveButton: company.show_public_hero_reserve_button ?? true,
     showPublicStickyReserveButton: (company as any).show_public_sticky_reserve_button ?? true,
     showPublicReservationExitPrompt: (company as any).show_public_reservation_exit_prompt ?? false,
     publicReservationExitPromptPrimaryText: getPublicReservationExitPromptTextValue(
@@ -597,6 +602,23 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
       const selectAttempts = [
         {
           select: COMPANY_SETTINGS_SELECT,
+          missingColumns: [
+            'show_public_hero_reserve_button',
+            'hero_media_urls',
+            'hero_media_url',
+            'hero_media_type',
+            'public_header_style',
+            'public_reservation_exit_prompt_primary_text',
+            'public_reservation_exit_prompt_primary_text_size',
+            'public_reservation_exit_prompt_secondary_text',
+            'public_reservation_exit_prompt_secondary_text_size',
+            'large_party_whatsapp_threshold',
+            'reservation_late_tolerance_minutes',
+            'reservation_slot_interval_minutes',
+          ],
+        },
+        {
+          select: COMPANY_SETTINGS_SELECT_WITHOUT_HERO_RESERVE,
           missingColumns: [
             'hero_media_urls',
             'hero_media_url',
@@ -709,6 +731,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
   const [instagram, setInstagram] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [showPublicWhatsappButton, setShowPublicWhatsappButton] = useState('show');
+  const [showPublicHeroReserveButton, setShowPublicHeroReserveButton] = useState(true);
   const [showPublicStickyReserveButton, setShowPublicStickyReserveButton] = useState(true);
   const [showPublicReservationExitPrompt, setShowPublicReservationExitPrompt] = useState(false);
   const [publicReservationExitPromptPrimaryText, setPublicReservationExitPromptPrimaryText] = useState(DEFAULT_PUBLIC_RESERVATION_EXIT_PROMPT_PRIMARY_TEXT);
@@ -827,6 +850,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     setInstagram(values.instagram);
     setWhatsapp(values.whatsapp);
     setShowPublicWhatsappButton(values.showPublicWhatsappButton);
+    setShowPublicHeroReserveButton(values.showPublicHeroReserveButton);
     setShowPublicStickyReserveButton(values.showPublicStickyReserveButton);
     setShowPublicReservationExitPrompt(values.showPublicReservationExitPrompt);
     setPublicReservationExitPromptPrimaryText(values.publicReservationExitPromptPrimaryText);
@@ -881,6 +905,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     instagram,
     whatsapp,
     showPublicWhatsappButton,
+    showPublicHeroReserveButton,
     showPublicStickyReserveButton,
     showPublicReservationExitPrompt,
     publicReservationExitPromptPrimaryText,
@@ -1003,6 +1028,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
         }
 
         companyUpdate.public_waitlist_enabled = publicWaitlistEnabled;
+        companyUpdate.show_public_hero_reserve_button = showPublicHeroReserveButton;
         companyUpdate.show_public_sticky_reserve_button = showPublicStickyReserveButton;
         // A recuperacao ao sair e um aviso da pagina publica, nao uma regra de reserva.
         companyUpdate.show_public_reservation_exit_prompt = showPublicReservationExitPrompt;
@@ -1589,6 +1615,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
           logoUrl={logoUrl}
           companyName={companyName || 'Sua empresa'}
           showWhatsapp={showPublicWhatsappButton === 'show' && !publicCustomizationLocked}
+          showHeroReserve={showPublicHeroReserveButton}
           showSticky={showPublicStickyReserveButton}
         />
       </PhonePreviewFrame>
@@ -2542,7 +2569,19 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
                   />
 
                   <SettingRow
-                    title='Botão "Reservar agora"'
+                    title='Botão "Reservar agora" no topo'
+                    description="Aparece no topo da página pública, no celular e no computador."
+                    control={(
+                      <Switch
+                        checked={showPublicHeroReserveButton}
+                        onCheckedChange={setShowPublicHeroReserveButton}
+                        aria-label="Ativar botão reservar agora no topo"
+                      />
+                    )}
+                  />
+
+                  <SettingRow
+                    title='Botão "Reservar agora" fixo'
                     description="Fixo no rodapé da versão mobile."
                     control={(
                       <Switch
