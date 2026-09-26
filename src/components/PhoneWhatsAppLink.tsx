@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { formatBrazilPhone, normalizeBrazilPhoneDigits, toBrazilWhatsAppNumber } from '@/lib/validation';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
+export function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
       <path

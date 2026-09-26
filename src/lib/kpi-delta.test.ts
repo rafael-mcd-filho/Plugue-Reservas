@@ -19,6 +19,21 @@ describe('kpi-delta', () => {
     });
   });
 
+  it('uses an absolute difference in a custom unit', () => {
+    expect(formatKpiDelta({ current: 40, previous: 28, absoluteUnit: 'pts', fractionDigits: 0 })).toMatchObject({
+      direction: 'up',
+      label: '+12 pts',
+    });
+    expect(formatKpiDelta({ current: 4.2, previous: 4.6, absoluteUnit: '' })).toMatchObject({
+      direction: 'down',
+      label: '−0,4',
+    });
+    expect(formatKpiDelta({ current: 20, previous: 0, absoluteUnit: 'pts', fractionDigits: 0 })).toMatchObject({
+      direction: 'up',
+      label: '+20 pts',
+    });
+  });
+
   it('reports stability when the difference is negligible', () => {
     expect(formatKpiDelta({ current: 12, previous: 12 })).toMatchObject({ direction: 'flat', label: 'estável' });
     expect(formatKpiDelta({ current: 1.72, previous: 1.7, percentagePoints: true }).direction).toBe('flat');

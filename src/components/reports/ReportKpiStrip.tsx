@@ -39,6 +39,8 @@ interface ReportKpiDeltaProps {
   percentagePoints?: boolean;
   // No-show e cancelamento sobem para o lado errado.
   higherIsBetter?: boolean;
+  absoluteUnit?: string;
+  fractionDigits?: number;
   comparisonLabel?: string;
 }
 
@@ -47,9 +49,11 @@ export function ReportKpiDelta({
   previous,
   percentagePoints,
   higherIsBetter,
+  absoluteUnit,
+  fractionDigits,
   comparisonLabel = 'período anterior',
 }: ReportKpiDeltaProps) {
-  const delta = formatKpiDelta({ current, previous, percentagePoints, higherIsBetter });
+  const delta = formatKpiDelta({ current, previous, percentagePoints, higherIsBetter, absoluteUnit, fractionDigits });
   const Icon = delta.direction === 'up' ? ArrowUpRight : delta.direction === 'down' ? ArrowDownRight : Minus;
 
   return (

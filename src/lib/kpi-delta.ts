@@ -13,6 +13,10 @@ export interface KpiDeltaInput {
   // Em no-show, cancelamento e afins, subir e ruim: a seta continua apontando
   // para cima, mas a cor acompanha o que e bom para a operacao.
   higherIsBetter?: boolean;
+  // Diferenca absoluta em outra unidade: NPS varia em pontos ("+12 pts") e nota
+  // media em decimos ("−0,4"), nao em porcentagem do valor anterior.
+  absoluteUnit?: string;
+  fractionDigits?: number;
 }
 
 export interface KpiDelta {
@@ -32,8 +36,15 @@ export function formatKpiDelta({
   previous,
   percentagePoints = false,
   higherIsBetter = true,
+  absoluteUnit,
+  fractionDigits = 1,
 }: KpiDeltaInput): KpiDelta {
   const difference = current - previous;
+  const absolute = percentagePoints || absoluteUnit !== undefined;
+  const unit = absoluteUnit ?? 'p.p.';
+  const formatter = fractionDigits === 1
+    ? decimalFormatter
+    : new Intl.NumberFormat('pt-BR', { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 
   if (!Number.isFinite(difference) || Math.abs(difference) < 0.05) {
     return {
@@ -44,7 +55,7 @@ export function formatKpiDelta({
     };
   }
 
-  if (!percentagePoints && previous === 0) {
+  if (!absolute && previous === 0) {
     return {
       direction: 'unknown',
       favorable: null,
@@ -53,9 +64,9 @@ export function formatKpiDelta({
     };
   }
 
-  const magnitude = percentagePoints
-    ? `${decimalFormatter.format(Math.abs(difference))} p.p.`
-    : `${decimalFormatter.format(Math.abs((difference / previous) * 100))}%`;
+  const magnitude = absolute
+    ? `${formatter.format(Math.abs(difference))}${unit ? ` ${unit}` : ''}`
+    : `${formatter.format(Math.abs((difference / previous) * 100))}%`;
   const isPositive = difference > 0;
 
   return {
