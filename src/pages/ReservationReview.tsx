@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, ExternalLink, Heart, Loader2, MapPin, Sparkles, Star } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ExternalLink, Heart, Loader2, MapPin, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,7 +27,7 @@ interface PublicReviewData {
 }
 
 type RatingStep = 'food' | 'service' | 'ambiance';
-type ReviewStep = 'intro' | RatingStep | 'recommend' | 'comment' | 'thanks' | 'google';
+type ReviewStep = 'intro' | RatingStep | 'recommend' | 'comment' | 'thanks' | 'done';
 
 interface StepConfig {
   id: RatingStep;
@@ -208,7 +208,7 @@ export default function ReservationReview() {
 
   const questionSteps = useMemo<ReviewStep[]>(() => [...ratingSteps.map((item) => item.id), 'recommend'], [ratingSteps]);
   const questionIndex = questionSteps.indexOf(step);
-  const showSurveyHeader = step !== 'intro' && step !== 'thanks' && step !== 'google';
+  const showSurveyHeader = step !== 'intro' && step !== 'thanks' && step !== 'done';
   const progressTotal = questionSteps.length;
   const progressValue = questionIndex >= 0 ? Math.round(((questionIndex + 1) / progressTotal) * 100) : 100;
   const progressLabel = questionIndex >= 0 ? `Pergunta ${questionIndex + 1} de ${progressTotal}` : 'Comentário opcional';
@@ -322,29 +322,27 @@ export default function ReservationReview() {
       return;
     }
 
-    if (step === 'thanks') {
-      if (shouldOfferGoogleReview) {
-        setStep('google');
-        return;
-      }
-      window.close();
-      return;
-    }
-
-    if (step === 'google') {
-      if (googleReviewUrl) {
-        window.open(googleReviewUrl, '_blank', 'noopener,noreferrer');
-      }
-      return;
-    }
-
     setStep(getNextStepAfter(step));
+  }
+
+  // Browsers only let scripts close tabs they opened, so the link tab usually
+  // stays open; the "done" screen tells the customer they can leave.
+  function finishReview() {
+    setStep('done');
+    window.close();
+  }
+
+  function openGoogleReview() {
+    if (googleReviewUrl) {
+      window.open(googleReviewUrl, '_blank', 'noopener,noreferrer');
+    }
+    setStep('done');
   }
 
   function goBack() {
     clearPendingAdvance();
 
-    if (submitMutation.isPending || step === 'intro' || step === 'thanks' || step === 'google') return;
+    if (submitMutation.isPending || step === 'intro' || step === 'thanks' || step === 'done') return;
 
     if (step === 'comment') {
       setStep('recommend');
@@ -517,21 +515,10 @@ export default function ReservationReview() {
                     <p className="text-right text-xs text-muted-foreground">{comment.length}/1000</p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Button type="button" size="lg" className="w-full" onClick={() => submitMutation.mutate(comment)} disabled={submitMutation.isPending}>
-                      {submitMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Enviar avaliação
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full text-muted-foreground"
-                      onClick={() => submitMutation.mutate('')}
-                      disabled={submitMutation.isPending}
-                    >
-                      Pular e enviar
-                    </Button>
-                  </div>
+                  <Button type="button" size="lg" className="w-full" onClick={() => submitMutation.mutate(comment)} disabled={submitMutation.isPending}>
+                    {submitMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Enviar avaliação
+                  </Button>
                 </div>
               )}
 
@@ -544,29 +531,38 @@ export default function ReservationReview() {
                       Sua opinião nos ajuda a melhorar cada detalhe da experiência que oferecemos.
                     </p>
                   </div>
-                  <Button type="button" size="lg" className="w-full" onClick={goToNextStep}>
-                    {shouldOfferGoogleReview ? 'Continuar' : 'Finalizar'}
-                  </Button>
+                  {shouldOfferGoogleReview ? (
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-border bg-[#fbfaf8] p-4">
+                        <p className="text-sm font-medium text-foreground">Que bom que você gostou! ⭐</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          Compartilhe sua experiência no Google. Leva menos de um minuto e ajuda outras pessoas a nos conhecer.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Button type="button" size="lg" className="w-full gap-2" onClick={openGoogleReview}>
+                          <ExternalLink className="h-4 w-4" />
+                          Avaliar no Google
+                        </Button>
+                        <Button type="button" variant="ghost" className="w-full text-muted-foreground" onClick={finishReview}>
+                          Agora não
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Você já pode fechar esta página.</p>
+                  )}
                 </div>
               )}
 
-              {step === 'google' && (
-                <div className="flex flex-1 flex-col justify-center space-y-7 text-center">
-                  <Sparkles className="mx-auto h-14 w-14 text-primary" />
+              {step === 'done' && (
+                <div className="flex flex-1 flex-col justify-center space-y-4 text-center">
+                  <Heart className="mx-auto h-12 w-12 fill-primary/15 text-primary" />
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-bold tracking-tight text-foreground">Sua opinião pode ajudar outras pessoas ⭐</h2>
+                    <h2 className="text-2xl font-bold tracking-tight text-foreground">Tudo certo!</h2>
                     <p className="mx-auto max-w-sm text-sm leading-6 text-muted-foreground">
-                      Ficamos felizes em saber que você teve uma ótima experiência. Que tal compartilhar sua avaliação no Google?
+                      Obrigado pelo seu tempo. Você já pode fechar esta página.
                     </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Button type="button" size="lg" className="w-full gap-2" onClick={goToNextStep}>
-                      <ExternalLink className="h-4 w-4" />
-                      ⭐ Avaliar no Google
-                    </Button>
-                    <Button type="button" variant="ghost" className="w-full text-muted-foreground" onClick={() => window.close()}>
-                      Agora não
-                    </Button>
                   </div>
                 </div>
               )}
