@@ -42,7 +42,16 @@ export function buildPlugueChatPostVisitParameters(
   const token = getPostVisitReviewToken(reviewValue);
   if (includeReviewLink === true && !token) return null;
 
-  return { ...base, link_avaliacao: token };
+  return { ...base, avaliacao: token };
+}
+
+/** Rename the review parameter on post-visit messages queued before the rollout. */
+export function normalizePlugueChatPostVisitParameters(
+  parameters: Record<string, string>,
+): Record<string, string> {
+  const { link_avaliacao, ...current } = parameters;
+  if (link_avaliacao === undefined) return current;
+  return { ...current, avaliacao: current.avaliacao ?? link_avaliacao };
 }
 
 /** Evolution/non-official WhatsApp messages use the complete review URL. */

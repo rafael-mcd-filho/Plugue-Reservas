@@ -173,7 +173,7 @@ Deno.serve(async (req) => {
 
         const includeReviewLink = template.post_visit_include_review_link ?? null;
         // Apply the new contract only after an explicit template choice is saved.
-        // Unreviewed templates must keep working exactly as before the rollout.
+        // Unreviewed templates keep their previous value format with the avaliacao parameter.
         if (includeReviewLink === true && reviewEnabled !== true) {
           skipUnavailableReview(reviewEnabled);
           continue;
@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
         pcQueueIds.add(reservation.id);
         if (result === "inserted") {
           queued++;
-          if (includeReviewLink === null ? reviewToken : parameters.link_avaliacao) {
+          if (includeReviewLink === null ? reviewToken : parameters.avaliacao) {
             await markReviewSent(supabaseAdmin, reservation.id, "pluguechat");
           }
         } else {

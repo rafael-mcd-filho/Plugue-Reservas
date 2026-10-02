@@ -72,7 +72,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(withReview).toHaveAttribute('aria-checked', 'false');
     expect(withoutReview).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('status')).toHaveTextContent('Configuração antiga não revisada');
-    expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+    expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     expect(mutateMock).not.toHaveBeenCalled();
 
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
@@ -89,7 +89,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getReviewRadios().withReview).toHaveAttribute('aria-checked', 'false');
     expect(getCard().getByText('nome', { exact: true })).toBeInTheDocument();
     expect(getCard().getByText('data', { exact: true })).toBeInTheDocument();
-    expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+    expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
 
     fireEvent.change(getCard().getByLabelText('Template ID'), { target: { value: 'post_visit_name_date' } });
@@ -108,7 +108,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     renderWithTemplates([makeTemplate(false)]);
 
     expect(getReviewRadios().withoutReview).toHaveAttribute('aria-checked', 'true');
-    expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+    expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
     expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({
       template_id: 'post_visit_existing',
@@ -125,10 +125,10 @@ describe('PlugueChatMessages post-visit review contract', () => {
     fireEvent.change(getCard().getByLabelText('Template ID'), { target: { value: nextId } });
     expect(mutateMock).not.toHaveBeenCalled();
     if (includeReview) {
-      expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+      expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
       expect(getCard().getByText(/esta mensagem não será enviada com campo vazio/)).toBeInTheDocument();
     } else {
-      expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+      expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     }
 
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
@@ -191,7 +191,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
   it('explains the official token-only format and the non-official complete URL', () => {
     renderWithTemplates([makeTemplate(true)]);
 
-    expect(getCard().getByText(/no PlugueChat, link_avaliacao recebe apenas o código após/))
+    expect(getCard().getByText(/no PlugueChat, avaliacao recebe apenas o código após/))
       .toHaveTextContent('O endereço completo até /avaliacao/ deve estar no template aprovado, com o slug da sua empresa.');
     expect(getCard().getByText(/Na API não oficial, a variável continua recebendo o link completo/))
       .toBeInTheDocument();
@@ -202,7 +202,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     renderWithTemplates([makeTemplate(false)]);
 
     expect(npsActivationMock).toHaveBeenCalledWith(companyId);
-    expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
+    expect(getCard().queryByText('avaliacao', { exact: true })).not.toBeInTheDocument();
     expect(getCard().getByText('nome', { exact: true })).toBeInTheDocument();
     expect(getCard().getByText('data', { exact: true })).toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
@@ -222,7 +222,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     npsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     renderWithTemplates([makeTemplate(mode)]);
 
-    expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
+    expect(getCard().queryByText('avaliacao', { exact: true })).not.toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getCard().queryByRole('status')).not.toBeInTheDocument();
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
@@ -244,7 +244,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     npsActivationMock.mockReturnValue({ data: { enabled: true }, isPending, isError });
     renderWithTemplates([makeTemplate(false)]);
 
-    expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
+    expect(getCard().queryByText('avaliacao', { exact: true })).not.toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getCard().queryByRole('status')).not.toBeInTheDocument();
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
@@ -270,7 +270,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
 
     npsActivationMock.mockReturnValue({ data: { enabled: false }, isPending: false, isError: false });
     rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
-    expect(getCard().queryByText('link_avaliacao', { exact: true })).not.toBeInTheDocument();
+    expect(getCard().queryByText('avaliacao', { exact: true })).not.toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
     expect(getCard().getByLabelText('Template ID')).toHaveValue('unsaved_review_template');
@@ -279,7 +279,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
 
     npsActivationMock.mockReturnValue({ data: { enabled: true }, isPending: false, isError: false });
     rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
-    expect(getCard().getByText('link_avaliacao', { exact: true })).toBeInTheDocument();
+    expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getReviewRadios().withReview).toHaveAttribute('aria-checked', 'true');
     expect(getReviewRadios().withReview).not.toBeDisabled();

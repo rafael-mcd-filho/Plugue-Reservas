@@ -145,7 +145,7 @@ describe('post-visit job — channel-specific review contract', () => {
   it('enqueues only the review token for PlugueChat with evaluation', async () => {
     expect(await runJob()).toMatchObject({ queued: 1, skipped_missing_review: 0 });
     expect(mocks.enqueueOfficial).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      template_id: 'post-visit-template', parameters: { nome: 'Ana', data: '09/09/2026', link_avaliacao: token },
+      template_id: 'post-visit-template', parameters: { nome: 'Ana', data: '09/09/2026', avaliacao: token },
       idempotency_key: 'pluguechat:reservation:reservation-1:post_visit',
     }));
     expect(updates).toEqual([{ table: 'reservation_reviews', values: expect.objectContaining({ sent_channel: 'pluguechat' }) }]);
@@ -156,7 +156,7 @@ describe('post-visit job — channel-specific review contract', () => {
     appUrl = undefined;
     rows.companies = [];
     expect(await runJob()).toMatchObject({ queued: 1 });
-    expect(mocks.enqueueOfficial.mock.calls[0][1].parameters.link_avaliacao).toBe(token);
+    expect(mocks.enqueueOfficial.mock.calls[0][1].parameters.avaliacao).toBe(token);
   });
 
   it.each([true, false])('sends name/date only without evaluation (existing review: %s)', async (hasReview) => {
@@ -193,7 +193,7 @@ describe('post-visit job — channel-specific review contract', () => {
     rows.pluguechat_automation_templates[0].post_visit_include_review_link = mode;
     rows.reservation_reviews = [];
     expect(await runJob()).toMatchObject({ queued: 1 });
-    expect(mocks.enqueueOfficial.mock.calls[0][1].parameters).toEqual({ nome: 'Ana', data: '09/09/2026', link_avaliacao: '' });
+    expect(mocks.enqueueOfficial.mock.calls[0][1].parameters).toEqual({ nome: 'Ana', data: '09/09/2026', avaliacao: '' });
     expect(updates).toEqual([]);
   });
 
@@ -284,7 +284,7 @@ describe('post-visit job — channel-specific review contract', () => {
       expect(mocks.enqueueOfficial).toHaveBeenCalledTimes(1);
       expect(mocks.enqueueOfficial.mock.calls[0][1].parameters).toEqual(mode === false
         ? { nome: 'Ana', data: '09/09/2026' }
-        : { nome: 'Ana', data: '09/09/2026', link_avaliacao: isLegacy ? reviewUrl : token });
+        : { nome: 'Ana', data: '09/09/2026', avaliacao: isLegacy ? reviewUrl : token });
       expect(updates).toHaveLength(mode === false ? 0 : 1);
     } else {
       expect(mocks.enqueueOfficial).not.toHaveBeenCalled();
@@ -374,7 +374,7 @@ describe('post-visit job — channel-specific review contract', () => {
       expect(mocks.enqueueOfficial).toHaveBeenCalledTimes(2);
       expect(mocks.enqueueOfficial.mock.calls[0][1]).toMatchObject({
         reservation_id: 'reservation-1',
-        parameters: { nome: 'Ana', data: '09/09/2026', link_avaliacao: reviewUrl },
+        parameters: { nome: 'Ana', data: '09/09/2026', avaliacao: reviewUrl },
       });
       expect(mocks.enqueueOfficial.mock.calls[1][1]).toMatchObject({
         reservation_id: 'reservation-2',
@@ -396,7 +396,7 @@ describe('post-visit job — channel-specific review contract', () => {
     if (missing === 'slug') rows.companies = [];
     expect(await runJob()).toMatchObject({ queued: 1, skipped: 0, legacy_templates_preserved: 1 });
     expect(mocks.enqueueOfficial.mock.calls[0][1].parameters).toEqual({
-      nome: 'Ana', data: '09/09/2026', link_avaliacao: '',
+      nome: 'Ana', data: '09/09/2026', avaliacao: '',
     });
     // Keep the historical sent_at behavior for legacy; do not rewrite history at rollout.
     expect(updates).toHaveLength(missing === 'token' ? 0 : 1);

@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import { normalizePlugueChatPostVisitParameters } from "../_shared/post-visit.ts";
 import {
   buildPlugueChatPayload,
   checkPlugueChatMessageStatus,
@@ -364,7 +365,9 @@ Deno.serve(async (req) => {
         config.fromNumber,
         item.phone,
         item.template_id,
-        item.parameters ?? {},
+        item.type === "post_visit"
+          ? normalizePlugueChatPostVisitParameters(item.parameters ?? {})
+          : item.parameters ?? {},
       );
 
       const result = await sendPlugueChatMessage(config.apiUrl, config.apiToken, payload);

@@ -56,7 +56,7 @@ export const PLUGUECHAT_AUTOMATIONS: PlugueChatAutomationDefinition[] = [
     label: 'Pós-visita',
     description: 'Enviada no dia seguinte à visita.',
     icon: Star,
-    parameters: ['nome', 'data', 'link_avaliacao'],
+    parameters: ['nome', 'data', 'avaliacao'],
   },
   {
     type: 'no_show_message',

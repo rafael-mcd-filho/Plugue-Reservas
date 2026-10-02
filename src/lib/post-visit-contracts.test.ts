@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildReservationParameters } from '../../supabase/functions/_shared/pluguechat.ts';
+import { buildPlugueChatPayload, buildReservationParameters } from '../../supabase/functions/_shared/pluguechat.ts';
 import {
   buildPlugueChatPostVisitParameters,
   getPostVisitReviewToken,
+  normalizePlugueChatPostVisitParameters,
   renderPostVisitWhatsAppTemplate,
 } from '../../supabase/functions/_shared/post-visit.ts';
 
@@ -69,7 +70,7 @@ describe('PlugueChat post-visit parameters', () => {
     expect(buildPlugueChatPostVisitParameters(reservation, value, true)).toEqual({
       nome: 'Ana',
       data: '09/09/2026',
-      link_avaliacao: reviewToken,
+      avaliacao: reviewToken,
     });
   });
 
@@ -81,7 +82,7 @@ describe('PlugueChat post-visit parameters', () => {
     expect(buildReservationParameters('post_visit', reservation, null, reviewUrl)).toEqual({
       nome: 'Ana',
       data: '09/09/2026',
-      link_avaliacao: reviewUrl,
+      avaliacao: reviewUrl,
     });
   });
 
@@ -89,8 +90,31 @@ describe('PlugueChat post-visit parameters', () => {
     expect(buildReservationParameters('post_visit', reservation, null, null)).toEqual({
       nome: 'Ana',
       data: '09/09/2026',
-      link_avaliacao: '',
+      avaliacao: '',
     });
+  });
+});
+
+describe('queued PlugueChat post-visit parameters', () => {
+  it.each([reviewToken, reviewUrl])('renames an old queued parameter without changing its value: %s', (value) => {
+    const queued = { nome: 'Ana', data: '09/09/2026', link_avaliacao: value };
+    const payload = buildPlugueChatPayload('5562999999999', '5562988888888', 'approved-template',
+      normalizePlugueChatPostVisitParameters(queued));
+    expect(payload.body).toEqual({
+      templateId: 'approved-template',
+      parameters: { nome: 'Ana', data: '09/09/2026', avaliacao: value },
+    });
+    expect(queued.link_avaliacao).toBe(value);
+  });
+
+  it('preserves the new parameter when both names exist', () => {
+    expect(normalizePlugueChatPostVisitParameters({ avaliacao: reviewToken, link_avaliacao: 'old' }))
+      .toEqual({ avaliacao: reviewToken });
+  });
+
+  it('does not add a review parameter to a template without evaluation', () => {
+    expect(normalizePlugueChatPostVisitParameters({ nome: 'Ana', data: '09/09/2026' }))
+      .toEqual({ nome: 'Ana', data: '09/09/2026' });
   });
 });
 

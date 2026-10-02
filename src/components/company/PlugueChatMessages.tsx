@@ -179,7 +179,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                   </RadioGroup>
                   <p id="post-visit-review-help" className="text-xs leading-relaxed text-muted-foreground">
                     Ative ou desative as avaliações somente na tela Avaliações. A escolha acima descreve o template aprovado; não ativa a funcionalidade.
-                    {' '}Ao escolher e salvar “Sim”, no PlugueChat, link_avaliacao recebe apenas o código após /avaliacao/. O endereço completo até /avaliacao/ deve estar no template aprovado, com o slug da sua empresa.
+                    {' '}Ao escolher e salvar “Sim”, no PlugueChat, avaliacao recebe apenas o código após /avaliacao/. O endereço completo até /avaliacao/ deve estar no template aprovado, com o slug da sua empresa.
                     {' '}Na API não oficial, a variável continua recebendo o link completo.
                   </p>
                   {state.post_visit_include_review_link === null ? (

@@ -365,7 +365,7 @@ export function buildReservationParameters(
     case "reminder_1h":
       return { nome, hora, pessoas };
     case "post_visit":
-      return { nome, data, link_avaliacao: reviewUrl ?? "" };
+      return { nome, data, avaliacao: reviewUrl ?? "" };
     case "no_show_message":
       return { nome, data, hora };
     default:
