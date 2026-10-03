@@ -49,6 +49,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { parseEventUtmSearch, UTM_KEYS } from '@/lib/eventUtmSearch';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -325,6 +326,8 @@ function buildMetaQueueDetailContent(item: MetaQueueRow, attempts: MetaAttemptRo
 }
 
 function getSessionAttributionValue(event: TrackingEventRow, key: keyof TrackingSessionRow) {
+  const eventValue = getRecordText(event.metadata, key);
+  if (eventValue) return eventValue;
   const sessionValue = event.session?.[key];
   if (typeof sessionValue === 'string' && sessionValue.trim()) return sessionValue;
   return getRecordText(event.metadata, key);
@@ -374,6 +377,12 @@ export default function CompanyEvents() {
   const [eventCustomStart, setEventCustomStart] = useState('');
   const [eventCustomEnd, setEventCustomEnd] = useState('');
   const [eventSearch, setEventSearch] = useState('');
+  const [eventUtmSearch, setEventUtmSearch] = useState('');
+  const [debouncedEventUtmSearch, setDebouncedEventUtmSearch] = useState('');
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedEventUtmSearch(eventUtmSearch.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [eventUtmSearch]);
   const [eventLogPage, setEventLogPage] = useState(1);
 
   // Meta queue filters
@@ -457,8 +466,8 @@ export default function CompanyEvents() {
     refetchInterval: 30_000,
   });
 
-  const { data: eventLog = [], isLoading: eventLogLoading } = useQuery({
-    queryKey: ['company-event-log', companyId, eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd],
+  const { data: eventLog = [], isLoading: eventLogLoading, isFetching: eventLogFetching, isError: eventLogError } = useQuery({
+    queryKey: ['company-event-log', companyId, eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd, debouncedEventUtmSearch],
     queryFn: async () => {
       const range = eventPeriodPreset === 'custom'
         ? {
@@ -478,7 +487,17 @@ export default function CompanyEvents() {
       if (range.start) query = query.gte('occurred_at', range.start.toISOString());
       if (range.end) query = query.lte('occurred_at', range.end.toISOString());
 
-      const { data, error } = await query;
+      const utmSearch = parseEventUtmSearch(debouncedEventUtmSearch);
+      const { data, error } = debouncedEventUtmSearch
+        ? await supabase.rpc('search_company_event_log_utm' as any, {
+            _company_id: companyId,
+            _term: utmSearch.term,
+            _utm_filters: utmSearch.filters,
+            _event_name: eventTypeFilter === EVENT_TYPE_FILTER_ALL ? null : eventTypeFilter,
+            _start: range.start?.toISOString() ?? null,
+            _end: range.end?.toISOString() ?? null,
+          })
+        : await query;
       if (error) throw error;
 
       const events = (data as TrackingEventRow[]) ?? [];
@@ -665,6 +684,8 @@ export default function CompanyEvents() {
         setEventCustomStart('');
         setEventCustomEnd('');
         setEventSearch('');
+        setEventUtmSearch('');
+        setDebouncedEventUtmSearch('');
       }
       toast.success(scope === 'meta_queue'
         ? `Fila Meta limpa. ${total} registro(s) removido(s).`
@@ -680,7 +701,8 @@ export default function CompanyEvents() {
 
   const hasEventLogFiltersActive = eventTypeFilter !== EVENT_TYPE_FILTER_ALL
     || eventPeriodPreset !== 'all'
-    || !!eventSearch.trim();
+    || !!eventSearch.trim()
+    || !!eventUtmSearch.trim();
 
   const hasMetaQueueFiltersActive = metaQueueTypeFilter !== EVENT_TYPE_FILTER_ALL
     || metaQueuePeriodPreset !== 'all'
@@ -750,7 +772,7 @@ export default function CompanyEvents() {
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
-  useEffect(() => { setEventLogPage(1); }, [eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd, eventSearch]);
+  useEffect(() => { setEventLogPage(1); }, [eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd, eventSearch, debouncedEventUtmSearch]);
   useEffect(() => { setMetaQueuePage(1); }, [metaQueueTypeFilter, metaQueuePeriodPreset, metaQueueCustomStart, metaQueueCustomEnd, metaQueueSearch]);
   useEffect(() => { if (eventLogPage > eventLogTotalPages) setEventLogPage(eventLogTotalPages); }, [eventLogPage, eventLogTotalPages]);
   useEffect(() => { if (metaQueuePage > metaQueueTotalPages) setMetaQueuePage(metaQueueTotalPages); }, [metaQueuePage, metaQueueTotalPages]);
@@ -771,6 +793,8 @@ export default function CompanyEvents() {
     setEventCustomStart('');
     setEventCustomEnd('');
     setEventSearch('');
+    setEventUtmSearch('');
+    setDebouncedEventUtmSearch('');
   };
 
   const handleResetMetaQueueFilters = () => {
@@ -962,7 +986,7 @@ export default function CompanyEvents() {
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {/* Search */}
-                  <div className="space-y-2 sm:col-span-2">
+                  <div className="space-y-2">
                     <Label htmlFor="event-search">Pesquisar</Label>
                     <div className="relative">
                       <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
@@ -974,6 +998,24 @@ export default function CompanyEvents() {
                         onChange={(e) => setEventSearch(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="event-utm-search">Pesquisar UTM</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="event-utm-search"
+                        className="h-9 pl-8"
+                        placeholder="Ex.: gbp_goiania, google ou link com UTM"
+                        value={eventUtmSearch}
+                        onChange={(e) => setEventUtmSearch(e.target.value)}
+                        aria-describedby="event-utm-search-help"
+                      />
+                    </div>
+                    <p id="event-utm-search-help" className="text-xs text-muted-foreground">
+                      Busca por origem, meio, campanha, conteúdo ou termo, respeitando o tipo e o período.
+                    </p>
                   </div>
 
                   {/* Type filter */}
@@ -1059,7 +1101,12 @@ export default function CompanyEvents() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              {eventLogError && (
+                <p role="alert" className="text-sm text-destructive">
+                  Não foi possível consultar os eventos. Tente atualizar novamente.
+                </p>
+              )}
+              <div className="overflow-x-auto" aria-busy={eventLogFetching}>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1070,9 +1117,13 @@ export default function CompanyEvents() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {eventLogLoading && eventLog.length === 0 ? (
+                    {(eventLogLoading || eventLogFetching || eventUtmSearch.trim() !== debouncedEventUtmSearch) ? (
                       <TableRow>
                         <TableCell colSpan={4} className="text-center text-muted-foreground">Carregando eventos...</TableCell>
+                      </TableRow>
+                    ) : eventLogError ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">Consulta indisponível.</TableCell>
                       </TableRow>
                     ) : filteredEventLog.length === 0 ? (
                       <TableRow>
@@ -1101,6 +1152,11 @@ export default function CompanyEvents() {
                                 <Badge variant="outline">{event.tracking_source}</Badge>
                               </div>
                               <p className="text-xs text-muted-foreground">{formatEventDisplay(event.event_name)}</p>
+                              {UTM_KEYS.some((key) => getSessionAttributionValue(event, key)) && (
+                                <p className="text-xs text-muted-foreground break-all" title="Origem · meio · campanha · conteúdo · termo">
+                                  UTM: {UTM_KEYS.map((key) => getSessionAttributionValue(event, key)).filter(Boolean).join(' · ')}
+                                </p>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell className="font-mono text-xs">
