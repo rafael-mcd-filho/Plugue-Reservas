@@ -79,7 +79,7 @@ export default function CompanyReservationChart({ companies, startDate, endDate,
                   <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="period" tickFormatter={label} minTickGap={32} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip labelFormatter={(value) => label(String(value))} formatter={(value: number, name: string) => [value.toLocaleString('pt-BR'), name]}
+                  <Tooltip itemSorter={(item) => -Number(item.value ?? 0)} labelFormatter={(value) => label(String(value))} formatter={(value: number, name: string) => [value.toLocaleString('pt-BR'), name]}
                     contentStyle={{ borderRadius: 12, background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }} />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 12 }} />
                   {companies.map((company, index) => <Line key={company.id} name={company.name}
