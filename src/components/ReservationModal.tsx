@@ -12,7 +12,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck, Plus } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, Clock, Users, Loader2, Check, Copy, CalendarPlus, ExternalLink, Flame, BadgeCheck, Plus, Minus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -1505,7 +1505,7 @@ export default function ReservationModal({
         onPointerDownOutside={(event) => {
           if (showExitRecoveryPrompt) event.preventDefault();
         }}
-        className="left-[50%] right-auto top-[50%] bottom-auto w-[calc(100vw-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]"
+        className="left-[50%] right-auto top-[50%] bottom-auto grid-cols-[minmax(0,1fr)] w-[calc(100%-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]"
       >
         <DialogHeader className={showExitRecoveryPrompt ? 'sr-only' : 'px-12'}>
           {/* O nome da casa sai do título: ele já está na página atrás do modal,
@@ -1625,20 +1625,26 @@ export default function ReservationModal({
           </div>
         ) : step === 1 && (
           <div className="animate-fade-in space-y-3 pt-2">
-            {/* Rótulo à esquerda e controle único: antes eram três botões soltos
-                centralizados, competindo com a grade de datas. */}
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Pessoas</span>
-              <div className="flex items-center gap-1 rounded-full border border-border bg-muted/30 p-1">
+            {/* Pergunta direta em vez do rótulo pequeno em caixa alta, que passava
+                despercebido; o 2 pré-preenchido parecia escolha já resolvida. */}
+            <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+              <div className="min-w-0">
+                <p id="reservation-party-size-label" className="flex items-center gap-1.5 text-[15px] font-semibold leading-tight text-foreground">
+                  <Users className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                  Quantas pessoas?
+                </p>
+                <p className="mt-0.5 pl-[22px] text-xs text-muted-foreground">Inclua adultos e crianças na reserva</p>
+              </div>
+              <div role="group" aria-labelledby="reservation-party-size-label" className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/30 p-1">
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
                   aria-label="Diminuir número de pessoas"
                   disabled={selectedPartySize <= 1}
-                  onClick={() => handlePartySizeChange(selectedPartySize - 1)}>-</Button>
+                  onClick={() => handlePartySizeChange(selectedPartySize - 1)}><Minus /></Button>
                 <span id="reservation-party-size-value" className="w-9 text-center text-lg font-semibold tabular-nums" aria-live="polite">{selectedPartySize}</span>
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
                   aria-label="Aumentar número de pessoas"
                   disabled={selectedPartySize >= 20}
-                  onClick={() => handlePartySizeChange(selectedPartySize + 1)}>+</Button>
+                  onClick={() => handlePartySizeChange(selectedPartySize + 1)}><Plus /></Button>
               </div>
             </div>
 
@@ -1687,7 +1693,7 @@ export default function ReservationModal({
                         className={cn(
                           'relative flex h-[4.75rem] min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border p-2 text-sm transition-[border-color,background-color,color,box-shadow] duration-150',
                           closed
-                            ? 'cursor-not-allowed border-border/60 bg-muted/40 text-muted-foreground/70'
+                            ? 'cursor-not-allowed border-border bg-muted/40 text-muted-foreground/70'
                             : isSelected
                               ? 'border-primary bg-primary text-primary-foreground shadow-[0_6px_16px_rgba(201,129,58,0.28)]'
                               : 'border-border bg-card text-foreground hover:border-primary/50 hover:shadow-sm'
@@ -1730,18 +1736,18 @@ export default function ReservationModal({
                   {/* Navegação da janela de datas, com o calendário ao lado para
                       quem precisa de uma data fora dos seis dias visíveis. */}
                   <div className="flex items-center gap-2">
-                    <div className="grid flex-1 grid-cols-[2.5rem_minmax(5.25rem,1fr)_2.5rem] items-center gap-1 rounded-lg border border-border/70 bg-muted/20 px-2 py-2 min-[360px]:grid-cols-[minmax(5.75rem,6.75rem)_minmax(5.25rem,1fr)_minmax(5.75rem,6.75rem)]">
+                    <div className="grid min-w-0 flex-1 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center gap-1 rounded-lg border border-border bg-muted/20 px-2 py-2 min-[460px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100"
+                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100 [&_svg]:size-5 min-[460px]:[&_svg]:size-4"
                         aria-label="Mostrar 6 dias anteriores"
                         disabled={dateWindowOffset === 0}
                         onClick={() => handleDateWindowChange('previous')}
                       >
-                        <ArrowLeft className="h-3.5 w-3.5 shrink-0 min-[360px]:mr-1" />
-                        <span className="hidden min-[360px]:inline">Anteriores</span>
+                        <ArrowLeft className="shrink-0 min-[460px]:mr-1" />
+                        <span className="hidden min-[460px]:inline">Anteriores</span>
                       </Button>
                       <span className="flex h-8 min-w-0 items-center justify-center truncate px-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
                         {dateWindowLabel}
@@ -1750,12 +1756,12 @@ export default function ReservationModal({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100"
+                        className="h-8 min-w-0 justify-center px-1 text-xs active:scale-100 [&_svg]:size-5 min-[460px]:[&_svg]:size-4"
                         aria-label="Mostrar próximos 6 dias"
                         onClick={() => handleDateWindowChange('next')}
                       >
-                        <span className="hidden min-[360px]:inline">Próximos</span>
-                        <ArrowRight className="h-3.5 w-3.5 shrink-0 min-[360px]:ml-1" />
+                        <span className="hidden min-[460px]:inline">Próximos</span>
+                        <ArrowRight className="shrink-0 min-[460px]:ml-1" />
                       </Button>
                     </div>
 
