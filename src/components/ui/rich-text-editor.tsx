@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { richTextHasContent, sanitizeRichTextHtml, toSafeRichTextHtml } from '@/lib/richText';
 
@@ -16,6 +17,7 @@ interface ToolbarAction {
   title: string;
   command: string;
   value?: string;
+  icon?: typeof AlignLeft;
 }
 
 const TOOLBAR_ACTIONS: ToolbarAction[] = [
@@ -26,6 +28,10 @@ const TOOLBAR_ACTIONS: ToolbarAction[] = [
   { label: 'I', title: 'Italico', command: 'italic' },
   { label: 'U', title: 'Sublinhado', command: 'underline' },
   { label: 'Lista', title: 'Lista com marcadores', command: 'insertUnorderedList' },
+  { label: 'Esquerda', title: 'Alinhar à esquerda', command: 'justifyLeft', icon: AlignLeft },
+  { label: 'Centro', title: 'Centralizar', command: 'justifyCenter', icon: AlignCenter },
+  { label: 'Direita', title: 'Alinhar à direita', command: 'justifyRight', icon: AlignRight },
+  { label: 'Justificar', title: 'Justificar', command: 'justifyFull', icon: AlignJustify },
 ];
 
 export function RichTextEditor({
@@ -88,14 +94,15 @@ export function RichTextEditor({
             key={`${action.command}-${action.value ?? action.label}`}
             type="button"
             title={action.title}
+            aria-label={action.title}
             disabled={disabled}
+            onClick={() => applyAction(action)}
             onMouseDown={(event) => {
               event.preventDefault();
-              applyAction(action);
             }}
             className="h-8 rounded-md border border-border bg-background px-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {action.label}
+            {action.icon ? <action.icon className="h-4 w-4" aria-hidden="true" /> : action.label}
           </button>
         ))}
       </div>

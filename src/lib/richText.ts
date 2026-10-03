@@ -13,6 +13,15 @@ const ALLOWED_TAGS = new Set([
   'li',
 ]);
 
+const ALIGNABLE_TAGS = new Set(['div', 'p', 'h1', 'h2', 'ul', 'ol', 'li']);
+const ALLOWED_ALIGNMENTS = new Set(['left', 'center', 'right', 'justify']);
+
+function alignmentAttribute(element: HTMLElement, tag: string) {
+  if (!ALIGNABLE_TAGS.has(tag)) return '';
+  const alignment = (element.style.textAlign || element.getAttribute('align') || '').trim().toLowerCase();
+  return ALLOWED_ALIGNMENTS.has(alignment) ? ` style="text-align: ${alignment};"` : '';
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -51,9 +60,10 @@ function sanitizeNode(node: Node): string {
   const element = node as HTMLElement;
   const tag = element.tagName.toLowerCase();
   const children = Array.from(element.childNodes).map(sanitizeNode).join('');
+  const alignment = alignmentAttribute(element, tag);
 
   if (tag === 'div') {
-    return `<p>${children || '<br>'}</p>`;
+    return `<p${alignment}>${children || '<br>'}</p>`;
   }
 
   if (!ALLOWED_TAGS.has(tag)) {
@@ -65,7 +75,7 @@ function sanitizeNode(node: Node): string {
   }
 
   const normalizedTag = tag === 'b' ? 'strong' : tag === 'i' ? 'em' : tag;
-  return `<${normalizedTag}>${children}</${normalizedTag}>`;
+  return `<${normalizedTag}${alignment}>${children}</${normalizedTag}>`;
 }
 
 export function sanitizeRichTextHtml(value: string | null | undefined) {
