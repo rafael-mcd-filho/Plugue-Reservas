@@ -1010,7 +1010,7 @@ export default function CompanyEvents() {
                       <Input
                         id="event-utm-search"
                         className="h-9 pl-8"
-                        placeholder="Ex.: gbp_goiania, google ou link com UTM"
+                        placeholder="Ex.: minha_campanha, google ou link com UTM"
                         value={eventUtmSearch}
                         onChange={(e) => setEventUtmSearch(e.target.value)}
                         aria-describedby="event-utm-search-help"
