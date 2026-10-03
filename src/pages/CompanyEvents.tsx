@@ -468,7 +468,8 @@ export default function CompanyEvents() {
 
   const { data: eventLog = [], isLoading: eventLogLoading, isFetching: eventLogFetching, isError: eventLogError } = useQuery({
     queryKey: ['company-event-log', companyId, eventTypeFilter, eventPeriodPreset, eventCustomStart, eventCustomEnd, debouncedEventUtmSearch],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
+      const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
       const range = eventPeriodPreset === 'custom'
         ? {
             start: eventCustomStart ? startOfDay(parseISO(eventCustomStart)) : null,
@@ -496,8 +497,8 @@ export default function CompanyEvents() {
             _event_name: eventTypeFilter === EVENT_TYPE_FILTER_ALL ? null : eventTypeFilter,
             _start: range.start?.toISOString() ?? null,
             _end: range.end?.toISOString() ?? null,
-          })
-        : await query;
+          }).abortSignal(requestSignal)
+        : await query.abortSignal(requestSignal);
       if (error) throw error;
 
       const events = (data as TrackingEventRow[]) ?? [];
@@ -510,6 +511,7 @@ export default function CompanyEvents() {
           .select('id, anonymous_id, first_page_url, last_page_url, landing_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, fbclid, fbp, fbc, ip_address, user_agent, accept_language, started_at, last_seen_at')
           .eq('company_id', companyId)
           .in('id', sessionIds)
+          .abortSignal(requestSignal)
         : { data: [], error: null };
 
       if (sessionDetailsResult.error) throw sessionDetailsResult.error;
@@ -524,6 +526,7 @@ export default function CompanyEvents() {
       }));
     },
     enabled: !!companyId && !hasInvalidEventDateRange,
+    retry: false,
     placeholderData: (previousData) => previousData,
     refetchInterval: 30_000,
   });
