@@ -45,6 +45,7 @@ import {
   type DemandEntryModeTrendPoint,
   useDemandTemporalAnalysis,
 } from '@/hooks/useDemandTemporalAnalysis';
+import { useAttendanceOutcomeSeries } from '@/hooks/useAttendanceOutcomeSeries';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { ReportGranularity } from '@/lib/report-filters';
 import { type ReservationOriginKey } from '@/lib/reservation-origin';
@@ -82,7 +83,7 @@ type DemandEvolutionMetric = 'reservations' | 'people';
 
 const DEMAND_LENSES: Array<{ key: DemandEvolutionLens; label: string }> = [
   { key: 'journey', label: 'Jornada' },
-  { key: 'created', label: 'Reservas criadas' },
+  { key: 'created', label: 'Reservas realizadas' },
   { key: 'entry_created', label: 'Entrada por captação' },
   { key: 'entry_visit', label: 'Entrada por visita' },
   { key: 'lead_time', label: 'Antecedência' },
@@ -187,6 +188,17 @@ export default function DemandConversionReport() {
     granularity: filters.granularity,
     enabled: companyTimeZoneResolved && !filters.rangeError,
   });
+  const attendanceQuery = useAttendanceOutcomeSeries({
+    companyId,
+    periodStart: filters.dateOnlyRange.from,
+    periodEnd: filters.dateOnlyRange.to,
+    granularity: filters.granularity,
+    outcome: 'attended',
+    entryMethod: 'all',
+    enabled: companyTimeZoneResolved && !filters.rangeError && evolutionLens === 'created',
+  });
+  const realizedTrend = attendanceQuery.data?.series ?? [];
+  const evolutionQuery = evolutionLens === 'created' ? attendanceQuery : temporalQuery;
   const report = reportQuery.data;
   const temporal = temporalQuery.data;
   const trendHasData = !!report && report.trend.some((point) => (
@@ -223,7 +235,7 @@ export default function DemandConversionReport() {
   const selectedEvolutionHasData = evolutionLens === 'journey'
     ? trendHasData
     : evolutionLens === 'created'
-      ? !!report && report.trend.some((point) => point.created_reservations > 0 || point.created_people > 0)
+      ? realizedTrend.some((point) => point.attended > 0 || point.attended_people > 0)
       : evolutionLens === 'lead_time'
         ? !!temporal && temporal.lead_time_trend.some((point) => point.scheduled_reservations > 0)
         : selectedEntryTrend.some((point) => (
@@ -234,6 +246,7 @@ export default function DemandConversionReport() {
   const refreshReport = () => {
     void reportQuery.refetch();
     void temporalQuery.refetch();
+    if (evolutionLens === 'created') void attendanceQuery.refetch();
   };
 
   return (
@@ -243,12 +256,12 @@ export default function DemandConversionReport() {
       icon={MousePointerClick}
       eyebrow="Relatório avançado"
       updatedAt={report?.meta.generated_at}
-      isRefreshing={(reportQuery.isFetching || temporalQuery.isFetching) && !!report}
-      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching}
+      isRefreshing={(reportQuery.isFetching || temporalQuery.isFetching || attendanceQuery.isFetching) && !!report}
+      ariaBusy={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching || attendanceQuery.isFetching}
       filters={(
         <ReportFilterBar
           filters={filters}
-          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching}
+          isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || temporalQuery.isFetching || attendanceQuery.isFetching}
           onRefresh={refreshReport}
         >
           <div className={REPORT_FILTER_TOGGLE_CLASS}>
@@ -402,6 +415,11 @@ export default function DemandConversionReport() {
                 </div>
               </CardHeader>
               <CardContent>
+                {evolutionLens === 'created' && (
+                  <p className="mb-4 text-xs text-muted-foreground">
+                    Reservas com check-in realizado, agrupadas pela data da reserva. Cancelamentos e no-shows não entram. A opção Pessoas considera a quantidade registrada no check-in ou, se ausente, o tamanho da reserva.
+                  </p>
+                )}
                 {!temporalQuery.isError && selectedEvolutionHasData && isEntryEvolution && (
                   <section className="mb-4 space-y-2.5" aria-labelledby="entry-evolution-summary-title">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
@@ -455,11 +473,13 @@ export default function DemandConversionReport() {
                     </div>
                   </section>
                 )}
-                {temporalQuery.isError && evolutionLens !== 'journey' && evolutionLens !== 'created' ? (
+                {evolutionLens === 'created' && attendanceQuery.isPending ? (
+                  <Skeleton className="h-[310px] w-full" aria-label="Carregando reservas realizadas" />
+                ) : evolutionQuery.isError && evolutionLens !== 'journey' ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
                     <AlertCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
                     <p className="mt-3 text-sm font-medium">Não foi possível carregar esta evolução</p>
-                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => temporalQuery.refetch()}>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => evolutionQuery.refetch()}>
                       Tentar novamente
                     </Button>
                   </div>
@@ -484,13 +504,13 @@ export default function DemandConversionReport() {
                           <Area type="monotone" dataKey="completed" name="Reserva finalizada" stroke="hsl(var(--success))" fill="transparent" strokeWidth={2.5} />
                         </AreaChart>
                       ) : evolutionLens === 'created' ? (
-                        <ComposedChart data={report.trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                        <ComposedChart data={realizedTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                           <XAxis dataKey="period" tickFormatter={(value) => formatTrendPeriod(value, filters.granularity)} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
                           <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                           <RechartsTooltip labelFormatter={(value) => formatDate(String(value))} contentStyle={{ borderRadius: 12, borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }} />
                           <Legend iconType="circle" iconSize={7} />
-                          <Bar dataKey={evolutionMetric === 'people' ? 'created_people' : 'created_reservations'} name={evolutionMetric === 'people' ? 'Pessoas' : 'Reservas'} fill="hsl(var(--primary))" radius={[5, 5, 0, 0]} maxBarSize={44} />
+                          <Bar dataKey={evolutionMetric === 'people' ? 'attended_people' : 'attended'} name={evolutionMetric === 'people' ? 'Pessoas' : 'Reservas'} fill="hsl(var(--primary))" radius={[5, 5, 0, 0]} maxBarSize={44} />
                         </ComposedChart>
                       ) : evolutionLens === 'lead_time' ? (
                         <ComposedChart data={temporal?.lead_time_trend ?? []} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>

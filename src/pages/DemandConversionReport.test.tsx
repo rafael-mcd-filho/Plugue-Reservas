@@ -8,6 +8,15 @@ import type { DemandTemporalAnalysis } from '@/hooks/useDemandTemporalAnalysis';
 
 const refetch = vi.fn();
 const temporalRefetch = vi.fn();
+const attendanceRefetch = vi.fn();
+const attendanceQueryState = {
+  data: { series: [{ period: '2026-08-01', attended: 7, attended_people: 19 }] },
+  isPending: false, isError: false, isFetching: false, refetch: attendanceRefetch,
+};
+const useAttendanceOutcomeSeriesMock = vi.fn((_params?: unknown) => attendanceQueryState);
+vi.mock('@/hooks/useAttendanceOutcomeSeries', () => ({
+  useAttendanceOutcomeSeries: (params: unknown) => useAttendanceOutcomeSeriesMock(params),
+}));
 let companyTimeZoneResolved = true;
 let reportQueryState: {
   data?: DemandConversionReportData;
@@ -62,7 +71,7 @@ vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   AreaChart: () => <div data-testid="area-chart" />,
   BarChart: ({ children }: { children?: ReactNode }) => <div data-testid="bar-chart">{children}</div>,
-  ComposedChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ComposedChart: ({ children, data }: { children?: ReactNode; data?: unknown }) => <div data-testid="composed-chart" data-points={JSON.stringify(data)}>{children}</div>,
   Area: () => null,
   Bar: ({ dataKey, name, stackId }: { dataKey?: string; name?: string; stackId?: string }) => (
     <div data-testid="bar-series" data-data-key={dataKey} data-stack-id={stackId}>{name}</div>
@@ -306,5 +315,23 @@ describe('DemandConversionReport', () => {
 
     expect(useDemandConversionReportMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByLabelText('Carregando relatório')).toBeInTheDocument();
+  });
+});
+
+
+describe('Reservas realizadas na evolução', () => {
+  it('usa comparecimento pela data da reserva e alterna para pessoas atendidas', () => {
+    companyTimeZoneResolved = true;
+    reportQueryState = { data: report, isPending: false, isError: false, isFetching: false, refetch };
+    render(<MemoryRouter initialEntries={['/?analysis=created']}><DemandConversionReport /></MemoryRouter>);
+    expect(screen.getByRole('tab', { name: 'Reservas realizadas' })).toHaveAttribute('aria-selected', 'true');
+    expect(useAttendanceOutcomeSeriesMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      periodStart: '2026-08-01', periodEnd: '2026-08-20', granularity: 'day',
+      outcome: 'attended', entryMethod: 'all', enabled: true,
+    }));
+    expect(screen.getByTestId('composed-chart')).toHaveAttribute('data-points', JSON.stringify(attendanceQueryState.data.series));
+    expect(within(screen.getByTestId('composed-chart')).getByTestId('bar-series')).toHaveAttribute('data-data-key', 'attended');
+    fireEvent.click(screen.getByRole('button', { name: 'Pessoas' }));
+    expect(within(screen.getByTestId('composed-chart')).getByTestId('bar-series')).toHaveAttribute('data-data-key', 'attended_people');
   });
 });

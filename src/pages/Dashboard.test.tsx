@@ -390,9 +390,11 @@ describe('Dashboard — blocos operacionais protegidos', () => {
 
     renderDashboard();
 
-    expect(screen.getByText('Resumo de Atendimentos')).toBeInTheDocument();
+    expect(screen.queryByText('Resumo de Atendimentos')).not.toBeInTheDocument();
     expect(screen.getByText('Funil de Conversão')).toBeInTheDocument();
-    expect(screen.getByText('Reservas por dia')).toBeInTheDocument();
+    expect(screen.queryByText('Reservas por dia')).not.toBeInTheDocument();
+    expect(screen.getByText('Reservas por empresa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mensal' })).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-report-overview')).not.toBeInTheDocument();
     expect(screen.queryByText('Fila de Espera por Dia')).not.toBeInTheDocument();
     expect(screen.queryByText('Ocupação da capacidade diária')).not.toBeInTheDocument();

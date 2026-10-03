@@ -35,6 +35,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import LiveFunnelPanel from '@/components/LiveFunnelPanel';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import DashboardReportOverview from '@/components/dashboard/DashboardReportOverview';
+import CompanyReservationChart from '@/components/dashboard/CompanyReservationChart';
 import { useCustomerRecurrenceVisitSeries } from '@/hooks/useCustomerRecurrenceVisitSeries';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
@@ -435,7 +436,7 @@ export default function Dashboard() {
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const [reservationVolumeMetric, setReservationVolumeMetric] = useState<'reservations' | 'people'>('reservations');
 
-  const { data: companies = [] } = useQuery({
+  const { data: companies = [], isPending: companiesLoading, isError: companiesError, refetch: refetchCompanies } = useQuery({
     queryKey: ['dashboard-companies'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -516,6 +517,7 @@ export default function Dashboard() {
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations'] });
+          queryClient.invalidateQueries({ queryKey: ['superadmin-company-reservations'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-prev'] });
           if (showCompanyReportOverview) {
             queryClient.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
@@ -747,7 +749,9 @@ export default function Dashboard() {
         <div className="space-y-4" role="status" aria-label="Carregando dados da Dashboard">
           <span className="sr-only">Carregando dados da Dashboard…</span>
           <div aria-hidden="true" className="space-y-4">
-            <div className="h-[140px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
+            {isCompanyContext && (
+              <div className="h-[140px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
+            )}
             <div className="h-[230px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
             {advancedReportsEnabled && (
               <div className="h-[360px] animate-pulse rounded-xl border border-border bg-muted/60 motion-reduce:animate-none" />
@@ -787,6 +791,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI — linha 1: equação de atendimentos + pessoas */}
+          {isCompanyContext && (
           <Card className="border border-border shadow-sm">
             <CardContent className="py-4">
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -901,6 +906,7 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
+          )}
 
           {/* Conversion Funnel */}
           {(
@@ -1101,7 +1107,7 @@ export default function Dashboard() {
           )}
 
 
-          {advancedReportsEnabled && (
+          {advancedReportsEnabled && isCompanyContext && (
             <Card className="border border-border shadow-sm">
               <CardHeader className="pb-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1271,6 +1277,17 @@ export default function Dashboard() {
                 )}
               </CardContent>
             </Card>
+          )}
+
+          {!isCompanyContext && (
+            <CompanyReservationChart
+              companies={companyId === 'all' ? companies : companies.filter((company) => company.id === companyId)}
+              startDate={startDate}
+              endDate={endDate}
+              companiesLoading={companiesLoading}
+              companiesError={companiesError}
+              onRetryCompanies={() => void refetchCompanies()}
+            />
           )}
 
           {showCompanyReportOverview && companyContext && (
