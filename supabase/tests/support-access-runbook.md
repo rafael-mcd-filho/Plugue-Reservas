@@ -1,6 +1,17 @@
 # Suporte com acesso delegado
 
-Tudo foi implementado e verificado localmente. Nenhuma migração, função, credencial ou configuração de produção foi aplicada por este trabalho.
+Implementação publicada em produção em 6 de outubro de 2026, após autorização explícita do usuário. O commit da funcionalidade é `002b008`.
+
+- Site: `https://plugguest.com.br` (projeto Vercel `plugue-reservas`).
+- Banco: Supabase `Reservas`, ref `hdpxqqiudiotanrybvcf`; as duas migrations de suporte foram aplicadas, totalizando 211.
+- As 33 Edge Functions afetadas, incluindo dependências de arquivos compartilhados, foram publicadas e estão ativas. A configuração `verify_jwt` anterior foi preservada em todas elas.
+- Nenhum usuário de suporte ou concessão foi criado durante a publicação. O superadmin pode cadastrá-los na tela **Usuários**, escolhendo o perfil **Suporte** e as empresas permitidas.
+
+Antes da publicação, as 47 funções SQL e 129 políticas afetadas do banco remoto foram comparadas com o baseline local, sem divergências. As definições anteriores, ACLs, policies, constraints e triggers foram salvas em um catálogo privado. Cada função Edge também possui backup individual com suas dependências originais. Isso é um backup dos objetos alterados, não uma cópia dos dados de clientes.
+
+Artefatos de reversão e comprovantes da publicação: `C:/Users/adami/.codex/backups/plugue-reservas/20261006-092436`. Essa pasta fica fora do repositório e do upload da Vercel. O arquivo `rollback-support.sql` foi gerado a partir do catálogo real; o teste local de ida/volta restaura exatamente o catálogo e preserva reservas. O rollback recusa execução se contas, concessões, sessões ou auditoria de suporte já existirem, para preservar esses dados. O enum `support` permanece após a reversão; frontend e funções Edge precisam ser revertidos separadamente.
+
+Verificações após a publicação: bootstrap público por RPC com HTTP 200, APIs de suporte/tabela de sessões/gerenciamento de usuários com HTTP 401 para chamadas anônimas, CORS com o header de delegação nas 33 funções, nenhuma tabela por empresa sem a política de escopo e frontend/chunks de Suporte disponíveis com HTTP 200. Não foi realizado login com uma conta de suporte em produção; nenhuma conta foi criada para esse fim.
 
 ## Verificação local
 
@@ -63,6 +74,8 @@ Migrações futuras que substituam RPCs/políticas ou criem tabelas precisam pre
 
 A checagem TypeScript geral do projeto ainda apresenta erros de tipos em outros módulos. O build e os testes passam, sem diagnósticos nos novos arquivos de Suporte. Deno CLI não estava disponível; os handlers foram executados com mocks e checados usando o compilador TypeScript local.
 
-## Publicação futura
+## Publicação e reversão
 
-Antes de uma publicação autorizada, revisar o diff, aplicar as duas migrações na ordem em um ambiente de homologação, publicar as Edge Functions alteradas e o frontend e testar com três contas: superadmin, suporte com uma empresa e suporte sem concessões. Confirmar que links diretos/API não abrem módulos globais ou outra empresa e que saída/ban/desativação removem a sessão. A publicação em produção não foi executada.
+Para atualizações futuras, revisar o diff, aplicar as duas migrações na ordem em um ambiente de homologação, publicar todas as Edge Functions que dependem dos arquivos compartilhados alterados e o frontend e testar com três contas: superadmin, suporte com uma empresa e suporte sem concessões. Confirmar que links diretos/API não abrem módulos globais ou outra empresa e que saída/ban/desativação removem a sessão.
+
+Para preparar uma reversão, exportar `snapshotQuery` de `support-release-tools.mjs`, executar a consulta de catálogo com a CLI autenticada e guardar o JSON privadamente. `buildRollbackSql` gera a reversão; `run_support_rollback_regression.mjs` verifica ida/volta no schema local. Não executar um rollback antigo depois de outras releases de banco ou depois que usuários de suporte começarem a usar o sistema sem revisar a preservação dos dados.
