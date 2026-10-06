@@ -1,9 +1,9 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assertSuperadmin } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation",
 };
 
 Deno.serve(async (req) => {
@@ -12,44 +12,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
+    const { supabaseAdmin: adminClient } = await assertSuperadmin(req);
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader || "" } },
-    });
-
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized", detail: authError?.message }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const adminClient = createClient(supabaseUrl, serviceKey);
-
-    // Diagnóstico: busca roles diretamente
-    const { data: roleRows, error: roleQueryError } = await adminClient
-      .from("user_roles")
-      .select("role, company_id")
-      .eq("user_id", user.id);
-
-    const isSuperadmin = (roleRows || []).some((r: any) => r.role === "superadmin");
-
-    if (!isSuperadmin) {
-      return new Response(JSON.stringify({
-        error: "Forbidden",
-        user_id: user.id,
-        roles_found: roleRows,
-        roles_error: roleQueryError?.message,
-      }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const results: Record<string, any> = {};
 
@@ -217,7 +181,7 @@ Deno.serve(async (req) => {
     });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
+      status: err.message === "Nao autorizado" ? 401 : err.message.startsWith("Sem permissao") ? 403 : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

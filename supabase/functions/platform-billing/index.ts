@@ -4,6 +4,7 @@ import {
   createSupabaseAdminClient,
   getClientIpAddress,
   isAuthorizedInternalJob,
+  impersonationAuditDetails,
 } from "../_shared/internal-auth.ts";
 import {
   getPlatformAsaasPayment,
@@ -1103,7 +1104,7 @@ Deno.serve(async (req) => {
         await claimPlatformBillingPixRequest(
           context.supabaseAdmin,
           companyId,
-          context.user.id,
+          context.actorUser.id,
         );
 
         const config = await loadStoredPlatformBillingConfig(context.supabaseAdmin);
@@ -1167,11 +1168,12 @@ Deno.serve(async (req) => {
         await auditBillingAction(
           context.supabaseAdmin,
           req,
-          context.user.id,
+          context.actorUser.id,
           "get_company_billing_invoice_pix_qr_code",
           companyId,
           {
             success: true,
+            ...impersonationAuditDetails(context.impersonation),
             invoice_id: invoiceId,
             asaas_payment_id: paymentId,
             billing_type: validatedPayment.billingType,
@@ -1210,11 +1212,12 @@ Deno.serve(async (req) => {
         await auditBillingAction(
           context.supabaseAdmin,
           req,
-          context.user.id,
+          context.actorUser.id,
           "get_company_billing_invoice_pix_qr_code",
           companyId,
           {
             success: false,
+            ...impersonationAuditDetails(context.impersonation),
             invoice_id: invoiceId,
             asaas_payment_id: auditedPaymentId,
             provider_http_status: providerHttpStatus,
@@ -1496,10 +1499,10 @@ Deno.serve(async (req) => {
         await auditBillingAction(
           context.supabaseAdmin,
           req,
-          context.user.id,
+          context.actorUser.id,
           "sync_company_billing_invoices",
           companyId,
-          { success: true, ...sync },
+          { success: true, ...sync, ...impersonationAuditDetails(context.impersonation) },
         );
         return platformBillingJsonResponse({ ok: true, sync });
       } catch (error) {
@@ -1507,10 +1510,10 @@ Deno.serve(async (req) => {
         await auditBillingAction(
           context.supabaseAdmin,
           req,
-          context.user.id,
+          context.actorUser.id,
           "sync_company_billing_invoices",
           companyId,
-          { success: false, error: message },
+          { success: false, error: message, ...impersonationAuditDetails(context.impersonation) },
         );
         throw error;
       }

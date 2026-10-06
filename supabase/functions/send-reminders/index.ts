@@ -18,7 +18,7 @@ import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret",
 };
 
 const REMINDER_TYPES = ["reminder_1h", "reminder_24h"];

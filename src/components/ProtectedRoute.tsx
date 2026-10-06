@@ -18,12 +18,12 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, allowedRoles, requiredCompanyPermission }: ProtectedRouteProps) {
   const { user, roles, loading } = useAuth();
-  const { isImpersonatingCompany, effectiveRoles } = useImpersonation();
+  const { isImpersonatingCompany, effectiveRoles, impersonationLoading } = useImpersonation();
   const { hasPermission, permissionsLoading } = useCompanyPermissions();
   const location = useLocation();
   const locationState = location.state as PostLoginNavigationState | null;
 
-  if (loading || permissionsLoading) {
+  if (loading || permissionsLoading || impersonationLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

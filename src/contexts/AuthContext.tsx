@@ -3,8 +3,9 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
 import { isStrongPassword, normalizePasswordValidationMessage, PASSWORD_REQUIREMENTS_TEXT } from '@/lib/validation';
+import type { AppRole } from '@/lib/companyPermissions';
+import { clearImpersonationSession } from '@/lib/impersonationSession';
 
-type AppRole = 'superadmin' | 'admin' | 'operator';
 
 interface Profile {
   id: string;
@@ -83,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return [];
     }
 
-    return ((data ?? []) as Membership[]);
+    return ((data ?? []) as unknown as Membership[]);
   };
 
   const loadUserData = async (currentSession: Session | null, options?: { background?: boolean }) => {
@@ -241,6 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    clearImpersonationSession();
     await supabase.auth.signOut();
     setProfile(null);
     setRoles([]);

@@ -19,6 +19,8 @@ import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
+const SupportDashboard = lazyWithReload(() => import("@/pages/SupportDashboard"));
+const SupportCompanies = lazyWithReload(() => import("@/pages/SupportCompanies"));
 const DemandConversionReport = lazyWithReload(() => import("@/pages/DemandConversionReport"));
 const AttendanceLossesReport = lazyWithReload(() => import("@/pages/AttendanceLossesReport"));
 const OccupancyCapacityReport = lazyWithReload(() => import("@/pages/OccupancyCapacityReport"));
@@ -150,6 +152,22 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   );
 }
 
+function PlatformReadRoute({ page }: { page: 'dashboard' | 'companies' }) {
+  const { roles } = useAuth();
+  const isSupport = roles.includes('support') && !roles.includes('superadmin');
+  return (
+    <ProtectedRoute allowedRoles={['superadmin', 'support']}>
+      <AppLayout>
+        <SuspenseRoute fallback={<PanelPageSkeleton />}>
+          {page === 'dashboard'
+            ? (isSupport ? <SupportDashboard /> : <Dashboard />)
+            : (isSupport ? <SupportCompanies /> : <Companies />)}
+        </SuspenseRoute>
+      </AppLayout>
+    </ProtectedRoute>
+  );
+}
+
 function CompanyAdminRoute({
   allowedRoles,
   requiredCompanyPermission,
@@ -207,7 +225,7 @@ function HomeRedirect() {
   const { profile, roles, loading } = useAuth();
 
   if (loading) return null;
-  if (roles.includes("superadmin")) return <Navigate to="/dashboard" replace />;
+  if (roles.includes("superadmin") || roles.includes("support")) return <Navigate to="/dashboard" replace />;
   if (profile?.company_id) {
     return <CompanySlugRedirect companyId={profile.company_id} />;
   }
@@ -333,19 +351,11 @@ const App = () => (
 
               <Route
                 path="/dashboard"
-                element={
-                  <SuperadminRoute>
-                    <Dashboard />
-                  </SuperadminRoute>
-                }
+                element={<PlatformReadRoute page="dashboard" />}
               />
               <Route
                 path="/empresas"
-                element={
-                  <SuperadminRoute>
-                    <Companies />
-                  </SuperadminRoute>
-                }
+                element={<PlatformReadRoute page="companies" />}
               />
               <Route
                 path="/empresas/:id"

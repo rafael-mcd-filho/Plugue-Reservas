@@ -23,6 +23,7 @@ skills-lock.json
 
 # Supabase local CLI state
 supabase/.temp/
+.vercel/
 
 # Local test/scratch files
 playwright-*.png

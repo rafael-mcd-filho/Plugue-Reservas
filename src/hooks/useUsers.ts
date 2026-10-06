@@ -10,6 +10,7 @@ export interface ManagedUser {
   phone: string;
   company_id: string | null;
   roles: string[];
+  support_company_ids?: string[];
   company_panel_permission_overrides?: Partial<Record<CompanyPanelPermission, boolean>> | null;
   is_banned: boolean;
   last_sign_in: string | null;
@@ -50,7 +51,7 @@ export function useUpdateUser() {
   const { invokeManageUser } = useManageUserInvoker();
 
   return useMutation({
-    mutationFn: async (data: { user_id: string; full_name?: string; email?: string; phone?: string; company_id?: string | null; role?: string }) => {
+    mutationFn: async (data: { user_id: string; full_name?: string; email?: string; phone?: string; company_id?: string | null; role?: string; support_company_ids?: string[] }) => {
       return invokeManageUser({ action: 'update_user', ...data });
     },
     onSuccess: () => {

@@ -1,4 +1,4 @@
-export const APP_ROLES = ['superadmin', 'admin', 'operator'] as const;
+export const APP_ROLES = ['superadmin', 'support', 'admin', 'operator'] as const;
 
 export type AppRole = typeof APP_ROLES[number];
 

@@ -81,6 +81,7 @@ async function expirePaymentLocally(
       updated_at: now,
     })
     .eq("id", payment.reservation_id)
+    .eq("company_id", payment.company_id)
     .eq("status", "pending_payment");
 
   if (reservationError) throw new Error(reservationError.message);

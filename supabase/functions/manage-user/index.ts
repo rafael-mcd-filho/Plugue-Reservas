@@ -1,9 +1,14 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
+import { getRequestAuthContext, impersonationAuditDetails, type SupabaseAdminClient, type SupabaseRequestClient } from "../_shared/internal-auth.ts";
+import {
+  assertAssignableManagedRole,
+  normalizeSupportCompanyIds,
+  type SupportImpersonationContext,
+} from "../_shared/support-authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 type UserRoleRow = {
@@ -36,10 +41,13 @@ type OperatorAssignablePanelPermission = typeof OPERATOR_ASSIGNABLE_PANEL_PERMIS
 type CompanyPanelPermissionOverrides = Partial<Record<OperatorAssignablePanelPermission, boolean>>;
 
 type CallerContext = {
-  supabaseAdmin: ReturnType<typeof createClient>;
+  supabaseAdmin: SupabaseAdminClient;
   callerId: string;
+  effectiveUserId: string;
   isSuperadmin: boolean;
   adminCompanyIds: string[];
+  impersonation: SupportImpersonationContext | null;
+  supabaseUser: SupabaseRequestClient;
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -121,39 +129,22 @@ function isStrongPassword(value: string) {
 }
 
 async function verifyCaller(req: Request): Promise<CallerContext> {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) throw new Error("Nao autorizado: sem header de autenticacao");
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-  const { data: { user: caller }, error: callerError } = await supabaseAdmin.auth.getUser(token);
-  if (callerError || !caller) {
-    console.error("verifyCaller getUser failed:", callerError?.message ?? "no user returned");
-    throw new Error(`Nao autorizado: token invalido (${callerError?.message ?? "usuario nulo"})`);
-  }
-  const { data: callerRoles, error: callerRolesError } = await supabaseAdmin
-    .from("user_roles")
-    .select("role, company_id")
-    .eq("user_id", caller.id);
-
-  if (callerRolesError) throw new Error(callerRolesError.message);
-
-  const roles = (callerRoles ?? []) as Array<{ role: string; company_id: string | null }>;
-  const isSuperadmin = roles.some((role) => role.role === "superadmin");
+  const context = await getRequestAuthContext(req);
+  if (!context) throw new Error("Nao autorizado: token invalido");
+  const roles = context.isSupport && !context.impersonation ? [] : context.roleRows;
+  const isSuperadmin = !context.isSupport && roles.some((role) => role.role === "superadmin");
   const adminCompanyIds = [...new Set(
     roles
       .filter((role) => role.role === "admin" && role.company_id)
       .map((role) => role.company_id as string),
   )];
 
-  return { supabaseAdmin, callerId: caller.id, isSuperadmin, adminCompanyIds };
+  return { supabaseAdmin: context.supabaseAdmin, supabaseUser: context.supabaseUser,
+    callerId: context.actorUser.id, effectiveUserId: context.user.id,
+    isSuperadmin, adminCompanyIds, impersonation: context.impersonation };
 }
 
-async function getUserContext(supabaseAdmin: ReturnType<typeof createClient>, userId: string) {
+async function getUserContext(supabaseAdmin: SupabaseAdminClient, userId: string) {
   const [{ data: roles, error: rolesError }, { data: profile, error: profileError }] = await Promise.all([
     supabaseAdmin
       .from("user_roles")
@@ -176,7 +167,8 @@ async function getUserContext(supabaseAdmin: ReturnType<typeof createClient>, us
 }
 
 function getManagedRole(roles: UserRoleRow[]) {
-  return roles.find((role) => role.role === "admin")
+  return roles.find((role) => role.role === "support")
+    ?? roles.find((role) => role.role === "admin")
     ?? roles.find((role) => role.role === "operator")
     ?? null;
 }
@@ -252,7 +244,7 @@ function getAppOrigin(req: Request) {
 }
 
 async function generateRecoveryAccessLink(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   req: Request,
   email: string,
 ) {
@@ -285,12 +277,39 @@ function assertCallerCanManageUsers(context: CallerContext) {
   }
 }
 
+async function syncSupportCompanyAccess(context: CallerContext, userId: string, companyIds: string[]) {
+  if (!context.isSuperadmin || context.impersonation) {
+    throw new Error("Sem permissao: apenas superadmins podem gerenciar suporte");
+  }
+  // The database validates both the grantor and every company. Never use service_role here.
+  const { error } = await context.supabaseUser.rpc("set_support_company_access", {
+    _user_id: userId,
+    _company_ids: companyIds,
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function assertSupportCompaniesExist(context: CallerContext, companyIds: string[]) {
+  if (companyIds.length === 0) return;
+  const { data, error } = await context.supabaseAdmin.from("companies")
+    .select("id").in("id", companyIds);
+  if (error) throw new Error(error.message);
+  const foundIds = new Set((data ?? []).map((company) => company.id));
+  if (companyIds.some((id) => !foundIds.has(id))) {
+    throw new Error("support_company_ids contem uma empresa inexistente");
+  }
+}
+
 function withImpersonationAuditDetails(
   details: Record<string, unknown>,
   scopeCompanyId?: string | null,
   impersonatedBySuperadmin?: boolean,
   effectiveRole: "admin" | "operator" | null = "admin",
+  supportImpersonation: SupportImpersonationContext | null = null,
 ) {
+  if (supportImpersonation) {
+    return { ...details, ...impersonationAuditDetails(supportImpersonation) };
+  }
   if (!impersonatedBySuperadmin || !scopeCompanyId) {
     return details;
   }
@@ -319,7 +338,7 @@ function assertCallerCanAccessCompany(
 }
 
 async function buildAuthUserUpdates(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
   input: {
     full_name?: string;
@@ -353,7 +372,7 @@ async function buildAuthUserUpdates(
 }
 
 async function syncProfileAndAuth(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
   currentProfile: ProfileRow | null,
   input: {
@@ -437,7 +456,7 @@ async function syncProfileAndAuth(
 }
 
 async function clearCompanyPanelPermissionOverrides(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
   companyId?: string | null,
 ) {
@@ -455,7 +474,7 @@ async function clearCompanyPanelPermissionOverrides(
 }
 
 async function syncCompanyPanelPermissionOverrides(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
   companyId: string,
   overrides: CompanyPanelPermissionOverrides | null,
@@ -491,8 +510,8 @@ async function assertCallerCanManageTarget(
 
   if (context.isSuperadmin && !isScopedSuperadmin) return;
 
-  if (targetRoles.some((role) => role.role === "superadmin")) {
-    throw new Error("Admins nao podem gerenciar superadmins");
+  if (targetRoles.some((role) => role.role === "superadmin" || role.role === "support")) {
+    throw new Error("Admins nao podem gerenciar usuarios globais");
   }
 
   const companyIds = [...new Set([
@@ -507,7 +526,7 @@ async function assertCallerCanManageTarget(
 }
 
 async function countOtherActiveAdmins(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   companyId: string,
   excludedUserId: string,
 ) {
@@ -538,7 +557,7 @@ async function countOtherActiveAdmins(
 }
 
 async function ensureCompanyRetainsActiveAdmin(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   companyId: string | null,
   userId: string,
 ) {
@@ -551,7 +570,7 @@ async function ensureCompanyRetainsActiveAdmin(
 }
 
 async function writeAuditLog(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   callerId: string,
   action: string,
   userId: string,
@@ -567,7 +586,7 @@ async function writeAuditLog(
 }
 
 async function rollbackCreatedUser(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
 ) {
   const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
@@ -585,7 +604,11 @@ Deno.serve(async (req) => {
     const context = await verifyCaller(req);
     const body = await req.json();
     const { action } = body;
-    const scopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
+    const requestedScopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
+    if (context.impersonation && requestedScopeCompanyId && requestedScopeCompanyId !== context.impersonation.companyId) {
+      throw new Error("Sem permissao para esta empresa na sessao de suporte");
+    }
+    const scopeCompanyId = context.impersonation?.companyId ?? requestedScopeCompanyId;
     const impersonatedBySuperadmin = context.isSuperadmin && body.impersonated_by_superadmin === true;
     const impersonationEffectiveRole = impersonatedBySuperadmin
       ? normalizeEffectiveRole(body.effective_role)
@@ -634,7 +657,7 @@ Deno.serve(async (req) => {
           userIds = userIds.filter((userId) => {
             const userRoles = roleMap.get(userId) ?? [];
 
-            if (userRoles.some((role) => role.role === "superadmin")) {
+            if (userRoles.some((role) => role.role === "superadmin" || role.role === "support")) {
               return false;
             }
 
@@ -651,6 +674,7 @@ Deno.serve(async (req) => {
         }
 
         let profiles: ProfileRow[] = [];
+        let supportAccessRows: Array<{ user_id: string; company_id: string }> = [];
         let permissionRows: Array<{ user_id: string; permission_overrides: CompanyPanelPermissionOverrides | null }> = [];
         if (userIds.length > 0) {
           const profilesResult = await context.supabaseAdmin
@@ -660,6 +684,14 @@ Deno.serve(async (req) => {
 
           if (profilesResult.error) throw new Error(profilesResult.error.message);
           profiles = (profilesResult.data ?? []) as ProfileRow[];
+
+          const supportUserIds = userIds.filter((uid) => roleMap.get(uid)?.some((row) => row.role === "support"));
+          if (shouldListAllUsers && supportUserIds.length > 0) {
+            const accessResult = await context.supabaseAdmin.from("support_company_access")
+              .select("user_id, company_id").in("user_id", supportUserIds);
+            if (accessResult.error) throw new Error(accessResult.error.message);
+            supportAccessRows = accessResult.data ?? [];
+          }
 
           if (listCompanyId) {
             const permissionResult = await context.supabaseAdmin
@@ -690,6 +722,7 @@ Deno.serve(async (req) => {
               company_id: managedRole?.company_id ?? profile?.company_id ?? null,
               roles: [...new Set(userRoles.map((role) => role.role))],
               company_panel_permission_overrides: permissionMap.get(uid) ?? null,
+              support_company_ids: supportAccessRows.filter((row) => row.user_id === uid).map((row) => row.company_id),
               is_banned: profile?.is_active === false,
               last_sign_in: null,
               created_at: profile?.created_at || "",
@@ -753,6 +786,7 @@ Deno.serve(async (req) => {
             scopeCompanyId,
             impersonatedBySuperadmin,
             impersonationEffectiveRole,
+            context.impersonation,
           ),
         );
 
@@ -792,9 +826,21 @@ Deno.serve(async (req) => {
         const currentRole = getManagedRole(roles);
         const currentCompanyId = currentRole?.company_id ?? profile?.company_id ?? null;
         const nextRole = role ?? currentRole?.role ?? "operator";
-        const nextCompanyId = company_id !== undefined ? (company_id || null) : currentCompanyId;
+        assertAssignableManagedRole(nextRole, context.isSuperadmin && !scopeCompanyId);
+        const nextCompanyId = nextRole === "support" ? null : company_id !== undefined ? (company_id || null) : currentCompanyId;
+        const supportCompanyIds = body.support_company_ids === undefined
+          ? undefined : normalizeSupportCompanyIds(body.support_company_ids);
+        if (nextRole !== "support" && supportCompanyIds !== undefined) {
+          throw new Error("support_company_ids so pode ser usado para usuarios de suporte");
+        }
+        if (nextRole === "support" && company_id) {
+          throw new Error("Usuarios de suporte nao podem ter company_id");
+        }
+        if (nextRole === "support" && supportCompanyIds !== undefined) {
+          await assertSupportCompaniesExist(context, supportCompanyIds);
+        }
 
-        if (role === "superadmin") {
+        if (roles.some((row) => row.role === "superadmin") && (role !== undefined || company_id !== undefined)) {
           throw new Error("Este fluxo nao gerencia superadmins");
         }
 
@@ -817,10 +863,10 @@ Deno.serve(async (req) => {
           user_id,
           profile,
           {
-            full_name: normalizedFullName,
+            full_name: normalizedFullName ?? undefined,
             email: normalizedEmail,
             phone: normalizedPhone,
-            company_id: company_id !== undefined ? nextCompanyId : undefined,
+            company_id: company_id !== undefined || nextRole === "support" ? nextCompanyId : undefined,
           },
         );
 
@@ -829,7 +875,7 @@ Deno.serve(async (req) => {
             .from("user_roles")
             .delete()
             .eq("user_id", user_id)
-            .in("role", ["admin", "operator"]);
+            .in("role", ["admin", "operator", "support"]);
 
           if (deleteRolesError) throw new Error(deleteRolesError.message);
 
@@ -850,6 +896,14 @@ Deno.serve(async (req) => {
             .in("role", ["admin", "operator"]);
 
           if (companyRolesError) throw new Error(companyRolesError.message);
+        }
+
+        if (nextRole === "support" && (supportCompanyIds !== undefined || currentRole?.role !== "support")) {
+          await syncSupportCompanyAccess(context, user_id, supportCompanyIds ?? []);
+        } else if (currentRole?.role === "support" && nextRole !== "support") {
+          const { error: accessError } = await context.supabaseAdmin.from("support_company_access")
+            .delete().eq("user_id", user_id);
+          if (accessError) throw new Error(accessError.message);
         }
 
         const companyChanged = currentCompanyId !== nextCompanyId;
@@ -886,10 +940,12 @@ Deno.serve(async (req) => {
               company_panel_permission_overrides: nextRole === "operator"
                 ? (normalizedPermissionOverrides ?? null)
                 : null,
+              ...(supportCompanyIds === undefined ? {} : { support_company_ids: supportCompanyIds }),
             },
             scopeCompanyId,
             impersonatedBySuperadmin,
             impersonationEffectiveRole,
+            context.impersonation,
           ),
         );
 
@@ -927,6 +983,7 @@ Deno.serve(async (req) => {
             scopeCompanyId,
             impersonatedBySuperadmin,
             impersonationEffectiveRole,
+            context.impersonation,
           ),
         );
 
@@ -971,6 +1028,7 @@ Deno.serve(async (req) => {
             scopeCompanyId,
             impersonatedBySuperadmin,
             impersonationEffectiveRole,
+            context.impersonation,
           ),
         );
 
@@ -980,6 +1038,9 @@ Deno.serve(async (req) => {
       }
 
       case "update_my_account": {
+        if (context.impersonation) {
+          throw new Error("Sem permissao para alterar credenciais durante a impersonacao");
+        }
         const { full_name, email, password } = body;
 
         const normalizedFullName = full_name !== undefined ? normalizeFullNameValue(full_name) : undefined;
@@ -1016,7 +1077,7 @@ Deno.serve(async (req) => {
           context.callerId,
           profile,
           {
-            full_name: normalizedFullName,
+            full_name: normalizedFullName ?? undefined,
             email: normalizedEmail,
             password: normalizedPassword ?? undefined,
           },
@@ -1089,6 +1150,7 @@ Deno.serve(async (req) => {
             scopeCompanyId,
             impersonatedBySuperadmin,
             impersonationEffectiveRole,
+            context.impersonation,
           ),
         );
 
@@ -1103,15 +1165,31 @@ Deno.serve(async (req) => {
         const { users: seedUsers } = body;
         if (!seedUsers || !Array.isArray(seedUsers)) throw new Error("users array required");
 
-        const results = [];
+        const results: Array<Record<string, unknown>> = [];
 
         for (const userPayload of seedUsers) {
+          const seedRole = userPayload.role ?? "admin";
+          let supportCompanyIds: string[] = [];
+          try {
+            assertAssignableManagedRole(seedRole, context.isSuperadmin && !scopeCompanyId);
+            if (seedRole === "support") {
+              if (userPayload.company_id) throw new Error("Usuarios de suporte nao podem ter company_id");
+              supportCompanyIds = normalizeSupportCompanyIds(userPayload.support_company_ids ?? []);
+              await assertSupportCompaniesExist(context, supportCompanyIds);
+            } else if (userPayload.support_company_ids !== undefined) {
+              throw new Error("support_company_ids so pode ser usado para usuarios de suporte");
+            }
+          } catch (error: any) {
+            results.push({ email: userPayload.email, error: error.message });
+            continue;
+          }
+          const seedCompanyId = seedRole === "support" ? null : userPayload.company_id;
           const normalizedEmail = normalizeEmailValue(userPayload.email);
           const normalizedPhone = normalizePhoneValue(userPayload.phone);
           const normalizedPassword = normalizePasswordValue(userPayload.password);
           const normalizedPermissionOverrides = normalizeCompanyPanelPermissionOverrides(userPayload.company_panel_permission_overrides);
 
-          if (!userPayload.company_id) {
+          if (seedRole !== "support" && !seedCompanyId) {
             results.push({ email: userPayload.email, error: "company_id e obrigatorio" });
             continue;
           }
@@ -1132,19 +1210,14 @@ Deno.serve(async (req) => {
           }
 
           try {
-            assertCallerCanAccessCompany(context, userPayload.company_id, scopeCompanyId);
+            assertCallerCanAccessCompany(context, seedCompanyId, scopeCompanyId);
           } catch (error: any) {
             results.push({ email: userPayload.email, error: error.message });
             continue;
           }
 
-          if (!context.isSuperadmin && !context.adminCompanyIds.includes(userPayload.company_id)) {
+          if (!context.isSuperadmin && !context.adminCompanyIds.includes(seedCompanyId)) {
             results.push({ email: userPayload.email, error: "Admins so podem criar usuarios na propria empresa" });
-            continue;
-          }
-
-          if (userPayload.role === "superadmin") {
-            results.push({ email: userPayload.email, error: "Este fluxo nao cria superadmins" });
             continue;
           }
 
@@ -1165,7 +1238,7 @@ Deno.serve(async (req) => {
           const { error: profileError } = await context.supabaseAdmin
             .from("profiles")
             .update({
-              company_id: userPayload.company_id,
+              company_id: seedCompanyId,
               phone: normalizedPhone,
               full_name: userPayload.full_name,
               is_active: true,
@@ -1182,8 +1255,8 @@ Deno.serve(async (req) => {
             .from("user_roles")
             .insert({
               user_id: newUser.user.id,
-              role: userPayload.role || "admin",
-              company_id: userPayload.company_id,
+              role: seedRole,
+              company_id: seedCompanyId,
             });
 
           if (roleError) {
@@ -1192,13 +1265,23 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          if ((userPayload.role || "admin") === "operator") {
+          if (seedRole === "support") {
+            try {
+              await syncSupportCompanyAccess(context, newUser.user.id, supportCompanyIds);
+            } catch (accessError: any) {
+              await rollbackCreatedUser(context.supabaseAdmin, newUser.user.id);
+              results.push({ email: normalizedEmail, error: accessError.message });
+              continue;
+            }
+          }
+
+          if (seedRole === "operator") {
             try {
               await syncCompanyPanelPermissionOverrides(
                 context.supabaseAdmin,
                 newUser.user.id,
-                userPayload.company_id,
-                normalizedPermissionOverrides,
+                seedCompanyId,
+                normalizedPermissionOverrides ?? null,
               );
             } catch (permissionError: any) {
               await rollbackCreatedUser(context.supabaseAdmin, newUser.user.id);
@@ -1218,15 +1301,17 @@ Deno.serve(async (req) => {
                   target_user_id: newUser.user.id,
                   target_name: userPayload.full_name,
                   email: normalizedEmail,
-                  role: userPayload.role || "admin",
-                  company_id: userPayload.company_id,
-                  company_panel_permission_overrides: (userPayload.role || "admin") === "operator"
+                  role: seedRole,
+                  company_id: seedCompanyId,
+                  ...(seedRole === "support" ? { support_company_ids: supportCompanyIds } : {}),
+                  company_panel_permission_overrides: seedRole === "operator"
                     ? (normalizedPermissionOverrides ?? null)
                     : null,
                 },
                 scopeCompanyId,
                 impersonatedBySuperadmin,
                 impersonationEffectiveRole,
+                context.impersonation,
               ),
             );
           } catch (auditError) {
@@ -1266,10 +1351,11 @@ Deno.serve(async (req) => {
   } catch (err: any) {
     const message = err.message || "Erro interno";
     const status = message.includes("Nao autorizado") ? 401
-      : message.includes("Apenas admins e superadmins") ? 403
+      : message.includes("Apenas admins e superadmins") || message.startsWith("Sem permissao") ? 403
       : message.includes("Admins nao podem") || message.includes("Admins so podem") ? 403
       : message.includes("Este fluxo nao exclui superadmins") ? 403
-      : message.includes("Informe um") || message.includes("A senha deve") || message.includes("Nenhum dado foi informado") ? 400
+      : message.includes("Informe um") || message.includes("A senha deve") || message.includes("Nenhum dado foi informado")
+        || message.startsWith("Perfil invalido") || message.includes("support_company_ids") || message.startsWith("Usuarios de suporte") ? 400
       : message.includes("Cada empresa precisa") ? 409
       : 500;
 

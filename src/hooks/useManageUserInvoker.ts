@@ -41,7 +41,7 @@ export async function invokeManageUserRequest(body: Record<string, unknown>) {
 }
 
 export function useManageUserInvoker() {
-  const { isImpersonatingCompany, effectiveRole, scopeCompanyId } = useImpersonation();
+  const { isImpersonatingCompany, effectiveRole, scopeCompanyId, isSuperadmin, impersonatedUserId } = useImpersonation();
 
   const invokeManageUser = async <T = any>(body: Record<string, unknown>) => {
     const requestBody = {
@@ -49,7 +49,7 @@ export function useManageUserInvoker() {
       ...(isImpersonatingCompany
         ? {
             scope_company_id: scopeCompanyId,
-            impersonated_by_superadmin: true,
+            impersonated_by_superadmin: isSuperadmin,
             effective_role: effectiveRole,
           }
         : {}),
@@ -70,6 +70,6 @@ export function useManageUserInvoker() {
 
   return {
     invokeManageUser,
-    manageUserScopeKey: isImpersonatingCompany ? `${scopeCompanyId ?? 'company'}:${effectiveRole ?? 'unknown'}` : 'global',
+    manageUserScopeKey: isImpersonatingCompany ? `${scopeCompanyId ?? 'company'}:${effectiveRole ?? 'unknown'}:${impersonatedUserId ?? 'unknown'}` : 'global',
   };
 }

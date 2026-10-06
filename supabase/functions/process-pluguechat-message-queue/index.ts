@@ -11,7 +11,7 @@ import {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret",
 };
 
 const BATCH_SIZE = 20;
@@ -105,13 +105,15 @@ async function finalizeProviderQueuedMessage(
   await updateBroadcastRecipient(supabaseAdmin, item, finalStatus, errorDetails);
 }
 
-async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now: string) {
-  const { data: providerQueuedItems, error } = await supabaseAdmin
+async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now: string, companyId: string | null) {
+  let providerQueuedQuery = supabaseAdmin
     .from("pluguechat_message_queue")
     .select("*")
     .eq("status", "provider_queued")
     .order("provider_status_checked_at", { ascending: true })
     .limit(STATUS_CHECK_BATCH_SIZE);
+  if (companyId) providerQueuedQuery = providerQueuedQuery.eq("company_id", companyId);
+  const { data: providerQueuedItems, error } = await providerQueuedQuery;
 
   if (error) {
     console.error("pluguechat provider status fetch error", error);
@@ -120,8 +122,7 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
 
   const recheckCutoff = new Date(Date.parse(now) - SENT_RECHECK_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const remainingLimit = Math.max(0, STATUS_CHECK_BATCH_SIZE - (providerQueuedItems?.length ?? 0));
-  const { data: sentWithoutProviderStatus, error: sentFetchError } = remainingLimit > 0
-    ? await supabaseAdmin
+  let sentQuery = supabaseAdmin
       .from("pluguechat_message_queue")
       .select("*")
       .eq("status", "sent")
@@ -129,8 +130,10 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
       .not("provider_message_id", "is", null)
       .gte("created_at", recheckCutoff)
       .order("last_attempt_at", { ascending: false })
-      .limit(remainingLimit)
-    : { data: [], error: null };
+      .limit(remainingLimit);
+  if (companyId) sentQuery = sentQuery.eq("company_id", companyId);
+  const { data: sentWithoutProviderStatus, error: sentFetchError } = remainingLimit > 0
+    ? await sentQuery : { data: [], error: null };
 
   if (sentFetchError) {
     console.error("pluguechat sent status recheck fetch error", sentFetchError);
@@ -276,10 +279,13 @@ Deno.serve(async (req) => {
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
+    const body = await req.json().catch(() => ({}));
+    const requestedCompanyId = typeof body.company_id === "string" && body.company_id.length > 0
+      ? body.company_id : null;
     const now = new Date().toISOString();
 
     // Busca itens pendentes prontos para envio
-    const { data: items, error: fetchError } = await supabaseAdmin
+    let itemsQuery = supabaseAdmin
       .from("pluguechat_message_queue")
       .select("*")
       .eq("status", "pending")
@@ -290,6 +296,8 @@ Deno.serve(async (req) => {
       .order("scheduled_for", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(BATCH_SIZE);
+    if (requestedCompanyId) itemsQuery = itemsQuery.eq("company_id", requestedCompanyId);
+    const { data: items, error: fetchError } = await itemsQuery;
 
     if (fetchError) {
       console.error("process-pluguechat-queue fetch error", fetchError);
@@ -300,7 +308,7 @@ Deno.serve(async (req) => {
     }
 
     if (!items || items.length === 0) {
-      const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now);
+      const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId);
 
       return new Response(JSON.stringify({
         sent: 0,
@@ -465,7 +473,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now);
+    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId);
 
     return new Response(JSON.stringify({
       sent,

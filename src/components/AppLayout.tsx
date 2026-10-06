@@ -90,6 +90,7 @@ interface NavItem {
 
 const ROLE_LABELS: Record<AppRole, string> = {
   superadmin: 'Superadmin',
+  support: 'Suporte',
   admin: 'Admin',
   operator: 'Operador',
 };
@@ -166,6 +167,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const systemLogo = systemBranding?.system_logo_url || '';
   useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
   const userId = user?.id;
+  const isSupportAccount = roles.includes('support');
 
   const {
     isImpersonatingCompany,
@@ -417,14 +419,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           description: 'Vis\u00E3o consolidada',
           icon: BarChart3,
           path: '/dashboard',
-          showFor: ['superadmin'],
+          showFor: ['superadmin', 'support'],
         },
         {
           label: 'Empresas',
           description: 'Cadastros e acesso',
           icon: Building2,
           path: '/empresas',
-          showFor: ['superadmin'],
+          showFor: ['superadmin', 'support'],
           matchPrefix: true,
         },
         {
@@ -648,13 +650,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       slug: slug ?? null,
       path: `${location.pathname}${location.search || ''}`,
       metadata: {
-        area: slug ? 'company_panel' : 'superadmin_panel',
+        area: slug ? 'company_panel' : (isSupportAccount ? 'support_panel' : 'superadmin_panel'),
         ...auditMetadata,
       },
     }).catch((error) => {
       reportAccessAuditFailure('panel access', error);
     });
-  }, [auditMetadata, loading, location.pathname, location.search, slug, userId]);
+  }, [auditMetadata, isSupportAccount, loading, location.pathname, location.search, slug, userId]);
 
   useEffect(() => {
     const previousHtmlOverflow = document.documentElement.style.overflow;
@@ -700,14 +702,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   ]);
 
   const handleSignOut = async () => {
-    stopImpersonation();
+    await stopImpersonation();
     await signOut();
     navigate('/login');
   };
 
-  const handleExitImpersonation = () => {
-    stopImpersonation();
-    navigate('/dashboard');
+  const handleExitImpersonation = async () => {
+    await stopImpersonation();
+    navigate(roles.includes('support') ? '/empresas' : '/dashboard');
   };
 
   const renderNavLink = (item: NavItem) => {
@@ -1019,7 +1021,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <p className="mt-0.5 text-xs text-sidebar-foreground/75">{rolesLabel}</p>
               </div>
 
-              <Button
+              {!roles.includes('support') && <Button
                 asChild
                 variant="ghost"
                 className="mt-2 w-full justify-start gap-2 rounded-md text-sidebar-foreground/75 hover:bg-sidebar-border hover:text-sidebar-foreground"
@@ -1028,7 +1030,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   <User className="h-4 w-4" />
                   Meu perfil
                 </Link>
-              </Button>
+              </Button>}
 
               <Button
                 asChild

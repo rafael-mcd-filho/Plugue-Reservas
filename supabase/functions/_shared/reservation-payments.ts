@@ -3,7 +3,7 @@ import type { AsaasBillingType } from "./asaas.ts";
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-job-secret, asaas-access-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret, asaas-access-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 export interface ReservationPaymentRecord {
@@ -395,6 +395,7 @@ export async function markReservationPaymentProviderOutcome(
       .from("reservations")
       .update({ status: "payment_cancelled", updated_at: checkedAtIso })
       .eq("id", payment.reservation_id)
+      .eq("company_id", payment.company_id)
       .in("status", ["pending_payment", "confirmed"]);
   }
 
@@ -489,6 +490,7 @@ export async function confirmReservationPayment(
     .from("reservations")
     .select("*")
     .eq("id", payment.reservation_id)
+    .eq("company_id", payment.company_id)
     .maybeSingle();
 
   if (reservationError) throw new Error(reservationError.message);
@@ -527,7 +529,8 @@ export async function confirmReservationPayment(
       await supabaseAdmin
         .from("reservations")
         .update({ status: "paid_after_expiration", updated_at: checkedAtIso })
-        .eq("id", payment.reservation_id);
+        .eq("id", payment.reservation_id)
+        .eq("company_id", payment.company_id);
 
       await recordPaymentEvent(supabaseAdmin, payment, "payment_late_paid", {
         source,
@@ -553,7 +556,8 @@ export async function confirmReservationPayment(
   await supabaseAdmin
     .from("reservations")
     .update({ status: "confirmed", updated_at: checkedAtIso })
-    .eq("id", payment.reservation_id);
+    .eq("id", payment.reservation_id)
+    .eq("company_id", payment.company_id);
 
   await recordPaymentEvent(supabaseAdmin, payment, "payment_paid", {
     source,

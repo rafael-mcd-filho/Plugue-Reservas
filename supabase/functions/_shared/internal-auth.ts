@@ -1,4 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
+import {
+  assertSupportCompanyMatches,
+  isUuid,
+  validateSupportImpersonationContext,
+  type SupportImpersonationContext,
+} from "./support-authorization.ts";
 
 export function createSupabaseAdminClient() {
   return createClient(
@@ -6,6 +12,8 @@ export function createSupabaseAdminClient() {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 }
+
+export type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
 export function getClientIpAddress(req: Request) {
   const forwardedFor = req.headers.get("x-forwarded-for");
@@ -49,30 +57,76 @@ export async function isAuthorizedInternalJob(req: Request) {
   }
 }
 
-export async function getAuthenticatedUser(req: Request) {
+export function createSupabaseRequestClient(req: Request) {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return null;
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
   if (!anonKey) {
     throw new Error("SUPABASE_ANON_KEY nao configurada");
   }
 
-  const supabaseUser = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
+  const sessionId = req.headers.get("x-support-impersonation");
+  return createClient(supabaseUrl, anonKey, {
+    global: { headers: {
+      Authorization: authHeader || "",
+      ...(sessionId ? { "x-support-impersonation": sessionId } : {}),
+    } },
   });
+}
 
+export type SupabaseRequestClient = ReturnType<typeof createSupabaseRequestClient>;
+
+export async function getRequestAuthContext(req: Request) {
+  if (!req.headers.get("Authorization")) return null;
+  const supabaseUser = createSupabaseRequestClient(req);
   const { data: { user }, error } = await supabaseUser.auth.getUser();
   if (error || !user) {
     return null;
   }
 
-  return user;
+  const supabaseAdmin = createSupabaseAdminClient();
+  const actorRoleRows = await getUserRoleRows(supabaseAdmin, user.id);
+  const isSupport = actorRoleRows.some((row) => row.role === "support");
+  const sessionId = req.headers.get("x-support-impersonation");
+  let impersonation: SupportImpersonationContext | null = null;
+  let effectiveUser = user;
+  let roleRows = actorRoleRows;
+
+  if (sessionId) {
+    if (!isSupport || !isUuid(sessionId)) {
+      throw new Error("Sem permissao: sessao de suporte invalida");
+    }
+    const { data, error: contextError } = await supabaseUser.rpc("get_support_impersonation_context");
+    if (contextError) throw new Error("Sem permissao: sessao de suporte invalida ou expirada");
+    impersonation = validateSupportImpersonationContext(data, user.id, sessionId);
+    const { data: target, error: targetError } = await supabaseAdmin.auth.admin.getUserById(impersonation.userId);
+    if (targetError || !target.user) throw new Error("Sem permissao: usuario impersonado indisponivel");
+    effectiveUser = target.user;
+    // Never inherit additional companies/global roles from the impersonated user.
+    roleRows = [{ role: impersonation.effectiveRole, company_id: impersonation.companyId }];
+  }
+
+  return { supabaseAdmin, supabaseUser, user: effectiveUser, actorUser: user,
+    roleRows, actorRoleRows, isSupport, impersonation };
+}
+
+export async function getAuthenticatedUser(req: Request) {
+  return (await getRequestAuthContext(req))?.user ?? null;
+}
+
+export function impersonationAuditDetails(impersonation: SupportImpersonationContext | null) {
+  return impersonation ? {
+    impersonated_by_support: true,
+    support_session_id: impersonation.id,
+    actor_user_id: impersonation.actorUserId,
+    impersonated_user_id: impersonation.userId,
+    scope_company_id: impersonation.companyId,
+    effective_role: impersonation.effectiveRole,
+  } : {};
 }
 
 export async function getUserRoleRows(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: SupabaseAdminClient,
   userId: string,
 ) {
   const { data, error } = await supabaseAdmin
@@ -91,14 +145,16 @@ export async function assertUserCanAccessCompany(
   req: Request,
   companyId: string,
   allowedRoles: string[] = ["superadmin", "admin", "operator"],
+  permission?: string,
 ) {
-  const user = await getAuthenticatedUser(req);
-  if (!user) {
+  const context = await getRequestAuthContext(req);
+  if (!context) {
     throw new Error("Nao autorizado");
   }
 
-  const supabaseAdmin = createSupabaseAdminClient();
-  const roleRows = await getUserRoleRows(supabaseAdmin, user.id);
+  const { roleRows, impersonation, isSupport } = context;
+  if (isSupport && !impersonation) throw new Error("Sem permissao: inicie uma sessao de suporte");
+  assertSupportCompanyMatches(impersonation, companyId, allowedRoles);
 
   const isSuperadmin = roleRows.some((row) => row.role === "superadmin");
   const hasCompanyRole = roleRows.some((row) =>
@@ -109,20 +165,47 @@ export async function assertUserCanAccessCompany(
     throw new Error("Sem permissao para esta empresa");
   }
 
-  return { supabaseAdmin, user, roleRows, isSuperadmin };
+  if (permission && !isSuperadmin) {
+    const { data: permitted, error } = await context.supabaseUser.rpc("has_company_panel_permission", {
+      _user_id: context.actorUser.id,
+      _company_id: companyId,
+      _permission: permission,
+    });
+    if (error || permitted !== true) throw new Error("Sem permissao para esta acao");
+  }
+
+  if (impersonation) {
+    // These functions use service_role for provider work, so database triggers
+    // cannot infer the authenticated actor. Record the validated delegation here.
+    const { error } = await context.supabaseAdmin.from("audit_logs").insert({
+      user_id: context.actorUser.id,
+      action: "support_api_access",
+      entity_type: "company",
+      entity_id: companyId,
+      details: {
+        ...impersonationAuditDetails(impersonation),
+        endpoint: new URL(req.url).pathname,
+        method: req.method,
+        phase: "authorized_request",
+      },
+      ip_address: getClientIpAddress(req),
+    });
+    if (error) throw new Error("Nao foi possivel registrar o acesso de suporte");
+  }
+
+  return { ...context, isSuperadmin };
 }
 
 export async function assertSuperadmin(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user) {
+  const context = await getRequestAuthContext(req);
+  if (!context) {
     throw new Error("Nao autorizado");
   }
 
-  const supabaseAdmin = createSupabaseAdminClient();
-  const roleRows = await getUserRoleRows(supabaseAdmin, user.id);
+  const { supabaseAdmin, actorUser: user, actorRoleRows: roleRows } = context;
   const isSuperadmin = roleRows.some((row) => row.role === "superadmin");
 
-  if (!isSuperadmin) {
+  if (!isSuperadmin || context.isSupport || context.impersonation) {
     throw new Error("Sem permissao");
   }
 

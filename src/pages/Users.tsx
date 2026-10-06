@@ -22,7 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +36,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import UserPasswordDialog from '@/components/users/UserPasswordDialog';
+import SupportCompanyAccess from '@/components/users/SupportCompanyAccess';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUsers, useToggleBan, useUpdateUser, useSetUserPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
 import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
@@ -53,6 +54,7 @@ import {
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
   operator: 'Operador',
+  support: 'Suporte',
   superadmin: 'Superadmin',
 };
 
@@ -60,7 +62,13 @@ export default function Users() {
   const navigate = useNavigate();
   const { user: currentUser, signOut } = useAuth();
   const { data: users = [], isLoading, error, refetch, isFetching } = useUsers();
-  const { data: companies = [] } = useCompanies();
+  const {
+    data: companies = [],
+    isLoading: companiesLoading,
+    error: companiesError,
+    refetch: refetchCompanies,
+    isFetching: companiesFetching,
+  } = useCompanies();
   const toggleBan = useToggleBan();
   const updateUser = useUpdateUser();
   const setUserPassword = useSetUserPassword();
@@ -72,7 +80,7 @@ export default function Users() {
   const [filterRole, setFilterRole] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '', support_company_ids: [] as string[] });
   const [banDialog, setBanDialog] = useState<ManagedUser | null>(null);
   const [passwordDialog, setPasswordDialog] = useState<ManagedUser | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<ManagedUser | null>(null);
@@ -84,12 +92,15 @@ export default function Users() {
     phone: '',
     company_id: '',
     role: 'admin',
+    support_company_ids: [] as string[],
     password: '',
     confirmPassword: '',
   });
 
   const filtered = users.filter((user) => {
-    if (filterCompany !== 'all' && user.company_id !== filterCompany) return false;
+    if (filterCompany !== 'all' && (user.roles.includes('support')
+      ? !user.support_company_ids?.includes(filterCompany)
+      : user.company_id !== filterCompany)) return false;
     if (filterRole !== 'all' && !user.roles.includes(filterRole)) return false;
     if (search) {
       const query = search.toLowerCase();
@@ -117,10 +128,13 @@ export default function Users() {
     && (editForm.role !== 'admin' || (editForm.company_id || '') !== (editUser.company_id || ''));
   const banWouldRemoveLastAdmin = isLastActiveAdmin(banDialog);
   const deleteWouldRemoveLastAdmin = isLastActiveAdmin(deleteDialog);
+  const editAccessUnavailable = !!editUser?.roles.includes('support') && !Array.isArray(editUser.support_company_ids);
+  const editAccessBlocked = editAccessUnavailable || (editForm.role === 'support' && (companiesLoading || !!companiesError));
+  const createAccessBlocked = createForm.role === 'support' && (companiesLoading || !!companiesError);
 
   const getCompanyName = (id: string | null) => {
     if (!id) return '-';
-    return companies.find((company) => company.id === id)?.name || '-';
+    return companies.find((company) => company.id === id)?.name || 'Empresa indisponível';
   };
 
   const openEdit = (user: ManagedUser) => {
@@ -132,12 +146,29 @@ export default function Users() {
       phone: formatBrazilPhone(user.phone),
       company_id: user.company_id || '',
       role: primaryRole,
+      support_company_ids: Array.isArray(user.support_company_ids) ? [...user.support_company_ids] : [],
     });
+  };
+
+  const reloadEditAccess = async () => {
+    if (!editUser) return;
+    const result = await refetch();
+    const refreshedUser = result.data?.find((user) => user.id === editUser.id);
+    if (!refreshedUser || !Array.isArray(refreshedUser.support_company_ids)) {
+      toast.error('As autorizações continuam indisponíveis. Tente novamente.');
+      return;
+    }
+    setEditUser(refreshedUser);
+    setEditForm((form) => ({ ...form, support_company_ids: [...refreshedUser.support_company_ids] }));
   };
 
   const handleEdit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editUser) return;
+    if (editAccessBlocked) {
+      toast.error('Carregue as empresas e autorizações antes de salvar.');
+      return;
+    }
 
     if (editWouldRemoveLastAdmin) {
       toast.error('Cada empresa precisa ter pelo menos um admin ativo');
@@ -160,14 +191,19 @@ export default function Users() {
     const shouldReauthenticate = editUser.id === currentUser?.id
       && normalizedEmail !== normalizeEmail(editUser.email);
 
-    await updateUser.mutateAsync({
-      user_id: editUser.id,
-      full_name: editForm.full_name,
-      email: normalizedEmail,
-      phone: formatBrazilPhone(editForm.phone),
-      company_id: editForm.company_id || null,
-      role: editForm.role,
-    });
+    try {
+      await updateUser.mutateAsync({
+        user_id: editUser.id,
+        full_name: editForm.full_name,
+        email: normalizedEmail,
+        phone: formatBrazilPhone(editForm.phone),
+        company_id: editForm.role === 'support' ? null : editForm.company_id || null,
+        ...(editForm.role !== 'superadmin' ? { role: editForm.role } : {}),
+        ...(editForm.role === 'support' ? { support_company_ids: editForm.support_company_ids } : {}),
+      });
+    } catch {
+      return;
+    }
 
     setEditUser(null);
 
@@ -202,8 +238,12 @@ export default function Users() {
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!createForm.full_name || !createForm.email || !createForm.company_id) {
-      toast.error('Preencha nome, e-mail e empresa');
+    if (!createForm.full_name || !createForm.email || (createForm.role !== 'support' && !createForm.company_id)) {
+      toast.error(createForm.role === 'support' ? 'Preencha nome e e-mail' : 'Preencha nome, e-mail e empresa');
+      return;
+    }
+    if (createAccessBlocked) {
+      toast.error('Carregue as empresas antes de selecionar os acessos.');
       return;
     }
 
@@ -233,14 +273,15 @@ export default function Users() {
     setCreating(true);
 
     try {
-      const data = await invokeManageUser<{ results?: Array<{ error?: string; warning?: string }> }>({
+      const data = await invokeManageUser<{ results?: Array<{ error?: string; warning?: string; access_link?: string }> }>({
         action: 'seed_users',
         users: [{
           full_name: createForm.full_name,
           email: normalizeEmail(createForm.email),
           phone: formatBrazilPhone(createForm.phone) || null,
-          company_id: createForm.company_id,
+          company_id: createForm.role === 'support' ? null : createForm.company_id,
           role: createForm.role,
+          ...(createForm.role === 'support' ? { support_company_ids: createForm.support_company_ids } : {}),
           password: createForm.password,
         }],
       });
@@ -270,6 +311,7 @@ export default function Users() {
         phone: '',
         company_id: '',
         role: 'admin',
+        support_company_ids: [],
         password: '',
         confirmPassword: '',
       });
@@ -285,7 +327,7 @@ export default function Users() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Usuários</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Gerencie admins e operadores das empresas</p>
+          <p className="mt-1 text-sm text-muted-foreground">Gerencie admins, operadores e acessos de Suporte</p>
         </div>
         <Button className="gap-2 rounded-lg" onClick={() => setShowCreateDialog(true)}>
           <Plus className="h-4 w-4" />
@@ -321,6 +363,7 @@ export default function Users() {
             <SelectItem value="all">Todos os perfis</SelectItem>
             <SelectItem value="admin">Admin</SelectItem>
             <SelectItem value="operator">Operador</SelectItem>
+            <SelectItem value="support">Suporte</SelectItem>
             <SelectItem value="superadmin">Superadmin</SelectItem>
           </SelectContent>
         </Select>
@@ -358,7 +401,7 @@ export default function Users() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>Nome</TableHead>
                 <TableHead>E-mail</TableHead>
-                <TableHead>Empresa</TableHead>
+                <TableHead>Empresas</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -370,10 +413,26 @@ export default function Users() {
                   <TableCell className="font-medium">{user.full_name || '-'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                   <TableCell className="text-sm">
-                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <Building2 className="h-3 w-3" />
-                      {getCompanyName(user.company_id)}
-                    </span>
+                    {user.roles.includes('support') ? (
+                      <div className="max-w-xs space-y-1">
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                          <Building2 className="h-3 w-3 shrink-0" />
+                          {Array.isArray(user.support_company_ids)
+                            ? `${user.support_company_ids.length} ${user.support_company_ids.length === 1 ? 'empresa autorizada' : 'empresas autorizadas'}`
+                            : 'Autorizações indisponíveis'}
+                        </span>
+                        {!!user.support_company_ids?.length && (
+                          <p className="break-words text-xs text-muted-foreground">
+                            {user.support_company_ids.map(getCompanyName).join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <Building2 className="h-3 w-3" />
+                        {getCompanyName(user.company_id)}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
@@ -517,9 +576,10 @@ export default function Users() {
       />
 
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Usuário</DialogTitle>
+            <DialogDescription>Atualize o cadastro, o perfil e as empresas às quais este usuário pode acessar.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleEdit} className="mt-4 space-y-4">
             <div>
@@ -559,31 +619,61 @@ export default function Users() {
               />
             </div>
             <div>
-              <Label>Empresa</Label>
-              <Select value={editForm.company_id || 'none'} onValueChange={(value) => setEditForm({ ...editForm, company_id: value === 'none' ? '' : value })}>
-                <SelectTrigger aria-label="Empresa do usuario">
-                  <SelectValue placeholder="Selecione a empresa" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sem empresa</SelectItem>
-                  {companies.map((company) => (
-                    <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
               <Label>Perfil</Label>
-              <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })}>
-                <SelectTrigger aria-label="Perfil do usuario">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="operator">Operador</SelectItem>
-                </SelectContent>
-              </Select>
+              {editForm.role === 'superadmin' ? (
+                <Input aria-label="Perfil do usuario" value="Superadmin" readOnly />
+              ) : (
+                <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value })} disabled={updateUser.isPending}>
+                  <SelectTrigger aria-label="Perfil do usuario">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="operator">Operador</SelectItem>
+                    <SelectItem value="support" disabled={editUser?.roles.includes('superadmin')}>Suporte</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
+            {editForm.role === 'support' ? (
+              <SupportCompanyAccess
+                companies={companies}
+                selectedIds={editForm.support_company_ids}
+                onChange={(ids) => setEditForm({ ...editForm, support_company_ids: ids })}
+                isLoading={companiesLoading}
+                isFetching={companiesFetching || isFetching}
+                error={companiesError}
+                unavailable={editAccessUnavailable}
+                disabled={updateUser.isPending}
+                onRetry={() => {
+                  void refetchCompanies();
+                  if (editAccessUnavailable) void reloadEditAccess();
+                }}
+              />
+            ) : (
+              <div>
+                <Label>Empresa</Label>
+                <Select value={editForm.company_id || 'none'} onValueChange={(value) => setEditForm({ ...editForm, company_id: value === 'none' ? '' : value })}>
+                  <SelectTrigger aria-label="Empresa do usuario">
+                    <SelectValue placeholder="Selecione a empresa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem empresa</SelectItem>
+                    {companies.map((company) => (
+                      <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {editAccessUnavailable && editForm.role !== 'support' && (
+              <div role="alert" className="space-y-2 text-sm text-destructive">
+                <p>Não foi possível carregar as autorizações deste usuário. Recarregue antes de salvar.</p>
+                <Button type="button" variant="outline" size="sm" disabled={isFetching} onClick={reloadEditAccess}>
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
             {editWouldRemoveLastAdmin && (
               <p className="text-sm text-destructive">
                 Essa alteração removeria o último admin ativo da empresa.
@@ -591,16 +681,17 @@ export default function Users() {
             )}
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancelar</Button>
-              <Button type="submit" disabled={updateUser.isPending || editWouldRemoveLastAdmin}>Salvar</Button>
+              <Button type="submit" disabled={updateUser.isPending || editWouldRemoveLastAdmin || editAccessBlocked}>Salvar</Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Novo Usuário</DialogTitle>
+            <DialogDescription>Defina o perfil e os acessos do novo usuário.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="mt-4 space-y-4">
             <div>
@@ -645,31 +736,45 @@ export default function Users() {
               />
             </div>
             <div>
-              <Label>Empresa *</Label>
-              <Select value={createForm.company_id} onValueChange={(value) => setCreateForm({ ...createForm, company_id: value })}>
-                <SelectTrigger aria-label="Empresa do novo usuario">
-                  <SelectValue placeholder="Selecione a empresa" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((company) => (
-                    <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
               <Label>Perfil *</Label>
-              <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })}>
+              <Select value={createForm.role} onValueChange={(value) => setCreateForm({ ...createForm, role: value })} disabled={creating}>
                 <SelectTrigger aria-label="Perfil do novo usuario">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="operator">Operador</SelectItem>
+                  <SelectItem value="support">Suporte</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-muted-foreground">Um link unico de acesso será gerado automaticamente.</p>
+            {createForm.role === 'support' ? (
+              <SupportCompanyAccess
+                companies={companies}
+                selectedIds={createForm.support_company_ids}
+                onChange={(ids) => setCreateForm({ ...createForm, support_company_ids: ids })}
+                isLoading={companiesLoading}
+                isFetching={companiesFetching}
+                error={companiesError}
+                disabled={creating}
+                onRetry={() => { void refetchCompanies(); }}
+              />
+            ) : (
+              <div>
+                <Label>Empresa *</Label>
+                <Select value={createForm.company_id} onValueChange={(value) => setCreateForm({ ...createForm, company_id: value })}>
+                  <SelectTrigger aria-label="Empresa do novo usuario">
+                    <SelectValue placeholder="Selecione a empresa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map((company) => (
+                      <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">O usuário entrará com o e-mail e a senha definidos no cadastro.</p>
             <div>
               <Label htmlFor="users-create-password">Senha inicial *</Label>
               <Input
@@ -699,7 +804,7 @@ export default function Users() {
             </div>
             <div className="flex justify-end gap-3">
               <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
-              <Button type="submit" disabled={creating}>
+              <Button type="submit" disabled={creating || createAccessBlocked}>
                 {creating ? 'Criando...' : 'Criar Usuário'}
               </Button>
             </div>

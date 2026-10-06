@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
 import {
   buildEvolutionNotConfiguredFailure,
   getWhatsAppAcceptedLogStatus,
@@ -10,7 +10,7 @@ import {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-support-impersonation, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 const STATUS_CHECK_TIMEOUT_MS = 5000;
@@ -46,75 +46,37 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
-    }
-
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
-
-    // Verify user token
-    const token = authHeader.replace('Bearer ', '');
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
-    }
-
     const body = await req.json();
     const { action, company_id, instance_name, phone, message, log_id } = body;
     const refreshProfile = body.refresh_profile === true;
-    const scopeCompanyId = normalizeOptionalCompanyId(body.scope_company_id);
-    const impersonatedBySuperadmin = body.impersonated_by_superadmin === true;
-    const effectiveRole = normalizeEffectiveRole(body.effective_role);
-
     if (!company_id) {
-      return new Response(JSON.stringify({ error: 'company_id é obrigatório' }), {
+      return new Response(JSON.stringify({ error: 'company_id e obrigatorio' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    const { data: memberships, error: membershipsError } = await supabaseAdmin
-      .from('user_roles')
-      .select('role, company_id')
-      .eq('user_id', userData.user.id);
-
-    if (membershipsError) {
-      return new Response(JSON.stringify({ error: membershipsError.message }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    const roleRows = memberships ?? [];
-    const isSuperadmin = roleRows.some((row: any) => row.role === 'superadmin');
-    const adminCompanyIds = [...new Set(
-      roleRows
-        .filter((row: any) => row.role === 'admin' && row.company_id)
-        .map((row: any) => row.company_id as string)
-    )];
-
-    if (!isSuperadmin && adminCompanyIds.length === 0) {
-      return new Response(JSON.stringify({ error: 'Apenas admins e superadmins podem gerenciar a Evolution API' }), {
+    const { supabaseAdmin, isSuperadmin, impersonation } = await assertUserCanAccessCompany(req, company_id, ['admin']);
+    const scopeCompanyId = impersonation?.companyId ?? normalizeOptionalCompanyId(body.scope_company_id);
+    if (scopeCompanyId && scopeCompanyId !== company_id) {
+      return new Response(JSON.stringify({ error: 'Sem permissao para esta empresa' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    const allowedCompanyIds = isSuperadmin
-      ? (scopeCompanyId ? [scopeCompanyId] : null)
-      : adminCompanyIds;
-
-    if (allowedCompanyIds && !allowedCompanyIds.includes(company_id)) {
-      return new Response(JSON.stringify({ error: 'Acesso negado para esta empresa no contexto atual' }), {
-        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    if (isSuperadmin && scopeCompanyId && impersonatedBySuperadmin && effectiveRole !== 'admin') {
+    if (isSuperadmin && scopeCompanyId && body.impersonated_by_superadmin === true && normalizeEffectiveRole(body.effective_role) !== 'admin') {
       return new Response(JSON.stringify({ error: 'Operadores impersonados nao podem gerenciar a Evolution API' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
+    }
+
+    if (instance_name && !isSuperadmin) {
+      const { data: companyInstance, error: instanceError } = await supabaseAdmin
+        .from('company_whatsapp_instances').select('instance_name').eq('company_id', company_id).maybeSingle();
+      if (instanceError) throw instanceError;
+      const allowedInstanceName = companyInstance?.instance_name ?? `company_${company_id}`;
+      if (instance_name !== allowedInstanceName) {
+        return new Response(JSON.stringify({ error: 'Sem permissao para esta instancia' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     if (action === 'clear_logs') {
@@ -166,7 +128,8 @@ Deno.serve(async (req) => {
         if (action === 'resend_message' && log_id && !failure.ok) {
           await supabaseAdmin.from('whatsapp_message_logs')
             .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
-            .eq('id', log_id);
+            .eq('id', log_id)
+            .eq('company_id', company_id);
         }
 
         return new Response(JSON.stringify(
@@ -464,7 +427,8 @@ Deno.serve(async (req) => {
           if (action === 'resend_message' && log_id && !failure.ok) {
             await supabaseAdmin.from('whatsapp_message_logs')
               .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
-              .eq('id', log_id);
+              .eq('id', log_id)
+            .eq('company_id', company_id);
           }
           result = failure.ok ? { ok: true, data: failure.data } : {
             ok: false,
@@ -480,7 +444,8 @@ Deno.serve(async (req) => {
           if (action === 'resend_message' && log_id && !failure.ok) {
             await supabaseAdmin.from('whatsapp_message_logs')
               .update({ status: 'error', error_details: serializeWhatsAppFailure(failure.error) })
-              .eq('id', log_id);
+              .eq('id', log_id)
+            .eq('company_id', company_id);
           }
           result = failure.ok ? { ok: true, data: failure.data } : {
             ok: false,
@@ -504,11 +469,13 @@ Deno.serve(async (req) => {
             const logStatus = getWhatsAppAcceptedLogStatus(sendResult);
             await supabaseAdmin.from('whatsapp_message_logs')
               .update({ status: logStatus, error_details: null })
-              .eq('id', log_id);
+              .eq('id', log_id)
+            .eq('company_id', company_id);
           } else {
             await supabaseAdmin.from('whatsapp_message_logs')
               .update({ status: 'error', error_details: serializeWhatsAppFailure(sendResult.error) })
-              .eq('id', log_id);
+              .eq('id', log_id)
+            .eq('company_id', company_id);
           }
         }
 
@@ -591,7 +558,7 @@ Deno.serve(async (req) => {
     console.error('Evolution API error:', error);
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: msg === 'Nao autorizado' ? 401 : msg.startsWith('Sem permissao') ? 403 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 });

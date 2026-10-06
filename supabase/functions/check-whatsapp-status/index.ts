@@ -2,7 +2,7 @@ import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/i
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-job-secret',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret',
 };
 
 Deno.serve(async (req) => {

@@ -3,7 +3,7 @@ import { enqueuePlugueChatMessage, getCompanyChannel, normalizePhone } from "../
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret",
 };
 
 const RECIPIENT_BATCH = 200;

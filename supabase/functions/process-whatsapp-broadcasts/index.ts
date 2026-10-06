@@ -24,7 +24,7 @@ const MAX_INVOCATION_SECONDS = 140;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret",
 };
 
 const SUPPORTED_BROADCAST_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);

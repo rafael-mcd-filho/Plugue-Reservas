@@ -37,7 +37,7 @@ export default function Profile() {
   }, [profile]);
 
   const handleRequireFreshLogin = async (message: string) => {
-    stopImpersonation();
+    await stopImpersonation();
     toast.success(message);
     await signOut();
     navigate('/login', { replace: true });

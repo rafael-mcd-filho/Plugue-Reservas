@@ -140,15 +140,15 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
   }
 
   // Check access: superadmin can access any company, others only their own
-  const isSuperadmin = roles.includes('superadmin');
-  if (isSuperadmin && (!isImpersonatingCompany || impersonatedCompanyId !== company.id)) {
+  const isPlatformUser = roles.includes('superadmin') || roles.includes('support');
+  if (isPlatformUser && (!isImpersonatingCompany || impersonatedCompanyId !== company.id)) {
     if (locationState?.fromLogin) {
       return <Navigate to="/" replace />;
     }
     return <Navigate to="/empresas" replace />;
   }
 
-  if (!isSuperadmin && profile?.company_id !== company.id) {
+  if (!isPlatformUser && profile?.company_id !== company.id) {
     if (locationState?.fromLogin) {
       return <Navigate to="/" replace />;
     }

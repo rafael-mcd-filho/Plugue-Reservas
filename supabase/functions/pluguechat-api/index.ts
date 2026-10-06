@@ -8,7 +8,7 @@ import {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation",
 };
 
 function json(body: Record<string, unknown>, status = 200) {
@@ -93,7 +93,7 @@ async function getInternalJobSecret(supabaseAdmin: any): Promise<string | null> 
   return nullableString(data?.value);
 }
 
-async function processPlugueChatQueueNow(supabaseAdmin: any) {
+async function processPlugueChatQueueNow(supabaseAdmin: any, companyId: string) {
   const secret = await getInternalJobSecret(supabaseAdmin);
   if (!secret) {
     return { ok: false, error: "internal_job_secret_not_configured" };
@@ -111,7 +111,7 @@ async function processPlugueChatQueueNow(supabaseAdmin: any) {
         "Content-Type": "application/json",
         "x-job-secret": secret,
       },
-      body: "{}",
+      body: JSON.stringify({ company_id: companyId }),
     });
 
     let body: unknown = null;
@@ -441,7 +441,7 @@ Deno.serve(async (req) => {
 
       const process = body.process_now === false
         ? null
-        : await processPlugueChatQueueNow(supabaseAdmin);
+        : await processPlugueChatQueueNow(supabaseAdmin, companyId);
 
       return json({ ok: true, retried, process });
     }
@@ -449,14 +449,14 @@ Deno.serve(async (req) => {
     if (action === "retry_failed_queue") {
       const retried = await resetFailedQueueItems(supabaseAdmin, companyId);
       const process = retried > 0 && body.process_now !== false
-        ? await processPlugueChatQueueNow(supabaseAdmin)
+        ? await processPlugueChatQueueNow(supabaseAdmin, companyId)
         : null;
 
       return json({ ok: true, retried, process });
     }
 
     if (action === "process_queue") {
-      const process = await processPlugueChatQueueNow(supabaseAdmin);
+      const process = await processPlugueChatQueueNow(supabaseAdmin, companyId);
       return json({ ok: process.ok, process }, process.ok ? 200 : 502);
     }
 

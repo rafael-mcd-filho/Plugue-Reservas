@@ -17,7 +17,7 @@ import { formatDateKeyInTimeZone, getZonedParts } from "../_shared/timezone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-job-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-job-secret",
 };
 
 const PRIORITY_NO_SHOW = 70;

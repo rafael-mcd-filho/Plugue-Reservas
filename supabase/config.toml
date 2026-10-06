@@ -1,7 +1,7 @@
 project_id = "hdpxqqiudiotanrybvcf"
 
 [functions.create-company]
-verify_jwt = true
+verify_jwt = false
 
 [functions.manage-user]
 verify_jwt = false
@@ -34,6 +34,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.process-message-queue]
+verify_jwt = false
+
+[functions.process-whatsapp-broadcasts]
 verify_jwt = false
 
 [functions.process-pluguechat-message-queue]
@@ -85,4 +88,13 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.platform-billing]
+verify_jwt = false
+
+[functions.pluguechat-api]
+verify_jwt = true
+
+[functions.refund-reservation-payment]
+verify_jwt = true
+
+[functions.whatsapp-automation-channel]
 verify_jwt = false

@@ -41,7 +41,7 @@ async function resolvePaymentContext(supabaseAdmin: any, paymentToken: string) {
   if (!payment) throw new Error("Pagamento nao encontrado");
 
   const [{ data: reservation, error: reservationError }, { data: company, error: companyError }] = await Promise.all([
-    supabaseAdmin.from("reservations").select("*").eq("id", payment.reservation_id).maybeSingle(),
+    supabaseAdmin.from("reservations").select("*").eq("id", payment.reservation_id).eq("company_id", payment.company_id).maybeSingle(),
     supabaseAdmin.from("companies").select("id, name, slug, logo_url, phone, whatsapp").eq("id", payment.company_id).maybeSingle(),
   ]);
 

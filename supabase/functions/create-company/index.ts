@@ -1,9 +1,9 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
+import { assertSuperadmin } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation",
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -124,47 +124,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Nao autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
-
-    if (!anonKey) {
-      throw new Error("SUPABASE_ANON_KEY ou SUPABASE_PUBLISHABLE_KEY nao configurada");
-    }
-
-    const supabaseUser = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user: caller } } = await supabaseUser.auth.getUser();
-    if (!caller) {
-      return new Response(JSON.stringify({ error: "Nao autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-    const { data: callerRoles } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", caller.id)
-      .eq("role", "superadmin");
-
-    if (!callerRoles || callerRoles.length === 0) {
-      return new Response(JSON.stringify({ error: "Apenas superadmins podem criar empresas" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const { supabaseAdmin, user: caller } = await assertSuperadmin(req);
 
     const body = await req.json();
     const {
@@ -400,7 +360,7 @@ Deno.serve(async (req) => {
     );
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
+      status: err.message === "Nao autorizado" ? 401 : err.message.startsWith("Sem permissao") ? 403 : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

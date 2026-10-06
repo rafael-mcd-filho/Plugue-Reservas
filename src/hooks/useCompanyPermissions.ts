@@ -52,6 +52,8 @@ export function useCompanyPermissions() {
     effectiveRoles,
     impersonatedUserId,
     scopeCompanyId,
+    isSupport,
+    impersonationLoading,
   } = useImpersonation();
 
   const activeRoles = isImpersonatingCompany ? effectiveRoles : roles;
@@ -66,8 +68,8 @@ export function useCompanyPermissions() {
     && !activeRoles.includes('superadmin');
   const cacheKey = getCompanyPermissionCacheKey(activeCompanyId, targetUserId);
   const cachedPermissionOverrides = useMemo(
-    () => readCachedPermissionOverrides(shouldLoadOverrides ? cacheKey : null),
-    [cacheKey, shouldLoadOverrides],
+    () => readCachedPermissionOverrides(shouldLoadOverrides && !isSupport ? cacheKey : null),
+    [cacheKey, shouldLoadOverrides, isSupport],
   );
 
   const {
@@ -85,7 +87,8 @@ export function useCompanyPermissions() {
         .maybeSingle();
 
       if (error) throw error;
-      return (data?.permission_overrides ?? null) as Partial<Record<CompanyPanelPermission, boolean>> | null;
+      const row = data as unknown as { permission_overrides?: Partial<Record<CompanyPanelPermission, boolean>> } | null;
+      return row?.permission_overrides ?? null;
     },
     enabled: shouldLoadOverrides,
     initialData: shouldLoadOverrides ? cachedPermissionOverrides : undefined,
@@ -93,6 +96,7 @@ export function useCompanyPermissions() {
     staleTime: 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchInterval: isSupport ? 15000 : false,
   });
 
   useEffect(() => {
@@ -103,8 +107,8 @@ export function useCompanyPermissions() {
 
   const effectivePermissionOverrides = permissionOverrides ?? cachedPermissionOverrides ?? null;
   const permissions = useMemo(
-    () => resolveCompanyPanelPermissions(activeRoles, effectivePermissionOverrides),
-    [activeRoles, effectivePermissionOverrides],
+    () => resolveCompanyPanelPermissions(isSupport && permissionsError ? [] : activeRoles, effectivePermissionOverrides),
+    [activeRoles, effectivePermissionOverrides, isSupport, permissionsError],
   );
 
   const hasPermission = (permission: CompanyPanelPermission) => permissions.has(permission);
@@ -114,7 +118,7 @@ export function useCompanyPermissions() {
     permissions,
     permissionOverrides: effectivePermissionOverrides,
     permissionsError,
-    permissionsLoading,
+    permissionsLoading: permissionsLoading || impersonationLoading,
     hasPermission,
     isImpersonatingCompany,
     activeCompanyId,

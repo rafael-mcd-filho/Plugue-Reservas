@@ -1,9 +1,9 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.0";
+import { getRequestAuthContext, impersonationAuditDetails } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, cf-connecting-ip, user-agent",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation, cf-connecting-ip, user-agent",
 };
 
 type AuditEventType = "login" | "panel_access";
@@ -18,30 +18,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    const context = await getRequestAuthContext(req);
+    if (!context) {
       return new Response(JSON.stringify({ error: "Nao autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
-
-    const supabaseUser = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-    const { data: { user } } = await supabaseUser.auth.getUser();
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Nao autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const { supabaseAdmin, actorUser, roleRows, impersonation } = context;
 
     const body = await req.json().catch(() => ({}));
     const eventType = body.event_type as AuditEventType | undefined;
@@ -57,16 +40,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: memberships, error: membershipsError } = await supabaseAdmin
-      .from("user_roles")
-      .select("role, company_id")
-      .eq("user_id", user.id);
-
-    if (membershipsError) {
-      throw membershipsError;
-    }
-
-    const roleRows = memberships ?? [];
     const isSuperadmin = roleRows.some((row: any) => row.role === "superadmin");
     const membershipCompanyIds = [...new Set(
       roleRows
@@ -100,13 +73,20 @@ Deno.serve(async (req) => {
     const { error: insertError } = await supabaseAdmin
       .from("access_audit_logs")
       .insert({
-        user_id: user.id,
+        user_id: actorUser.id,
         company_id: resolvedCompanyId,
         event_type: eventType,
         path,
         ip_address: getIpAddress(req),
         user_agent: req.headers.get("user-agent"),
-        metadata,
+        metadata: {
+          ...metadata,
+          impersonated_by_support: !!impersonation,
+          support_session_id: impersonation?.id ?? null,
+          actor_user_id: actorUser.id,
+          impersonated_user_id: impersonation?.userId ?? null,
+          ...impersonationAuditDetails(impersonation),
+        },
       });
 
     if (insertError) {
@@ -119,7 +99,7 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
+      status: err.message?.startsWith("Sem permissao") ? 403 : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

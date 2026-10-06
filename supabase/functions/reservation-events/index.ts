@@ -1,7 +1,7 @@
 import {
   createSupabaseAdminClient,
-  getAuthenticatedUser,
-  getUserRoleRows,
+  getRequestAuthContext,
+  assertUserCanAccessCompany,
 } from "../_shared/internal-auth.ts";
 import {
   buildEvolutionNotConfiguredFailure,
@@ -29,7 +29,7 @@ import { getFirstName } from "../_shared/names.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-support-impersonation, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 interface ReservationData {
@@ -210,18 +210,10 @@ async function assertCanTriggerEvent(
     throw new Error("Empresa nao identificada");
   }
 
-  const user = await getAuthenticatedUser(req);
-  if (user) {
-    const roleRows = await getUserRoleRows(supabaseAdmin, user.id);
-    const isSuperadmin = roleRows.some((row) => row.role === "superadmin");
-    const hasCompanyAccess = roleRows.some((row) =>
-      row.company_id === companyId && ["admin", "operator"].includes(row.role)
-    );
-
-    if (!isSuperadmin && !hasCompanyAccess) {
-      throw new Error("Sem permissao para disparar eventos desta empresa");
-    }
-
+  const context = await getRequestAuthContext(req);
+  if (context) {
+    await assertUserCanAccessCompany(req, companyId, ["admin", "operator"],
+      waitlist ? "waitlist_view" : "reservations_view");
     return;
   }
 
@@ -286,7 +278,7 @@ async function getInternalJobSecret(supabaseAdmin: ReturnType<typeof createSupab
   return typeof data?.value === "string" && data.value.trim() ? data.value.trim() : null;
 }
 
-async function processPlugueChatQueueNow(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>) {
+async function processPlugueChatQueueNow(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>, companyId: string) {
   const secret = await getInternalJobSecret(supabaseAdmin);
   if (!secret) {
     console.warn("reservation-events pluguechat queue process skipped: internal job secret not configured");
@@ -306,7 +298,7 @@ async function processPlugueChatQueueNow(supabaseAdmin: ReturnType<typeof create
         "Content-Type": "application/json",
         "x-job-secret": secret,
       },
-      body: "{}",
+      body: JSON.stringify({ company_id: companyId }),
     });
 
     if (!response.ok) {
@@ -889,6 +881,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    const isWaitlistEvent = event === "waitlist_added" || event === "waitlist_called";
+    if ((!isWaitlistEvent && !RESERVATION_AUTOMATION_EVENTS.has(event))
+      || (isWaitlistEvent && reservationId) || (!isWaitlistEvent && waitlistId)) {
+      return new Response(JSON.stringify({ error: "Evento ou dados de evento invalidos" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const reservation = await resolveReservation(supabaseAdmin, reservationId);
     const waitlist = await resolveWaitlist(supabaseAdmin, waitlistId);
     const companySlug = await resolveCompanySlug(
@@ -947,7 +947,7 @@ Deno.serve(async (req) => {
     }
 
     if (activeChannel === "pluguechat_official" && results.whatsapp === "pluguechat_queued") {
-      runInBackground(processPlugueChatQueueNow(supabaseAdmin));
+      runInBackground(processPlugueChatQueueNow(supabaseAdmin, companyId!));
       results.pluguechat_processing = "scheduled";
     }
 
@@ -959,7 +959,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message || "Erro interno" }), {
       status: error.message === "Nao autorizado"
         ? 401
-        : error.message === "Sem permissao para disparar eventos desta empresa" || error.message === "Evento publico expirado"
+        : error.message?.startsWith("Sem permissao") || error.message === "Evento publico expirado"
           ? 403
           : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
