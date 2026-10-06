@@ -14,6 +14,7 @@ const db = new PGlite();
 const migrationDirectory = resolve(root, 'supabase/migrations');
 const support = '00000000-0000-4000-8000-000000000002';
 const admin = '00000000-0000-4000-8000-000000000004';
+const operator = '00000000-0000-4000-8000-000000000005';
 const superadmin = '00000000-0000-4000-8000-000000000001';
 const companyA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const companyB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -54,23 +55,35 @@ try {
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
   `);
   const files = (await readdir(migrationDirectory)).filter(file => file.endsWith('.sql')).sort();
+  const liveAclMigration = files.find(file => file.startsWith('20261006143500_'));
+  assert.ok(liveAclMigration, 'Expected the incremental live-funnel anonymous ACL migration');
   for (const file of files) {
     if (file === '20260309211714_c61ee570-889c-44b5-9189-83eb8dc93983.sql') {
       // Historical demo data expects objects that were created through the app.
       await db.exec(`INSERT INTO companies(id,name,slug) VALUES('1e0da55b-f8e9-4199-80b6-79c64e93cb7a','Historical demo fixture','historical-demo'); INSERT INTO restaurant_tables(id,company_id,number) VALUES('9a83e0fe-79e0-40e1-bdd5-1cfbab07752f','1e0da55b-f8e9-4199-80b6-79c64e93cb7a',1),('57be60f4-936e-42f9-ac7f-7f2049f5709f','1e0da55b-f8e9-4199-80b6-79c64e93cb7a',2);`);
+    }
+    if (file === liveAclMigration) {
+      // Production retained a historical explicit anon ACL. Revoking PUBLIC
+      // alone does not remove this grant; reproduce it before the ACL fix.
+      await db.exec('GRANT EXECUTE ON FUNCTION public.get_live_funnel_presence(uuid,integer) TO anon');
+      assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),true);
     }
     const sql = (await readFile(resolve(migrationDirectory, file), 'utf8'))
       .replace(/CREATE EXTENSION IF NOT EXISTS (pg_cron|pg_net)[^;]*;/gi, '')
       .replace(/CREATE INDEX CONCURRENTLY/gi, 'CREATE INDEX');
     try { await db.exec(sql); } catch (error) { throw new Error(`Migration replay failed in ${file}: ${error.message}`, { cause: error }); }
   }
+  assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),false);
+  assert.equal(await scalar(`SELECT has_function_privilege('authenticated','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),true);
   await db.query(`INSERT INTO companies(id,name,slug) VALUES($1,'Empresa A','empresa-a'),($2,'Empresa B','empresa-b')`, [companyA, companyB]);
-  for (const [id, role, name] of [[superadmin, 'superadmin', 'Root'], [support, 'support', 'Suporte'], [admin, 'admin', 'Admin']]) {
+  for (const [id, role, name] of [[superadmin, 'superadmin', 'Root'], [support, 'support', 'Suporte'], [admin, 'admin', 'Admin'], [operator, 'operator', 'Operador']]) {
     await db.query(`INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES($1,$2,$3)`, [id, `${role}@test.local`, JSON.stringify({ full_name: name })]);
-    await db.query('UPDATE profiles SET company_id=$2 WHERE id=$1', [id, role === 'admin' ? companyA : null]);
-    await db.query('INSERT INTO user_roles(user_id,role,company_id) VALUES($1,$2,$3)', [id, role, role === 'admin' ? companyA : null]);
+    const companyId = ['admin', 'operator'].includes(role) ? companyA : null;
+    await db.query('UPDATE profiles SET company_id=$2 WHERE id=$1', [id, companyId]);
+    await db.query('INSERT INTO user_roles(user_id,role,company_id) VALUES($1,$2,$3)', [id, role, companyId]);
   }
   await db.query(`INSERT INTO user_roles(user_id,role,company_id) VALUES($1,'admin',$2)`, [admin, companyB]);
+  await db.query(`INSERT INTO user_roles(user_id,role,company_id) VALUES($1,'operator',$2)`, [operator, companyB]);
   await db.query(`INSERT INTO reservations(company_id,guest_name,guest_phone,date,time,status,party_size,guest_birthdate) VALUES($1,'Visitante A','11999999999','2026-10-06','18:00','confirmed',2,'1990-01-01'),($2,'Visitante B','11888888888','2026-10-06','18:00','confirmed',100,'1990-01-01')`, [companyA, companyB]);
   const reservationA = (await db.query('SELECT id FROM reservations WHERE company_id=$1', [companyA])).rows[0].id;
   const reservationB = (await db.query('SELECT id FROM reservations WHERE company_id=$1', [companyB])).rows[0].id;
@@ -125,6 +138,105 @@ try {
   await db.query(`SELECT set_config('request.jwt.claims','{"role":"anon"}',false),set_config('request.headers','{}',false)`);
   await db.exec('SET ROLE anon');
   assert.equal((await db.query('SELECT * FROM get_public_company_by_slug($1)', ['empresa-a'])).rows.length, 1);
+
+  // A busy live funnel used to revalidate support delegation through the event
+  // RLS policy once per event. Reproduce with real schema/policies, then apply
+  // only the incremental fix and compare identical results and elapsed time.
+  await db.exec('RESET ROLE');
+  await db.query(`SELECT set_config('request.jwt.claims','{}',false),set_config('request.headers','{}',false)`);
+  await db.query(`INSERT INTO tracking_events(company_id,anonymous_id,event_id,event_name,occurred_at)
+    SELECT $1,'live-page-'||n,'live-page-'||n,'page_view',now() FROM generate_series(1,1000) AS n`, [companyA]);
+  await db.query(`INSERT INTO tracking_events(company_id,anonymous_id,event_id,event_name,occurred_at,tracking_source) VALUES
+    ($1,'live-flow','live-flow-page','page_view',now()-interval '3 minutes','public'),
+    ($1,'live-flow','live-flow-date','date_select',now()-interval '2 minutes','public'),
+    ($1,'live-flow','live-flow-time','time_select',now()-interval '1 minute','public'),
+    ($1,'live-final','live-final-page','page_view',now()-interval '2 minutes','public'),
+    ($1,'live-final','live-final-conversion','reservation_created',now()-interval '1 minute','public'),
+    ($1,'live-date','live-date','date_select',now(),'public'),
+    ($1,'live-form','live-form','lead_captured',now(),'public'),
+    ($1,'live-stale','live-stale','page_view',now()-interval '6 minutes','public'),
+    ($1,'live-internal','live-internal','page_view',now(),'internal'),
+    ($2,'live-other','live-other','time_select',now(),'public')`, [companyA, companyB]);
+  const oldLiveMigration = await readFile(resolve(migrationDirectory, '20260429120000_optimize_tracking_query_performance.sql'), 'utf8');
+  await db.exec(oldLiveMigration.slice(oldLiveMigration.indexOf('CREATE OR REPLACE FUNCTION public.get_live_funnel_presence(')));
+  await actor(support, context.id);
+  const previousLiveStarted = performance.now();
+  const previousLiveRows = (await db.query('SELECT * FROM get_live_funnel_presence($1,5)', [companyA])).rows;
+  const previousLiveMs = performance.now() - previousLiveStarted;
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(resolve(migrationDirectory, '20261006143000_fix_support_live_funnel_presence.sql'), 'utf8'));
+  await actor(support, context.id);
+  const fixedLiveStarted = performance.now();
+  const liveRows = (await db.query('SELECT * FROM get_live_funnel_presence($1,5)', [companyA])).rows;
+  const fixedLiveMs = performance.now() - fixedLiveStarted;
+  assert.deepEqual(liveRows, previousLiveRows);
+  assert.deepEqual(liveRows.map(row => [row.stage,row.stage_count]), [
+    ['page_view',1000],['date_select',1],['time_select',1],['form_fill',1],['completed',1],
+  ]);
+  assert.equal(liveRows.every(row => row.total_active===1004 && row.window_minutes===5),true);
+  const liveDenied = companyId => assert.rejects(
+    db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyId]), error => error.code==='42501');
+  await liveDenied(companyB);
+  await liveDenied(null);
+  await actor(support);
+  await liveDenied(companyA);
+  await actor(admin);
+  assert.deepEqual((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA])).rows,liveRows);
+  await liveDenied(null);
+  await actor(operator);
+  assert.deepEqual((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA])).rows,liveRows);
+  assert.equal((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyB])).rows[0].total_active,1);
+  await liveDenied(null);
+  await actor(superadmin);
+  assert.deepEqual((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA])).rows,liveRows);
+  assert.equal((await db.query('SELECT * FROM get_live_funnel_presence(NULL,5)')).rows[0].total_active,1005);
+
+  await actor(support);
+  const operatorContext = await scalar('SELECT start_support_impersonation($1,$2) value',[companyA,operator]);
+  await actor(support,operatorContext.id);
+  assert.deepEqual((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA])).rows,liveRows);
+  await liveDenied(companyB);
+  await db.query(`SELECT set_config('request.jwt.claims',$1,false)`,[
+    JSON.stringify({sub:support,role:'authenticated',session_id:'22222222-2222-4222-8222-222222222222'}),
+  ]);
+  await liveDenied(companyA);
+  await actor(support,operatorContext.id);
+  await db.exec('RESET ROLE');
+  await db.query(`INSERT INTO company_user_panel_permissions(user_id,company_id,permission_overrides)
+    VALUES($1,$2,'{"dashboard_view":false}')`,[operator,companyA]);
+  await actor(operator);
+  await liveDenied(companyA);
+  await actor(support,operatorContext.id);
+  await liveDenied(companyA);
+  await db.exec('RESET ROLE');
+  await db.query(`UPDATE company_user_panel_permissions SET permission_overrides='{"dashboard_view":true}' WHERE user_id=$1 AND company_id=$2`,[operator,companyA]);
+  await actor(support,operatorContext.id);
+  assert.deepEqual((await db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA])).rows,liveRows);
+  await db.exec('RESET ROLE');
+  await db.query(`UPDATE support_impersonation_sessions SET started_at=now()-interval '1 hour',expires_at=now()-interval '1 second' WHERE id=$1`,[operatorContext.id]);
+  await actor(support,operatorContext.id);
+  await liveDenied(companyA);
+  await actor(support);
+  const revokedContext = await scalar('SELECT start_support_impersonation($1,$2) value',[companyA,operator]);
+  await actor(superadmin);
+  await db.query('SELECT set_support_company_access($1,$2)',[support,[]]);
+  await actor(support,revokedContext.id);
+  await liveDenied(companyA);
+  await db.exec('RESET ROLE');
+  await db.query(`SELECT set_config('request.jwt.claims','{"role":"anon"}',false),set_config('request.headers','{}',false)`);
+  await db.exec('SET ROLE anon');
+  await liveDenied(companyA);
+  await db.exec('RESET ROLE');
+  await db.exec('GRANT EXECUTE ON FUNCTION public.get_live_funnel_presence(uuid,integer) TO anon');
+  await db.exec('SET ROLE anon');
+  // The guarded definer must also reject an anonymous request if an explicit
+  // execute grant is accidentally restored by a later deployment.
+  await assert.rejects(db.query('SELECT * FROM get_live_funnel_presence($1,5)',[companyA]),
+    error => error.code==='42501' && /Nao autorizado/.test(error.message));
+  await db.exec('RESET ROLE');
+  await db.exec(await readFile(resolve(migrationDirectory,liveAclMigration),'utf8'));
+  assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),false);
+  console.log(`Support live-funnel regression passed (same 1,004 sessions; invoker ${previousLiveMs.toFixed(1)} ms -> guarded RPC ${fixedLiveMs.toFixed(1)} ms locally; tenant/permission/login/expiry/revocation/anonymous boundaries).`);
   console.log(`Support full-schema migration replay passed (${files.length} actual migrations, inert cron/net; real RLS and company RPCs).`);
 } catch (error) {
   console.error(error.message);

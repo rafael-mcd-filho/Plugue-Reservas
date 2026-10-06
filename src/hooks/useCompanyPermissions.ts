@@ -5,6 +5,7 @@ import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveCompanyPanelPermissions, type CompanyPanelPermission } from '@/lib/companyPermissions';
+import { isAuthorizationFailure } from '@/lib/authorizationFailure';
 
 const COMPANY_PANEL_PERMISSION_CACHE_KEY_PREFIX = 'company-panel-permission-overrides';
 
@@ -76,6 +77,7 @@ export function useCompanyPermissions() {
     data: permissionOverrides,
     error: permissionsError,
     isLoading: permissionsLoading,
+    refetch: retryPermissions,
   } = useQuery({
     queryKey: ['company-panel-permission-overrides', activeCompanyId, targetUserId],
     queryFn: async () => {
@@ -97,6 +99,9 @@ export function useCompanyPermissions() {
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchInterval: isSupport ? 15000 : false,
+    // Nested guards mount after the outer guard finishes loading. Retrying a
+    // failed read on each mount would make the outer guard unmount them again.
+    retryOnMount: !isSupport,
   });
 
   useEffect(() => {
@@ -118,6 +123,11 @@ export function useCompanyPermissions() {
     permissions,
     permissionOverrides: effectivePermissionOverrides,
     permissionsError,
+    permissionsRecoverableError: isSupport && shouldLoadOverrides && permissionsError
+      && !isAuthorizationFailure(permissionsError) ? permissionsError : null,
+    permissionsAuthorizationError: isSupport && shouldLoadOverrides && permissionsError
+      && isAuthorizationFailure(permissionsError) ? permissionsError : null,
+    retryPermissions,
     permissionsLoading: permissionsLoading || impersonationLoading,
     hasPermission,
     isImpersonatingCompany,

@@ -114,6 +114,7 @@ describe('companies authorized for support', () => {
 
   it.each([
     ['a different target', { userId: 'other-user' }],
+    ['a different company slug', { companySlug: 'empresa-b' }],
     ['a global role', { effectiveRole: 'superadmin' }],
   ])('rejects a start response for %s before saving or navigating', async (_, alteration) => {
     mockRpc({ start_support_impersonation: { data: { ...validContext(), ...alteration }, error: null } });

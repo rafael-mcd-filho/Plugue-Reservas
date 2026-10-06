@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
 import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import type { PostLoginNavigationState } from '@/pages/Login';
 import {
   type AppRole,
@@ -18,10 +19,27 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, allowedRoles, requiredCompanyPermission }: ProtectedRouteProps) {
   const { user, roles, loading } = useAuth();
-  const { isImpersonatingCompany, effectiveRoles, impersonationLoading } = useImpersonation();
-  const { hasPermission, permissionsLoading } = useCompanyPermissions();
+  const {
+    isImpersonatingCompany, effectiveRoles, impersonationLoading,
+    impersonationError, retryImpersonation,
+  } = useImpersonation();
+  const {
+    hasPermission, permissionsLoading, permissionsRecoverableError,
+    permissionsAuthorizationError, retryPermissions,
+  } = useCompanyPermissions();
   const location = useLocation();
   const locationState = location.state as PostLoginNavigationState | null;
+
+  if (!loading && user && (impersonationError || permissionsRecoverableError)) {
+    const retry = impersonationError ? retryImpersonation : retryPermissions;
+    return <div role="alert" className="flex min-h-screen items-center justify-center p-6">
+      <div className="max-w-md space-y-4 rounded-lg border bg-card p-8 text-center">
+        <p className="font-medium">Não foi possível validar o acesso à empresa agora.</p>
+        <p className="text-sm text-muted-foreground">Tente novamente para retomar a impersonação.</p>
+        <Button variant="outline" onClick={() => { void retry(); }}>Tentar novamente</Button>
+      </div>
+    </div>;
+  }
 
   if (loading || permissionsLoading || impersonationLoading) {
     return (
@@ -36,6 +54,10 @@ export default function ProtectedRoute({ children, allowedRoles, requiredCompany
     return <Navigate to="/login" replace state={{ redirectTo }} />;
   }
 
+  if (permissionsAuthorizationError) {
+    return <Navigate to={locationState?.fromLogin ? '/' : '/acesso-negado'} replace />;
+  }
+
   if (allowedRoles && allowedRoles.length > 0) {
     const activeRoles = isImpersonatingCompany ? effectiveRoles : roles;
     const hasAccess = allowedRoles.some(role => activeRoles.includes(role));
@@ -46,12 +68,13 @@ export default function ProtectedRoute({ children, allowedRoles, requiredCompany
       return <Navigate to="/acesso-negado" replace />;
     }
 
-    if (requiredCompanyPermission && !hasPermission(requiredCompanyPermission)) {
-      if (locationState?.fromLogin) {
-        return <Navigate to="/" replace />;
-      }
-      return <Navigate to="/acesso-negado" replace />;
+  }
+
+  if (requiredCompanyPermission && !hasPermission(requiredCompanyPermission)) {
+    if (locationState?.fromLogin) {
+      return <Navigate to="/" replace />;
     }
+    return <Navigate to="/acesso-negado" replace />;
   }
 
   return <>{children}</>;

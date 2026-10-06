@@ -172,6 +172,7 @@ describe('support impersonation runtime', () => {
     ['revoked delegation', null],
     ['different actor', serverContext({ actorUserId: 'another-actor' })],
     ['different company', serverContext({ companyId: 'company-two' })],
+    ['different company slug', serverContext({ companySlug: 'empresa-b' })],
     ['different target', serverContext({ userId: 'target-two' })],
     ['expired delegation', serverContext({ expiresAt: '2020-01-01T00:00:00.000Z' })],
     ['invalid expiry', serverContext({ expiresAt: 'not-a-date' })],

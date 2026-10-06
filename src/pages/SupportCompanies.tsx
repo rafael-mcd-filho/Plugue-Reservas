@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useSupportCompanies, useSupportCandidates, type SupportCompany, type SupportCandidate } from '@/hooks/useSupportAccess';
 import { startImpersonationSession, type SupportImpersonationContext } from '@/hooks/useImpersonation';
 import { useAuth } from '@/contexts/AuthContext';
+import { isValidCompanySlug } from '@/lib/validation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +37,7 @@ export default function SupportCompanies() {
       if (error) throw error;
       const context = data as SupportImpersonationContext;
       if (!context?.id || context.actorUserId !== user.id || context.companyId !== selectedCompany.id
+        || context.companySlug !== selectedCompany.slug || !isValidCompanySlug(context.companySlug)
         || context.userId !== candidate.user_id || !['admin', 'operator'].includes(context.effectiveRole)
         || !Number.isFinite(Date.parse(context.expiresAt)) || Date.parse(context.expiresAt) <= Date.now()) {
         throw new Error('Não foi possível validar o acesso à empresa.');

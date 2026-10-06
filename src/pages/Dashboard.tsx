@@ -495,7 +495,7 @@ export default function Dashboard() {
     data: liveFunnelPresence,
     dataUpdatedAt: liveFunnelUpdatedAt = 0,
     isFetching: liveFunnelFetching,
-    isPending: liveFunnelPending,
+    isLoading: liveFunnelLoading,
     isError: liveFunnelIsError,
   } = useLiveFunnelPresence(liveFunnelCompanyId);
 
@@ -740,7 +740,7 @@ export default function Dashboard() {
           data={liveFunnelPresence?.stages ?? []}
           totalActive={liveFunnelPresence?.totalActive ?? 0}
           windowMinutes={liveFunnelPresence?.windowMinutes ?? 5}
-          isLoading={liveFunnelPending}
+          isLoading={liveFunnelLoading}
           isUnavailable={liveFunnelIsError && !liveFunnelPresence}
         />
       )}

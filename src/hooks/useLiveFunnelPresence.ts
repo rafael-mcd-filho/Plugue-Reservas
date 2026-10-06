@@ -29,11 +29,11 @@ function isLiveFunnelStage(value: string | null): value is LiveFunnelStage {
 export function useLiveFunnelPresence(companyId?: string) {
   return useQuery<LiveFunnelPresenceData>({
     queryKey: ['live-funnel-presence', companyId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await (supabase as any).rpc('get_live_funnel_presence', {
         _company_id: companyId && companyId !== 'all' ? companyId : null,
         _window_minutes: LIVE_WINDOW_MINUTES,
-      });
+      }).abortSignal(signal);
 
       if (error) {
         console.error('[LiveFunnelPresence] Query error:', error.message ?? error);
@@ -63,6 +63,9 @@ export function useLiveFunnelPresence(companyId?: string) {
     // O painel Ao Vivo só é exibido quando existe uma unidade definida.
     // Evita consultar e atualizar a agregação global em segundo plano no superadmin.
     enabled: Boolean(companyId && companyId !== 'all'),
+    // O polling tenta novamente na próxima atualização, sem prolongar o
+    // carregamento inicial quando a API recusa ou falha na consulta.
+    retry: false,
     refetchInterval: 15_000,
     refetchIntervalInBackground: false,
     staleTime: 10_000,

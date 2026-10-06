@@ -41,6 +41,12 @@ Não foi criada uma stack com login real nem alterada a configuração local do 
 
 Aplicar `20261006120000_add_support_role.sql` antes de `20261006121000_add_support_access_and_impersonation.sql`, em transações separadas. PostgreSQL precisa do commit da adição de `support` ao enum antes de usar o novo valor.
 
+Aplicar depois `20261006143000_fix_support_live_funnel_presence.sql`. Ela substitui apenas a agregação Ao Vivo, validando autenticação, empresa e `dashboard_view` antes da consulta. Evita repetir a validação da delegação para cada evento. O replay compara as mesmas contagens antes/depois e verifica os acessos negados. As medições de desempenho são locais com PGlite, sem garantia de tempo no banco hospedado.
+
+Em seguida, `20261006143500_revoke_anonymous_live_funnel_rpc.sql` remove o grant explícito de execução para `anon` que pode existir no Supabase hospedado. A validação de autenticação já bloqueia chamadas anônimas dentro da função; a migração também bloqueia a execução pela ACL.
+
+O Suporte entra em Empresas e não tem dashboard global na interface. Ao impersonar, a página inicial da empresa segue as permissões do alvo, incluindo usuários com acesso apenas a Mesas. Falhas transitórias na validação suspendem o conteúdo e oferecem nova tentativa; não descartam a sessão apenas por indisponibilidade de rede. Expiração e revogação continuam encerrando o acesso.
+
 O papel `support` é global (`user_roles.company_id = null`) e não pode ser combinado com outros papéis. Somente um superadmin pode criar/gerenciar esse usuário e seus acessos na tela **Usuários**. Nenhuma empresa é autorizada automaticamente.
 
 O RPC `set_support_company_access(_user_id uuid, _company_ids uuid[])` define a lista permitida. Uma lista vazia remove todos os acessos. A lista própria e a lista para um superadmin podem ser consultadas em `support_company_access`; a tabela de sessões não oferece leitura direta ao cliente.
@@ -79,3 +85,5 @@ A checagem TypeScript geral do projeto ainda apresenta erros de tipos em outros 
 Para atualizações futuras, revisar o diff, aplicar as duas migrações na ordem em um ambiente de homologação, publicar todas as Edge Functions que dependem dos arquivos compartilhados alterados e o frontend e testar com três contas: superadmin, suporte com uma empresa e suporte sem concessões. Confirmar que links diretos/API não abrem módulos globais ou outra empresa e que saída/ban/desativação removem a sessão.
 
 Para preparar uma reversão, exportar `snapshotQuery` de `support-release-tools.mjs`, executar a consulta de catálogo com a CLI autenticada e guardar o JSON privadamente. `buildRollbackSql` gera a reversão; `run_support_rollback_regression.mjs` verifica ida/volta no schema local. Não executar um rollback antigo depois de outras releases de banco ou depois que usuários de suporte começarem a usar o sistema sem revisar a preservação dos dados.
+
+Para reverter somente a correção Ao Vivo, guardar antes da aplicação a definição, owner e ACL de `public.get_live_funnel_presence(uuid, integer)`. Restaurar essa definição preserva os dados e as sessões existentes. O rollback da implementação original de Suporte não corresponde a essa atualização.

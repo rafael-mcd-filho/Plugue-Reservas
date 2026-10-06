@@ -419,7 +419,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           description: 'Vis\u00E3o consolidada',
           icon: BarChart3,
           path: '/dashboard',
-          showFor: ['superadmin', 'support'],
+          showFor: ['superadmin'],
         },
         {
           label: 'Empresas',

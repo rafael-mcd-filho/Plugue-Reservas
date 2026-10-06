@@ -317,6 +317,7 @@ describe('Dashboard — blocos operacionais protegidos', () => {
       dataUpdatedAt: 0,
       isFetching: true,
       isPending: true,
+      isLoading: true,
       isError: false,
     });
 
@@ -324,6 +325,24 @@ describe('Dashboard — blocos operacionais protegidos', () => {
 
     expect(screen.getByText('Ao Vivo')).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Carregando atividade ao vivo' })).toBeInTheDocument();
+    expect(screen.getByText('Resumo de Atendimentos')).toBeInTheDocument();
+  });
+
+  it('mostra indisponibilidade do Ao Vivo após falha, sem ficar carregando ou exibir zeros', () => {
+    useLiveFunnelPresenceMock.mockReturnValue({
+      data: undefined,
+      dataUpdatedAt: 0,
+      isFetching: false,
+      isPending: false,
+      isLoading: false,
+      isError: true,
+    });
+
+    renderDashboard();
+
+    expect(screen.getByRole('status', { name: 'Atividade ao vivo indisponível' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Carregando atividade ao vivo' })).not.toBeInTheDocument();
+    expect(screen.getByText('Erro parcial')).toBeInTheDocument();
     expect(screen.getByText('Resumo de Atendimentos')).toBeInTheDocument();
   });
 

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole } from '@/lib/companyPermissions';
+import { isAuthorizationFailure } from '@/lib/authorizationFailure';
 import {
   clearImpersonationSession, getImpersonationSession, startImpersonationSession,
   IMPERSONATION_EVENT, type ImpersonationSession,
@@ -19,6 +20,8 @@ export interface SupportImpersonationContext extends Omit<ImpersonationSession, 
 
 const IMPERSONATION_PENDING_GRACE_MS = 15000;
 
+class ImpersonationAuthorizationError extends Error {}
+
 export function useImpersonation() {
   const location = useLocation();
   const { slug } = useParams<{ slug?: string }>();
@@ -32,14 +35,18 @@ export function useImpersonation() {
     queryKey: ['support-impersonation-context', user?.id, session?.supportSessionId],
     queryFn: async () => {
       const { data, error } = await (supabase as any).rpc('get_support_impersonation_context');
-      if (error) throw error;
+      if (error) {
+        if (isAuthorizationFailure(error)) throw new ImpersonationAuthorizationError(error.message);
+        throw error;
+      }
       const context = data as SupportImpersonationContext | null;
       if (!context || context.actorUserId !== user?.id || context.companyId !== session?.companyId
+        || context.companySlug !== session?.companySlug
         || context.userId !== session?.userId || context.id !== session?.supportSessionId
         || !['admin', 'operator'].includes(context.effectiveRole)
         || !Number.isFinite(Date.parse(context.expiresAt))
         || Date.parse(context.expiresAt) <= Date.now()) {
-        throw new Error('A impersonação expirou ou o acesso foi removido.');
+        throw new ImpersonationAuthorizationError('A impersonação expirou ou o acesso foi removido.');
       }
       return context;
     },
@@ -67,7 +74,8 @@ export function useImpersonation() {
     const pathMatches = location.pathname === basePath || location.pathname.startsWith(basePath + '/');
     const allowedActor = isSuperadmin ? !session.supportSessionId : isSupportSession;
     const expired = !!session.supportSessionId && Date.parse(session.expiresAt ?? '') <= Date.now();
-    if (!user || !allowedActor || session.actorUserId !== user.id || expired || (isSupportSession && contextQuery.error)) {
+    if (!user || !allowedActor || session.actorUserId !== user.id || expired
+      || (isSupportSession && contextQuery.error instanceof ImpersonationAuthorizationError)) {
       clearImpersonationSession();
       if (session.supportSessionId) queryClient.clear();
       return;
@@ -134,7 +142,12 @@ export function useImpersonation() {
     isSuperadmin,
     isSupport,
     isImpersonatingCompany,
-    impersonationLoading: isSupportSession && contextQuery.isPending,
+    // A transport failure suspends access without discarding a valid delegation.
+    // The guard offers retry and never renders company content from stale data.
+    impersonationLoading: isSupportSession && (contextQuery.isPending || !!contextQuery.error),
+    impersonationError: isSupportSession && contextQuery.error
+      && !(contextQuery.error instanceof ImpersonationAuthorizationError) ? contextQuery.error : null,
+    retryImpersonation: contextQuery.refetch,
     impersonationSession: isImpersonatingCompany ? activeSession : null,
     effectiveRole: isImpersonatingCompany && activeSession ? activeSession.effectiveRole : null,
     effectiveRoles,

@@ -36,13 +36,15 @@ const CompanySlugContext = createContext<CompanySlugContextType | undefined>(und
 export function CompanySlugProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { slug } = useParams<{ slug: string }>();
-  const { profile, roles, loading: authLoading } = useAuth();
+  const { user, profile, roles, loading: authLoading } = useAuth();
   const {
     isImpersonatingCompany,
     impersonatedCompanyId,
     impersonatedCompanyName,
     impersonatedSlug,
+    impersonationLoading,
   } = useImpersonation();
+  const isPlatformUser = roles.includes('superadmin') || roles.includes('support');
   const slugIsValid = isValidCompanySlug(slug);
   const locationState = location.state as PostLoginNavigationState | null;
   const impersonatedCompany = isImpersonatingCompany
@@ -60,7 +62,7 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
   const { data: companyQuery, isLoading } = useQuery<CompanySlugQueryResult>({
     // The suffix prevents a legacy object cached by an earlier app version
     // from being mistaken for a confirmed timezone resolution after HMR.
-    queryKey: ['company-by-slug', slug, 'time-zone-v2'],
+    queryKey: ['company-by-slug', slug, 'time-zone-v2', user?.id, impersonatedCompanyId],
     queryFn: async () => {
       const currentSchemaResult = await supabase
         .from('companies' as any)
@@ -98,7 +100,10 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
         timeZoneResolution: 'legacy-default' as const,
       };
     },
-    enabled: slugIsValid,
+    // A support JWT has no tenant access until its delegation is validated.
+    // Reading early can cache an empty result and redirect a valid session.
+    enabled: slugIsValid && !authLoading && !impersonationLoading
+      && (!isPlatformUser || !!impersonatedCompany),
     initialData: impersonatedCompany
       ? {
           company: impersonatedCompany,
@@ -121,12 +126,16 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
     || companyQuery?.timeZoneResolution === 'legacy-default'
   );
 
-  if (authLoading || isLoading) {
+  if (authLoading || impersonationLoading || isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
+  }
+
+  if (isPlatformUser && slugIsValid && !isImpersonatingCompany) {
+    return <Navigate to="/empresas" replace />;
   }
 
   // A transient refetch/schema error must not invalidate a company that was
@@ -140,7 +149,6 @@ export function CompanySlugProvider({ children }: { children: ReactNode }) {
   }
 
   // Check access: superadmin can access any company, others only their own
-  const isPlatformUser = roles.includes('superadmin') || roles.includes('support');
   if (isPlatformUser && (!isImpersonatingCompany || impersonatedCompanyId !== company.id)) {
     if (locationState?.fromLogin) {
       return <Navigate to="/" replace />;

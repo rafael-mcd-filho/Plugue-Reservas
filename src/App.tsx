@@ -12,6 +12,7 @@ import AppLayout from "@/components/AppLayout";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import PublicPageSkeleton from "@/components/PublicPageSkeleton";
 import CompanyFeatureRouteGate from "@/components/company/CompanyFeatureRouteGate";
+import CompanyPanelEntryRoute from "@/components/company/CompanyPanelEntryRoute";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyPermissions } from "@/hooks/useCompanyPermissions";
 import type { AppRole, CompanyPanelPermission } from "@/lib/companyPermissions";
@@ -19,7 +20,6 @@ import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
-const SupportDashboard = lazyWithReload(() => import("@/pages/SupportDashboard"));
 const SupportCompanies = lazyWithReload(() => import("@/pages/SupportCompanies"));
 const DemandConversionReport = lazyWithReload(() => import("@/pages/DemandConversionReport"));
 const AttendanceLossesReport = lazyWithReload(() => import("@/pages/AttendanceLossesReport"));
@@ -152,16 +152,28 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   );
 }
 
-function PlatformReadRoute({ page }: { page: 'dashboard' | 'companies' }) {
+function PlatformDashboardRoute() {
+  const { roles } = useAuth();
+  const isSupport = roles.includes('support') && !roles.includes('superadmin');
+  return (
+    <ProtectedRoute allowedRoles={['superadmin', 'support']}>
+      {isSupport ? <Navigate to="/empresas" replace /> : (
+        <AppLayout>
+          <SuspenseRoute fallback={<PanelPageSkeleton />}><Dashboard /></SuspenseRoute>
+        </AppLayout>
+      )}
+    </ProtectedRoute>
+  );
+}
+
+function PlatformCompaniesRoute() {
   const { roles } = useAuth();
   const isSupport = roles.includes('support') && !roles.includes('superadmin');
   return (
     <ProtectedRoute allowedRoles={['superadmin', 'support']}>
       <AppLayout>
         <SuspenseRoute fallback={<PanelPageSkeleton />}>
-          {page === 'dashboard'
-            ? (isSupport ? <SupportDashboard /> : <Dashboard />)
-            : (isSupport ? <SupportCompanies /> : <Companies />)}
+          {isSupport ? <SupportCompanies /> : <Companies />}
         </SuspenseRoute>
       </AppLayout>
     </ProtectedRoute>
@@ -225,7 +237,8 @@ function HomeRedirect() {
   const { profile, roles, loading } = useAuth();
 
   if (loading) return null;
-  if (roles.includes("superadmin") || roles.includes("support")) return <Navigate to="/dashboard" replace />;
+  if (roles.includes("superadmin")) return <Navigate to="/dashboard" replace />;
+  if (roles.includes("support")) return <Navigate to="/empresas" replace />;
   if (profile?.company_id) {
     return <CompanySlugRedirect companyId={profile.company_id} />;
   }
@@ -268,34 +281,11 @@ function CompanySlugRedirect({ companyId }: { companyId: string }) {
 }
 
 function CompanyAdminHome() {
-  const { slug } = useParams<{ slug: string }>();
-  const { hasPermission, permissionsLoading } = useCompanyPermissions();
-
-  if (permissionsLoading) {
-    return <PanelPageSkeleton />;
-  }
-
-  if (hasPermission("dashboard_view")) {
-    return <Dashboard />;
-  }
-
-  if (slug && hasPermission("checkins_view")) {
-    return <Navigate to={`/${slug}/admin/check-ins`} replace />;
-  }
-
-  if (slug && hasPermission("reservations_view")) {
-    return <Navigate to={`/${slug}/admin/reservas`} replace />;
-  }
-
-  if (slug && hasPermission("calendar_view")) {
-    return <Navigate to={`/${slug}/admin/reservas/calendario`} replace />;
-  }
-
-  if (slug && hasPermission("waitlist_view")) {
-    return <Navigate to={`/${slug}/admin/fila`} replace />;
-  }
-
-  return <Navigate to="/acesso-negado" replace />;
+  return (
+    <CompanyPanelEntryRoute loadingFallback={<PanelPageSkeleton />}>
+      <Dashboard />
+    </CompanyPanelEntryRoute>
+  );
 }
 
 function LegacyCalendarRedirect() {
@@ -351,11 +341,11 @@ const App = () => (
 
               <Route
                 path="/dashboard"
-                element={<PlatformReadRoute page="dashboard" />}
+                element={<PlatformDashboardRoute />}
               />
               <Route
                 path="/empresas"
-                element={<PlatformReadRoute page="companies" />}
+                element={<PlatformCompaniesRoute />}
               />
               <Route
                 path="/empresas/:id"
