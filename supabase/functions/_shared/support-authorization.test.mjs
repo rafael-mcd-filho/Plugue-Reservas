@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import { createClient as createRealClient } from "@supabase/supabase-js";
 import * as rules from "./support-authorization.ts";
 
 const actorId = "00000000-0000-4000-8000-000000000001";
@@ -30,11 +31,19 @@ function evaluate(file, modules, deno = { env: { get: () => "offline-value" } })
   return exports;
 }
 
-function authHarness({ role = "support", context = delegation, permission = true } = {}) {
+function authHarness({ role = "support", context = delegation, permission = true, authError = null } = {}) {
   const auditEntries = [];
   const calls = [];
+  const verifiedTokens = [];
   const admin = {
-    auth: { admin: { getUserById: async (id) => ({ data: { user: { id } }, error: null }) } },
+    auth: {
+      getUser: async (token) => {
+        verifiedTokens.push(token);
+        assert.equal(token, "offline-token", "Auth must receive the caller JWT explicitly");
+        return { data: { user: authError ? null : { id: actorId } }, error: authError };
+      },
+      admin: { getUserById: async (id) => ({ data: { user: { id } }, error: null }) },
+    },
     from: (table) => ({
       select: () => ({ eq: async () => ({
         data: table === "user_roles" ? [{ role, company_id: role === "admin" ? companyId : null }] : [], error: null,
@@ -45,7 +54,7 @@ function authHarness({ role = "support", context = delegation, permission = true
   const createClient = (_url, key, options) => {
     if (!options) return admin;
     return {
-      auth: { getUser: async () => ({ data: { user: { id: actorId } }, error: null }) },
+      auth: { getUser: async () => { throw new Error("Request client cannot infer an Edge Auth session"); } },
       rpc: async (name, args) => {
         calls.push({ name, args, headers: options.global.headers });
         return { data: name === "get_support_impersonation_context" ? context : permission, error: null };
@@ -59,8 +68,73 @@ function authHarness({ role = "support", context = delegation, permission = true
   const request = (session = sessionId) => new Request("https://offline.invalid/functions/v1/company-action", {
     method: "POST", headers: { Authorization: "Bearer offline-token", ...(session ? { "x-support-impersonation": session } : {}) },
   });
-  return { auth, request, calls, auditEntries };
+  return { auth, request, calls, auditEntries, verifiedTokens };
 }
+
+test("global superadmin authenticates with the exact request JWT without a stored Edge session", async () => {
+  const { auth, request, verifiedTokens } = authHarness({ role: "superadmin" });
+  const context = await auth.getRequestAuthContext(request(null));
+  assert.equal(context.user.id, actorId);
+  assert.equal(context.actorUser.id, actorId);
+  assert.equal(context.impersonation, null);
+  assert.deepEqual(verifiedTokens, ["offline-token"]);
+  assert.equal((await auth.assertSuperadmin(request(null))).user.id, actorId);
+});
+
+test("missing or malformed bearer authorization never reaches privileged database access", async () => {
+  const { auth, verifiedTokens } = authHarness();
+  for (const Authorization of [undefined, "Bearer", "Basic offline-token", "Bearer token extra"]) {
+    const request = new Request("https://offline.invalid", { headers: Authorization ? { Authorization } : {} });
+    assert.equal(await auth.getRequestAuthContext(request), null);
+  }
+  assert.deepEqual(verifiedTokens, []);
+});
+
+test("Auth rejecting the exact JWT still denies global and company access", async () => {
+  const { auth, request, calls, auditEntries } = authHarness({ role: "superadmin", authError: { code: "bad_jwt", status: 401 } });
+  assert.equal(await auth.getRequestAuthContext(request(null)), null);
+  await assert.rejects(auth.assertSuperadmin(request(null)), /Nao autorizado/);
+  await assert.rejects(auth.assertUserCanAccessCompany(request(null), companyId), /Nao autorizado/);
+  assert.equal(calls.length, 0);
+  assert.equal(auditEntries.length, 0);
+});
+
+test("SDK transport validates JWT with server credentials and preserves caller credentials for delegation RPCs", async () => {
+  const calls = [];
+  const jwt = "transport-actor-jwt";
+  const serviceKey = "transport-service-key";
+  const publicKey = "transport-public-key";
+  const sdkFetch = async (input, init) => {
+    const url = new URL(String(input));
+    const headers = new Headers(init?.headers);
+    calls.push({ path: url.pathname, authorization: headers.get("Authorization"), apikey: headers.get("apikey"), session: headers.get("x-support-impersonation") });
+    if (url.pathname === "/auth/v1/user") {
+      const accepted = headers.get("Authorization") === `Bearer ${jwt}` && headers.get("apikey") === serviceKey;
+      return new Response(JSON.stringify(accepted ? { id: actorId, aud: "authenticated", email: "transport@test.invalid" } : { code: "bad_jwt", msg: "Rejected credentials" }), { status: accepted ? 200 : 401, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/rest/v1/user_roles") return new Response(JSON.stringify([{ role: "support", company_id: null }]), { headers: { "Content-Type": "application/json" } });
+    if (url.pathname === "/rest/v1/rpc/get_support_impersonation_context") return new Response(JSON.stringify(delegation), { headers: { "Content-Type": "application/json" } });
+    if (url.pathname === `/auth/v1/admin/users/${targetId}`) return new Response(JSON.stringify({ user: { id: targetId, aud: "authenticated" } }), { headers: { "Content-Type": "application/json" } });
+    throw new Error(`Unexpected SDK request: ${url.pathname}`);
+  };
+  const auth = evaluate("./internal-auth.ts", {
+    "https://esm.sh/@supabase/supabase-js@2.99.0": {
+      createClient: (url, key, options = {}) => createRealClient(url, key, {
+        ...options,
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        global: { ...options.global, fetch: sdkFetch },
+      }),
+    },
+    "./support-authorization.ts": rules,
+  }, { env: { get: (name) => ({ SUPABASE_URL: "https://sdk.offline.invalid", SUPABASE_SERVICE_ROLE_KEY: serviceKey, SUPABASE_ANON_KEY: publicKey })[name] } });
+  const context = await auth.getRequestAuthContext(new Request("https://offline.invalid", {
+    headers: { Authorization: `Bearer ${jwt}`, "x-support-impersonation": sessionId },
+  }));
+  assert.equal(context.actorUser.id, actorId);
+  assert.equal(context.user.id, targetId);
+  assert.deepEqual(calls.find(call => call.path === "/auth/v1/user"), { path: "/auth/v1/user", authorization: `Bearer ${jwt}`, apikey: serviceKey, session: null });
+  assert.deepEqual(calls.find(call => call.path === "/rest/v1/rpc/get_support_impersonation_context"), { path: "/rest/v1/rpc/get_support_impersonation_context", authorization: `Bearer ${jwt}`, apikey: publicKey, session: sessionId });
+});
 
 test("delegation is accepted only for the exact actor and session, company and company role", () => {
   assert.equal(rules.validateSupportImpersonationContext(delegation, actorId, sessionId).userId, targetId);

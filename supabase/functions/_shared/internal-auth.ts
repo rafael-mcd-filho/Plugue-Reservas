@@ -67,6 +67,7 @@ export function createSupabaseRequestClient(req: Request) {
 
   const sessionId = req.headers.get("x-support-impersonation");
   return createClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: {
       Authorization: authHeader || "",
       ...(sessionId ? { "x-support-impersonation": sessionId } : {}),
@@ -77,14 +78,21 @@ export function createSupabaseRequestClient(req: Request) {
 export type SupabaseRequestClient = ReturnType<typeof createSupabaseRequestClient>;
 
 export async function getRequestAuthContext(req: Request) {
-  if (!req.headers.get("Authorization")) return null;
-  const supabaseUser = createSupabaseRequestClient(req);
-  const { data: { user }, error } = await supabaseUser.auth.getUser();
+  const token = req.headers.get("Authorization")?.match(/^Bearer\s+(\S+)\s*$/i)?.[1];
+  if (!token) return null;
+  const supabaseAdmin = createSupabaseAdminClient();
+  // Edge requests carry a JWT, not a persisted Auth session. Validate that
+  // exact JWT with Auth using the same server client as the original handlers.
+  // The request client below is reserved for the caller's RLS-scoped RPCs.
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) {
+    console.error("Request JWT validation failed", {
+      code: error?.code ?? "user_missing", status: error?.status ?? null,
+    });
     return null;
   }
 
-  const supabaseAdmin = createSupabaseAdminClient();
+  const supabaseUser = createSupabaseRequestClient(req);
   const actorRoleRows = await getUserRoleRows(supabaseAdmin, user.id);
   const isSupport = actorRoleRows.some((row) => row.role === "support");
   const sessionId = req.headers.get("x-support-impersonation");
