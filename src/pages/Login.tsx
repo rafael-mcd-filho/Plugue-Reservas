@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { UtensilsCrossed, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { ArrowRight, Eye, EyeOff, UtensilsCrossed, Loader2, CircleAlert } from 'lucide-react';
 import { getEmailValidationMessage, normalizeEmail } from '@/lib/validation';
 import { useSystemBranding } from '@/hooks/useSettings';
 import { useFaviconOverride } from '@/lib/publicCompanyIcons';
+import { DEFAULT_SYSTEM_NAME, normalizeSystemName } from '@/lib/branding';
+import './Login.css';
 
 interface LoginLocationState {
   redirectTo?: string;
@@ -28,15 +28,15 @@ function getSafeRedirectPath(value: unknown) {
 
 function getRedirectMessage(path: string) {
   if (path === '/') {
-    return 'O sistema direciona voce automaticamente para o painel correto apos o login.';
+    return 'Após entrar, você será direcionado ao seu painel.';
   }
 
   const companyAdminMatch = path.match(/^\/([^/]+)\/admin(?:\/|$)/i);
   if (companyAdminMatch) {
-    return 'Depois do login, voce sera direcionado para o painel da unidade.';
+    return 'Após entrar, você será direcionado ao painel da unidade.';
   }
 
-  return 'Depois do login, voce sera direcionado automaticamente para a tela solicitada.';
+  return 'Após entrar, você voltará à página que estava acessando.';
 }
 
 export default function Login() {
@@ -46,6 +46,12 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [invalidField, setInvalidField] = useState<'email' | 'password' | null>(null);
+  const submissionPending = useRef(false);
+  const emailInput = useRef<HTMLInputElement>(null);
+  const passwordInput = useRef<HTMLInputElement>(null);
   const redirectTo = useMemo(
     () => getSafeRedirectPath((location.state as LoginLocationState | null)?.redirectTo),
     [location.state],
@@ -53,6 +59,7 @@ export default function Login() {
   const helperMessage = useMemo(() => getRedirectMessage(redirectTo), [redirectTo]);
   const { data: systemBranding, isLoading: systemBrandingLoading } = useSystemBranding();
   const systemLogo = systemBranding?.system_logo_url || '';
+  const systemName = normalizeSystemName(systemBranding?.system_name);
   useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
 
   useEffect(() => {
@@ -62,86 +69,145 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionPending.current) return;
+    setFormError('');
+    setInvalidField(null);
     if (!email || !password) {
-      toast.error('Preencha todos os campos');
+      setFormError('Preencha o e-mail e a senha para entrar.');
+      setInvalidField(!email ? 'email' : 'password');
+      (!email ? emailInput : passwordInput).current?.focus();
       return;
     }
 
     const emailError = getEmailValidationMessage(email, 'um e-mail', true);
     if (emailError) {
-      toast.error(emailError);
+      setFormError(emailError);
+      setInvalidField('email');
+      emailInput.current?.focus();
       return;
     }
 
+    submissionPending.current = true;
     setLoading(true);
-    const { error } = await signIn(normalizeEmail(email), password);
-    setLoading(false);
-    if (error) {
-      const message = error.message === 'Invalid login credentials'
-        ? 'Email ou senha incorretos'
-        : error.message;
-      toast.error(message);
+    try {
+      const { error } = await signIn(normalizeEmail(email), password);
+      if (error) {
+        setFormError(error.message === 'Invalid login credentials'
+          ? 'E-mail ou senha incorretos. Confira seus dados e tente novamente.'
+          : error.message || 'Não foi possível entrar agora. Tente novamente.');
+      }
+    } catch {
+      setFormError('Não foi possível entrar agora. Verifique sua conexão e tente novamente.');
+    } finally {
+      submissionPending.current = false;
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-none shadow-sm">
-        <CardHeader className="text-center space-y-4">
-          <div className="flex justify-center">
+    <main className="login-page">
+      <div className="login-shell">
+        <section className="login-brand" aria-label={systemName}>
+          <div className="login-brand-image" aria-hidden="true" />
+          <div className="login-brand-identity">
             {systemLogo ? (
-              <img src={systemLogo} alt={systemBranding?.system_name || ''} className="h-14 w-14 rounded-lg object-contain" />
+              <img src={systemLogo} alt={systemName} className="login-logo" />
             ) : (
-              <div className="p-3 rounded-lg bg-primary/10">
-                <UtensilsCrossed className="h-8 w-8 text-primary" />
+              <div className="login-logo login-logo-fallback" aria-hidden="true">
+                <UtensilsCrossed size={28} />
               </div>
             )}
+            <span className="login-brand-name">
+              {systemName === DEFAULT_SYSTEM_NAME ? <>Plug <span>Guest</span></> : systemName}
+            </span>
           </div>
-          <div>
-            <CardTitle className="text-2xl">
-              Plug<span className="text-primary"> Guest</span>
-            </CardTitle>
-            <CardDescription className="mt-2">Entre na sua conta para continuar</CardDescription>
+          <div className="login-brand-copy">
+            <h2>Cada reserva,<br />uma boa experiência.</h2>
+            <p>Mais cuidado com quem chega.<br />Mais leveza para quem recebe.</p>
           </div>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="seu@email.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </div>
-            <div>
-              <Label htmlFor="password">Senha</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Entrando...
-                </>
-              ) : 'Entrar'}
-            </Button>
-          </form>
-          <p className="text-sm text-center text-muted-foreground mt-6">
-            {helperMessage}
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+        </section>
+
+        <section className="login-form-panel" aria-labelledby="login-title">
+          <div className="login-form-content">
+            <header className="login-form-header">
+              <h1 id="login-title">Bem-vindo de volta.</h1>
+              <p>Entre com seu e-mail e senha para continuar.</p>
+            </header>
+            <form onSubmit={handleSubmit} className="login-form" noValidate aria-busy={loading}>
+              <div className="login-field">
+                <Label htmlFor="email">E-mail</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  ref={emailInput}
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={email}
+                  onChange={e => {
+                    setEmail(e.target.value);
+                    if (invalidField === 'email') setInvalidField(null);
+                  }}
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  className="login-input"
+                  aria-invalid={invalidField === 'email'}
+                  aria-describedby={formError ? 'login-error' : undefined}
+                />
+              </div>
+              <div className="login-field">
+                <Label htmlFor="password">Senha</Label>
+                <div className="login-password">
+                  <Input
+                    id="password"
+                    name="password"
+                    ref={passwordInput}
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Sua senha"
+                    value={password}
+                    onChange={e => {
+                      setPassword(e.target.value);
+                      if (invalidField === 'password') setInvalidField(null);
+                    }}
+                    autoComplete="current-password"
+                    required
+                    className="login-input"
+                    aria-invalid={invalidField === 'password'}
+                    aria-describedby={formError ? 'login-error' : undefined}
+                  />
+                  <button
+                    type="button"
+                    className="login-password-toggle"
+                    aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword(value => !value)}
+                  >
+                    {showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+                  </button>
+                </div>
+              </div>
+              {formError && (
+                <div id="login-error" className="login-error" role="alert">
+                  <CircleAlert size={18} aria-hidden="true" />
+                  <p>{formError}</p>
+                </div>
+              )}
+              <Button type="submit" className="login-submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                    Entrando...
+                  </>
+                ) : <><span>Entrar</span><ArrowRight size={18} aria-hidden="true" /></>}
+              </Button>
+            </form>
+            <p className="login-helper">
+              {helperMessage}
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
