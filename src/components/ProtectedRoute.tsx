@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
@@ -28,6 +28,7 @@ export default function ProtectedRoute({ children, allowedRoles, requiredCompany
     permissionsAuthorizationError, retryPermissions,
   } = useCompanyPermissions();
   const location = useLocation();
+  const { slug } = useParams<{ slug?: string }>();
   const locationState = location.state as PostLoginNavigationState | null;
 
   if (!loading && user && (impersonationError || permissionsRecoverableError)) {
@@ -52,6 +53,16 @@ export default function ProtectedRoute({ children, allowedRoles, requiredCompany
   if (!user) {
     const redirectTo = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to="/login" replace state={{ redirectTo }} />;
+  }
+
+  // Clearing delegation can render this outer guard before the exit handler
+  // navigates. Return to the actor's platform page instead of denying the old
+  // company route; no company content is rendered without a delegation.
+  const companyPanelPath = slug ? `/${slug}/admin` : null;
+  if (companyPanelPath && !isImpersonatingCompany
+    && (location.pathname === companyPanelPath || location.pathname.startsWith(companyPanelPath + '/'))
+    && (roles.includes('superadmin') || roles.includes('support'))) {
+    return <Navigate to={roles.includes('superadmin') ? '/dashboard' : '/empresas'} replace />;
   }
 
   if (permissionsAuthorizationError) {

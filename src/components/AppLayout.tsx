@@ -708,8 +708,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   };
 
   const handleExitImpersonation = async () => {
-    await stopImpersonation();
-    navigate(roles.includes('support') ? '/empresas' : '/dashboard');
+    try {
+      await stopImpersonation();
+    } finally {
+      navigate(roles.includes('support') ? '/empresas' : '/dashboard', { replace: true });
+    }
   };
 
   const renderNavLink = (item: NavItem) => {

@@ -129,12 +129,21 @@ export function useImpersonation() {
     const stored = getImpersonationSession();
     try {
       if (stored?.supportSessionId) {
-        await (supabase as any).rpc('stop_support_impersonation', { _session_id: stored.supportSessionId });
+        const { error } = await (supabase as any).rpc('stop_support_impersonation', { _session_id: stored.supportSessionId });
+        if (error) throw error;
       }
+    } catch {
+      // A failed revocation request must still remove local delegated access.
+      console.warn('[Impersonation] Não foi possível confirmar o encerramento da sessão no servidor.');
     } finally {
-      await queryClient.cancelQueries();
-      clearImpersonationSession();
-      queryClient.clear();
+      try {
+        await queryClient.cancelQueries();
+      } catch {
+        console.warn('[Impersonation] Não foi possível cancelar todas as consultas pendentes.');
+      } finally {
+        clearImpersonationSession();
+        queryClient.clear();
+      }
     }
   };
 

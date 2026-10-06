@@ -207,7 +207,9 @@ describe('support company entry with real route guards', () => {
     startPendingSession();
     renderEntry();
 
-    expect(await screen.findByText('Acesso negado')).toBeInTheDocument();
+    expect(await screen.findByText('Empresas autorizadas')).toBeInTheDocument();
+    expect(screen.getByTestId('path')).toHaveTextContent(/^\/empresas$/);
+    expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();
     expect(mocks.companyQuery).not.toHaveBeenCalled();
     expect(mocks.permissionQuery).not.toHaveBeenCalled();
     expect(getImpersonationSession()).toBeNull();
@@ -248,7 +250,8 @@ describe('support company entry with real route guards', () => {
     startPendingSession();
     renderEntry({ path: '/empresa-b/admin' });
 
-    expect(await screen.findByText('Acesso negado')).toBeInTheDocument();
+    expect(await screen.findByText('Empresas autorizadas')).toBeInTheDocument();
+    expect(screen.getByTestId('path')).toHaveTextContent(/^\/empresas$/);
     expect(mocks.companyQuery).not.toHaveBeenCalled();
     expect(mocks.permissionQuery).not.toHaveBeenCalled();
     expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();

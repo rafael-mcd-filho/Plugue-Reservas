@@ -47,6 +47,8 @@ Em seguida, `20261006143500_revoke_anonymous_live_funnel_rpc.sql` remove o grant
 
 O Suporte entra em Empresas e não tem dashboard global na interface. Ao impersonar, a página inicial da empresa segue as permissões do alvo, incluindo usuários com acesso apenas a Mesas. Falhas transitórias na validação suspendem o conteúdo e oferecem nova tentativa; não descartam a sessão apenas por indisponibilidade de rede. Expiração e revogação continuam encerrando o acesso.
 
+Ao encerrar a impersonação, a guarda do painel retorna o ator para Empresas (Suporte) ou Dashboard (Superadmin), sem exibir uma negação durante a limpeza da sessão. A saída substitui a entrada no histórico e remove o contexto/cache local mesmo se a chamada de encerramento falhar. Falha nessa chamada não confirma revogação no servidor; a sessão remota continua sujeita à expiração e às verificações de concessão/login.
+
 O papel `support` é global (`user_roles.company_id = null`) e não pode ser combinado com outros papéis. Somente um superadmin pode criar/gerenciar esse usuário e seus acessos na tela **Usuários**. Nenhuma empresa é autorizada automaticamente.
 
 O RPC `set_support_company_access(_user_id uuid, _company_ids uuid[])` define a lista permitida. Uma lista vazia remove todos os acessos. A lista própria e a lista para um superadmin podem ser consultadas em `support_company_access`; a tabela de sessões não oferece leitura direta ao cliente.
