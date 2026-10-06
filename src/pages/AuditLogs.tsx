@@ -97,7 +97,7 @@ export default function AuditLogs() {
                   <TableCell className="text-sm">
                     <div className="min-w-[180px]">
                       <p className="font-medium">{log.actor_name || 'Usuário sem perfil'}</p>
-                      <p className="text-muted-foreground break-all">{log.actor_email || log.user_id}</p>
+                      <p className="text-muted-foreground break-all">{log.actor_email || log.actor_user_id || log.user_id}</p>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -150,7 +150,7 @@ export default function AuditLogs() {
                 <div className="rounded-lg border p-3">
                   <p className="text-xs font-medium text-muted-foreground mb-1">Quem realizou</p>
                   <p className="text-sm font-medium">{selectedLog.actor_name || 'Usuário sem perfil'}</p>
-                  <p className="text-xs text-muted-foreground break-all">{selectedLog.actor_email || selectedLog.user_id}</p>
+                  <p className="text-xs text-muted-foreground break-all">{selectedLog.actor_email || selectedLog.actor_user_id || selectedLog.user_id}</p>
                 </div>
                 <div className="rounded-lg border p-3">
                   <p className="text-xs font-medium text-muted-foreground mb-1">IP</p>
@@ -163,7 +163,7 @@ export default function AuditLogs() {
                 </div>
                 <div className="rounded-lg border p-3">
                   <p className="text-xs font-medium text-muted-foreground mb-1">Usuário autor</p>
-                  <p className="text-sm break-all">{selectedLog.user_id}</p>
+                  <p className="text-sm break-all">{selectedLog.actor_user_id || selectedLog.user_id}</p>
                 </div>
               </div>
 

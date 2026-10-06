@@ -13,7 +13,8 @@ export interface SystemSetting {
 
 export interface AuditLog {
   id: string;
-  user_id: string;
+  user_id: string | null;
+  actor_user_id: string | null;
   action: string;
   entity_type: string | null;
   entity_id: string | null;
@@ -123,31 +124,34 @@ export function useAuditLogs(limit = 50) {
       if (error) throw error;
 
       const rows = (data ?? []) as any[];
-      const userIds = [...new Set(rows.map((row) => row.user_id).filter(Boolean))];
+      const userIds = [...new Set(rows
+        .filter((row) => row.actor_name == null || row.actor_email == null)
+        .map((row) => row.user_id)
+        .filter(Boolean))];
+      const profileMap = new Map<string, { actor_name: string | null; actor_email: string | null }>();
 
-      if (userIds.length === 0) {
-        return [] as AuditLog[];
+      if (userIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles' as any)
+          .select('id, full_name, email')
+          .in('id', userIds as any);
+
+        if (profilesError) throw profilesError;
+        for (const profile of (profiles ?? []) as any[]) {
+          profileMap.set(profile.id, {
+            actor_name: profile.full_name || null,
+            actor_email: profile.email || null,
+          });
+        }
       }
 
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles' as any)
-        .select('id, full_name, email')
-        .in('id', userIds as any);
-
-      if (profilesError) throw profilesError;
-
-      const profileMap = new Map(
-        ((profiles ?? []) as any[]).map((profile) => [
-          profile.id,
-          { actor_name: profile.full_name || null, actor_email: profile.email || null },
-        ]),
-      );
-
       return rows.map((row) => {
-        const actor = profileMap.get(row.user_id) ?? { actor_name: null, actor_email: null };
+        const actor = profileMap.get(row.user_id);
         return {
           ...row,
-          ...actor,
+          actor_user_id: row.actor_user_id ?? row.user_id ?? null,
+          actor_name: row.actor_name ?? actor?.actor_name ?? null,
+          actor_email: row.actor_email ?? actor?.actor_email ?? null,
         };
       }) as AuditLog[];
     },

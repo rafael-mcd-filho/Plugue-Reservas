@@ -19,6 +19,8 @@ const superadmin = '00000000-0000-4000-8000-000000000001';
 const companyA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const companyB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const login = '11111111-1111-4111-8111-111111111111';
+const historicalActor = '00000000-0000-4000-8000-000000000006';
+const historicalAudit = '00000000-0000-4000-8000-000000000007';
 
 async function actor(id, session = null) {
   await db.exec('RESET ROLE');
@@ -57,6 +59,8 @@ try {
   const files = (await readdir(migrationDirectory)).filter(file => file.endsWith('.sql')).sort();
   const liveAclMigration = files.find(file => file.startsWith('20261006143500_'));
   assert.ok(liveAclMigration, 'Expected the incremental live-funnel anonymous ACL migration');
+  const auditActorMigration = files.find(file => file.startsWith('20261006150000_'));
+  assert.ok(auditActorMigration, 'Expected the additive audit actor preservation migration');
   for (const file of files) {
     if (file === '20260309211714_c61ee570-889c-44b5-9189-83eb8dc93983.sql') {
       // Historical demo data expects objects that were created through the app.
@@ -68,6 +72,12 @@ try {
       await db.exec('GRANT EXECUTE ON FUNCTION public.get_live_funnel_presence(uuid,integer) TO anon');
       assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),true);
     }
+    if (file === auditActorMigration) {
+      // Existing history must be backfilled from the real pre-migration schema.
+      await db.query(`INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES($1,'historical-auth@test.local','{"full_name":"Auth historical name"}')`, [historicalActor]);
+      await db.query(`UPDATE profiles SET full_name='Historical profile name',email='historical-profile@test.local' WHERE id=$1`, [historicalActor]);
+      await db.query(`INSERT INTO audit_logs(id,user_id,action,details) VALUES($1,$2,'historical_actor_fixture','{"retained":true}')`, [historicalAudit,historicalActor]);
+    }
     const sql = (await readFile(resolve(migrationDirectory, file), 'utf8'))
       .replace(/CREATE EXTENSION IF NOT EXISTS (pg_cron|pg_net)[^;]*;/gi, '')
       .replace(/CREATE INDEX CONCURRENTLY/gi, 'CREATE INDEX');
@@ -75,6 +85,11 @@ try {
   }
   assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),false);
   assert.equal(await scalar(`SELECT has_function_privilege('authenticated','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),true);
+  const historicalSnapshot = {
+    user_id: historicalActor, actor_user_id: historicalActor,
+    actor_name: 'Historical profile name', actor_email: 'historical-profile@test.local',
+  };
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[historicalAudit])).rows[0],historicalSnapshot);
   await db.query(`INSERT INTO companies(id,name,slug) VALUES($1,'Empresa A','empresa-a'),($2,'Empresa B','empresa-b')`, [companyA, companyB]);
   for (const [id, role, name] of [[superadmin, 'superadmin', 'Root'], [support, 'support', 'Suporte'], [admin, 'admin', 'Admin'], [operator, 'operator', 'Operador']]) {
     await db.query(`INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES($1,$2,$3)`, [id, `${role}@test.local`, JSON.stringify({ full_name: name })]);
@@ -236,6 +251,77 @@ try {
   await db.exec('RESET ROLE');
   await db.exec(await readFile(resolve(migrationDirectory,liveAclMigration),'utf8'));
   assert.equal(await scalar(`SELECT has_function_privilege('anon','public.get_live_funnel_presence(uuid,integer)','EXECUTE') value`),false);
+
+  // Canonical snapshots cannot be spoofed on insert or rewritten later. New
+  // records still require a live Auth actor, preserving FK validation.
+  await db.query(`SELECT set_config('request.jwt.claims','{}',false),set_config('request.headers','{}',false)`);
+  const spoofedAudit = await scalar(`INSERT INTO audit_logs(user_id,action,actor_user_id,actor_name,actor_email)
+    VALUES($1,'snapshot_spoof_fixture',$2,'Forged actor','forged@test.local') RETURNING id value`,[support,superadmin]);
+  const supportSnapshot = { user_id:support,actor_user_id:support,actor_name:'Suporte',actor_email:'support@test.local' };
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[spoofedAudit])).rows[0],supportSnapshot);
+  for (const [column,value] of [['actor_user_id',superadmin],['actor_name','Rewritten name'],['actor_email','rewritten@test.local'],['user_id',superadmin]]) {
+    await assert.rejects(db.query(`UPDATE audit_logs SET ${column}=$1 WHERE id=$2`,[value,spoofedAudit]),error => error.code==='23514');
+  }
+  await assert.rejects(db.query(`INSERT INTO audit_logs(user_id,action) VALUES('ffffffff-ffff-4fff-8fff-ffffffffffff','invalid_actor_fixture')`),
+    error => error.code==='23503' && error.constraint==='audit_logs_user_id_fkey');
+  await assert.rejects(db.query(`INSERT INTO audit_logs(user_id,action,actor_user_id) VALUES(NULL,'null_actor_fixture',$1)`,[support]),
+    error => error.code==='23502' && error.column==='user_id');
+
+  await db.query(`UPDATE profiles SET full_name='',email=NULL WHERE id=$1`,[historicalActor]);
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[historicalAudit])).rows[0],historicalSnapshot);
+  const fallbackAudit = await scalar(`INSERT INTO audit_logs(user_id,action) VALUES($1,'auth_fallback_fixture') RETURNING id value`,[historicalActor]);
+  assert.deepEqual((await db.query('SELECT actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[fallbackAudit])).rows[0],{
+    actor_user_id:historicalActor,actor_name:'Auth historical name',actor_email:'historical-auth@test.local',
+  });
+
+  // Simulate GoTrue's role: it can delete Auth users but has no direct access
+  // to audit/profile tables or the snapshot trigger function.
+  await db.exec(`CREATE ROLE fixture_auth_admin NOLOGIN;
+    GRANT USAGE ON SCHEMA auth TO fixture_auth_admin;
+    GRANT SELECT,DELETE ON auth.users TO fixture_auth_admin;`);
+  assert.equal(await scalar(`SELECT has_table_privilege('fixture_auth_admin','public.audit_logs','UPDATE') value`),false);
+  assert.equal(await scalar(`SELECT has_table_privilege('fixture_auth_admin','public.profiles','SELECT') value`),false);
+  assert.equal(await scalar(`SELECT has_function_privilege('fixture_auth_admin','public.capture_audit_log_actor()','EXECUTE') value`),false);
+
+  await actor(superadmin);
+  await db.query('SELECT set_support_company_access($1,$2)',[support,[companyA]]);
+  await actor(support);
+  const deletedTargetSession = await scalar('SELECT start_support_impersonation($1,$2) value',[companyA,operator]);
+  await db.exec('RESET ROLE');
+  await db.query(`SELECT set_config('request.jwt.claims','{}',false),set_config('request.headers','{}',false)`);
+  const targetAudit = await scalar(`INSERT INTO audit_logs(user_id,action) VALUES($1,'deleted_target_fixture') RETURNING id value`,[operator]);
+  await db.exec('SET ROLE fixture_auth_admin');
+  await db.query('DELETE FROM auth.users WHERE id=$1',[operator]);
+  await db.exec('RESET ROLE');
+  assert.equal(await scalar('SELECT count(*) value FROM support_impersonation_sessions WHERE id=$1',[deletedTargetSession.id]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM profiles WHERE id=$1',[operator]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM user_roles WHERE user_id=$1',[operator]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM company_user_panel_permissions WHERE user_id=$1',[operator]),0);
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[targetAudit])).rows[0],{
+    user_id:null,actor_user_id:operator,actor_name:'Operador',actor_email:'operator@test.local',
+  });
+
+  await actor(support);
+  await db.query('SELECT start_support_impersonation($1,$2)',[companyA,admin]);
+  await db.exec('RESET ROLE');
+  await db.query(`SELECT set_config('request.jwt.claims','{}',false),set_config('request.headers','{}',false)`);
+  const auditsBeforeDeletion = (await db.query('SELECT id,action,entity_type,entity_id,details,actor_user_id,actor_name,actor_email FROM audit_logs ORDER BY id')).rows;
+  assert.equal(auditsBeforeDeletion.filter(log => log.actor_user_id===support).length>0,true);
+  await db.exec('SET ROLE fixture_auth_admin');
+  await db.query('DELETE FROM auth.users WHERE id=ANY($1::uuid[])',[[support,historicalActor]]);
+  await db.exec('RESET ROLE');
+  assert.deepEqual((await db.query('SELECT id,action,entity_type,entity_id,details,actor_user_id,actor_name,actor_email FROM audit_logs ORDER BY id')).rows,auditsBeforeDeletion);
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[spoofedAudit])).rows[0],{...supportSnapshot,user_id:null});
+  assert.deepEqual((await db.query('SELECT user_id,actor_user_id,actor_name,actor_email FROM audit_logs WHERE id=$1',[historicalAudit])).rows[0],{...historicalSnapshot,user_id:null});
+  assert.equal(await scalar('SELECT count(*) value FROM audit_logs WHERE actor_user_id=ANY($1::uuid[]) AND user_id IS NOT NULL',[[support,operator,historicalActor]]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM support_company_access WHERE user_id=$1',[support]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM support_impersonation_sessions WHERE actor_user_id=$1',[support]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM profiles WHERE id=$1',[support]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM user_roles WHERE user_id=$1',[support]),0);
+  assert.equal(await scalar('SELECT count(*) value FROM auth.users WHERE id=ANY($1::uuid[])',[[superadmin,admin]]),2);
+  assert.equal(await scalar('SELECT count(*) value FROM reservations WHERE id=ANY($1::uuid[])',[[reservationA,reservationB]]),2);
+  await assert.rejects(db.query('UPDATE audit_logs SET user_id=$1 WHERE id=$2',[superadmin,spoofedAudit]),error => error.code==='23514');
+  console.log('Audit actor deletion regression passed: historical/new snapshots, canonical inserts, immutable identity, FK validation, restricted Auth role, preserved history, and support actor/target cascades.');
   console.log(`Support live-funnel regression passed (same 1,004 sessions; invoker ${previousLiveMs.toFixed(1)} ms -> guarded RPC ${fixedLiveMs.toFixed(1)} ms locally; tenant/permission/login/expiry/revocation/anonymous boundaries).`);
   console.log(`Support full-schema migration replay passed (${files.length} actual migrations, inert cron/net; real RLS and company RPCs).`);
 } catch (error) {
