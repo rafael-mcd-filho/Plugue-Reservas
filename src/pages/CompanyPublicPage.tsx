@@ -42,7 +42,8 @@ import { normalizePublicHeroMediaUrls } from '@/lib/publicHeroMedia';
 import { richTextHasContent, richTextToPlainText } from '@/lib/richText';
 import { cn } from '@/lib/utils';
 import { lazyWithReload, preloadLazyImport } from '@/lib/lazyReload';
-import { findOpeningHoursForDayIndex, getDayIndexFromName } from '@/lib/openingHours';
+import { buildOpeningHourGroups, getOpeningScheduleDates, getOpeningStatus } from '@/lib/public-opening-hours';
+import { getPublicReservationSchedules } from '@/lib/public-reservation-schedule';
 import { getPrefetchedPublicCompany } from '@/publicCompanyBootstrap';
 
 const loadReservationModal = () => import('@/components/ReservationModal');
@@ -60,13 +61,6 @@ interface OpeningHour {
   open: string;
   close: string;
   closed: boolean;
-}
-
-interface BlockedDate {
-  date: string;
-  all_day: boolean;
-  start_time: string | null;
-  end_time: string | null;
 }
 
 interface PublicNotice {
@@ -140,207 +134,6 @@ const PAYMENT_LABELS: Record<string, { label: string; icon: typeof CreditCard }>
   pix: { label: 'Pix', icon: QrCode },
   vale_refeicao: { label: 'Vale Refeiç\u00E3o', icon: Wallet },
 };
-
-const DAY_MAP: Record<string, number> = {
-  Dom: 0,
-  Seg: 1,
-  Ter: 2,
-  Qua: 3,
-  Qui: 4,
-  Sex: 5,
-  'S\u00E1b': 6,
-};
-
-const DAY_NAMES_BY_INDEX = Object.entries(DAY_MAP).reduce<Record<number, string>>((acc, [day, index]) => {
-  acc[index] = day;
-  return acc;
-}, {});
-
-const FULL_DAY_NAME_BY_ABBR: Record<string, string> = {
-  Seg: 'Segunda',
-  Ter: 'Terça',
-  Qua: 'Quarta',
-  Qui: 'Quinta',
-  Sex: 'Sexta',
-  'Sáb': 'Sábado',
-  Dom: 'Domingo',
-};
-
-interface OpeningHourGroup {
-  label: string;
-  closed: boolean;
-  open: string;
-  close: string;
-  isToday: boolean;
-}
-
-interface OpeningSlot {
-  day: string;
-  open: string;
-  close: string;
-  start: Date;
-  end: Date;
-}
-
-interface OpeningStatus {
-  title: string;
-  description: string | null;
-  variant: 'open' | 'closed';
-}
-
-function parseTimeToMinutes(time?: string | null) {
-  if (!time) return null;
-  const [hours, minutes] = time.split(':').map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  return hours * 60 + minutes;
-}
-
-function isSameCalendarDate(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate();
-}
-
-function getOpeningHourByDayIndex(hours: OpeningHour[], dayIndex: number) {
-  return findOpeningHoursForDayIndex(hours, dayIndex);
-}
-
-function buildOpeningSlots(hours: OpeningHour[], now: Date) {
-  const slots: OpeningSlot[] = [];
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-
-  for (let offset = -1; offset <= 8; offset += 1) {
-    const dayStart = new Date(todayStart);
-    dayStart.setDate(todayStart.getDate() + offset);
-
-    const hour = getOpeningHourByDayIndex(hours, dayStart.getDay());
-    if (!hour || hour.closed) continue;
-
-    const openMinutes = parseTimeToMinutes(hour.open);
-    const closeMinutes = parseTimeToMinutes(hour.close);
-    if (openMinutes === null || closeMinutes === null) continue;
-
-    const closeOffset = closeMinutes <= openMinutes ? 24 * 60 : 0;
-    const start = new Date(dayStart.getTime() + openMinutes * 60_000);
-    const end = new Date(dayStart.getTime() + (closeMinutes + closeOffset) * 60_000);
-
-    slots.push({
-      day: hour.day,
-      open: hour.open,
-      close: hour.close,
-      start,
-      end,
-    });
-  }
-
-  return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
-}
-
-function describeOpeningDay(slot: OpeningSlot, now: Date) {
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-
-  if (isSameCalendarDate(slot.start, tomorrow)) return 'Abre amanhã';
-  return `Abre ${format(slot.start, "EEEE, dd/MM", { locale: ptBR })}`;
-}
-
-function hasUniformOpenHours(hours: OpeningHour[]) {
-  const openDays = hours.filter((hour) => !hour.closed);
-  if (openDays.length === 0) return false;
-
-  const [first, ...rest] = openDays;
-  return rest.every((hour) => hour.open === first.open && hour.close === first.close);
-}
-
-function getOpeningStatus(hours: OpeningHour[], now: Date): OpeningStatus | null {
-  if (hours.length === 0) return null;
-
-  const uniformSuffix = hasUniformOpenHours(hours) ? ' · todos os dias' : '';
-  const slots = buildOpeningSlots(hours, now);
-  const currentSlot = slots.find((slot) => now >= slot.start && now < slot.end);
-
-  if (currentSlot) {
-    return {
-      title: 'Aberto agora',
-      description: `Fecha às ${currentSlot.close}${uniformSuffix}`,
-      variant: 'open',
-    };
-  }
-
-  const upcomingTodaySlot = slots.find((slot) => slot.start > now && isSameCalendarDate(slot.start, now));
-  if (upcomingTodaySlot) {
-    return {
-      title: 'Abre hoje',
-      description: `Abre às ${upcomingTodaySlot.open}${uniformSuffix}`,
-      variant: 'closed',
-    };
-  }
-
-  const nextSlot = slots.find((slot) => slot.start > now);
-  if (!nextSlot) {
-    return {
-      title: 'Fechado hoje',
-      description: null,
-      variant: 'closed',
-    };
-  }
-
-  return {
-    title: describeOpeningDay(nextSlot, now),
-    description: null,
-    variant: 'closed',
-  };
-}
-
-function buildOpeningHourGroups(hours: OpeningHour[], now: Date): OpeningHourGroup[] {
-  const todayIndex = now.getDay();
-  const groups: { startDay: string; endDay: string; closed: boolean; open: string; close: string; isToday: boolean }[] = [];
-
-  for (const hour of hours) {
-    const isToday = getDayIndexFromName(hour.day) === todayIndex;
-    const last = groups[groups.length - 1];
-    const sameAsLast = last
-      && !isToday
-      && !last.isToday
-      && last.closed === hour.closed
-      && last.open === hour.open
-      && last.close === hour.close;
-
-    if (sameAsLast) {
-      last.endDay = hour.day;
-    } else {
-      groups.push({
-        startDay: hour.day,
-        endDay: hour.day,
-        closed: hour.closed,
-        open: hour.open,
-        close: hour.close,
-        isToday,
-      });
-    }
-  }
-
-  return groups.map((group) => {
-    if (group.isToday) {
-      return {
-        label: `${FULL_DAY_NAME_BY_ABBR[group.startDay] || group.startDay} · hoje`,
-        closed: group.closed,
-        open: group.open,
-        close: group.close,
-        isToday: true,
-      };
-    }
-
-    return {
-      label: group.startDay === group.endDay ? group.startDay : `${group.startDay} a ${group.endDay}`,
-      closed: group.closed,
-      open: group.open,
-      close: group.close,
-      isToday: false,
-    };
-  });
-}
 
 function flattenAddress(address: string | null | undefined) {
   if (!address) return '';
@@ -567,23 +360,6 @@ export default function CompanyPublicPage() {
     };
   }, [company?.id]);
 
-  const { data: blockedDates = [] } = useQuery({
-    queryKey: ['blocked-dates-public-page', company?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('blocked_dates' as any)
-        .select('date, all_day, start_time, end_time')
-        .eq('company_id', company!.id)
-        .gte('date', format(new Date(), 'yyyy-MM-dd'));
-
-      if (error) throw error;
-      return (data ?? []) as BlockedDate[];
-    },
-    enabled: !!company?.id,
-    staleTime: 5 * 60 * 1000,
-    refetchOnMount: false,
-  });
-
   const { data: publicNotice } = useQuery({
     queryKey: ['company-public-notice', company?.id],
     queryFn: async () => {
@@ -659,18 +435,26 @@ export default function CompanyPublicPage() {
       : 'calc(1.25rem + env(safe-area-inset-bottom, 0px))',
   } as CSSProperties;
   const activePublicNotice = publicNotice && publicNotice.id !== dismissedNoticeId ? publicNotice : null;
-  const getOpeningHourForDate = (date: Date) => {
-    return findOpeningHoursForDayIndex(openingHours, date.getDay());
-  };
-
-  const isAllDayBlocked = (iso: string) => blockedDates.some((blocked) => blocked.date === iso && blocked.all_day);
-  const isDateClosed = (date: Date) => {
-    const iso = format(date, 'yyyy-MM-dd');
-    const hours = getOpeningHourForDate(date);
-    return !hours || hours.closed || isAllDayBlocked(iso);
-  };
-  const openingStatus = useMemo(() => getOpeningStatus(openingHours, statusNow), [openingHours, statusNow]);
-  const openingHourGroups = useMemo(() => buildOpeningHourGroups(openingHours, statusNow), [openingHours, statusNow]);
+  const openingScheduleDates = useMemo(() => getOpeningScheduleDates(statusNow), [statusNow]);
+  const { data: openingSchedules, isError: openingSchedulesError } = useQuery({
+    queryKey: ['public-reservation-schedules-preview', company?.id, openingScheduleDates.join(',')],
+    queryFn: () => getPublicReservationSchedules(company!.id, openingScheduleDates),
+    enabled: !!company?.id && openingHours.length > 0,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+  const schedulesByDate = useMemo(
+    () => new Map((openingSchedules ?? []).map(({ date, schedule }) => [date, schedule])),
+    [openingSchedules],
+  );
+  const openingStatus = useMemo(
+    () => openingSchedules ? getOpeningStatus(openingHours, statusNow, schedulesByDate) : null,
+    [openingHours, statusNow, schedulesByDate, openingSchedules],
+  );
+  const openingHourGroups = useMemo(
+    () => openingSchedules ? buildOpeningHourGroups(openingHours, statusNow, schedulesByDate) : [],
+    [openingHours, statusNow, schedulesByDate, openingSchedules],
+  );
   const canMatchContactCardHeight = Boolean(company?.phone || company?.address);
   const openingHoursDensity = openingHourGroups.length >= 6
     ? 'tight'
@@ -1243,6 +1027,11 @@ export default function CompanyPublicPage() {
                         <Clock className="h-4 w-4" />
                         {'Hor\u00E1rio de Funcionamento'}
                       </h3>
+                      {!openingSchedules && (
+                        <p className="mt-3 text-xs text-muted-foreground" role="status">
+                          {openingSchedulesError ? 'Não foi possível consultar o funcionamento.' : 'Consultando funcionamento...'}
+                        </p>
+                      )}
                       {openingStatus && (
                         <div className="mt-3" role="status">
                           <div className="flex items-center justify-between gap-3">
