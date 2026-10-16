@@ -88,6 +88,59 @@ interface ReservationModalProps {
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
 
 const MIN_PREFILL_PHONE_DIGITS = 10;
+const PARTY_SIZE_HELP_TEXT = 'Inclua você, os demais adultos e as crianças.';
+
+function PartySizeControl({
+  value,
+  onChange,
+  emphasized = false,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  emphasized?: boolean;
+}) {
+  return (
+    <div
+      role="group"
+      aria-labelledby="reservation-party-size-label"
+      aria-describedby="reservation-party-size-help"
+      className={cn(
+        'flex shrink-0 items-center rounded-full border border-border bg-muted/30 p-1',
+        emphasized ? 'mx-auto h-[60px] w-[252px] max-w-full gap-1.5 border-[#e8e1da] bg-[#fdfbf8] shadow-[0_8px_18px_rgba(66,42,19,0.05)]' : 'gap-1',
+      )}
+    >
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn('rounded-full bg-background active:scale-100', emphasized ? 'h-12 w-12 shrink-0 bg-[#f7f2eb] text-[#6c655e] [&_svg]:size-5' : 'h-8 w-8 shadow-sm')}
+        type="button"
+        aria-label="Diminuir número de pessoas"
+        disabled={value <= 1}
+        onClick={() => onChange(value - 1)}
+      ><Minus aria-hidden="true" /></Button>
+      {emphasized && <span aria-hidden="true" className="h-[26px] w-px shrink-0 bg-[#e8e1da]" />}
+      <span
+        id="reservation-party-size-value"
+        className={cn('text-center font-semibold tabular-nums', emphasized ? 'flex min-w-0 flex-1 items-center justify-center gap-2 text-[34px] leading-none tracking-tight min-[360px]:gap-4' : 'w-9 text-lg')}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {value}
+        {emphasized && <span className="text-sm font-normal tracking-normal text-muted-foreground">{' '}{value === 1 ? 'pessoa' : 'pessoas'}</span>}
+      </span>
+      {emphasized && <span aria-hidden="true" className="h-[26px] w-px shrink-0 bg-[#e8e1da]" />}
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn('rounded-full bg-background active:scale-100', emphasized ? 'h-12 w-12 shrink-0 bg-[#faeddf] text-[#b77635] [&_svg]:size-5' : 'h-8 w-8 shadow-sm')}
+        type="button"
+        aria-label="Aumentar número de pessoas"
+        disabled={value >= 20}
+        onClick={() => onChange(value + 1)}
+      ><Plus aria-hidden="true" /></Button>
+    </div>
+  );
+}
 
 function normalizePhone(phone: string): string {
   return normalizeBrazilPhoneDigits(phone);
@@ -356,6 +409,8 @@ export default function ReservationModal({
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
   const [selectedPartySize, setSelectedPartySize] = useState(2);
+  const [confirmedPartySize, setConfirmedPartySize] = useState<number | null>(null);
+  const [showPartySizeConfirmation, setShowPartySizeConfirmation] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState('');
   const [selectedTableMapId, setSelectedTableMapId] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
@@ -381,6 +436,7 @@ export default function ReservationModal({
   const [identityFieldsCollapsed, setIdentityFieldsCollapsed] = useState(false);
   const [showExitRecoveryPrompt, setShowExitRecoveryPrompt] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const partySizeHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const prefillRequestIdRef = useRef(0);
   const dateSelectTrackedRef = useRef(false);
   const tableAvailabilityRequestIdRef = useRef(0);
@@ -413,6 +469,8 @@ export default function ReservationModal({
     setSelectedDate(initialDate ? new Date(`${initialDate}T12:00:00`) : undefined);
     setSelectedTime('');
     setSelectedPartySize(initialPartySize);
+    setConfirmedPartySize(null);
+    setShowPartySizeConfirmation(false);
     setSelectedTableId('');
     setSelectedTableMapId('');
     setShowCalendar(false);
@@ -437,6 +495,10 @@ export default function ReservationModal({
     tableAvailabilityRequestIdRef.current += 1;
     lastPrefillLookupRef.current = '';
   }, [initialDate, initialPartySize, open]);
+
+  useEffect(() => {
+    if (showPartySizeConfirmation) partySizeHeadingRef.current?.focus();
+  }, [showPartySizeConfirmation]);
 
   useEffect(() => {
     if (!open || step !== 2 || !selectedTime) return;
@@ -794,6 +856,10 @@ export default function ReservationModal({
     setSelectedDate(undefined);
     setSelectedTime('');
     setSelectedPartySize(2);
+    setConfirmedPartySize(null);
+    setShowPartySizeConfirmation(false);
+    setPendingDateAdvance(false);
+    setPendingTimeAdvance(false);
     setSelectedTableId('');
     setSelectedTableMapId('');
     setShowCalendar(false);
@@ -854,12 +920,32 @@ export default function ReservationModal({
       dateSelectTrackedRef.current = true;
       onStepChange?.('date_select');
     }
-    setPendingDateAdvance(true);
+    const needsPartySizeConfirmation = confirmedPartySize !== selectedPartySize;
+    setShowPartySizeConfirmation(needsPartySizeConfirmation);
+    setPendingDateAdvance(!needsPartySizeConfirmation);
   };
 
   const handlePartySizeChange = (nextSize: number) => {
-    setSelectedPartySize(Math.max(1, Math.min(20, nextSize)));
+    const normalizedSize = Math.max(1, Math.min(20, nextSize));
+    if (normalizedSize === selectedPartySize) return;
+    setSelectedPartySize(normalizedSize);
+    setConfirmedPartySize(null);
+    setPendingDateAdvance(false);
+    setPendingTimeAdvance(false);
     resetAvailabilitySelection();
+  };
+
+  const handlePartySizeConfirm = () => {
+    if (!selectedDate || isLargeParty) return;
+    setConfirmedPartySize(selectedPartySize);
+    setPendingDateAdvance(true);
+  };
+
+  const handlePartySizeEdit = () => {
+    setPendingDateAdvance(false);
+    setPendingTimeAdvance(false);
+    setStep(1);
+    setShowPartySizeConfirmation(true);
   };
 
   const handleTimeSelect = (time: string) => {
@@ -1375,18 +1461,19 @@ export default function ReservationModal({
     && !isCheckingSelectedTable
     && !tableAvailabilityError;
 
-  // Avanço automático: tocar na data leva para os horários assim que eles ficam
-  // prontos. O botão continua existindo para quem volta e só quer seguir.
+  // A primeira escolha de data exige confirmar o total de pessoas. Depois,
+  // trocar só a data mantém o avanço automático para a quantidade confirmada.
   useEffect(() => {
     if (!pendingDateAdvance) return;
-    if (step !== 1 || !selectedDate || isLargeParty) {
+    if (step !== 1 || !selectedDate || isLargeParty || confirmedPartySize !== selectedPartySize) {
       setPendingDateAdvance(false);
       return;
     }
     if (isPreparingDateAvailability) return;
     setPendingDateAdvance(false);
+    setShowPartySizeConfirmation(false);
     setStep(2);
-  }, [isLargeParty, isPreparingDateAvailability, pendingDateAdvance, selectedDate, step]);
+  }, [confirmedPartySize, isLargeParty, isPreparingDateAvailability, pendingDateAdvance, selectedDate, selectedPartySize, step]);
 
   useEffect(() => {
     if (!pendingTimeAdvance) return;
@@ -1416,6 +1503,32 @@ export default function ReservationModal({
     tableAvailabilityError,
   ]);
 
+  const isConfirmingPartySize = showPartySizeConfirmation && !showExitRecoveryPrompt;
+  const largePartyNotice = isLargeParty && (
+    <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-background text-emerald-700 shadow-sm">
+        <Users className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <div className="space-y-2">
+        <p className="text-base font-semibold text-foreground">
+          Reservas a partir de {resolvedLargePartyThreshold} pessoas precisam ser confirmadas pelo WhatsApp.
+        </p>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          O processo é rápido, e nossa equipe finaliza tudo com você por lá.
+        </p>
+      </div>
+      {largePartyWhatsappUrl ? (
+        <Button asChild className="w-full">
+          <a href={largePartyWhatsappUrl} target="_blank" rel="noopener noreferrer">Falar no WhatsApp</a>
+        </Button>
+      ) : (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          O WhatsApp deste restaurante ainda não está configurado.
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -1426,12 +1539,15 @@ export default function ReservationModal({
         onPointerDownOutside={(event) => {
           if (showExitRecoveryPrompt) event.preventDefault();
         }}
-        className="left-[50%] right-auto top-[50%] bottom-auto grid-cols-[minmax(0,1fr)] w-[calc(100%-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]"
+        className={cn(
+          'left-[50%] right-auto top-[50%] bottom-auto grid-cols-[minmax(0,1fr)] w-[calc(100%-1.5rem)] max-w-md translate-x-[-50%] translate-y-[-50%] max-h-[88vh] overflow-y-auto data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:slide-out-to-bottom-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:max-w-md sm:max-h-[90vh]',
+          isConfirmingPartySize && 'gap-4 rounded-[15px] border-[#e8e2dc] bg-[#fffefd] pb-3 shadow-[0_22px_60px_rgba(31,22,13,0.2)] sm:rounded-[15px]',
+        )}
       >
-        <DialogHeader className={showExitRecoveryPrompt ? 'sr-only' : 'px-12'}>
+        <DialogHeader className={showExitRecoveryPrompt ? 'sr-only' : isConfirmingPartySize ? 'space-y-0 px-7' : 'px-12'}>
           {/* O nome da casa sai do título: ele já está na página atrás do modal,
               e em duas linhas roubava altura de todas as etapas. */}
-          <DialogTitle className={cn('mx-auto max-w-full text-center text-lg font-bold leading-snug', showExitRecoveryPrompt ? 'text-white' : 'text-foreground')}>
+          <DialogTitle className={cn('mx-auto max-w-full text-center text-lg font-bold leading-snug', showExitRecoveryPrompt ? 'text-white' : 'text-foreground', isConfirmingPartySize && 'text-2xl leading-tight tracking-[-0.025em]')}>
             {showExitRecoveryPrompt
               ? 'Tem certeza que quer parar por aqui?'
               : step === 4
@@ -1440,10 +1556,10 @@ export default function ReservationModal({
           </DialogTitle>
           {!showExitRecoveryPrompt && step !== 4 && (
             <>
-              <p className="text-center text-xs text-muted-foreground">{companyName}</p>
+              <p className={cn('text-center text-xs text-muted-foreground', isConfirmingPartySize && 'text-sm')}>{companyName}</p>
               {/* Etapas nomeadas: saber quanto falta segura quem pensa em desistir. */}
               <div
-                className="grid grid-cols-3 gap-2 pt-1.5"
+                className={cn('grid grid-cols-3 gap-2 pt-1.5', isConfirmingPartySize && 'mx-auto w-full max-w-[320px] gap-0 pt-2.5')}
                 role="progressbar"
                 aria-valuenow={step}
                 aria-valuemin={1}
@@ -1453,16 +1569,28 @@ export default function ReservationModal({
                 {RESERVATION_STEP_LABELS.map((label, index) => {
                   const stepNumber = index + 1;
                   return (
-                    <div key={label} className="space-y-1">
+                    <div key={label} className={isConfirmingPartySize ? 'relative' : 'space-y-1'}>
+                      {isConfirmingPartySize && index < RESERVATION_STEP_LABELS.length - 1 && (
+                        <span aria-hidden="true" className="absolute left-[calc(50%+1.125rem)] top-[13px] h-px w-[calc(100%-2.25rem)] overflow-hidden bg-[#e8e2dc]">
+                          <span className={cn('block h-full bg-[#b77635]', stepNumber < step ? 'w-full' : stepNumber === step ? 'w-1/2' : 'w-0')} />
+                        </span>
+                      )}
                       <div
+                        aria-hidden="true"
                         className={cn(
                           'h-1 rounded-full transition-colors duration-200',
                           stepNumber < step ? 'bg-primary/50' : stepNumber === step ? 'bg-primary' : 'bg-muted',
+                          isConfirmingPartySize && 'relative mx-auto flex h-[26px] w-[26px] items-center justify-center text-xs font-semibold',
+                          isConfirmingPartySize && (stepNumber <= step ? 'bg-[linear-gradient(135deg,#b46e2e,#c18542)] text-white' : 'bg-[#f3f0ec] text-[#77716a]'),
                         )}
-                      />
+                      >
+                        {isConfirmingPartySize && stepNumber}
+                      </div>
                       <p className={cn(
                         'text-center text-[10px] font-medium leading-none',
                         stepNumber === step ? 'text-foreground' : 'text-muted-foreground',
+                        isConfirmingPartySize && 'mt-1.5 text-[11px] leading-tight',
+                        isConfirmingPartySize && stepNumber === step && 'font-semibold text-[#b77635]',
                       )}>
                         {label}
                       </p>
@@ -1512,6 +1640,7 @@ export default function ReservationModal({
                       {format(selectedDate, "EEE, dd/MM", { locale: ptBR }).replace('.', '')} · {selectedTime} · {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
                     </span>
                   </p>
+                  <p className="mt-1.5 text-center text-xs text-muted-foreground">{PARTY_SIZE_HELP_TEXT}</p>
                   {/* Escassez só quando o horário escolhido realmente está no fim. */}
                   {selectedSlotIsLow && (
                     <p className="mt-1.5 flex items-center justify-center gap-1.5 text-xs font-semibold text-amber-800">
@@ -1544,6 +1673,67 @@ export default function ReservationModal({
               </div>
             </div>
           </div>
+        ) : showPartySizeConfirmation ? (
+          <div className="animate-fade-in space-y-3">
+            <div className="space-y-2 text-center">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#fbf1e6] text-[#b77635]">
+                <Users className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <h2
+                id="reservation-party-size-label"
+                ref={partySizeHeadingRef}
+                tabIndex={-1}
+                className="text-xl font-semibold leading-[1.2] tracking-[-0.025em] outline-none"
+              >
+                Confirme a quantidade de pessoas
+              </h2>
+              <p id="reservation-party-size-help" className="text-sm leading-normal text-muted-foreground">
+                {PARTY_SIZE_HELP_TEXT}
+              </p>
+            </div>
+
+            {selectedDate && (
+              <p className="flex items-center justify-center gap-2 text-center text-sm font-medium leading-normal text-[#6c655e]">
+                <CalendarIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                <span>{format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}</span>
+              </p>
+            )}
+
+            <PartySizeControl value={selectedPartySize} onChange={handlePartySizeChange} emphasized />
+
+            {largePartyNotice}
+
+            <div className="space-y-2">
+              {!isLargeParty && (
+                <Button
+                  type="button"
+                  className="relative h-auto min-h-12 w-full whitespace-normal rounded-xl bg-[linear-gradient(110deg,#b57536,#af6e31)] px-10 py-3 text-sm font-medium text-white shadow-[0_8px_18px_rgba(157,97,39,0.12)] hover:brightness-105 [&_svg]:size-[18px]"
+                  disabled={!selectedDate || pendingDateAdvance}
+                  onClick={handlePartySizeConfirm}
+                >
+                  {pendingDateAdvance ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Preparando horários...</>
+                  ) : (
+                    <>
+                      Ver horários para {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
+                      <ArrowRight className="absolute right-5 h-[18px] w-[18px]" aria-hidden="true" />
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-11 w-full gap-3 text-sm font-medium text-[#6c655e]"
+                onClick={() => {
+                  setPendingDateAdvance(false);
+                  setShowPartySizeConfirmation(false);
+                }}
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Alterar data
+              </Button>
+            </div>
+          </div>
         ) : step === 1 && (
           <div className="animate-fade-in space-y-3 pt-2">
             {/* Pergunta direta em vez do rótulo pequeno em caixa alta, que passava
@@ -1554,19 +1744,9 @@ export default function ReservationModal({
                   <Users className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                   Quantas pessoas?
                 </p>
-                <p className="mt-0.5 pl-[22px] text-xs text-muted-foreground">Inclua adultos e crianças na reserva</p>
+                <p id="reservation-party-size-help" className="mt-0.5 pl-[22px] text-xs text-muted-foreground">{PARTY_SIZE_HELP_TEXT}</p>
               </div>
-              <div role="group" aria-labelledby="reservation-party-size-label" className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/30 p-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
-                  aria-label="Diminuir número de pessoas"
-                  disabled={selectedPartySize <= 1}
-                  onClick={() => handlePartySizeChange(selectedPartySize - 1)}><Minus /></Button>
-                <span id="reservation-party-size-value" className="w-9 text-center text-lg font-semibold tabular-nums" aria-live="polite">{selectedPartySize}</span>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white shadow-sm active:scale-100" type="button"
-                  aria-label="Aumentar número de pessoas"
-                  disabled={selectedPartySize >= 20}
-                  onClick={() => handlePartySizeChange(selectedPartySize + 1)}><Plus /></Button>
-              </div>
+              <PartySizeControl value={selectedPartySize} onChange={handlePartySizeChange} />
             </div>
 
             {schedulePartySizeLimit !== null && selectedDate && (
@@ -1576,30 +1756,7 @@ export default function ReservationModal({
               </p>
             )}
 
-            {isLargeParty && (
-              <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
-                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-700 shadow-sm">
-                  <Users className="h-5 w-5" />
-                </div>
-                <div className="space-y-2">
-                  <p className="text-base font-semibold text-foreground">
-                    Reservas a partir de {resolvedLargePartyThreshold} pessoas precisam ser confirmadas pelo WhatsApp.
-                  </p>
-                  <p className="text-sm leading-relaxed text-muted-foreground">
-                    O processo é rápido, e nossa equipe finaliza tudo com você por lá.
-                  </p>
-                </div>
-                {largePartyWhatsappUrl ? (
-                  <a href={largePartyWhatsappUrl} target="_blank" rel="noopener noreferrer" className="block">
-                    <Button className="w-full">Falar no WhatsApp</Button>
-                  </a>
-                ) : (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    O WhatsApp deste restaurante ainda não está configurado.
-                  </div>
-                )}
-              </div>
-            )}
+            {largePartyNotice}
 
             {!isLargeParty && (!showCalendar ? (
               <>
@@ -1724,8 +1881,8 @@ export default function ReservationModal({
               </div>
             ))}
 
-            {/* Sem botão, o rodapé é quem diz o que fazer: tocar na data avança,
-                inclusive quando é a mesma data já escolhida. */}
+            {/* A data abre a confirmação de pessoas; uma quantidade já confirmada
+                segue direto para os horários, inclusive na mesma data. */}
             {!isLargeParty && (
               <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
                 {pendingDateAdvance && isPreparingDateAvailability ? (
@@ -1747,13 +1904,19 @@ export default function ReservationModal({
             <Button variant="ghost" size="sm" onClick={() => { setStep(1); handleTimeSelect(''); }}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
             </Button>
-            <p className="text-sm text-muted-foreground text-center">
-              Horários para{' '}
-              <span className="font-semibold text-foreground">
-                {selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}
-              </span>
-              {' '}· {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
-            </p>
+            <div className="space-y-1 text-center">
+              <p className="text-sm text-muted-foreground">
+                Horários para{' '}
+                <span className="font-semibold text-foreground">
+                  {selectedDate && format(selectedDate, "EEEE, dd 'de' MMMM", { locale: ptBR })}
+                </span>
+                {' '}· {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
+              </p>
+              <p className="text-xs text-muted-foreground">{PARTY_SIZE_HELP_TEXT}</p>
+              <Button type="button" variant="ghost" size="sm" className="min-h-11 text-primary" onClick={handlePartySizeEdit}>
+                <Users className="mr-1.5 h-4 w-4" aria-hidden="true" /> Alterar pessoas
+              </Button>
+            </div>
 
             {scheduleLoading ? (
               <p className="flex items-center justify-center gap-1.5 text-center text-sm text-muted-foreground">
@@ -1932,24 +2095,33 @@ export default function ReservationModal({
 
             {/* O que está sendo confirmado ganha peso: é a última chance de notar
                 um horário trocado antes de preencher tudo. */}
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">
-                  {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
-                </p>
+            <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    {selectedDate && format(selectedDate, "dd/MM/yyyy", { locale: ptBR })} às {selectedTime}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Alterar data e horário"
+                  className="min-h-11 shrink-0 px-2 text-xs font-semibold text-primary active:scale-100"
+                  onClick={() => setStep(2)}
+                >
+                  Alterar horário
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 shrink-0 px-2 text-xs font-semibold text-primary active:scale-100"
-                onClick={() => setStep(2)}
-              >
-                Alterar
-              </Button>
+              <div className="flex flex-wrap items-center justify-between gap-x-2 border-t border-primary/10 pt-1">
+                <p className="min-w-0 flex-1 basis-36 text-xs leading-relaxed text-muted-foreground">{PARTY_SIZE_HELP_TEXT}</p>
+                <Button type="button" variant="ghost" size="sm" className="min-h-11 shrink-0 px-2 text-xs font-semibold text-primary" onClick={handlePartySizeEdit}>
+                  Alterar pessoas
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -2213,7 +2385,7 @@ export default function ReservationModal({
                   <span className="font-medium text-foreground">{confirmedReservation.time}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Pessoas</span>
+                  <span className="text-muted-foreground">Pessoas (adultos e crianças)</span>
                   <span className="font-medium text-foreground">{confirmedReservation.partySize}</span>
                 </div>
               </CardContent>
