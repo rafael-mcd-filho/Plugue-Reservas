@@ -1,3 +1,4 @@
+import { formatPhone, getPhoneLookupVariants, normalizePhoneE164 } from '@/lib/phone';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -14,13 +15,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/hooks/useImpersonation';
 import { supabase } from '@/integrations/supabase/client';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
-import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
 import type { ReservationStatus } from '@/types/restaurant';
 
 interface ReservationCompanion {
   id: string;
   name: string;
   phone: string | null;
+  phone_e164?: string | null;
   email: string | null;
   birthdate: string | null;
   position: number;
@@ -33,6 +34,7 @@ export interface ReservationDetails {
   created_in_mode?: string | null;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   source: string | null;
   origin_affiliate_code?: string | null;
@@ -280,7 +282,7 @@ export default function ReservationDetailsDialog({
   const { effectiveRoles, isImpersonatingCompany, scopeCompanyId } = useImpersonation();
   const [eventHistoryOpen, setEventHistoryOpen] = useState(false);
   const [auditHistoryOpen, setAuditHistoryOpen] = useState(false);
-  const normalizedPhone = normalizeBrazilPhoneDigits(reservation?.guest_phone);
+  const normalizedPhone = normalizePhoneE164(reservation?.guest_phone_e164 ?? reservation?.guest_phone);
   const eventHistoryCompanyScope = reservation?.company_id ?? companyId ?? null;
   const eventHistoryRoleScope = isImpersonatingCompany
     ? `impersonated:${scopeCompanyId ?? 'unknown'}:${effectiveRoles.join(',')}`
@@ -358,7 +360,7 @@ export default function ReservationDetailsDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('reservation_companions' as any)
-        .select('id, name, phone, email, birthdate, position')
+        .select('id, name, phone, phone_e164, email, birthdate, position')
         .eq('reservation_id', reservation!.id)
         .order('position', { ascending: true });
 
@@ -463,14 +465,20 @@ export default function ReservationDetailsDialog({
       const { data, error } = await supabase
         .from('reservations' as never)
         .select(
-          'id, guest_name, guest_phone, guest_email, source, date, time, party_size, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, public_tracking_code, origin_affiliate_code, origin_affiliate_name',
+          'id, guest_name, guest_phone, guest_phone_e164, guest_email, source, date, time, party_size, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, public_tracking_code, origin_affiliate_code, origin_affiliate_name',
         )
         .eq('company_id', companyId!)
-        .eq('guest_phone', normalizedPhone);
+        .or([
+          `guest_phone_e164.eq.${normalizedPhone}`,
+          ...getPhoneLookupVariants(normalizedPhone).map((phone) => `guest_phone.eq.${JSON.stringify(phone)}`),
+        ].join(','));
 
       if (error) throw error;
 
-      return (((data ?? []) as any[]) as ReservationLeadHistoryItem[]).sort(sortReservationHistory);
+      return (((data ?? []) as any[]) as ReservationLeadHistoryItem[])
+        .map((entry) => ({ ...entry, guest_phone: entry.guest_phone_e164 ?? entry.guest_phone }))
+        .filter((entry) => normalizePhoneE164(entry.guest_phone) === normalizedPhone)
+        .sort(sortReservationHistory);
     },
     enabled: showLeadHistory && open && !!companyId && normalizedPhone.length > 0,
   });
@@ -625,7 +633,7 @@ export default function ReservationDetailsDialog({
                 {reservation && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     <PhoneWhatsAppLink
-                      phone={reservation.guest_phone}
+                      phone={reservation.guest_phone_e164 ?? reservation.guest_phone}
                       companyId={companyId}
                       slug={slug}
                       reservation={reservation}
@@ -887,7 +895,7 @@ export default function ReservationDetailsDialog({
                         <div key={companion.id} className="rounded-lg border border-border bg-background/80 p-3 text-sm">
                           <p className="font-medium text-foreground">{companion.name}</p>
                           <div className="mt-1 space-y-1 text-muted-foreground">
-                            {companion.phone && <p>{formatBrazilPhone(companion.phone)}</p>}
+                            {(companion.phone_e164 || companion.phone) && <p>{formatPhone(companion.phone_e164 ?? companion.phone)}</p>}
                             {companion.email && <p>{companion.email}</p>}
                             {companion.birthdate && (
                               <p>

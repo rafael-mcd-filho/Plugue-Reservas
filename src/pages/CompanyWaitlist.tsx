@@ -1,3 +1,4 @@
+import { formatPhone, getPhoneLookupVariants, normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -24,6 +25,7 @@ import ReservationDetailsDialog, { type ReservationDetails } from '@/components/
 import { ReservationStatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -44,13 +46,10 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { cn } from '@/lib/utils';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  isValidBrazilWhatsApp,
   MAX_WAITLIST_NAME_LENGTH,
   MAX_WAITLIST_NOTES_LENGTH,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 import {
@@ -59,7 +58,7 @@ import {
   hasWaitlistCallExpired,
   WAITLIST_CALL_TIMEOUT_MINUTES,
 } from '@/lib/waitlist';
-import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
+import { useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
 import { toast } from 'sonner';
 
 interface WaitlistEntry {
@@ -67,6 +66,7 @@ interface WaitlistEntry {
   company_id: string;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   guest_birthdate: string | null;
   party_size: number;
@@ -120,7 +120,7 @@ function validateWaitlistGuestInput(input: {
   notes: string;
 }) {
   const guestName = input.guest_name.trim();
-  const guestPhone = normalizeBrazilPhoneDigits(input.guest_phone);
+  const guestPhone = normalizePhoneE164(input.guest_phone);
   const guestEmail = normalizeEmail(input.guest_email);
   const notes = input.notes.trim();
 
@@ -132,8 +132,8 @@ function validateWaitlistGuestInput(input: {
     throw new Error(`O nome deve ter no máximo ${MAX_WAITLIST_NAME_LENGTH} caracteres.`);
   }
 
-  if (!isValidBrazilWhatsApp(guestPhone)) {
-    throw new Error('Informe um WhatsApp válido com DDD.');
+  if (!isValidPhone(guestPhone)) {
+    throw new Error('Informe um WhatsApp válido para o país selecionado.');
   }
 
   if (notes.length > MAX_WAITLIST_NOTES_LENGTH) {
@@ -157,7 +157,7 @@ function createCompanionForm(values?: Partial<WaitlistCompanionForm>): WaitlistC
   return {
     key: values?.key ?? crypto.randomUUID(),
     name: values?.name ?? '',
-    phone: formatBrazilPhone(values?.phone),
+    phone: normalizePhoneE164(values?.phone),
     email: values?.email ?? '',
     birthdate: values?.birthdate ?? '',
   };
@@ -166,7 +166,7 @@ function createCompanionForm(values?: Partial<WaitlistCompanionForm>): WaitlistC
 function createWaitlistDetailsForm(entry: WaitlistEntry | null): WaitlistDetailsForm {
   return {
     guest_name: entry?.guest_name ?? '',
-    guest_phone: formatBrazilPhone(entry?.guest_phone),
+    guest_phone: normalizePhoneE164(entry?.guest_phone_e164 ?? entry?.guest_phone),
     guest_email: entry?.guest_email ?? '',
     guest_birthdate: entry?.guest_birthdate ?? '',
     party_size: entry ? String(entry.party_size) : '2',
@@ -207,7 +207,7 @@ export default function CompanyWaitlist() {
   const [removeEntry, setRemoveEntry] = useState<WaitlistEntry | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const addFormPhoneDigits = useMemo(
-    () => normalizeBrazilPhoneDigits(addForm.guest_phone),
+    () => normalizePhoneE164(addForm.guest_phone),
     [addForm.guest_phone],
   );
   const {
@@ -215,7 +215,7 @@ export default function CompanyWaitlist() {
     isFetching: addFormLeadLoading,
   } = useCrmLeadPrefill(companyId, addFormPhoneDigits, showAdd);
   const showAddFormLeadLookup = showAdd
-    && addFormPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
+    && isValidPhone(addForm.guest_phone);
 
   useEffect(() => {
     if (!showAdd || !addFormLead) return;
@@ -274,8 +274,8 @@ export default function CompanyWaitlist() {
   }, [companyId, qc]);
 
   const contactHistoryPhone = useMemo(
-    () => normalizeBrazilPhoneDigits(contactHistoryEntry?.guest_phone ?? ''),
-    [contactHistoryEntry?.guest_phone],
+    () => normalizePhoneE164(contactHistoryEntry?.guest_phone_e164 ?? contactHistoryEntry?.guest_phone),
+    [contactHistoryEntry?.guest_phone_e164, contactHistoryEntry?.guest_phone],
   );
   const contactHistoryEmail = useMemo(
     () => normalizeEmail(contactHistoryEntry?.guest_email ?? ''),
@@ -293,7 +293,7 @@ export default function CompanyWaitlist() {
         .order('position', { ascending: true });
 
       if (error) throw error;
-      return data as unknown as WaitlistEntry[];
+      return ((data ?? []) as unknown as WaitlistEntry[]).map((entry) => ({ ...entry, guest_phone: entry.guest_phone_e164 ?? entry.guest_phone }));
     },
     enabled: !!companyId,
     refetchInterval: 10000,
@@ -316,6 +316,7 @@ export default function CompanyWaitlist() {
           id,
           guest_name,
           guest_phone,
+          guest_phone_e164,
           guest_email,
           source,
           origin_affiliate_code,
@@ -334,15 +335,16 @@ export default function CompanyWaitlist() {
         `)
         .eq('company_id', companyId);
 
-      if (contactHistoryPhone && contactHistoryEmail) {
-        query = query.or(`guest_phone.eq.${contactHistoryPhone},guest_email.eq.${contactHistoryEmail}`);
-      } else if (contactHistoryPhone) {
-        query = query.eq('guest_phone', contactHistoryPhone);
-      } else if (contactHistoryEmail) {
-        query = query.eq('guest_email', contactHistoryEmail);
-      } else {
-        return [] as ReservationDetails[];
+      const contactFilters = contactHistoryPhone ? [
+        `guest_phone_e164.eq.${contactHistoryPhone}`,
+        ...getPhoneLookupVariants(contactHistoryPhone).map((phone) => `guest_phone.eq.${JSON.stringify(phone)}`),
+      ] : [];
+      if (contactHistoryEmail) {
+        // PostgREST quoted values protect commas and other filter punctuation in email addresses.
+        contactFilters.push(`guest_email.eq.${JSON.stringify(contactHistoryEmail)}`);
       }
+      if (!contactFilters.length) return [] as ReservationDetails[];
+      query = query.or(contactFilters.join(','));
 
       const { data, error } = await query
         .order('date', { ascending: false })
@@ -350,10 +352,16 @@ export default function CompanyWaitlist() {
 
       if (error) throw error;
 
-      return ((data as any[]) ?? []).map((reservation) => ({
-        ...reservation,
-        status: normalizeReservationStatus(reservation.status),
-      })) as ReservationDetails[];
+      return ((data as any[]) ?? [])
+        .map((reservation) => ({
+          ...reservation,
+          guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
+          status: normalizeReservationStatus(reservation.status),
+        }))
+        .filter((reservation) => (
+          (contactHistoryPhone && normalizePhoneE164(reservation.guest_phone) === contactHistoryPhone)
+          || (contactHistoryEmail && normalizeEmail(reservation.guest_email) === contactHistoryEmail)
+        )) as ReservationDetails[];
     },
     enabled: !!companyId && !!contactHistoryEntry && (!!contactHistoryPhone || !!contactHistoryEmail),
   });
@@ -376,7 +384,7 @@ export default function CompanyWaitlist() {
         .order('seated_at', { ascending: false });
 
       if (error) throw error;
-      return (data as unknown as WaitlistEntry[]) ?? [];
+      return ((data ?? []) as unknown as WaitlistEntry[]).map((entry) => ({ ...entry, guest_phone: entry.guest_phone_e164 ?? entry.guest_phone }));
     },
     enabled: !!companyId,
     refetchInterval: 30000,
@@ -712,7 +720,7 @@ export default function CompanyWaitlist() {
     setSeatCompanionForms((current) =>
       current.map((companion) =>
         companion.key === key
-          ? { ...companion, [field]: field === 'phone' ? formatBrazilPhone(value) : value }
+          ? { ...companion, [field]: value }
           : companion,
       ),
     );
@@ -777,7 +785,7 @@ export default function CompanyWaitlist() {
       guestBirthdate: seatGuestBirthdate.trim(),
       companions: companions.map((companion) => ({
         ...companion,
-        phone: normalizeBrazilPhoneDigits(companion.phone),
+        phone: normalizePhoneE164(companion.phone),
         email: normalizeEmail(companion.email),
       })),
     });
@@ -953,7 +961,7 @@ export default function CompanyWaitlist() {
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                             <Phone className="h-3.5 w-3.5" />
-                            {formatBrazilPhone(entry.guest_phone)}
+                            {formatPhone(entry.guest_phone)}
                           </span>
                           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                             <Users className="h-3.5 w-3.5" />
@@ -1159,7 +1167,7 @@ export default function CompanyWaitlist() {
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
                           <span className="inline-flex items-center gap-1.5">
                             <Phone className="h-3.5 w-3.5" />
-                            {formatBrazilPhone(entry.guest_phone)}
+                            {formatPhone(entry.guest_phone)}
                           </span>
                           <span className="inline-flex items-center gap-1.5">
                             <Users className="h-3.5 w-3.5" />
@@ -1226,16 +1234,14 @@ export default function CompanyWaitlist() {
             </div>
             <div>
               <Label htmlFor="waitlist-add-phone">WhatsApp *</Label>
-              <Input
+              <PhoneInput
                 id="waitlist-add-phone"
                 name="guest_phone"
-                type="tel"
                 value={addForm.guest_phone}
-                onChange={(event) => setAddForm({ ...addForm, guest_phone: formatBrazilPhone(event.target.value) })}
+                onChange={(value) => setAddForm({ ...addForm, guest_phone: value })}
                 placeholder="(11) 99999-9999"
                 autoComplete="tel"
                 inputMode="tel"
-                maxLength={15}
                 required
               />
               {showAddFormLeadLookup && (addFormLeadLoading || addFormLead) && (
@@ -1445,16 +1451,14 @@ export default function CompanyWaitlist() {
 
                   <div className="space-y-2">
                     <Label htmlFor="waitlist-details-phone">WhatsApp</Label>
-                    <Input
+                    <PhoneInput
                       id="waitlist-details-phone"
                       name="guest_phone"
-                      type="tel"
                       value={detailsForm.guest_phone}
-                      onChange={(event) => setDetailsForm((current) => ({ ...current, guest_phone: formatBrazilPhone(event.target.value) }))}
+                      onChange={(value) => setDetailsForm((current) => ({ ...current, guest_phone: value }))}
                       placeholder="(11) 99999-9999"
                       autoComplete="tel"
                       inputMode="tel"
-                      maxLength={15}
                     />
                   </div>
 
@@ -1553,7 +1557,7 @@ export default function CompanyWaitlist() {
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
                     <Phone className="h-3.5 w-3.5" />
-                    {formatBrazilPhone(contactHistoryEntry.guest_phone)}
+                    {formatPhone(contactHistoryEntry.guest_phone)}
                   </span>
                   {contactHistoryEntry.guest_email && (
                     <span className="inline-flex items-center gap-1.5">
@@ -1744,7 +1748,7 @@ export default function CompanyWaitlist() {
             <div className="space-y-4 pt-2">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">{seatEntry.guest_name}</p>
-                <p className="text-sm text-muted-foreground">{formatBrazilPhone(seatEntry.guest_phone)}</p>
+                <p className="text-sm text-muted-foreground">{formatPhone(seatEntry.guest_phone)}</p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1857,16 +1861,14 @@ export default function CompanyWaitlist() {
                             placeholder="Nome do acompanhante"
                             autoComplete="name"
                           />
-                          <Input
+                          <PhoneInput
                             id={`waitlist-seat-companion-phone-${companion.key}`}
                             name={`companions[${index}].phone`}
-                            type="tel"
                             value={companion.phone}
-                            onChange={(event) => updateSeatCompanionForm(companion.key, 'phone', event.target.value)}
+                            onChange={(value) => updateSeatCompanionForm(companion.key, 'phone', value)}
                             placeholder="WhatsApp"
                             autoComplete="tel"
                             inputMode="tel"
-                            maxLength={15}
                           />
                           <Input
                             id={`waitlist-seat-companion-email-${companion.key}`}

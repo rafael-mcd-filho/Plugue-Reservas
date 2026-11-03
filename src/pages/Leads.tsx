@@ -10,6 +10,8 @@ import {
   Eye,
   Filter,
   Loader2,
+  MoreHorizontal,
+  Pencil,
   Search,
   Upload,
   X,
@@ -18,6 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useAuth } from '@/contexts/AuthContext';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
+import LeadEditDialog from '@/components/leads/LeadEditDialog';
 import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +28,12 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -40,8 +49,8 @@ import {
   downloadSpreadsheet,
   type SpreadsheetColumn,
 } from '@/lib/export-utils';
-import { parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
-import { normalizeLeadPhoneKey } from '@/lib/lead-consistency';
+import { createImportedLeadMatcher, parseLeadImportCsv, type ParsedLeadImportRow } from '@/lib/lead-import';
+import type { CrmLeadEditValues } from '@/lib/crm-lead-edit';
 import {
   formatLeadPhoneText,
   formatLeadSource,
@@ -70,6 +79,7 @@ interface ImportedLeadRecord {
   full_name: string;
   phone: string | null;
   phone_normalized: string | null;
+  phone_e164?: string | null;
   email: string | null;
   email_normalized: string | null;
   birthdate: string | null;
@@ -215,7 +225,8 @@ async function findImportedLeadMatches(companyId: string, rows: ParsedLeadImport
   for (const row of rows) {
     if (row.phoneNormalized) {
       phoneValues.add(row.phoneNormalized);
-      phoneValues.add(normalizeLeadPhoneKey(row.phoneNormalized));
+      // Legacy imports may still use the national Brazilian key until backfill.
+      if (row.phone.startsWith('+55')) phoneValues.add(row.phoneNormalized.slice(2));
     }
 
     if (row.emailNormalized) {
@@ -223,7 +234,7 @@ async function findImportedLeadMatches(companyId: string, rows: ParsedLeadImport
     }
   }
 
-  const selectFields = 'id, full_name, phone, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at';
+  const selectFields = 'id, full_name, phone, phone_e164, phone_normalized, email, email_normalized, birthdate, notes, source, import_filename, imported_at, imported_by_user_id, created_at, updated_at';
   const matches = new Map<string, ImportedLeadRecord>();
   const chunkSize = 100;
   const queryPageSize = 500;
@@ -320,6 +331,7 @@ export default function Leads() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof LEADS_PAGE_SIZE_OPTIONS)[number]>('25');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importFileName, setImportFileName] = useState('');
   const [importRows, setImportRows] = useState<ParsedLeadImportRow[]>([]);
@@ -385,6 +397,46 @@ export default function Leads() {
     enabled: exportDialogOpen && !!exportRequest,
   });
 
+  const editLeadMutation = useMutation({
+    mutationFn: async ({ lead, values }: { lead: Lead; values: CrmLeadEditValues }) => {
+      if (!companyId) {
+        throw new Error('Sessão expirada. Entre novamente para editar o lead.');
+      }
+
+      const { error } = await (supabase as any).rpc('upsert_crm_lead_profile', {
+        _company_id: companyId,
+        _customer_key: lead.key,
+        _full_name: values.fullName,
+        _phone: values.phone || null,
+        _email: values.email || null,
+        _birthdate: values.birthdate || null,
+      });
+
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('Este telefone ou e-mail já está vinculado a outro lead.');
+        }
+
+        throw error;
+      }
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['crm-leads-page', companyId] }),
+        qc.invalidateQueries({ queryKey: ['crm-leads-export', companyId] }),
+        qc.invalidateQueries({ queryKey: ['crm-lead-prefill', companyId] }),
+        qc.invalidateQueries({ queryKey: ['customer-recurrence-report', companyId] }),
+      ]);
+
+      toast.success('Dados do lead atualizados.');
+      setEditingLead(null);
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Não foi possível atualizar o lead.';
+      toast.error(message);
+    },
+  });
+
   const resetImportState = () => {
     setImportFileName('');
     setImportRows([]);
@@ -408,20 +460,8 @@ export default function Leads() {
         throw new Error('Carregue um CSV com pelo menos um lead válido antes de importar.');
       }
 
-      const existingByPhone = new Map<string, ImportedLeadRecord>();
-      const existingByEmail = new Map<string, ImportedLeadRecord>();
       const existingLeads = await findImportedLeadMatches(companyId, importRows);
-
-      for (const lead of existingLeads) {
-        const phoneKey = normalizeLeadPhoneKey(lead.phone_normalized ?? lead.phone);
-        if (phoneKey && !existingByPhone.has(phoneKey)) {
-          existingByPhone.set(phoneKey, lead);
-        }
-
-        if (lead.email_normalized && !existingByEmail.has(lead.email_normalized)) {
-          existingByEmail.set(lead.email_normalized, lead);
-        }
-      }
+      const matchExistingLead = createImportedLeadMatcher(existingLeads);
 
       const importedAt = new Date().toISOString();
       const payloads: Array<Record<string, unknown>> = [];
@@ -430,16 +470,11 @@ export default function Leads() {
       let skipped = 0;
 
       for (const row of importRows) {
-        const phoneKey = normalizeLeadPhoneKey(row.phoneNormalized || row.phone);
-        const matchedByPhone = phoneKey ? existingByPhone.get(phoneKey) : undefined;
-        const matchedByEmail = row.emailNormalized ? existingByEmail.get(row.emailNormalized) : undefined;
-
-        if (matchedByPhone && matchedByEmail && matchedByPhone.id !== matchedByEmail.id) {
+        const { lead: current, conflict } = matchExistingLead(row);
+        if (conflict) {
           skipped += 1;
           continue;
         }
-
-        const current = matchedByPhone ?? matchedByEmail ?? null;
 
         const payload: Record<string, unknown> = {
           company_id: companyId,
@@ -549,10 +584,11 @@ export default function Leads() {
   const downloadImportTemplate = () => {
     downloadCsv(
       'modelo-importacao-leads.csv',
-      ['nome', 'telefone', 'email', 'nascimento', 'observações'],
+      ['nome', 'telefone', 'pais', 'email', 'nascimento', 'observações'],
       [
-        ['Maria Eduarda Nunes', '83981297758', 'maria@example.com', '1994-05-18', 'Veio de uma base antiga'],
-        ['Joao Pedro', '85999887766', '', '', 'Interessado em jantar romantico'],
+        ['Maria Eduarda Nunes', '83981297758', 'BR', 'maria@example.com', '1994-05-18', 'Veio de uma base antiga'],
+        ['Joao Pedro', '+14072641934', 'US', '', '', 'Interessado em jantar romantico'],
+        ['Ana Silva', '912345678', 'PT', 'ana@example.com', '', 'Contato internacional'],
       ],
     );
   };
@@ -970,7 +1006,9 @@ export default function Leads() {
                       />
                     </span>
                   </TableHead>
-                  <TableHead className="h-8 w-9 px-2" />
+                  <TableHead className="h-8 w-12 px-2 text-right text-[11px]">
+                    <span className="sr-only">Ações</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -996,7 +1034,7 @@ export default function Leads() {
                             </Badge>
                             {lead.importedLeadId && (
                               <Badge variant="outline" className="h-4 shrink-0 rounded border-amber-200 bg-amber-50 px-1.5 text-[9px] leading-none text-amber-700">
-                                Importado
+                                {lead.importFilename ? 'Importado' : 'Editado'}
                               </Badge>
                             )}
                           </div>
@@ -1012,20 +1050,31 @@ export default function Leads() {
                     <TableCell className="px-2 py-1.5 text-right">
                       <span className="font-semibold text-foreground">{formatLeadVisitsText(lead.total_reservations)}</span>
                     </TableCell>
-                    <TableCell className="px-2 py-1.5">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="ml-auto h-8 w-8 text-muted-foreground group-hover:bg-primary-soft group-hover:text-primary"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSelectedLead(lead);
-                        }}
-                        aria-label={`Abrir perfil de ${lead.guest_name}`}
-                      >
-                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
+                    <TableCell className="px-2 py-1.5 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="ml-auto h-8 w-8 text-muted-foreground group-hover:bg-primary-soft group-hover:text-primary"
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Ações para ${lead.guest_name}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+                          <DropdownMenuItem onSelect={() => setSelectedLead(lead)}>
+                            <Eye className="mr-2 h-4 w-4" aria-hidden="true" />
+                            Ver perfil
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setEditingLead(lead)}>
+                            <Pencil className="mr-2 h-4 w-4" aria-hidden="true" />
+                            Editar dados
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1111,9 +1160,14 @@ export default function Leads() {
                 Importe leads sem criar reservas. O arquivo pode ter as colunas
                 <span className="font-medium text-foreground"> nome</span>,
                 <span className="font-medium text-foreground"> telefone</span>,
+                <span className="font-medium text-foreground"> pais</span> (opcional),
                 <span className="font-medium text-foreground"> email</span>,
                 <span className="font-medium text-foreground"> nascimento</span> e
                 <span className="font-medium text-foreground"> observações</span>.
+              </p>
+
+              <p className="text-sm text-muted-foreground">
+                Telefones sem DDI usam Brasil por padrão. Para outro país, informe o telefone com +DDI ou preencha pais com a sigla, como US ou PT.
               </p>
 
               <input
@@ -1402,6 +1456,27 @@ export default function Leads() {
         slug={slug}
         companyId={companyId}
         onRefreshLead={refreshSelectedLead}
+        onEdit={(lead) => {
+          setSelectedLead(null);
+          setEditingLead(lead);
+        }}
+      />
+
+      <LeadEditDialog
+        open={!!editingLead}
+        lead={editingLead}
+        pending={editLeadMutation.isPending}
+        onOpenChange={(open) => {
+          if (!open) setEditingLead(null);
+        }}
+        onSave={async (values) => {
+          if (!editingLead) return;
+          try {
+            await editLeadMutation.mutateAsync({ lead: editingLead, values });
+          } catch {
+            // The mutation displays the actionable error and keeps the dialog open.
+          }
+        }}
       />
     </div>
   );

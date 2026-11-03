@@ -14,13 +14,16 @@ export interface Company {
   razao_social: string | null;
   cnpj: string | null;
   phone: string | null;
+  phone_e164?: string | null;
   email: string | null;
   address: string | null;
   responsible_name: string | null;
   responsible_email: string | null;
   responsible_phone: string | null;
+  responsible_phone_e164?: string | null;
   instagram: string | null;
   whatsapp: string | null;
+  whatsapp_e164?: string | null;
   custom_public_page_enabled?: boolean | null;
   public_header_style?: 'classic' | 'modern' | null;
   show_public_whatsapp_button?: boolean | null;

@@ -1,3 +1,5 @@
+import { normalizeStoredPhoneE164, toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 import { Suspense, useEffect, useMemo, useState, type CSSProperties, type SVGProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -30,10 +32,9 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   buildInstagramProfileUrl,
   formatInstagramHandleLabel,
-  formatBrazilPhone,
+  formatPhone,
   isValidCompanySlug,
-  normalizeBrazilPhoneDigits,
-  toBrazilWhatsAppNumber,
+
 } from '@/lib/validation';
 import { DEFAULT_SYSTEM_NAME } from '@/lib/branding';
 import { useSystemBranding } from '@/hooks/useSettings';
@@ -261,10 +262,10 @@ function toAbsoluteUrl(url: string | null | undefined) {
 }
 
 function buildPublicWhatsappUrl(phone: string | null | undefined) {
-  const whatsappNumber = toBrazilWhatsAppNumber(phone);
+  const whatsappNumber = toStoredWhatsAppNumber(phone);
   if (!whatsappNumber) return null;
 
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(PUBLIC_WHATSAPP_MESSAGE)}`;
+  return buildWhatsAppMessageUrl(whatsappNumber, PUBLIC_WHATSAPP_MESSAGE);
 }
 
 export default function CompanyPublicPage() {
@@ -535,7 +536,7 @@ export default function CompanyPublicPage() {
       description: seoDescription,
       url: canonicalUrl,
       image: seoImage,
-      telephone: formatBrazilPhone(company.phone),
+      telephone: formatPhone(company.phone),
       address: company.address
         ? compactJsonLd({
           '@type': 'PostalAddress',
@@ -605,11 +606,11 @@ export default function CompanyPublicPage() {
             <div className="space-y-3">
               {companyStatus.phone && (
                 <a
-                  href={`tel:${normalizeBrazilPhoneDigits(companyStatus.phone)}`}
+                  href={`tel:${normalizeStoredPhoneE164(companyStatus.phone)}`}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-4 py-3 text-white transition-colors hover:bg-white/20"
                 >
                   <Phone className="h-4 w-4" />
-                  Ligar: {formatBrazilPhone(companyStatus.phone)}
+                  Ligar: {formatPhone(companyStatus.phone)}
                 </a>
               )}
               {contactWhatsapp && (
@@ -1148,10 +1149,10 @@ export default function CompanyPublicPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-xs text-muted-foreground">Telefone</p>
-                      <p className="text-base font-semibold text-foreground">{formatBrazilPhone(company.phone)}</p>
+                      <p className="text-base font-semibold text-foreground">{formatPhone(company.phone)}</p>
                     </div>
                     <a
-                      href={`tel:${normalizeBrazilPhoneDigits(company.phone)}`}
+                      href={`tel:${normalizeStoredPhoneE164(company.phone)}`}
                       className="flex shrink-0 items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
                     >
                       <Phone className="h-4 w-4" />

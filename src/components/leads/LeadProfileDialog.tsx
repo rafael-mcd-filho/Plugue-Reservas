@@ -11,6 +11,7 @@ import {
   Loader2,
   Mail,
   MapPin,
+  Pencil,
 } from 'lucide-react';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
 import { Badge } from '@/components/ui/badge';
@@ -49,6 +50,7 @@ export interface LeadProfileDialogProps {
    * chave da consulta recarregará o histórico automaticamente.
    */
   onRefreshLead?: (lead: CrmLeadProfile) => Promise<boolean>;
+  onEdit?: (lead: CrmLeadProfile) => void;
 }
 
 const PRESENCE_PAGE_SIZE = 25;
@@ -63,6 +65,7 @@ export default function LeadProfileDialog({
   profileError = null,
   onRetryProfile,
   onRefreshLead,
+  onEdit,
 }: LeadProfileDialogProps) {
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
   const [retryingHistory, setRetryingHistory] = useState(false);
@@ -264,9 +267,9 @@ export default function LeadProfileDialog({
 
                 {lead.importedLeadId && (
                   <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-muted/20 p-3 text-sm">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Origem do lead</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Cadastro CRM</p>
                     <p className="mt-1 break-words font-medium text-foreground">
-                      Importado via CSV{lead.importFilename ? ` · ${lead.importFilename}` : ''}
+                      {lead.importFilename ? `Importado via CSV · ${lead.importFilename}` : 'Dados editados manualmente'}
                     </p>
                     {lead.importedAt && (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -279,6 +282,18 @@ export default function LeadProfileDialog({
                       </p>
                     )}
                   </div>
+                )}
+
+                {onEdit && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => onEdit(lead)}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                    Editar dados do lead
+                  </Button>
                 )}
               </div>
 

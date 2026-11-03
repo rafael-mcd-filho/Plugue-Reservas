@@ -29,6 +29,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164, formatPhone } from '@/lib/phone';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
@@ -62,7 +64,6 @@ import { toSafeRichTextHtml } from '@/lib/richText';
 import { toast } from 'sonner';
 import {
   normalizeInstagramHandle,
-  formatBrazilPhone,
   formatCnpj,
   getCnpjValidationMessage,
   getEmailValidationMessage,
@@ -211,14 +212,14 @@ function buildFormFromCompany(company: Company): CompanyInsert {
     slug: company.slug,
     razao_social: company.razao_social || '',
     cnpj: formatCnpj(company.cnpj),
-    phone: formatBrazilPhone(company.phone),
+    phone: normalizePhoneE164(company.phone_e164 ?? company.phone),
     email: company.email || '',
     address: company.address || '',
     responsible_name: company.responsible_name || '',
     responsible_email: company.responsible_email || '',
-    responsible_phone: formatBrazilPhone(company.responsible_phone),
+    responsible_phone: normalizePhoneE164(company.responsible_phone_e164 ?? company.responsible_phone),
     instagram: normalizeInstagramHandle(company.instagram),
-    whatsapp: formatBrazilPhone(company.whatsapp),
+    whatsapp: normalizePhoneE164(company.whatsapp_e164 ?? company.whatsapp),
     google_maps_url: company.google_maps_url || '',
     description: company.description || '',
     logo_url: company.logo_url || '',
@@ -606,14 +607,14 @@ export default function CompanyDialog({
     const payload: CompanyInsert = {
       ...form,
       cnpj: normalizeOptionalCnpj(form.cnpj),
-      phone: formatBrazilPhone(form.phone),
+      phone: normalizePhoneE164(form.phone),
       email: normalizeEmail(form.email),
       responsible_email: normalizeEmail(form.responsible_email),
-      responsible_phone: formatBrazilPhone(form.responsible_phone),
+      responsible_phone: normalizePhoneE164(form.responsible_phone),
       instagram: normalizeInstagramHandle(form.instagram) || null,
       logo_url: publicCustomizationLocked ? (company?.logo_url || '') : (form.logo_url || ''),
       description: publicCustomizationLocked ? (company?.description || '') : toSafeRichTextHtml(form.description || ''),
-      whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : formatBrazilPhone(form.whatsapp),
+      whatsapp: publicCustomizationLocked ? (company?.whatsapp || '') : normalizePhoneE164(form.whatsapp),
       google_maps_url: normalizeGoogleMapsEmbedInput(form.google_maps_url) || '',
       opening_hours: normalizeOpeningHours(form.opening_hours),
       payment_methods: normalizePaymentMethods(form.payment_methods),
@@ -744,10 +745,9 @@ export default function CompanyDialog({
                       </div>
                       <div>
                         <Label>Telefone</Label>
-                        <Input
+                        <PhoneInput
                           value={form.phone || ''}
-                          onChange={(event) => setForm((current) => ({ ...current, phone: formatBrazilPhone(event.target.value) }))}
-                          maxLength={15}
+                          onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
                         />
                       </div>
                       <div>
@@ -846,10 +846,9 @@ export default function CompanyDialog({
                         </div>
                         <div>
                           <Label>Telefone do Responsável</Label>
-                          <Input
+                          <PhoneInput
                             value={form.responsible_phone || ''}
-                            onChange={(event) => setForm((current) => ({ ...current, responsible_phone: formatBrazilPhone(event.target.value) }))}
-                            maxLength={15}
+                            onChange={(value) => setForm((current) => ({ ...current, responsible_phone: value }))}
                           />
                         </div>
                       </div>
@@ -885,12 +884,10 @@ export default function CompanyDialog({
                         </div>
                         <div>
                           <Label>WhatsApp</Label>
-                          <Input
+                          <PhoneInput
                             value={form.whatsapp || ''}
-                            onChange={(event) => setForm((current) => ({ ...current, whatsapp: formatBrazilPhone(event.target.value) }))}
-                            placeholder="(84) 99999-9999"
+                            onChange={(value) => setForm((current) => ({ ...current, whatsapp: value }))}
                             disabled={publicCustomizationLocked}
-                            maxLength={15}
                           />
                         </div>
                         <div className="md:col-span-2">
@@ -1253,7 +1250,7 @@ export default function CompanyDialog({
                     </CardHeader>
                     <CardContent className="grid gap-4 md:grid-cols-2">
                       <InfoRow icon={<Mail className="h-4 w-4 text-muted-foreground" />} label="Email principal" value={company.email} />
-                      <InfoRow icon={<Phone className="h-4 w-4 text-muted-foreground" />} label="Telefone principal" value={formatBrazilPhone(company.phone)} />
+                      <InfoRow icon={<Phone className="h-4 w-4 text-muted-foreground" />} label="Telefone principal" value={formatPhone(company.phone_e164 ?? company.phone)} />
                       <InfoRow icon={<MapPin className="h-4 w-4 text-muted-foreground" />} label="Endereço" value={company.address} />
                       <InfoRow icon={<Globe className="h-4 w-4 text-muted-foreground" />} label="Slug" value={company.slug} />
                       <InfoRow icon={<Calendar className="h-4 w-4 text-muted-foreground" />} label="Criada em" value={format(new Date(company.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} />

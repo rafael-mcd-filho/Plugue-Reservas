@@ -27,19 +27,24 @@ describe('reservation-flow', () => {
 
   it('builds the WhatsApp URL for large party reservations', () => {
     expect(buildLargePartyWhatsappUrl('(11) 99999-9999')).toBe(
-      'https://wa.me/5511999999999?text=Oi%2C%20vim%20pelo%20site%20e%20preciso%20de%20uma%20reserva%20a%20partir%20de%2010%20pessoas',
+      'https://api.whatsapp.com/send?phone=5511999999999&text=Oi%2C%20vim%20pelo%20site%20e%20preciso%20de%20uma%20reserva%20a%20partir%20de%2010%20pessoas',
     );
   });
 
   it('builds the WhatsApp URL with the configured threshold', () => {
     expect(buildLargePartyWhatsappUrl('(11) 99999-9999', 20)).toBe(
-      'https://wa.me/5511999999999?text=Oi%2C%20vim%20pelo%20site%20e%20preciso%20de%20uma%20reserva%20a%20partir%20de%2020%20pessoas',
+      'https://api.whatsapp.com/send?phone=5511999999999&text=Oi%2C%20vim%20pelo%20site%20e%20preciso%20de%20uma%20reserva%20a%20partir%20de%2020%20pessoas',
     );
   });
 
   it('returns null when the restaurant has no WhatsApp configured', () => {
     expect(buildLargePartyWhatsappUrl(null)).toBeNull();
     expect(buildLargePartyWhatsappUrl('')).toBeNull();
+  });
+
+  it('keeps the large party contact available for an existing BR number with eight local digits', () => {
+    expect(buildLargePartyWhatsappUrl('(11) 9999-8888')).toContain('https://api.whatsapp.com/send?phone=551199998888&text=');
+    expect(buildLargePartyWhatsappUrl('+9991234567')).toBeNull();
   });
 
   it('normalizes the reservation late tolerance', () => {

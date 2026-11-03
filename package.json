@@ -14,6 +14,8 @@
     "test:reports:sql": "node supabase/tests/run_advanced_report_temporal_rpc_contract.mjs && node supabase/tests/run_occupancy_waitlist_series_regression.mjs && node supabase/tests/run_customer_recurrence_temporal_regression.mjs",
     "test:hero-gallery:sql": "node supabase/tests/run_company_hero_media_gallery_regression.mjs",
     "test:meta-queue:sql": "node supabase/tests/run_meta_event_queue_reservation_link_regression.mjs",
+    "test:phones:sql": "node supabase/tests/run_international_phone_regression.mjs",
+    "phone:metadata:generate": "node supabase/scripts/generate_phone_number_metadata.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -63,12 +65,14 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "libphonenumber-js": "1.13.15",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.61.1",
+    "react-phone-number-input": "3.4.18",
     "react-resizable-panels": "^2.1.9",
     "react-router-dom": "^6.30.1",
     "recharts": "^2.15.4",

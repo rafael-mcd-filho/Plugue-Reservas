@@ -54,7 +54,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
+import { formatPhone, toStoredWhatsAppNumber, normalizeStoredPhoneE164 } from '@/lib/phone';
+import { getLeadReactivationPhone } from '@/lib/lead-consistency';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
 import { parseWhatsAppErrorDetails } from '@/lib/whatsapp-automations';
 
@@ -142,6 +143,7 @@ interface ReservationCandidate {
   reservation_id?: string | null;
   guest_name: string;
   guest_phone: string | null;
+  guest_phone_e164?: string | null;
   date: string;
   time: string | null;
   party_size: number | null;
@@ -155,6 +157,8 @@ interface LeadReactivationCandidateRow {
   lead_key: string;
   guest_name: string | null;
   guest_phone: string | null;
+  guest_phone_e164?: string | null;
+  phone_normalized: string | null;
   last_visit_date: string;
   last_reservation_id: string | null;
   days_since_visit: number;
@@ -287,7 +291,7 @@ export default function BroadcastsTab({ companyId }: Props) {
           id: lead.lead_key,
           reservation_id: lead.last_reservation_id,
           guest_name: lead.guest_name || 'Cliente sem nome',
-          guest_phone: lead.guest_phone,
+          guest_phone: getLeadReactivationPhone(lead),
           date: lead.last_visit_date,
           time: null,
           party_size: null,
@@ -300,7 +304,7 @@ export default function BroadcastsTab({ companyId }: Props) {
 
       let query = supabase
         .from('reservations')
-        .select('id, guest_name, guest_phone, date, time, party_size, status')
+        .select('id, guest_name, guest_phone, guest_phone_e164, date, time, party_size, status')
         .eq('company_id', companyId)
         .order('date', { ascending: true })
         .order('time', { ascending: true })
@@ -320,6 +324,7 @@ export default function BroadcastsTab({ companyId }: Props) {
       if (error) throw error;
       return ((data ?? []) as ReservationCandidate[]).map((reservation) => ({
         ...reservation,
+        guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
         source: 'reservations' as const,
       }));
     },
@@ -367,7 +372,7 @@ export default function BroadcastsTab({ companyId }: Props) {
   const uniqueRecipients = useMemo(() => {
     const seen = new Map<string, ReservationCandidate>();
     for (const reservation of reservations) {
-      const digits = normalizeBrazilPhoneDigits(reservation.guest_phone);
+      const digits = toStoredWhatsAppNumber(reservation.guest_phone);
       if (!digits) continue;
       if (!seen.has(digits)) seen.set(digits, reservation);
     }
@@ -485,7 +490,7 @@ export default function BroadcastsTab({ companyId }: Props) {
         broadcast_id: createdBroadcast.id,
         company_id: companyId,
         reservation_id: r.source === 'reactivation' ? r.reservation_id ?? null : r.id,
-        phone: r.guest_phone ?? '',
+        phone: normalizeStoredPhoneE164(r.guest_phone),
         guest_name: r.guest_name,
         status: 'pending' as const,
       }));
@@ -790,7 +795,7 @@ export default function BroadcastsTab({ companyId }: Props) {
                           />
                         </TableCell>
                         <TableCell className="font-medium">{r.guest_name}</TableCell>
-                        <TableCell>{formatBrazilPhone(r.guest_phone)}</TableCell>
+                        <TableCell>{formatPhone(r.guest_phone)}</TableCell>
                         <TableCell>
                           {r.date ? format(parseISO(r.date), 'dd/MM/yyyy', { locale: ptBR }) : '—'} {r.time?.slice(0, 5)}
                         </TableCell>
@@ -1197,7 +1202,7 @@ function BroadcastDetailsDialog({
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="whitespace-nowrap font-medium">{r.guest_name || '—'}</TableCell>
-                      <TableCell className="whitespace-nowrap tabular-nums">{formatBrazilPhone(r.phone)}</TableCell>
+                      <TableCell className="whitespace-nowrap tabular-nums">{formatPhone(r.phone)}</TableCell>
                       <TableCell className={cn('whitespace-nowrap', cfg.className)}>{cfg.label}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm text-muted-foreground tabular-nums">
                         {r.sent_at ? formatDate(r.sent_at) : '—'}

@@ -15,6 +15,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164, formatPhone } from '@/lib/phone';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -42,7 +44,6 @@ import {
 import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchList';
 import { toast } from 'sonner';
 import {
-  formatBrazilPhone,
   formatCnpj,
   getCnpjValidationMessage,
   getEmailValidationMessage,
@@ -178,12 +179,12 @@ export default function CompanyProfile() {
       slug: company.slug,
       razao_social: company.razao_social || '',
       cnpj: formatCnpj(company.cnpj),
-      phone: formatBrazilPhone(company.phone),
+      phone: normalizePhoneE164(company.phone_e164 ?? company.phone),
       email: company.email || '',
       address: company.address || '',
       responsible_name: company.responsible_name || '',
       responsible_email: company.responsible_email || '',
-      responsible_phone: formatBrazilPhone(company.responsible_phone),
+      responsible_phone: normalizePhoneE164(company.responsible_phone_e164 ?? company.responsible_phone),
       status: company.status,
     });
     setModalFeatures(getCurrentFeatures(company, featureFlags?.features));
@@ -228,10 +229,10 @@ export default function CompanyProfile() {
       id: company.id,
       ...form,
       cnpj: normalizeOptionalCnpj(form.cnpj),
-      phone: formatBrazilPhone(form.phone),
+      phone: normalizePhoneE164(form.phone),
       email: normalizeEmail(form.email),
       responsible_email: normalizeEmail(form.responsible_email),
-      responsible_phone: formatBrazilPhone(form.responsible_phone),
+      responsible_phone: normalizePhoneE164(form.responsible_phone),
     });
     if (modalFeatures) {
       await saveCompanyFeatures.mutateAsync({
@@ -473,7 +474,7 @@ export default function CompanyProfile() {
             {company.phone && (
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{formatBrazilPhone(company.phone)}</span>
+                <span>{formatPhone(company.phone_e164 ?? company.phone)}</span>
               </div>
             )}
             {company.address && (
@@ -502,7 +503,7 @@ export default function CompanyProfile() {
             {company.responsible_phone && (
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{formatBrazilPhone(company.responsible_phone)}</span>
+                <span>{formatPhone(company.responsible_phone_e164 ?? company.responsible_phone)}</span>
               </div>
             )}
             <Separator />
@@ -688,10 +689,9 @@ export default function CompanyProfile() {
               </div>
               <div>
                 <Label>Telefone</Label>
-                <Input
+                <PhoneInput
                   value={form.phone || ''}
-                  onChange={(e) => setForm({ ...form, phone: formatBrazilPhone(e.target.value) })}
-                  maxLength={15}
+                  onChange={(value) => setForm({ ...form, phone: value })}
                 />
               </div>
               <div>
@@ -712,10 +712,9 @@ export default function CompanyProfile() {
               </div>
               <div>
                 <Label>Telefone do Responsável</Label>
-                <Input
+                <PhoneInput
                   value={form.responsible_phone || ''}
-                  onChange={(e) => setForm({ ...form, responsible_phone: formatBrazilPhone(e.target.value) })}
-                  maxLength={15}
+                  onChange={(value) => setForm({ ...form, responsible_phone: value })}
                 />
               </div>
               <div>

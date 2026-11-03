@@ -34,6 +34,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import BlockedDatesTab from '@/components/company/BlockedDatesTab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164 } from '@/lib/phone';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -63,7 +65,7 @@ import {
 } from '@/lib/publicReservationExitPrompt';
 import { cn } from '@/lib/utils';
 import { toSafeRichTextHtml } from '@/lib/richText';
-import { formatBrazilPhone, getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
+import { getPhoneValidationMessage, normalizeInstagramHandle } from '@/lib/validation';
 import { normalizeLargePartyThreshold, normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import {
   getCompanyHeroMediaStoragePath,
@@ -504,9 +506,9 @@ function buildCompanyFormValues(company: Company) {
     heroMediaType: storedHeroMediaType,
     publicHeaderStyle: ((company as any).public_header_style === 'modern' ? 'modern' : 'classic') as 'classic' | 'modern',
     address: company.address || '',
-    phone: formatBrazilPhone(company.phone),
+    phone: normalizePhoneE164(company.phone_e164 ?? company.phone),
     instagram: normalizeInstagramHandle(company.instagram),
-    whatsapp: formatBrazilPhone(company.whatsapp),
+    whatsapp: normalizePhoneE164(company.whatsapp_e164 ?? company.whatsapp),
     showPublicWhatsappButton: (company.show_public_whatsapp_button ?? true) ? 'show' : 'hide',
     showPublicHeroReserveButton: company.show_public_hero_reserve_button ?? true,
     showPublicStickyReserveButton: (company as any).show_public_sticky_reserve_button ?? true,
@@ -600,6 +602,10 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     queryKey: ['company-settings', companyId],
     queryFn: async () => {
       const selectAttempts = [
+        {
+          select: `${COMPANY_SETTINGS_SELECT}, phone_e164, whatsapp_e164`,
+          missingColumns: ['phone_e164', 'whatsapp_e164', ...OPTIONAL_COMPANY_COLUMNS],
+        },
         {
           select: COMPANY_SETTINGS_SELECT,
           missingColumns: [
@@ -985,7 +991,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
         companyUpdate.time_zone = normalizeCompanyTimeZone(timeZone);
         companyUpdate.payment_methods = payments;
         companyUpdate.address = address;
-        companyUpdate.phone = formatBrazilPhone(phone);
+        companyUpdate.phone = normalizePhoneE164(phone);
         companyUpdate.instagram = normalizeInstagramHandle(instagram) || null;
         companyUpdate.google_maps_url = normalizedMapsEmbedUrl || null;
 
@@ -993,7 +999,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
         if (!publicCustomizationLocked) {
           companyUpdate.description = toSafeRichTextHtml(description);
           companyUpdate.logo_url = logoUrl;
-          companyUpdate.whatsapp = formatBrazilPhone(whatsapp);
+          companyUpdate.whatsapp = normalizePhoneE164(whatsapp);
         }
       }
 
@@ -1938,16 +1944,14 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
                 <div className="space-y-4">
                   <div className={settingsFieldGroupClassName}>
                     <Label htmlFor="company-settings-phone" className={settingsLabelClassName}><Phone className="h-4 w-4" /> Telefone</Label>
-                    <Input
+                    <PhoneInput
                       id="company-settings-phone"
                       name="phone"
                       value={phone}
-                      onChange={(event) => setPhone(formatBrazilPhone(event.target.value))}
-                      placeholder="(84) 3333-4444"
+                      onChange={(value) => setPhone(value)}
                       className={settingsFieldClassName}
                       autoComplete="tel"
                       inputMode="tel"
-                      maxLength={15}
                     />
                   </div>
 
@@ -1969,17 +1973,15 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
 
                   <div className={settingsFieldGroupClassName}>
                     <Label htmlFor="company-settings-whatsapp" className={settingsLabelClassName}><WhatsAppIcon className="h-4 w-4" /> WhatsApp</Label>
-                    <Input
+                    <PhoneInput
                       id="company-settings-whatsapp"
                       name="whatsapp"
                       value={whatsapp}
-                      onChange={(event) => setWhatsapp(formatBrazilPhone(event.target.value))}
-                      placeholder="(84) 99999-9999"
+                      onChange={(value) => setWhatsapp(value)}
                       disabled={publicCustomizationLocked}
                       className={settingsFieldClassName}
                       autoComplete="tel"
                       inputMode="tel"
-                      maxLength={15}
                     />
                     {publicCustomizationLocked && (
                       <p className="text-xs text-muted-foreground">O WhatsApp público fica bloqueado enquanto a feature estiver desativada.</p>

@@ -1,3 +1,4 @@
+import { normalizePhoneE164 } from '@/lib/phone';
 import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { differenceInMinutes, format } from 'date-fns';
@@ -29,14 +30,14 @@ import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { getReservationTableBadge } from '@/lib/reservation-table-badge';
 import { cn } from '@/lib/utils';
 import type { ReservationStatus } from '@/types/restaurant';
-import { normalizeBrazilPhoneDigits, normalizePhoneDigits } from '@/lib/validation';
+import { normalizePhoneDigits } from '@/lib/validation';
 
 const DEFAULT_RESERVATION_DURATION_MINUTES = 30;
 const RECENT_PENDING_PAYMENT_GRACE_MS = 2 * 60 * 1000;
 const OPERATOR_RESERVATION_SELECT =
-  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, duration_minutes, created_in_mode, reservation_table_assignments(table_id), reservation_payments(id,status,expires_at)';
+  'id, company_id, table_id, source, guest_name, guest_phone, guest_phone_e164, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, duration_minutes, created_in_mode, reservation_table_assignments(table_id), reservation_payments(id,status,expires_at)';
 const OPERATOR_RESERVATION_LEGACY_SELECT =
-  'id, company_id, table_id, source, guest_name, guest_phone, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, reservation_table_assignments(table_id), reservation_payments(id,status)';
+  'id, company_id, table_id, source, guest_name, guest_phone, guest_phone_e164, guest_email, date, time, party_size, public_tracking_code, status, occasion, notes, checked_in_at, checked_in_party_size, created_at, updated_at, reservation_table_assignments(table_id), reservation_payments(id,status)';
 
 type ReservationAvailabilityMode = 'tables' | 'capacity';
 type PublicReservationScheduleSource = 'blocked' | 'date_specific' | 'date_range' | 'weekly' | 'default';
@@ -55,6 +56,7 @@ interface Reservation {
   source: string | null;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   date: string;
   time: string;
@@ -196,6 +198,7 @@ function sortReservationScheduleSlots(slots: string[]) {
 function normalizeReservationRecord(reservation: Reservation) {
   return {
     ...reservation,
+    guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
     status: normalizeReservationStatus(reservation.status),
     duration_minutes: reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES,
   };
@@ -210,7 +213,7 @@ async function fetchOperatorReservations(companyId: string, date: string, select
     .order('time', { ascending: true });
 
   if (error) throw error;
-  return ((data ?? []) as Reservation[]).map(normalizeReservationRecord).sort(sortReservations);
+  return ((data ?? []) as unknown as Reservation[]).map(normalizeReservationRecord).sort(sortReservations);
 }
 
 async function getPublicReservationSchedule(companyId: string, date: string): Promise<PublicReservationSchedule> {
@@ -296,7 +299,7 @@ function sortProcessedReservations(left: Reservation, right: Reservation) {
 }
 
 function getReservationPhoneMatchKey(reservation: Pick<Reservation, 'guest_phone'>) {
-  return normalizeBrazilPhoneDigits(reservation.guest_phone) || normalizePhoneDigits(reservation.guest_phone);
+  return normalizePhoneE164(reservation.guest_phone) || normalizePhoneDigits(reservation.guest_phone);
 }
 
 function getReservationDateTime(reservation: Reservation) {
@@ -815,7 +818,7 @@ export default function OperatorTodayReservations() {
         .maybeSingle();
 
       if (error) throw error;
-      return (data as ReservationSettings | null) ?? null;
+      return (data as unknown as ReservationSettings | null) ?? null;
     },
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,

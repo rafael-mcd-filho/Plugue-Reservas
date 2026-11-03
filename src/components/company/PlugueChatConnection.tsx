@@ -1,3 +1,5 @@
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { useEffect, useState } from 'react';
 import { Eye, EyeOff, KeyRound, Phone, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -43,7 +45,7 @@ export default function PlugueChatConnection({ companyId, activeChannel, embedde
     saveConfig.mutate(
       {
         company_id: companyId,
-        from_number: fromNumber.trim(),
+        from_number: normalizePhoneE164(fromNumber),
         ...(apiToken.trim() ? { api_token: apiToken.trim() } : {}),
       },
       {
@@ -71,20 +73,20 @@ export default function PlugueChatConnection({ companyId, activeChannel, embedde
                 <Phone className="h-4 w-4 text-primary" /> Número remetente
               </h4>
               <p className="text-xs text-muted-foreground">
-                Use o formato internacional sem espaços, por exemplo 5585999999999.
+                Selecione o país e informe o número com DDD.
               </p>
             </div>
           )}
           <div className="space-y-2">
             <Label htmlFor="from-number">Número remetente</Label>
-            <Input
+            <PhoneInput
               id="from-number"
               value={fromNumber}
-              onChange={(e) => setFromNumber(e.target.value)}
-              placeholder="5585999999999"
+              onChange={setFromNumber}
+              placeholder="(85) 99999-9999"
             />
             {embedded && (
-              <p className="text-xs text-muted-foreground">Use o formato internacional sem espaços.</p>
+              <p className="text-xs text-muted-foreground">Selecione o país e informe o número com DDD.</p>
             )}
           </div>
         </div>
@@ -142,7 +144,7 @@ export default function PlugueChatConnection({ companyId, activeChannel, embedde
 
       <Button
         onClick={handleSave}
-        disabled={saveConfig.isPending || !fromNumber.trim()}
+        disabled={saveConfig.isPending || !isValidPhone(fromNumber)}
         size="sm"
         className="gap-2"
       >

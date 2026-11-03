@@ -54,6 +54,18 @@ describe('mapCrmLeadRowToProfile', () => {
     });
   });
 
+  it('prefere E164 e a chave de perfil preservada quando presentes', () => {
+    const profile = mapCrmLeadRowToProfile({ ...leadRow, phone_e164: '+14072641934', profile_customer_key: 'phone:legacy-identity' });
+    expect(profile.guest_phone).toBe('+14072641934');
+    expect(profile.key).toBe('phone:legacy-identity');
+    expect(formatLeadPhoneText(profile.guest_phone)).toBe('+1 407 264 1934');
+    expect(formatLeadState(profile)).toBe('Telefone internacional');
+  });
+
+  it('interpreta telefone normalizado sem display como numero internacional completo', () => {
+    expect(mapCrmLeadRowToProfile({ ...leadRow, phone_normalized: '14072641934', display_phone: null }).guest_phone).toBe('+14072641934');
+  });
+
   it('aplica fallbacks seguros quando telefone, nome e importação não existem', () => {
     const profile = mapCrmLeadRowToProfile({
       ...leadRow,

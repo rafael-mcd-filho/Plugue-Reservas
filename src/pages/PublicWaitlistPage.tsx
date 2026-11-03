@@ -1,3 +1,4 @@
+import { normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -6,6 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
@@ -13,13 +15,10 @@ import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import type { Company } from '@/hooks/useCompanies';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
-  isValidBrazilWhatsApp,
   isValidCompanySlug,
   MAX_WAITLIST_NAME_LENGTH,
   MAX_WAITLIST_NOTES_LENGTH,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 
@@ -74,7 +73,7 @@ export default function PublicWaitlistPage() {
           .maybeSingle();
 
         if (error) throw error;
-        return data as Company | null;
+        return data as unknown as Company | null;
       };
 
       const rpcResult = await (supabase as any).rpc('get_public_company_by_slug', { _slug: slug! });
@@ -115,7 +114,7 @@ export default function PublicWaitlistPage() {
     if (!slug || !slugIsValid) return;
 
     const guestName = form.guestName.trim();
-    const guestPhone = normalizeBrazilPhoneDigits(form.guestPhone);
+    const guestPhone = normalizePhoneE164(form.guestPhone);
     const guestEmail = normalizeEmail(form.guestEmail);
     const guestBirthdate = form.guestBirthdate;
     const notes = form.notes.trim();
@@ -130,8 +129,8 @@ export default function PublicWaitlistPage() {
       return;
     }
 
-    if (!isValidBrazilWhatsApp(guestPhone)) {
-      toast.error('Informe um WhatsApp válido com DDD.');
+    if (!isValidPhone(guestPhone)) {
+      toast.error('Informe um WhatsApp válido para o país selecionado.');
       return;
     }
 
@@ -276,17 +275,15 @@ export default function PublicWaitlistPage() {
                     <Phone className="h-4 w-4" />
                     WhatsApp *
                   </Label>
-                  <Input
+                  <PhoneInput
                     id="waitlist-guest-phone"
                     name="guest_phone"
-                    type="tel"
                     value={form.guestPhone}
-                    onChange={(event) => setForm((current) => ({ ...current, guestPhone: formatBrazilPhone(event.target.value) }))}
+                    onChange={(value) => setForm((current) => ({ ...current, guestPhone: value }))}
                     placeholder="(11) 99999-9999"
                     autoComplete="tel"
                     inputMode="tel"
                     spellCheck={false}
-                    maxLength={15}
                     required
                   />
                 </div>

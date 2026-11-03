@@ -1,3 +1,5 @@
+import { toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 import { type MouseEvent, type SVGProps, useMemo, useState } from 'react';
 import { ExternalLink, Loader2, MessageCircle } from 'lucide-react';
 import { useAutomationSettings } from '@/hooks/useAutomations';
@@ -6,7 +8,7 @@ import {
   renderReservationWhatsAppTemplate,
 } from '@/lib/whatsapp-automations';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone, normalizeBrazilPhoneDigits, toBrazilWhatsAppNumber } from '@/lib/validation';
+import { formatPhone } from '@/lib/validation';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
@@ -58,9 +60,8 @@ export default function PhoneWhatsAppLink({
 }: PhoneWhatsAppLinkProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const { data: automationSettings, isLoading, isError } = useAutomationSettings(companyId ?? undefined, pickerOpen);
-  const formattedPhone = formatBrazilPhone(phone);
-  const digits = normalizeBrazilPhoneDigits(phone);
-  const whatsappNumber = digits.length >= 10 ? toBrazilWhatsAppNumber(digits) : '';
+  const formattedPhone = formatPhone(phone);
+  const whatsappNumber = toStoredWhatsAppNumber(phone);
   const whatsappUrl = whatsappNumber ? `https://wa.me/${whatsappNumber}` : '';
   const hasMessagePicker = Boolean(companyId && reservation);
   const trackingUrl =
@@ -100,7 +101,7 @@ export default function PhoneWhatsAppLink({
   const openWhatsApp = (message?: string) => {
     if (!whatsappUrl || typeof window === 'undefined') return;
     const text = message?.trim();
-    const targetUrl = text ? `${whatsappUrl}?text=${encodeURIComponent(text)}` : whatsappUrl;
+    const targetUrl = text ? buildWhatsAppMessageUrl(whatsappNumber, text) : whatsappUrl;
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
     setPickerOpen(false);
   };

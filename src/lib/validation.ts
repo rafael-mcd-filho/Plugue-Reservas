@@ -1,3 +1,6 @@
+import { isValidPhone, toWhatsAppNumber } from './phone';
+export { formatPhone, toWhatsAppNumber } from './phone';
+
 export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_WAITLIST_NAME_LENGTH = 120;
 export const MAX_WAITLIST_NOTES_LENGTH = 500;
@@ -65,11 +68,7 @@ export function isValidBrazilWhatsApp(value: string | null | undefined) {
 }
 
 export function toBrazilWhatsAppNumber(value: string | null | undefined) {
-  const digits = normalizeBrazilPhoneDigits(value);
-
-  if (!digits) return '';
-
-  return `55${digits}`;
+  return toWhatsAppNumber(value);
 }
 
 export function normalizeEmail(value: string | null | undefined) {
@@ -192,13 +191,13 @@ export function getEmailValidationMessage(value: string | null | undefined, labe
 }
 
 export function getPhoneValidationMessage(value: string | null | undefined, label: string, required = false) {
-  const formatted = formatBrazilPhone(value);
+  const formatted = value?.trim() ?? '';
 
   if (!formatted) {
     return required ? `Informe ${label}.` : null;
   }
 
-  return isValidBrazilPhone(formatted) ? null : `Informe ${label} valido com DDD.`;
+  return isValidPhone(formatted) ? null : `Informe ${label} válido para o país selecionado.`;
 }
 
 export function getCnpjValidationMessage(value: string | null | undefined, label = 'um CNPJ', required = false) {

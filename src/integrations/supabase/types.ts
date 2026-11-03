@@ -170,16 +170,22 @@ export type Database = {
           payment_methods: Json | null
           reservation_late_tolerance_minutes: number
           phone: string | null
+          phone_e164: string | null
+          phone_country: string | null
           razao_social: string | null
           reservation_duration: number
           reservation_slot_interval_minutes: number
           responsible_email: string | null
           responsible_name: string | null
           responsible_phone: string | null
+          responsible_phone_e164: string | null
+          responsible_phone_country: string | null
           slug: string
           status: string
           updated_at: string
           whatsapp: string | null
+          whatsapp_e164: string | null
+          whatsapp_country: string | null
         }
         Insert: {
           address?: string | null
@@ -201,16 +207,22 @@ export type Database = {
           payment_methods?: Json | null
           reservation_late_tolerance_minutes?: number
           phone?: string | null
+          phone_e164?: string | null
+          phone_country?: string | null
           razao_social?: string | null
           reservation_duration?: number
           reservation_slot_interval_minutes?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
+          responsible_phone_e164?: string | null
+          responsible_phone_country?: string | null
           slug: string
           status?: string
           updated_at?: string
           whatsapp?: string | null
+          whatsapp_e164?: string | null
+          whatsapp_country?: string | null
         }
         Update: {
           address?: string | null
@@ -232,16 +244,22 @@ export type Database = {
           payment_methods?: Json | null
           reservation_late_tolerance_minutes?: number
           phone?: string | null
+          phone_e164?: string | null
+          phone_country?: string | null
           razao_social?: string | null
           reservation_duration?: number
           reservation_slot_interval_minutes?: number
           responsible_email?: string | null
           responsible_name?: string | null
           responsible_phone?: string | null
+          responsible_phone_e164?: string | null
+          responsible_phone_country?: string | null
           slug?: string
           status?: string
           updated_at?: string
           whatsapp?: string | null
+          whatsapp_e164?: string | null
+          whatsapp_country?: string | null
         }
         Relationships: []
       }
@@ -411,6 +429,8 @@ export type Database = {
           id: string
           is_active: boolean
           phone: string | null
+          phone_e164: string | null
+          phone_country: string | null
           updated_at: string
         }
         Insert: {
@@ -421,6 +441,8 @@ export type Database = {
           id: string
           is_active?: boolean
           phone?: string | null
+          phone_e164?: string | null
+          phone_country?: string | null
           updated_at?: string
         }
         Update: {
@@ -431,6 +453,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           phone?: string | null
+          phone_e164?: string | null
+          phone_country?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -674,6 +698,8 @@ export type Database = {
           guest_email: string | null
           guest_name: string
           guest_phone: string
+          guest_phone_e164: string | null
+          guest_phone_country: string | null
           id: string
           notes: string | null
           occasion: string | null
@@ -695,6 +721,8 @@ export type Database = {
           guest_email?: string | null
           guest_name: string
           guest_phone: string
+          guest_phone_e164: string | null
+          guest_phone_country: string | null
           id?: string
           notes?: string | null
           occasion?: string | null
@@ -716,6 +744,8 @@ export type Database = {
           guest_email?: string | null
           guest_name?: string
           guest_phone?: string
+          guest_phone_e164?: string | null
+          guest_phone_country?: string | null
           id?: string
           notes?: string | null
           occasion?: string | null
@@ -873,6 +903,8 @@ export type Database = {
           expired_at: string | null
           guest_name: string
           guest_phone: string
+          guest_phone_e164: string | null
+          guest_phone_country: string | null
           id: string
           notes: string | null
           party_size: number
@@ -889,6 +921,8 @@ export type Database = {
           expired_at?: string | null
           guest_name: string
           guest_phone: string
+          guest_phone_e164: string | null
+          guest_phone_country: string | null
           id?: string
           notes?: string | null
           party_size?: number
@@ -905,6 +939,8 @@ export type Database = {
           expired_at?: string | null
           guest_name?: string
           guest_phone?: string
+          guest_phone_e164?: string | null
+          guest_phone_country?: string | null
           id?: string
           notes?: string | null
           party_size?: number
@@ -1049,6 +1085,8 @@ export type Database = {
           max_attempts: number
           message: string
           phone: string
+          phone_e164: string | null
+          phone_country: string | null
           reservation_id: string | null
           status: string
           type: string
@@ -1064,6 +1102,8 @@ export type Database = {
           max_attempts?: number
           message: string
           phone: string
+          phone_e164: string | null
+          phone_country: string | null
           reservation_id?: string | null
           status?: string
           type?: string
@@ -1079,6 +1119,8 @@ export type Database = {
           max_attempts?: number
           message?: string
           phone?: string
+          phone_e164?: string | null
+          phone_country?: string | null
           reservation_id?: string | null
           status?: string
           type?: string

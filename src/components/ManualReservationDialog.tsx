@@ -1,3 +1,4 @@
+import { normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -7,16 +8,15 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { MIN_CRM_LEAD_PREFILL_PHONE_DIGITS, useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
+import { useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
 import { supabase } from '@/integrations/supabase/client';
 import { MANUAL_RESERVATION_MAX_PARTY_SIZE } from '@/lib/calendar-slot-availability';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 
@@ -140,7 +140,7 @@ export default function ManualReservationDialog({
   }
 
   const manualReservationPhoneDigits = useMemo(
-    () => normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
+    () => normalizePhoneE164(manualReservationForm.guest_phone),
     [manualReservationForm.guest_phone],
   );
   const {
@@ -148,7 +148,7 @@ export default function ManualReservationDialog({
     isFetching: manualReservationLeadLoading,
   } = useCrmLeadPrefill(companyId, manualReservationPhoneDigits, open);
   const showManualReservationLeadLookup = open
-    && manualReservationPhoneDigits.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS;
+    && isValidPhone(manualReservationForm.guest_phone);
 
   useEffect(() => {
     const appliedPrefill = appliedLeadPrefillRef.current;
@@ -248,7 +248,7 @@ export default function ManualReservationDialog({
         _time: `${manualReservationForm.time}:00`,
         _party_size: parsedPartySize,
         _guest_name: manualReservationForm.guest_name.trim(),
-        _guest_phone: normalizeBrazilPhoneDigits(manualReservationForm.guest_phone),
+        _guest_phone: normalizePhoneE164(manualReservationForm.guest_phone),
         _guest_email: normalizeEmail(manualReservationForm.guest_email) || null,
         _guest_birthdate: manualReservationForm.guest_birthdate || null,
         _occasion: manualReservationForm.occasion.trim() || null,
@@ -341,18 +341,16 @@ export default function ManualReservationDialog({
 
             <div className="space-y-2">
               <Label htmlFor="manual-reservation-phone">WhatsApp *</Label>
-              <Input
+              <PhoneInput
                 id="manual-reservation-phone"
                 name="guest_phone"
-                type="tel"
                 value={manualReservationForm.guest_phone}
-                onChange={(event) =>
-                  setManualReservationForm((current) => ({ ...current, guest_phone: formatBrazilPhone(event.target.value) }))
+                onChange={(value) =>
+                  setManualReservationForm((current) => ({ ...current, guest_phone: value }))
                 }
                 placeholder="(11) 99999-9999"
                 autoComplete="tel"
                 inputMode="tel"
-                maxLength={15}
                 required
               />
               {showManualReservationLeadLookup && (manualReservationLeadLoading || manualReservationLead) && (

@@ -1,3 +1,4 @@
+import { normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -17,6 +18,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
@@ -47,10 +49,8 @@ import {
 } from '@/lib/public-reservation-schedule';
 import { createReservationPayment } from '@/lib/asaas-prepayment-api';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 
@@ -87,7 +87,6 @@ interface ReservationModalProps {
 
 const OCCASIONS = ['Aniversário', 'Jantar Romântico', 'Reunião de Negócios', 'Confraternização', 'Comemoração', 'Outro'];
 
-const MIN_PREFILL_PHONE_DIGITS = 10;
 const PARTY_SIZE_HELP_TEXT = 'Inclua você, os demais adultos e as crianças.';
 
 function PartySizeControl({
@@ -143,7 +142,7 @@ function PartySizeControl({
 }
 
 function normalizePhone(phone: string): string {
-  return normalizeBrazilPhoneDigits(phone);
+  return normalizePhoneE164(phone);
 }
 
 function splitGuestName(name: string) {
@@ -1062,7 +1061,7 @@ export default function ReservationModal({
       return;
     }
 
-    if (whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS) {
+    if (!isValidPhone(form.whatsapp)) {
       setPrefilledPhoneDigits('');
       setPrefillStatus('idle');
       setIdentityFieldsCollapsed(false);
@@ -1082,7 +1081,7 @@ export default function ReservationModal({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [lookupCustomerPrefill, open, step, whatsappDigits]);
+  }, [lookupCustomerPrefill, open, step, whatsappDigits, form.whatsapp]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1128,7 +1127,7 @@ export default function ReservationModal({
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       const normalizedEmail = normalizeEmail(form.email);
-      const normalizedPhone = normalizeBrazilPhoneDigits(form.whatsapp);
+      const normalizedPhone = normalizePhoneE164(form.whatsapp);
       const reservationId = crypto.randomUUID();
       const trackingCode = crypto.randomUUID().replace(/-/g, '');
       const trackingSnapshot: TrackingSnapshot = getTrackingSnapshot
@@ -2128,12 +2127,12 @@ export default function ReservationModal({
               <div>
                 <Label htmlFor="public-reservation-whatsapp" className="text-sm font-medium">WhatsApp</Label>
                 <div className="flex gap-2">
-                  <Input
+                  <PhoneInput
                     id="public-reservation-whatsapp"
                     name="guest_phone"
                     value={form.whatsapp}
-                    onChange={e => setForm(f => ({ ...f, whatsapp: formatBrazilPhone(e.target.value) }))}
-                    placeholder="(11) 99999-9999" required maxLength={15} autoComplete="tel" inputMode="tel"
+                    onChange={value => setForm(f => ({ ...f, whatsapp: value }))}
+                    placeholder="(11) 99999-9999" required autoComplete="tel" inputMode="tel"
                   />
                 </div>
                 {customerFoundForCurrentPhone && !shouldCollapseIdentityFields && (
@@ -2143,8 +2142,8 @@ export default function ReservationModal({
                   </div>
                 )}
                 <p className="hidden text-xs text-muted-foreground mt-1">
-                  {whatsappDigits.length > 0 && whatsappDigits.length < MIN_PREFILL_PHONE_DIGITS
-                    ? 'Digite o WhatsApp completo com DDD para buscar os dados.'
+                  {form.whatsapp.length > 0 && !isValidPhone(form.whatsapp)
+                    ? 'Digite o WhatsApp completo para buscar os dados.'
                     : 'Digite o WhatsApp completo. A busca acontece ao sair do campo.'}
                 </p>
               </div>

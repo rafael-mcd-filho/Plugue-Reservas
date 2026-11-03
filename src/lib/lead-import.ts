@@ -1,8 +1,7 @@
+import { isSupportedCountry, type CountryCode } from 'libphonenumber-js';
+import { formatPhone, normalizePhoneE164 } from '@/lib/phone';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
-  getPhoneValidationMessage,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 
@@ -25,9 +24,43 @@ export interface ParsedLeadImportResult {
   delimiter: ',' | ';';
 }
 
+interface ImportedLeadContact {
+  phone?: string | null;
+  phone_e164?: string | null;
+  phone_normalized?: string | null;
+  email_normalized?: string | null;
+}
+
+/** Imported normalized-only records predate E.164 and contain BR national input. */
+export function normalizeImportedLeadPhone(lead: ImportedLeadContact) {
+  return normalizePhoneE164(lead.phone_e164)
+    || normalizePhoneE164(lead.phone)
+    || normalizePhoneE164(lead.phone_normalized);
+}
+
+/** Match the stored record itself so an import updates its existing ID. */
+export function createImportedLeadMatcher<T extends ImportedLeadContact & { id: string }>(leads: T[]) {
+  const byPhone = new Map<string, T>();
+  const byEmail = new Map<string, T>();
+  for (const lead of leads) {
+    const phoneKey = normalizeImportedLeadPhone(lead).replace(/^\+/, '');
+    if (phoneKey && !byPhone.has(phoneKey)) byPhone.set(phoneKey, lead);
+    if (lead.email_normalized && !byEmail.has(lead.email_normalized)) byEmail.set(lead.email_normalized, lead);
+  }
+
+  return (row: ParsedLeadImportRow) => {
+    const phoneKey = row.phoneNormalized || normalizePhoneE164(row.phone).replace(/^\+/, '');
+    const phoneMatch = phoneKey ? byPhone.get(phoneKey) : undefined;
+    const emailMatch = row.emailNormalized ? byEmail.get(row.emailNormalized) : undefined;
+    const conflict = !!phoneMatch && !!emailMatch && phoneMatch.id !== emailMatch.id;
+    return { lead: conflict ? null : phoneMatch ?? emailMatch ?? null, conflict };
+  };
+}
+
 const HEADER_ALIASES = {
   name: ['nome', 'name', 'lead', 'lead_name', 'cliente', 'contato'],
   phone: ['telefone', 'phone', 'celular', 'whatsapp', 'fone'],
+  country: ['pais', 'country', 'country_code', 'phone_country'],
   email: ['email', 'e_mail', 'mail'],
   birthdate: ['nascimento', 'birthdate', 'data_nascimento', 'aniversario'],
   notes: ['observacoes', 'observacao', 'notes', 'nota', 'notas'],
@@ -143,7 +176,7 @@ function deriveLeadName(name: string, email: string, phone: string) {
     return normalizedEmail.split('@')[0] || normalizedEmail;
   }
 
-  const formattedPhone = formatBrazilPhone(phone);
+  const formattedPhone = formatPhone(phone);
   if (formattedPhone) {
     return formattedPhone;
   }
@@ -186,6 +219,7 @@ export function parseLeadImportCsv(text: string): ParsedLeadImportResult {
   const normalizedHeaders = matrix[0].map(normalizeHeader);
   const nameIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.name);
   const phoneIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.phone);
+  const countryIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.country);
   const emailIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.email);
   const birthdateIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.birthdate);
   const notesIndex = getColumnIndex(normalizedHeaders, HEADER_ALIASES.notes);
@@ -209,6 +243,7 @@ export function parseLeadImportCsv(text: string): ParsedLeadImportResult {
 
     const rawName = nameIndex >= 0 ? row[nameIndex] ?? '' : '';
     const rawPhone = phoneIndex >= 0 ? row[phoneIndex] ?? '' : '';
+    const country = (countryIndex >= 0 ? row[countryIndex] ?? '' : '').trim().toUpperCase() || 'BR';
     const rawEmail = emailIndex >= 0 ? row[emailIndex] ?? '' : '';
     const rawBirthdate = birthdateIndex >= 0 ? row[birthdateIndex] ?? '' : '';
     const rawNotes = notesIndex >= 0 ? row[notesIndex] ?? '' : '';
@@ -221,7 +256,14 @@ export function parseLeadImportCsv(text: string): ParsedLeadImportResult {
       continue;
     }
 
-    const phoneError = rawPhone ? getPhoneValidationMessage(rawPhone, 'um telefone') : null;
+    if (rawPhone && !isSupportedCountry(country)) {
+      errors.push(`Linha ${rowNumber}: país inválido. Use a sigla de duas letras, como BR, US ou PT.`);
+      continue;
+    }
+
+    // The explicit +DDI always takes precedence over the optional national country.
+    const phone = rawPhone ? normalizePhoneE164(rawPhone, country as CountryCode) : '';
+    const phoneError = rawPhone && !phone ? 'Informe um telefone válido para o país selecionado.' : null;
     const emailError = rawEmail ? getEmailValidationMessage(rawEmail, 'um email') : null;
 
     if (phoneError) {
@@ -234,7 +276,7 @@ export function parseLeadImportCsv(text: string): ParsedLeadImportResult {
       continue;
     }
 
-    const phoneNormalized = rawPhone ? normalizeBrazilPhoneDigits(rawPhone) : '';
+    const phoneNormalized = phone.replace(/\D/g, '');
     const emailNormalized = rawEmail ? normalizeEmail(rawEmail) : '';
 
     if (!phoneNormalized && !emailNormalized) {
@@ -251,8 +293,8 @@ export function parseLeadImportCsv(text: string): ParsedLeadImportResult {
     const parsedRow: ParsedLeadImportRow = {
       key: phoneNormalized || emailNormalized,
       rowNumber,
-      name: deriveLeadName(rawName, rawEmail, rawPhone),
-      phone: rawPhone.trim(),
+      name: deriveLeadName(rawName, rawEmail, phone),
+      phone,
       phoneNormalized,
       email: rawEmail.trim(),
       emailNormalized,

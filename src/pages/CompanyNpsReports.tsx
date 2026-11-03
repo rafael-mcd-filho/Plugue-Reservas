@@ -1,3 +1,4 @@
+import { toStoredWhatsAppNumber } from '@/lib/phone';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -84,7 +85,6 @@ import {
   type RatingField,
 } from '@/lib/nps-reviews';
 import { cn } from '@/lib/utils';
-import { normalizeBrazilPhoneDigits, toBrazilWhatsAppNumber } from '@/lib/validation';
 
 const PERIOD_OPTIONS = [
   { value: '30', label: 'Últimos 30 dias' },
@@ -226,9 +226,7 @@ function toneForNps(score: number): NpsTone {
 }
 
 function buildWhatsAppUrl(phone: string | null | undefined) {
-  const digits = normalizeBrazilPhoneDigits(phone);
-  if (digits.length < 10) return null;
-  const number = toBrazilWhatsAppNumber(digits);
+  const number = toStoredWhatsAppNumber(phone);
   return number ? `https://wa.me/${number}` : null;
 }
 

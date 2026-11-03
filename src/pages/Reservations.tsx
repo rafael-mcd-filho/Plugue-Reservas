@@ -1,3 +1,4 @@
+import { formatPhone, normalizePhoneE164 } from '@/lib/phone';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { eachDayOfInterval, format, isToday, parseISO } from 'date-fns';
@@ -22,6 +23,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -62,10 +64,8 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
@@ -109,6 +109,7 @@ interface Reservation {
   attribution_snapshot?: Record<string, unknown> | null;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   date: string;
   time: string;
@@ -396,7 +397,7 @@ export default function Reservations({ view }: ReservationsProps) {
       view === 'overview' ? overviewDateRange.endKey : null,
     ],
     queryFn: async () => {
-      const data = await fetchAllSupabasePages<Reservation>((from, to) => {
+      const data = await fetchAllSupabasePages<Reservation>(async (from, to) => {
         let query = supabase
           .from('reservations' as any)
           .select('*, reservation_payments(id,status,paid_at,billing_type,charged_amount,base_amount)')
@@ -408,14 +409,16 @@ export default function Reservations({ view }: ReservationsProps) {
             .lte('date', overviewDateRange.endKey);
         }
 
-        return query
+        const result = await query
           .order('date', { ascending: true })
           .order('time', { ascending: true })
           .range(from, to);
+        return { data: result.data as unknown as Reservation[] | null, error: result.error };
       });
 
       return data.map((reservation) => ({
         ...reservation,
+        guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
         status: normalizeReservationStatus(reservation.status),
       }));
     },
@@ -431,18 +434,20 @@ export default function Reservations({ view }: ReservationsProps) {
   } = useQuery({
     queryKey: ['reservation-export-source', companyId],
     queryFn: async () => {
-      const data = await fetchAllSupabasePages<Reservation>((from, to) =>
-        supabase
+      const data = await fetchAllSupabasePages<Reservation>(async (from, to) => {
+        const result = await supabase
           .from('reservations' as any)
           .select('*')
           .eq('company_id', companyId)
           .order('date', { ascending: false })
           .order('time', { ascending: false })
-          .range(from, to),
-      );
+          .range(from, to);
+        return { data: result.data as unknown as Reservation[] | null, error: result.error };
+      });
 
       return data.map((reservation) => ({
         ...reservation,
+        guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
         status: normalizeReservationStatus(reservation.status),
       }));
     },
@@ -481,19 +486,19 @@ export default function Reservations({ view }: ReservationsProps) {
       const [reservationResult, companionResult, waitlistResult, waitlistCompanionResult] = await Promise.all([
         supabase
           .from('reservations' as never)
-          .select('guest_phone, created_at')
+          .select('guest_phone, guest_phone_e164, created_at')
           .eq('company_id', companyId!),
         supabase
           .from('reservation_companions' as never)
-          .select('phone, created_at')
+          .select('phone, phone_e164, created_at')
           .eq('company_id', companyId!),
         supabase
           .from('waitlist' as never)
-          .select('guest_phone, created_at')
+          .select('guest_phone, guest_phone_e164, created_at')
           .eq('company_id', companyId!),
         supabase
           .from('waitlist_companions' as never)
-          .select('phone, created_at')
+          .select('phone, phone_e164, created_at')
           .eq('company_id', companyId!),
       ]);
 
@@ -504,7 +509,7 @@ export default function Reservations({ view }: ReservationsProps) {
 
       const map: Record<string, string> = {};
       const mergeEntry = (phone: string | null | undefined, createdAt: string | null | undefined) => {
-        const phoneDigits = normalizePhone(phone);
+        const phoneDigits = normalizePhoneE164(phone);
 
         if (!phoneDigits || !createdAt) {
           return;
@@ -515,20 +520,20 @@ export default function Reservations({ view }: ReservationsProps) {
         }
       };
 
-      ((reservationResult.data ?? []) as Array<{ guest_phone: string | null; created_at: string | null }>).forEach((entry) => {
-        mergeEntry(entry.guest_phone, entry.created_at);
+      ((reservationResult.data ?? []) as Array<{ guest_phone: string | null; guest_phone_e164?: string | null; created_at: string | null }>).forEach((entry) => {
+        mergeEntry(entry.guest_phone_e164 ?? entry.guest_phone, entry.created_at);
       });
 
-      ((companionResult.data ?? []) as Array<{ phone: string | null; created_at: string | null }>).forEach((entry) => {
-        mergeEntry(entry.phone, entry.created_at);
+      ((companionResult.data ?? []) as Array<{ phone: string | null; phone_e164?: string | null; created_at: string | null }>).forEach((entry) => {
+        mergeEntry(entry.phone_e164 ?? entry.phone, entry.created_at);
       });
 
-      ((waitlistResult.data ?? []) as Array<{ guest_phone: string | null; created_at: string | null }>).forEach((entry) => {
-        mergeEntry(entry.guest_phone, entry.created_at);
+      ((waitlistResult.data ?? []) as Array<{ guest_phone: string | null; guest_phone_e164?: string | null; created_at: string | null }>).forEach((entry) => {
+        mergeEntry(entry.guest_phone_e164 ?? entry.guest_phone, entry.created_at);
       });
 
-      ((waitlistCompanionResult.data ?? []) as Array<{ phone: string | null; created_at: string | null }>).forEach((entry) => {
-        mergeEntry(entry.phone, entry.created_at);
+      ((waitlistCompanionResult.data ?? []) as Array<{ phone: string | null; phone_e164?: string | null; created_at: string | null }>).forEach((entry) => {
+        mergeEntry(entry.phone_e164 ?? entry.phone, entry.created_at);
       });
 
       return map;
@@ -560,7 +565,7 @@ export default function Reservations({ view }: ReservationsProps) {
 
       const { data, error } = await supabase
         .from('reservation_companions' as any)
-        .select('id, name, phone, email, birthdate, position')
+        .select('id, name, phone, phone_e164, email, birthdate, position')
         .eq('reservation_id', editingReservation.id)
         .order('position', { ascending: true });
 
@@ -575,7 +580,7 @@ export default function Reservations({ view }: ReservationsProps) {
             createCompanionForm({
               key: companion.id,
               name: companion.name,
-              phone: companion.phone ?? '',
+              phone: companion.phone_e164 ?? companion.phone ?? '',
               email: companion.email ?? '',
               birthdate: companion.birthdate ?? '',
             }),
@@ -676,7 +681,7 @@ export default function Reservations({ view }: ReservationsProps) {
         _time: `${dataEditForm.time}:00`,
         _party_size: parsedPartySize,
         _guest_name: dataEditForm.guest_name.trim(),
-        _guest_phone: normalizeBrazilPhoneDigits(dataEditForm.guest_phone),
+        _guest_phone: normalizePhoneE164(dataEditForm.guest_phone),
         _guest_email: normalizeEmail(dataEditForm.guest_email) || null,
         _occasion: dataEditForm.occasion.trim() || null,
         _notes: dataEditForm.notes.trim() || null,
@@ -791,7 +796,7 @@ export default function Reservations({ view }: ReservationsProps) {
         return false;
       }
 
-      const leadCreatedAt = leadCreatedAtByPhone[normalizePhone(reservation.guest_phone)] ?? null;
+      const leadCreatedAt = leadCreatedAtByPhone[normalizePhoneE164(reservation.guest_phone)] ?? null;
 
       if (!matchesTimestampRange(leadCreatedAt, exportLeadCreatedRange)) {
         return false;
@@ -874,7 +879,7 @@ export default function Reservations({ view }: ReservationsProps) {
     setDataEditReservation(reservation);
     setDataEditForm({
       guest_name: reservation.guest_name,
-      guest_phone: formatBrazilPhone(reservation.guest_phone),
+      guest_phone: normalizePhoneE164(reservation.guest_phone_e164 ?? reservation.guest_phone),
       guest_email: reservation.guest_email ?? '',
       date: reservation.date,
       time: reservation.time.slice(0, 5),
@@ -1003,12 +1008,12 @@ export default function Reservations({ view }: ReservationsProps) {
 
   const exportReservationsSpreadsheet = async () => {
     const rows = exportedReservations.map((reservation) => {
-      const leadCreatedAt = leadCreatedAtByPhone[normalizePhone(reservation.guest_phone)] ?? null;
+      const leadCreatedAt = leadCreatedAtByPhone[normalizePhoneE164(reservation.guest_phone)] ?? null;
 
       return [
         reservation.guest_name,
         RESERVATION_ORIGIN_CONFIG[classifyReservationOrigin(reservation)].label,
-        formatBrazilPhone(reservation.guest_phone),
+        formatPhone(reservation.guest_phone),
         reservation.guest_email ?? '',
         new Date(`${reservation.date}T12:00:00`),
         reservation.time.slice(0, 5),
@@ -1071,7 +1076,7 @@ export default function Reservations({ view }: ReservationsProps) {
     setCompanionForms((current) =>
       current.map((companion) =>
         companion.key === key
-          ? { ...companion, [field]: field === 'phone' ? formatBrazilPhone(value) : value }
+          ? { ...companion, [field]: value }
           : companion,
       ),
     );
@@ -1131,7 +1136,7 @@ export default function Reservations({ view }: ReservationsProps) {
         checkedInCount: parsedCheckedInCount,
         companions: companions.map((companion) => ({
           ...companion,
-          phone: normalizeBrazilPhoneDigits(companion.phone),
+          phone: normalizePhoneE164(companion.phone),
           email: normalizeEmail(companion.email),
         })),
       });
@@ -1898,16 +1903,14 @@ export default function Reservations({ view }: ReservationsProps) {
                               placeholder="Nome do acompanhante"
                               autoComplete="name"
                             />
-                            <Input
+                            <PhoneInput
                               id={`reservation-companion-phone-${companion.key}`}
                               name={`companions[${index}].phone`}
-                              type="tel"
                               value={companion.phone}
-                              onChange={(event) => updateCompanionForm(companion.key, 'phone', event.target.value)}
+                              onChange={(value) => updateCompanionForm(companion.key, 'phone', value)}
                               placeholder="WhatsApp"
                               autoComplete="tel"
                               inputMode="tel"
-                              maxLength={15}
                             />
                             <Input
                               id={`reservation-companion-email-${companion.key}`}
@@ -1980,13 +1983,12 @@ export default function Reservations({ view }: ReservationsProps) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="data-edit-phone">WhatsApp *</Label>
-                  <Input
+                  <PhoneInput
                     id="data-edit-phone"
                     value={dataEditForm.guest_phone}
-                    onChange={(e) => setDataEditForm((f) => ({ ...f, guest_phone: formatBrazilPhone(e.target.value) }))}
+                    onChange={(value) => setDataEditForm((f) => ({ ...f, guest_phone: value }))}
                     autoComplete="tel"
                     inputMode="tel"
-                    maxLength={15}
                   />
                 </div>
                 <div className="space-y-2">

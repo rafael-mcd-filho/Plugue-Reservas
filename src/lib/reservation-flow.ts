@@ -1,4 +1,5 @@
-import { toBrazilWhatsAppNumber } from '@/lib/validation';
+import { toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 
 export const LARGE_PARTY_SIZE = 10;
 export const LARGE_PARTY_WHATSAPP_MESSAGE = 'Oi, vim pelo site e preciso de uma reserva a partir de {threshold} pessoas';
@@ -16,13 +17,13 @@ export function isLargePartyReservation(partySize: number, threshold = LARGE_PAR
 }
 
 export function buildLargePartyWhatsappUrl(companyWhatsapp: string | null | undefined, threshold = LARGE_PARTY_SIZE) {
-  const whatsappNumber = toBrazilWhatsAppNumber(companyWhatsapp);
+  const whatsappNumber = toStoredWhatsAppNumber(companyWhatsapp);
   if (!whatsappNumber) {
     return null;
   }
 
   const message = LARGE_PARTY_WHATSAPP_MESSAGE.replace('{threshold}', String(normalizeLargePartyThreshold(threshold)));
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppMessageUrl(whatsappNumber, message);
 }
 
 export function normalizeReservationLateToleranceMinutes(value: number | null | undefined) {

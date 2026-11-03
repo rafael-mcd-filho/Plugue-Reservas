@@ -20,7 +20,6 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 
 vi.mock('@/hooks/useCrmLeadPrefill', () => ({
-  MIN_CRM_LEAD_PREFILL_PHONE_DIGITS: 10,
   useCrmLeadPrefill: crmLeadPrefillMocks.useCrmLeadPrefill,
 }));
 
@@ -88,6 +87,7 @@ describe('ManualReservationDialog', () => {
       _time: '18:00:00',
       _party_size: 4,
       _table_id: 'table-3',
+      _guest_phone: '+5511999998888',
     }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -113,12 +113,12 @@ describe('ManualReservationDialog', () => {
 
   it('remove dados autopreenchidos quando o telefone muda para outro sem lead', async () => {
     crmLeadPrefillMocks.useCrmLeadPrefill.mockImplementation((_companyId, phoneDigits) => ({
-      data: phoneDigits === '11999998888'
+      data: phoneDigits === '+5511999998888'
         ? {
           id: 'lead-a',
           full_name: 'Ana Souza',
           phone: '11999998888',
-          phone_normalized: '11999998888',
+          phone_normalized: '+5511999998888',
           email: 'ana@example.com',
           birthdate: '1990-05-12',
         }
@@ -147,12 +147,12 @@ describe('ManualReservationDialog', () => {
 
   it('preserva dados editados manualmente ao trocar o telefone autopreenchido', async () => {
     crmLeadPrefillMocks.useCrmLeadPrefill.mockImplementation((_companyId, phoneDigits) => ({
-      data: phoneDigits === '11999998888'
+      data: phoneDigits === '+5511999998888'
         ? {
           id: 'lead-a',
           full_name: 'Ana Souza',
           phone: '11999998888',
-          phone_normalized: '11999998888',
+          phone_normalized: '+5511999998888',
           email: 'ana@example.com',
           birthdate: '1990-05-12',
         }
@@ -176,4 +176,18 @@ describe('ManualReservationDialog', () => {
       expect(screen.getByLabelText('Data de nascimento')).toHaveValue('1991-06-13');
     });
   });
+  it('envia o telefone internacional completo sem acrescentar DDI brasileiro', async () => {
+    const { onCreated } = renderDialog({ date: '2026-09-23', time: '20:00', partySize: 2 });
+
+    fireEvent.change(screen.getByLabelText('Nome *'), { target: { value: 'John Smith' } });
+    fireEvent.change(screen.getByLabelText('WhatsApp *'), { target: { value: '+1 407 264 1934' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Criar reserva' }));
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('create_panel_reservation', expect.objectContaining({
+      _guest_phone: '+14072641934',
+    }));
+    expect(crmLeadPrefillMocks.useCrmLeadPrefill).toHaveBeenCalledWith('company-1', '+14072641934', true);
+  });
+
 });

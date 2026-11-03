@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164 } from '@/lib/phone';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -43,7 +45,6 @@ import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 import { useCompanies } from '@/hooks/useCompanies';
 import { toast } from 'sonner';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPasswordValidationMessage,
   getPhoneValidationMessage,
@@ -143,7 +144,7 @@ export default function Users() {
     setEditForm({
       full_name: user.full_name,
       email: user.email,
-      phone: formatBrazilPhone(user.phone),
+      phone: normalizePhoneE164(user.phone_e164 ?? user.phone),
       company_id: user.company_id || '',
       role: primaryRole,
       support_company_ids: Array.isArray(user.support_company_ids) ? [...user.support_company_ids] : [],
@@ -196,7 +197,7 @@ export default function Users() {
         user_id: editUser.id,
         full_name: editForm.full_name,
         email: normalizedEmail,
-        phone: formatBrazilPhone(editForm.phone),
+        phone: normalizePhoneE164(editForm.phone),
         company_id: editForm.role === 'support' ? null : editForm.company_id || null,
         ...(editForm.role !== 'superadmin' ? { role: editForm.role } : {}),
         ...(editForm.role === 'support' ? { support_company_ids: editForm.support_company_ids } : {}),
@@ -278,7 +279,7 @@ export default function Users() {
         users: [{
           full_name: createForm.full_name,
           email: normalizeEmail(createForm.email),
-          phone: formatBrazilPhone(createForm.phone) || null,
+          phone: normalizePhoneE164(createForm.phone) || null,
           company_id: createForm.role === 'support' ? null : createForm.company_id,
           role: createForm.role,
           ...(createForm.role === 'support' ? { support_company_ids: createForm.support_company_ids } : {}),
@@ -607,15 +608,13 @@ export default function Users() {
             </div>
             <div>
               <Label htmlFor="users-edit-phone">Telefone</Label>
-              <Input
+              <PhoneInput
                 id="users-edit-phone"
                 name="phone"
-                type="tel"
                 value={editForm.phone}
-                onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
+                onChange={(value) => setEditForm({ ...editForm, phone: value })}
                 autoComplete="tel"
                 inputMode="tel"
-                maxLength={15}
               />
             </div>
             <div>
@@ -723,16 +722,13 @@ export default function Users() {
             </div>
             <div>
               <Label htmlFor="users-create-phone">Telefone</Label>
-              <Input
+              <PhoneInput
                 id="users-create-phone"
                 name="phone"
-                type="tel"
                 value={createForm.phone}
-                onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
-                placeholder="(11) 99999-9999"
+                onChange={(value) => setCreateForm({ ...createForm, phone: value })}
                 autoComplete="tel"
                 inputMode="tel"
-                maxLength={15}
               />
             </div>
             <div>

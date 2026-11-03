@@ -49,7 +49,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { type PlugueChatBroadcast, useCancelPlugueChatBroadcast, useCreatePlugueChatBroadcast, usePlugueChatBroadcasts } from '@/hooks/usePlugueChatBroadcasts';
 import type { WhatsAppChannel } from '@/hooks/useWhatsAppChannel';
 import { cn } from '@/lib/utils';
-import { formatBrazilPhone, normalizeBrazilPhoneDigits } from '@/lib/validation';
+import { formatPhone, toStoredWhatsAppNumber, normalizeStoredPhoneE164 } from '@/lib/phone';
+import { getLeadReactivationPhone } from '@/lib/lead-consistency';
 import { getReservationStatusLabel } from '@/lib/reservation-status';
 
 interface Props {
@@ -65,6 +66,7 @@ type RecipientCandidate = {
   reservation_id?: string | null;
   guest_name: string | null;
   guest_phone: string | null;
+  guest_phone_e164?: string | null;
   date: string | null;
   time: string | null;
   party_size: number | null;
@@ -86,6 +88,8 @@ type LeadReactivationCandidateRow = {
   lead_key: string;
   guest_name: string | null;
   guest_phone: string | null;
+  guest_phone_e164?: string | null;
+  phone_normalized: string | null;
   last_visit_date: string;
   last_reservation_id: string | null;
   days_since_visit: number;
@@ -280,7 +284,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
           id: lead.lead_key,
           reservation_id: lead.last_reservation_id,
           guest_name: lead.guest_name || 'Cliente sem nome',
-          guest_phone: lead.guest_phone,
+          guest_phone: getLeadReactivationPhone(lead),
           date: lead.last_visit_date,
           time: null,
           party_size: null,
@@ -293,7 +297,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
 
       let query = supabase
         .from('reservations')
-        .select('id, guest_name, guest_phone, date, time, party_size, status')
+        .select('id, guest_name, guest_phone, guest_phone_e164, date, time, party_size, status')
         .eq('company_id', companyId)
         .not('guest_phone', 'is', null)
         .order('date', { ascending: true })
@@ -314,6 +318,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
       if (error) throw error;
       return ((data ?? []) as RecipientCandidate[]).map((reservation) => ({
         ...reservation,
+        guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
         source: 'reservations' as const,
       }));
     },
@@ -339,7 +344,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
     const seen = new Map<string, RecipientCandidate>();
 
     for (const reservation of reservations) {
-      const digits = normalizeBrazilPhoneDigits(reservation.guest_phone);
+      const digits = toStoredWhatsAppNumber(reservation.guest_phone);
       if (!digits || seen.has(digits)) continue;
       seen.set(digits, reservation);
     }
@@ -426,7 +431,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
           .filter((recipient) => recipient.source !== 'reactivation')
           .map((recipient) => recipient.reservation_id ?? recipient.id),
         recipient_leads: selectedRecipients.map((recipient) => ({
-          phone: recipient.guest_phone,
+          phone: normalizeStoredPhoneE164(recipient.guest_phone),
           guest_name: recipient.guest_name,
           reservation_id: recipient.source === 'reactivation' ? recipient.reservation_id ?? null : recipient.reservation_id ?? recipient.id,
           parameters: buildRecipientParameters(recipient, publicReservationUrl),
@@ -669,7 +674,7 @@ export default function PlugueChatBroadcastsTab({ companyId, activeChannel }: Pr
                             />
                           </TableCell>
                           <TableCell className="font-medium">{recipient.guest_name || 'Cliente sem nome'}</TableCell>
-                          <TableCell className="whitespace-nowrap tabular-nums">{formatBrazilPhone(recipient.guest_phone)}</TableCell>
+                          <TableCell className="whitespace-nowrap tabular-nums">{formatPhone(recipient.guest_phone)}</TableCell>
                           <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
                             {formatReservationDate(recipient)}
                           </TableCell>

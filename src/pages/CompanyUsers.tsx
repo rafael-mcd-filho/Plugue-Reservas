@@ -18,6 +18,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { normalizePhoneE164 } from '@/lib/phone';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
@@ -55,7 +57,6 @@ import {
   type CompanyPanelPermission,
 } from '@/lib/companyPermissions';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPasswordValidationMessage,
   getPhoneValidationMessage,
@@ -303,7 +304,7 @@ export default function CompanyUsers() {
     setEditForm({
       full_name: user.full_name,
       email: user.email,
-      phone: formatBrazilPhone(user.phone),
+      phone: normalizePhoneE164(user.phone_e164 ?? user.phone),
       role: primaryRole,
       operatorPermissions: createOperatorPermissionSelection(
         primaryRole === 'operator' ? user.company_panel_permission_overrides : null,
@@ -346,7 +347,7 @@ export default function CompanyUsers() {
         user_id: editUser.id,
         full_name: editForm.full_name,
         email: normalizedEmail,
-        phone: formatBrazilPhone(editForm.phone),
+        phone: normalizePhoneE164(editForm.phone),
         company_id: companyId,
         role: expectedRole,
         company_panel_permission_overrides: expectedPermissionOverrides,
@@ -492,7 +493,7 @@ export default function CompanyUsers() {
           {
             full_name: createForm.full_name,
             email: normalizeEmail(createForm.email),
-            phone: formatBrazilPhone(createForm.phone) || null,
+            phone: normalizePhoneE164(createForm.phone) || null,
             company_id: companyId,
             role: createForm.role,
             company_panel_permission_overrides: createForm.role === 'operator'
@@ -819,15 +820,13 @@ export default function CompanyUsers() {
               </div>
               <div>
                 <Label htmlFor="edit-user-phone">Telefone</Label>
-                <Input
+                <PhoneInput
                   id="edit-user-phone"
                   name="phone"
-                  type="tel"
-                  value={editForm.phone}
-                  onChange={(event) => setEditForm({ ...editForm, phone: formatBrazilPhone(event.target.value) })}
+                    value={editForm.phone}
+                  onChange={(value) => setEditForm({ ...editForm, phone: value })}
                   autoComplete="tel"
                   inputMode="tel"
-                  maxLength={15}
                 />
               </div>
               <div>
@@ -906,16 +905,13 @@ export default function CompanyUsers() {
               </div>
               <div>
                 <Label htmlFor="create-user-phone">Telefone</Label>
-                <Input
+                <PhoneInput
                   id="create-user-phone"
                   name="phone"
-                  type="tel"
-                  value={createForm.phone}
-                  onChange={(event) => setCreateForm({ ...createForm, phone: formatBrazilPhone(event.target.value) })}
-                  placeholder="(11) 99999-9999"
+                    value={createForm.phone}
+                  onChange={(value) => setCreateForm({ ...createForm, phone: value })}
                   autoComplete="tel"
                   inputMode="tel"
-                  maxLength={15}
                 />
               </div>
               <div>

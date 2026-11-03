@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { isCompanyNavGroupActive } from '@/lib/company-nav-groups';
 import { cn } from '@/lib/utils';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
@@ -125,7 +126,7 @@ const SUPPORT_WHATSAPP_NUMBER = '5584991079919';
 
 function buildSupportWhatsAppUrl(companyName: string) {
   const message = `Olá, gostaria de suporte para minha conta: ${companyName}`;
-  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppMessageUrl(SUPPORT_WHATSAPP_NUMBER, message);
 }
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {

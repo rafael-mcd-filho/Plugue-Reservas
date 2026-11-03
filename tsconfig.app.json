@@ -17,6 +17,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "paths": {
+      "npm:libphonenumber-js@1.13.15/max": [
+        "./node_modules/libphonenumber-js/max"
+      ],
       "@/*": [
         "./src/*"
       ]

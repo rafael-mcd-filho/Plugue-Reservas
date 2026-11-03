@@ -8,6 +8,7 @@ export interface ManagedUser {
   full_name: string;
   email: string;
   phone: string;
+  phone_e164?: string | null;
   company_id: string | null;
   roles: string[];
   support_company_ids?: string[];

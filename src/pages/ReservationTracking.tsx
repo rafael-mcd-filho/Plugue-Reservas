@@ -35,7 +35,9 @@ import {
 import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import { normalizeReservationLateToleranceMinutes } from '@/lib/reservation-flow';
 import { normalizeReservationStatus } from '@/lib/reservation-status';
-import { isValidCompanySlug, toBrazilWhatsAppNumber } from '@/lib/validation';
+import { isValidCompanySlug } from '@/lib/validation';
+import { toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 import type { ReservationStatus } from '@/types/restaurant';
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
@@ -179,7 +181,7 @@ function buildReservationCancellationWhatsappUrl({
   partySize: number;
   trackingCode: string;
 }) {
-  const whatsappNumber = toBrazilWhatsAppNumber(companyWhatsapp);
+  const whatsappNumber = toStoredWhatsAppNumber(companyWhatsapp);
   if (!whatsappNumber) return null;
 
   const formattedDate = format(new Date(`${date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR });
@@ -193,7 +195,7 @@ function buildReservationCancellationWhatsappUrl({
     `Pessoas: ${partySize}\n` +
     `Código: ${trackingCode}`;
 
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppMessageUrl(whatsappNumber, message);
 }
 
 export default function ReservationTracking() {
@@ -655,7 +657,7 @@ function AlterReservationDialog({
   time: string;
   partySize: number;
 }) {
-  const whatsappNumber = toBrazilWhatsAppNumber(companyWhatsapp);
+  const whatsappNumber = toStoredWhatsAppNumber(companyWhatsapp);
   const formattedDate = format(new Date(`${date}T12:00:00`), "dd/MM/yyyy", { locale: ptBR });
   const formattedTime = time.slice(0, 5);
   const message =
@@ -665,7 +667,7 @@ function AlterReservationDialog({
     `Horário: ${formattedTime}\n` +
     `Pessoas: ${partySize}`;
   const whatsappUrl = whatsappNumber
-    ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+    ? buildWhatsAppMessageUrl(whatsappNumber, message)
     : null;
 
   return (

@@ -26,6 +26,8 @@ export interface CrmLeadImportMetadata {
 
 export interface CrmLeadRow {
   customer_key: string;
+  profile_customer_key?: string | null;
+  phone_e164?: string | null;
   phone_normalized: string | null;
   display_phone: string | null;
   latest_name: string;
@@ -405,6 +407,8 @@ export function normalizeCrmLeadRow(value: unknown): CrmLeadRow | null {
 
   return {
     customer_key: customerKey,
+    ...(value.profile_customer_key !== undefined ? { profile_customer_key: toNullableString(value.profile_customer_key) } : {}),
+    ...(value.phone_e164 !== undefined ? { phone_e164: toNullableString(value.phone_e164) } : {}),
     phone_normalized: toNullableString(value.phone_normalized),
     display_phone: toNullableString(value.display_phone),
     latest_name: toStringValue(value.latest_name, 'Lead sem nome') || 'Lead sem nome',

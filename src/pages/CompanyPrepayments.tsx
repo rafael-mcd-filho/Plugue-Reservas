@@ -75,7 +75,8 @@ import {
   type ReservationPaymentRuleDraft,
   type ReservationPrepaymentAmountType,
 } from '@/lib/asaas-prepayment-contracts';
-import { toBrazilWhatsAppNumber } from '@/lib/validation';
+import { toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 
 interface RuleFormState {
   name: string;
@@ -550,8 +551,8 @@ function buildCompanyPublicReservationUrl(companySlug: string) {
 function buildExpiredReservationWhatsappUrl(payment: ReservationPaymentRow, companySlug: string) {
   if (payment.status !== 'expired') return null;
 
-  const whatsappNumber = toBrazilWhatsAppNumber(payment.customer_phone);
-  if (whatsappNumber.length < 12) return null;
+  const whatsappNumber = toStoredWhatsAppNumber(payment.customer_phone);
+  if (!whatsappNumber) return null;
 
   const dateLabel = payment.reservation_date
     ? `o dia ${formatShortDate(payment.reservation_date)}`
@@ -563,7 +564,7 @@ function buildExpiredReservationWhatsappUrl(payment: ReservationPaymentRow, comp
     `Mas não perca tempo: os horários estão se esgotando. ` +
     `Faça uma nova reserva pelo link: ${reservationUrl}`;
 
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppMessageUrl(whatsappNumber, message);
 }
 
 function getAsaasStatusLabel(status: string) {

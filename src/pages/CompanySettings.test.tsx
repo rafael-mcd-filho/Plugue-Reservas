@@ -224,6 +224,20 @@ describe('CompanySettings — salvamento por página', () => {
     expect(db.upserts.map((entry) => entry.table)).toEqual(['company_nps_configs']);
   });
 
+  it('prefere telefones internacionais migrados ao salvar o cadastro', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      phone_e164: '+14072641934',
+      whatsapp_e164: '+351912345678',
+    };
+    await saveSection('empresa');
+
+    expect(companyUpdates()[0].payload).toMatchObject({
+      phone: '+14072641934',
+      whatsapp: '+351912345678',
+    });
+  });
+
   it('grava apenas os campos públicos na página Página Pública', async () => {
     await saveSection('pagina-publica');
 

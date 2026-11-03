@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-
-export const MIN_CRM_LEAD_PREFILL_PHONE_DIGITS = 10;
+import { getPhoneLookupVariants, isValidPhone, normalizePhoneE164 } from '@/lib/phone';
 
 export interface CrmLeadPrefill {
   id: string;
@@ -35,13 +34,13 @@ export function useCrmLeadPrefill(
   phoneDigits: string,
   enabled = true,
 ) {
-  const normalizedPhone = phoneDigits.trim();
-  const phoneVariants = Array.from(new Set([
-    normalizedPhone,
-    normalizedPhone.length === 11 ? `55${normalizedPhone}` : normalizedPhone,
-  ].filter(Boolean)));
-  const buildPhoneFilter = (columns: string[]) =>
-    phoneVariants.flatMap((phone) => columns.map((column) => `${column}.eq.${phone}`)).join(',');
+  const normalizedPhone = normalizePhoneE164(phoneDigits);
+  const phoneIsValid = isValidPhone(phoneDigits);
+  const phoneVariants = getPhoneLookupVariants(phoneDigits);
+  const buildPhoneFilter = (legacyColumns: string[], canonicalColumn: string) => [
+    `${canonicalColumn}.eq.${normalizedPhone}`,
+    ...phoneVariants.flatMap((phone) => legacyColumns.map((column) => `${column}.eq.${JSON.stringify(phone)}`)),
+  ].join(',');
 
   return useQuery({
     queryKey: ['crm-lead-prefill', companyId, normalizedPhone],
@@ -55,37 +54,37 @@ export function useCrmLeadPrefill(
       ] = await Promise.all([
         supabase
           .from('crm_leads' as never)
-          .select('id, full_name, phone, phone_normalized, email, birthdate, imported_at, created_at')
+          .select('id, full_name, phone, phone_normalized, phone_e164, email, birthdate, imported_at, created_at')
           .eq('company_id', companyId!)
-          .or(buildPhoneFilter(['phone_normalized', 'phone']))
+          .or(buildPhoneFilter(['phone_normalized', 'phone'], 'phone_e164'))
           .order('imported_at', { ascending: false })
           .limit(10),
         supabase
           .from('reservations' as never)
-          .select('id, guest_name, guest_phone, guest_email, guest_birthdate, created_at')
+          .select('id, guest_name, guest_phone, guest_phone_e164, guest_email, guest_birthdate, created_at')
           .eq('company_id', companyId!)
-          .or(buildPhoneFilter(['guest_phone']))
+          .or(buildPhoneFilter(['guest_phone'], 'guest_phone_e164'))
           .order('created_at', { ascending: false })
           .limit(10),
         supabase
           .from('reservation_companions' as never)
-          .select('id, name, phone, email, birthdate, created_at')
+          .select('id, name, phone, phone_e164, email, birthdate, created_at')
           .eq('company_id', companyId!)
-          .or(buildPhoneFilter(['phone']))
+          .or(buildPhoneFilter(['phone'], 'phone_e164'))
           .order('created_at', { ascending: false })
           .limit(10),
         supabase
           .from('waitlist' as never)
-          .select('id, guest_name, guest_phone, guest_email, guest_birthdate, created_at')
+          .select('id, guest_name, guest_phone, guest_phone_e164, guest_email, guest_birthdate, created_at')
           .eq('company_id', companyId!)
-          .or(buildPhoneFilter(['guest_phone']))
+          .or(buildPhoneFilter(['guest_phone'], 'guest_phone_e164'))
           .order('created_at', { ascending: false })
           .limit(10),
         supabase
           .from('waitlist_companions' as never)
-          .select('id, name, phone, email, birthdate, created_at')
+          .select('id, name, phone, phone_e164, email, birthdate, created_at')
           .eq('company_id', companyId!)
-          .or(buildPhoneFilter(['phone']))
+          .or(buildPhoneFilter(['phone'], 'phone_e164'))
           .order('created_at', { ascending: false })
           .limit(10),
       ]);
@@ -102,7 +101,7 @@ export function useCrmLeadPrefill(
         ...(((importedResult.data ?? []) as any[]).map((lead) => ({
           id: `crm-${lead.id}`,
           full_name: cleanText(lead.full_name),
-          phone: cleanText(lead.phone) ?? cleanText(lead.phone_normalized),
+          phone: cleanText(lead.phone_e164) ?? cleanText(lead.phone) ?? cleanText(lead.phone_normalized),
           email: cleanText(lead.email),
           birthdate: cleanText(lead.birthdate),
           created_at: cleanText(lead.imported_at) ?? cleanText(lead.created_at),
@@ -110,7 +109,7 @@ export function useCrmLeadPrefill(
         ...(((reservationResult.data ?? []) as any[]).map((reservation) => ({
           id: `reservation-${reservation.id}`,
           full_name: cleanText(reservation.guest_name),
-          phone: cleanText(reservation.guest_phone),
+          phone: cleanText(reservation.guest_phone_e164) ?? cleanText(reservation.guest_phone),
           email: cleanText(reservation.guest_email),
           birthdate: cleanText(reservation.guest_birthdate),
           created_at: cleanText(reservation.created_at),
@@ -118,7 +117,7 @@ export function useCrmLeadPrefill(
         ...(((reservationCompanionResult.data ?? []) as any[]).map((companion) => ({
           id: `reservation-companion-${companion.id}`,
           full_name: cleanText(companion.name),
-          phone: cleanText(companion.phone),
+          phone: cleanText(companion.phone_e164) ?? cleanText(companion.phone),
           email: cleanText(companion.email),
           birthdate: cleanText(companion.birthdate),
           created_at: cleanText(companion.created_at),
@@ -126,7 +125,7 @@ export function useCrmLeadPrefill(
         ...(((waitlistResult.data ?? []) as any[]).map((entry) => ({
           id: `waitlist-${entry.id}`,
           full_name: cleanText(entry.guest_name),
-          phone: cleanText(entry.guest_phone),
+          phone: cleanText(entry.guest_phone_e164) ?? cleanText(entry.guest_phone),
           email: cleanText(entry.guest_email),
           birthdate: cleanText(entry.guest_birthdate),
           created_at: cleanText(entry.created_at),
@@ -134,12 +133,15 @@ export function useCrmLeadPrefill(
         ...(((waitlistCompanionResult.data ?? []) as any[]).map((companion) => ({
           id: `waitlist-companion-${companion.id}`,
           full_name: cleanText(companion.name),
-          phone: cleanText(companion.phone),
+          phone: cleanText(companion.phone_e164) ?? cleanText(companion.phone),
           email: cleanText(companion.email),
           birthdate: cleanText(companion.birthdate),
           created_at: cleanText(companion.created_at),
         })) satisfies PrefillCandidate[]),
       ]
+        // Legacy digits alone can also resemble another country's full number.
+        // Reconcile every match with its canonical identity before using data.
+        .filter((candidate) => normalizePhoneE164(candidate.phone) === normalizedPhone)
         .filter((candidate) => candidate.full_name || candidate.phone || candidate.email || candidate.birthdate)
         .sort((left, right) => (right.created_at ?? '').localeCompare(left.created_at ?? ''));
 
@@ -159,7 +161,7 @@ export function useCrmLeadPrefill(
     enabled: Boolean(
       enabled
         && companyId
-        && normalizedPhone.length >= MIN_CRM_LEAD_PREFILL_PHONE_DIGITS,
+        && phoneIsValid,
     ),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,

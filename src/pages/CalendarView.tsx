@@ -1,3 +1,4 @@
+import { normalizePhoneE164 } from '@/lib/phone';
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -47,6 +48,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -61,10 +63,8 @@ import {
 } from '@/lib/reservation-calendar-metrics';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
 import {
-  formatBrazilPhone,
   getEmailValidationMessage,
   getPhoneValidationMessage,
-  normalizeBrazilPhoneDigits,
   normalizeEmail,
 } from '@/lib/validation';
 import { cn } from '@/lib/utils';
@@ -96,6 +96,7 @@ interface Reservation {
   source: string | null;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   date: string;
   time: string;
@@ -256,6 +257,7 @@ function ReservationPaymentPaidBadge({ payment }: { payment: ReservationPaymentI
 function normalizeReservationRecord(reservation: Reservation) {
   return {
     ...reservation,
+    guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
     status: normalizeReservationStatus(reservation.status),
     duration_minutes: reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES,
   };
@@ -264,7 +266,7 @@ function normalizeReservationRecord(reservation: Reservation) {
 function createReservationEditForm(reservation: Reservation): ReservationEditForm {
   return {
     guest_name: reservation.guest_name,
-    guest_phone: formatBrazilPhone(reservation.guest_phone),
+    guest_phone: normalizePhoneE164(reservation.guest_phone_e164 ?? reservation.guest_phone),
     guest_email: reservation.guest_email ?? '',
     date: reservation.date,
     time: reservation.time.slice(0, 5),
@@ -411,6 +413,7 @@ interface AdminCapacityReservationJson {
   company_id: string;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   date: string;
   time: string;
@@ -483,7 +486,7 @@ function mapCapacityReservation(raw: AdminCapacityReservationJson): Reservation 
     table_id: raw.table_id ?? null,
     source: raw.source ?? null,
     guest_name: raw.guest_name,
-    guest_phone: raw.guest_phone,
+    guest_phone: raw.guest_phone_e164 ?? raw.guest_phone,
     guest_email: raw.guest_email ?? null,
     date: raw.date,
     time: raw.time,
@@ -701,7 +704,7 @@ export default function CalendarView() {
         _time: `${editForm.time}:00`,
         _party_size: parsedPartySize,
         _guest_name: editForm.guest_name.trim(),
-        _guest_phone: normalizeBrazilPhoneDigits(editForm.guest_phone),
+        _guest_phone: normalizePhoneE164(editForm.guest_phone),
         _guest_email: normalizeEmail(editForm.guest_email) || null,
         _occasion: editForm.occasion.trim() || null,
         _notes: editForm.notes.trim() || null,
@@ -1742,15 +1745,14 @@ export default function CalendarView() {
 
                 <div className="space-y-2">
                   <Label htmlFor="calendar-edit-phone">WhatsApp</Label>
-                  <Input
+                  <PhoneInput
                     id="calendar-edit-phone"
                     value={editForm.guest_phone}
-                    onChange={(event) =>
-                      setEditForm((current) => current ? { ...current, guest_phone: formatBrazilPhone(event.target.value) } : current)
+                    onChange={(value) =>
+                      setEditForm((current) => current ? { ...current, guest_phone: value } : current)
                     }
                     autoComplete="tel"
                     inputMode="tel"
-                    maxLength={15}
                   />
                 </div>
 

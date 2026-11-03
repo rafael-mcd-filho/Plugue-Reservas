@@ -31,7 +31,8 @@ import {
   type ReservationPrepaymentBillingType,
 } from '@/lib/asaas-prepayment-contracts';
 import { useFaviconOverride } from '@/lib/publicCompanyIcons';
-import { toBrazilWhatsAppNumber } from '@/lib/validation';
+import { toStoredWhatsAppNumber } from '@/lib/phone';
+import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 
 function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -49,7 +50,7 @@ function WhatsAppIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 function buildHelpWhatsappUrl(payment: PublicReservationPaymentSummary) {
-  const whatsappNumber = toBrazilWhatsAppNumber(payment.company.whatsapp);
+  const whatsappNumber = toStoredWhatsAppNumber(payment.company.whatsapp);
   if (!whatsappNumber) return null;
 
   const formattedDate = formatReservationDate(payment.reservation.date, payment.reservation.time);
@@ -58,7 +59,7 @@ function buildHelpWhatsappUrl(payment: PublicReservationPaymentSummary) {
     `Data: ${formattedDate}\n` +
     `Cliente: ${payment.reservation.guest_name}`;
 
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppMessageUrl(whatsappNumber, message);
 }
 
 function buildNewReservationUrl(payment: PublicReservationPaymentSummary) {

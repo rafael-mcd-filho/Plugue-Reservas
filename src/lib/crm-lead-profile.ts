@@ -5,7 +5,7 @@ import type {
   CrmLeadSource,
 } from '@/hooks/useCrmLeads';
 import { getReservationStatusLabel, normalizeReservationStatus } from '@/lib/reservation-status';
-import { formatBrazilPhone } from '@/lib/validation';
+import { formatPhone, normalizePhoneE164 } from '@/lib/phone';
 
 export interface CrmLeadProfile {
   key: string;
@@ -28,10 +28,10 @@ export interface CrmLeadProfile {
 }
 
 export function mapCrmLeadRowToProfile(row: CrmLeadRow): CrmLeadProfile {
-  const phone = row.display_phone ?? row.phone_normalized ?? '';
+  const phone = row.phone_e164 ?? row.display_phone ?? (row.phone_normalized ? `+${row.phone_normalized}` : '');
 
   return {
-    key: row.customer_key,
+    key: row.profile_customer_key ?? row.customer_key,
     guest_phone: phone,
     guest_name: row.latest_name || 'Lead sem nome',
     guest_email: row.latest_email,
@@ -52,7 +52,7 @@ export function mapCrmLeadRowToProfile(row: CrmLeadRow): CrmLeadProfile {
 }
 
 export function formatLeadPhoneText(phone: string | null | undefined) {
-  return formatBrazilPhone(phone) || 'Não informado';
+  return formatPhone(phone) || 'Não informado';
 }
 
 export function formatLeadState(
@@ -60,6 +60,10 @@ export function formatLeadState(
 ) {
   if (!lead.guest_phone) {
     return 'Sem telefone informado';
+  }
+
+  if (!normalizePhoneE164(lead.guest_phone).startsWith('+55')) {
+    return 'Telefone internacional';
   }
 
   return lead.stateCode && lead.stateName

@@ -1,5 +1,6 @@
 import { normalizeReservationStatus } from '@/lib/reservation-status';
 import { normalizePhoneDigits } from '@/lib/validation';
+import { normalizeStoredPhoneE164, toStoredWhatsAppNumber } from '@/lib/phone';
 
 export type CanonicalLeadVisitOrigin = 'reservation' | 'waitlist';
 
@@ -28,12 +29,18 @@ interface ReservationWaitlistLink {
  * recurrence report to identify a customer.
  */
 export function normalizeLeadPhoneKey(value: string | null | undefined) {
-  const digits = normalizePhoneDigits(value);
+  return toStoredWhatsAppNumber(value);
+}
 
-  if (!digits) return '';
-  if (!digits.startsWith('55') && digits.length <= 11) return `55${digits}`;
-
-  return digits;
+/** Reactivation RPC phone_normalized is already a full international identity. */
+export function getLeadReactivationPhone(candidate: {
+  guest_phone?: string | null;
+  guest_phone_e164?: string | null;
+  phone_normalized?: string | null;
+}) {
+  return normalizeStoredPhoneE164(candidate.guest_phone_e164)
+    || (candidate.phone_normalized ? normalizeStoredPhoneE164(`+${normalizePhoneDigits(candidate.phone_normalized)}`) : '')
+    || normalizeStoredPhoneE164(candidate.guest_phone);
 }
 
 export function matchesLeadPhoneDigits(
@@ -46,7 +53,7 @@ export function matchesLeadPhoneDigits(
   if (!normalizedSearch) return false;
 
   return normalizedPhone.includes(normalizedSearch)
-    || normalizeLeadPhoneKey(normalizedPhone).includes(normalizedSearch);
+    || normalizeLeadPhoneKey(phone).includes(normalizedSearch);
 }
 
 export function countsAsCanonicalLeadPresence({

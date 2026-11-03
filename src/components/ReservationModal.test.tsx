@@ -211,6 +211,20 @@ describe('ReservationModal', () => {
     expect(screen.queryByText(/Confirmando disponibilidade/)).not.toBeInTheDocument();
   });
 
+  it('busca o cadastro com o telefone internacional completo e o escopo da unidade', async () => {
+    renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
+    await selectTomorrow();
+    await confirmPartySize();
+    fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+
+    fireEvent.change(await screen.findByLabelText('WhatsApp'), { target: { value: '+1 407 264 1934' } });
+
+    await waitFor(() => expect(supabaseMocks.rpc).toHaveBeenCalledWith(
+      'get_public_reservation_prefill',
+      expect.objectContaining({ _company_id: 'company-1', _guest_phone: '+14072641934' }),
+    ));
+  });
+
   it('mantem o fluxo antigo como fallback durante o deploy da nova RPC', async () => {
     const defaultRpcImplementation = supabaseMocks.rpc.getMockImplementation()!;
     supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => {
@@ -404,7 +418,7 @@ describe('ReservationModal', () => {
 
     expect(await screen.findByRole('link', { name: /Falar no WhatsApp/ })).toHaveAttribute(
       'href',
-      expect.stringContaining('https://wa.me/5511999999999'),
+      expect.stringContaining('https://api.whatsapp.com/send?phone=5511999999999&text='),
     );
     expect(screen.queryByRole('button', { name: /Ver horários para/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^18:00/ })).not.toBeInTheDocument();
