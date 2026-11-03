@@ -618,6 +618,8 @@ function buildOperatorCapacitySlots({
     let health: SlotHealth = 'available';
     if (isBlocked) {
       health = 'blocked';
+    } else if (unavailableReason === 'manually_full') {
+      health = 'full';
     } else if (!capacityLimit || capacityLimit <= 0) {
       health = 'configuration';
     } else if (occupiedGuests > capacityLimit) {
@@ -708,6 +710,7 @@ function getUnavailableReasonLabel(reason: string | null) {
 
   const labels: Record<string, string> = {
     blocked: 'Bloqueado',
+    manually_full: 'Lotado no site',
     party_size_limit: 'Limite por reserva',
     reservation_limit: 'Limite de reservas',
     guest_limit: 'Limite de pessoas',

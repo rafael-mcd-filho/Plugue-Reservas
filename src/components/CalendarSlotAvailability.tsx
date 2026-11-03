@@ -29,6 +29,7 @@ export interface CalendarSlotAvailabilitySlot {
   remainingCapacity: number | null;
   reservationLimit: number | null;
   arrivalReservationCount: number;
+  unavailableReason?: string | null;
 }
 
 interface CalendarSlotAvailabilityProps {

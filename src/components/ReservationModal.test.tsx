@@ -211,6 +211,74 @@ describe('ReservationModal', () => {
     expect(screen.queryByText(/Confirmando disponibilidade/)).not.toBeInTheDocument();
   });
 
+  it.each([
+    { mode: 'tables', legacy: false },
+    { mode: 'capacity', legacy: false },
+    { mode: 'tables', legacy: true },
+    { mode: 'capacity', legacy: true },
+  ])('mantem o horario marcado como lotado visivel e bloqueado em $mode (fallback: $legacy)', async ({ mode, legacy }) => {
+    const defaultRpcImplementation = supabaseMocks.rpc.getMockImplementation()!;
+    supabaseMocks.rpc.mockImplementation(async (name: string, ...args: unknown[]) => {
+      if (legacy && name === 'get_public_reservation_booking_context') {
+        return {
+          data: null,
+          error: { code: 'PGRST202', message: 'Could not find get_public_reservation_booking_context' },
+        };
+      }
+
+      const result = await defaultRpcImplementation(name, ...args);
+      if (name === 'get_public_reservation_schedule') {
+        return {
+          ...result,
+          data: [{ ...result.data[0], slots: ['18:00', '19:00'], availability_mode: mode }],
+        };
+      }
+      if (name !== 'get_public_reservation_booking_context' && name !== 'get_public_reservation_availability') {
+        return result;
+      }
+
+      const openSlot = {
+        ...result.data[0],
+        schedule_slots: ['18:00', '19:00'],
+        schedule_availability_mode: mode,
+        availability_mode: mode,
+        total_tables: 10,
+        occupied_tables: 0,
+        available_tables: 10,
+        max_reservations_per_slot: null,
+        max_guests_per_slot: mode === 'capacity' ? 10 : null,
+      };
+      return {
+        ...result,
+        data: [
+          {
+            ...openSlot,
+            time_slot: '18:00:00',
+            available: false,
+            unavailable_reason: 'manually_full',
+            available_tables: 0,
+            recommended_table_id: null,
+          },
+          { ...openSlot, time_slot: '19:00:00' },
+        ],
+      };
+    });
+
+    renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
+    await selectTomorrow();
+    await confirmPartySize();
+
+    const fullSlot = await screen.findByRole('button', { name: /^18:00.*Lotado/ });
+    expect(fullSlot).toBeDisabled();
+    fireEvent.click(fullSlot);
+    expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+
+    const openSlot = screen.getByRole('button', { name: /^19:00/ });
+    expect(openSlot).toBeEnabled();
+    fireEvent.click(openSlot);
+    expect(await screen.findByLabelText('WhatsApp')).toBeInTheDocument();
+  });
+
   it('busca o cadastro com o telefone internacional completo e o escopo da unidade', async () => {
     renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
     await selectTomorrow();

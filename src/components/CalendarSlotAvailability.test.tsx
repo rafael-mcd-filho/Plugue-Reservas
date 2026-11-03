@@ -139,6 +139,40 @@ describe('CalendarSlotAvailability', () => {
     expect(onReserve).not.toHaveBeenCalled();
   });
 
+  it('permite reserva manual nas mesas quando o horário foi marcado como lotado apenas no site', async () => {
+    const { onReserve, onOpenReservation } = renderAvailability({
+      ...tablesSlot,
+      unavailableReason: 'manually_full',
+    }, { showOccupied: true });
+
+    const freeTable = await screen.findByRole('button', { name: /Mesa 3/ });
+    expect(freeTable).toBeEnabled();
+    fireEvent.click(freeTable);
+    expect(onReserve).toHaveBeenCalledWith(expect.objectContaining({
+      time: '18:00',
+      table: expect.objectContaining({ id: 'table-3' }),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Mesa 7/ }));
+    expect(onOpenReservation).toHaveBeenCalledWith('reservation-1');
+  });
+
+  it('permite reserva manual por capacidade quando o horário foi marcado como lotado apenas no site', () => {
+    const { onReserve } = renderAvailability({
+      ...tablesSlot,
+      availabilityMode: 'capacity',
+      unavailableReason: 'manually_full',
+    });
+
+    for (const partySize of [2, 4, 6, 8]) {
+      const button = screen.getByRole('button', { name: `${partySize} pessoas` });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(onReserve).toHaveBeenLastCalledWith(expect.objectContaining({ partySize }));
+    }
+    expect(onReserve).toHaveBeenCalledTimes(4);
+  });
+
   it('no modo por capacidade oferece tamanhos de grupo até as vagas restantes', () => {
     const { onReserve } = renderAvailability({
       ...tablesSlot,

@@ -99,6 +99,13 @@ describe('getSlotBookingState', () => {
     expect(getSlotBookingState(base)).toEqual({ blockedReason: null, maxPartySize: 50 });
   });
 
+  it.each(['tables', 'capacity'] as const)('permite reserva manual no modo %s quando o horário está lotado apenas no site', (availabilityMode) => {
+    expect(getSlotBookingState({ ...base, availabilityMode, unavailableReason: 'manually_full' })).toEqual({
+      blockedReason: null,
+      maxPartySize: 50,
+    });
+  });
+
   it('limita o maior grupo às vagas restantes', () => {
     expect(getSlotBookingState({ ...base, remainingCapacity: 5 })).toEqual({ blockedReason: null, maxPartySize: 5 });
   });

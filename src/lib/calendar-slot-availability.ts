@@ -67,6 +67,8 @@ export interface SlotBookingInput {
   remainingCapacity: number | null;
   reservationLimit: number | null;
   arrivalReservationCount: number;
+  /** A lotação manual da página pública não impede reservas pelo painel. */
+  unavailableReason?: string | null;
 }
 
 export interface SlotBookingState {

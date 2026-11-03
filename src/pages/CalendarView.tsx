@@ -318,6 +318,7 @@ function getUnavailableReasonLabel(reason: string | null) {
 
   const labels: Record<string, string> = {
     blocked: 'Bloqueado',
+    manually_full: 'Lotado no site',
     party_size_limit: 'Limite por reserva',
     reservation_limit: 'Limite de reservas',
     guest_limit: 'Limite de pessoas',

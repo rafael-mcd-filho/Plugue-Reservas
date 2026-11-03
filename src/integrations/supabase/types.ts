@@ -566,6 +566,7 @@ export type Database = {
           created_at: string
           duration_minutes: number | null
           id: string
+          is_full: boolean
           max_guests_per_slot: number | null
           max_party_size_per_reservation: number | null
           max_reservations_per_slot: number | null
@@ -578,6 +579,7 @@ export type Database = {
           created_at?: string
           duration_minutes?: number | null
           id?: string
+          is_full?: boolean
           max_guests_per_slot?: number | null
           max_party_size_per_reservation?: number | null
           max_reservations_per_slot?: number | null
@@ -590,6 +592,7 @@ export type Database = {
           created_at?: string
           duration_minutes?: number | null
           id?: string
+          is_full?: boolean
           max_guests_per_slot?: number | null
           max_party_size_per_reservation?: number | null
           max_reservations_per_slot?: number | null

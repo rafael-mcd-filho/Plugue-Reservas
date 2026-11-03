@@ -11,6 +11,7 @@ export interface ReservationScheduleRuleSlot {
   rule_id: string;
   block_id: string;
   time: string;
+  is_full?: boolean;
   sort_order: number;
   duration_minutes: number | null;
   max_party_size_per_reservation: number | null;
@@ -77,6 +78,7 @@ export interface ReservationScheduleRuleDraft {
     availability_mode: ReservationAvailabilityMode;
     slots: Array<{
       time: string;
+      is_full: boolean;
       duration_minutes: number | null;
       max_party_size_per_reservation: number | null;
       max_reservations_per_slot: number | null;
@@ -97,6 +99,13 @@ function invalidateScheduleRuleQueries(queryClient: ReturnType<typeof useQueryCl
   queryClient.invalidateQueries({ queryKey: ['reservation-schedule-rule-usage', companyId] });
   queryClient.invalidateQueries({ queryKey: ['public-reservation-schedule', companyId] });
   queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-preview', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-calendar-preview', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['public-reservation-booking-context', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['calendar-public-schedule', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['calendar-day-capacity', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['calendar-slot-tables', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['operator-public-schedule', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['operator-public-availability', companyId] });
 }
 
 export function useReservationScheduleRules(companyId: string | null | undefined) {

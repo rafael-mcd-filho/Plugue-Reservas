@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
 import type {
   ArchivedReservationScheduleRule,
   ReservationScheduleRule,
+  ReservationAvailabilityMode,
 } from '@/hooks/useReservationScheduleRules';
 
 const hooks = vi.hoisted(() => ({
@@ -13,13 +14,14 @@ const hooks = vi.hoisted(() => ({
   archive: vi.fn(),
   restore: vi.fn(),
   remove: vi.fn(),
+  save: vi.fn(),
 }));
 
 vi.mock('@/hooks/useReservationScheduleRules', () => ({
   useReservationScheduleRules: () => ({ data: hooks.rules, isLoading: false }),
   useArchivedReservationScheduleRules: () => ({ data: hooks.archivedRules, isLoading: false }),
   useReservationScheduleRuleUsage: () => ({ data: hooks.usage }),
-  useSaveReservationScheduleRule: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  useSaveReservationScheduleRule: () => ({ mutate: vi.fn(), mutateAsync: hooks.save, isPending: false }),
   useArchiveReservationScheduleRule: () => ({ mutate: hooks.archive, isPending: false, variables: undefined }),
   useRestoreReservationScheduleRule: () => ({ mutate: hooks.restore, isPending: false, variables: undefined }),
   useDeleteReservationScheduleRule: () => ({ mutate: hooks.remove, isPending: false, variables: undefined }),
@@ -51,6 +53,39 @@ function makeRule(overrides: Partial<ReservationScheduleRule> = {}): Reservation
   };
 }
 
+function makeSlottedRule(availabilityMode: ReservationAvailabilityMode = 'tables'): ReservationScheduleRule {
+  return makeRule({
+    name: 'Noite',
+    scope: 'weekly',
+    start_date: null,
+    end_date: null,
+    reservation_schedule_rule_blocks: [{
+      id: 'block-1',
+      rule_id: 'rule-1',
+      name: 'Padrão',
+      weekdays: [1],
+      availability_mode: availabilityMode,
+      default_duration_minutes: null,
+      sort_order: 10,
+      created_at: '2026-05-01T12:00:00.000Z',
+      updated_at: '2026-05-01T12:00:00.000Z',
+      reservation_schedule_rule_slots: ['18:00', '19:00'].map((time, index) => ({
+        id: `slot-${index}`,
+        rule_id: 'rule-1',
+        block_id: 'block-1',
+        time,
+        ...(index === 0 ? { is_full: true } : {}),
+        sort_order: index * 10,
+        duration_minutes: null,
+        max_party_size_per_reservation: null,
+        max_reservations_per_slot: null,
+        max_guests_per_slot: availabilityMode === 'capacity' ? 20 : null,
+        created_at: '2026-05-01T12:00:00.000Z',
+      })),
+    }],
+  });
+}
+
 describe('ReservationScheduleRulesCard', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -61,10 +96,127 @@ describe('ReservationScheduleRulesCard', () => {
     hooks.archive.mockReset();
     hooks.restore.mockReset();
     hooks.remove.mockReset();
+    hooks.save.mockReset();
+    hooks.save.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(['tables', 'capacity'] as const)('carrega e salva o estado lotado por horario em %s', async (mode) => {
+    hooks.rules = [makeSlottedRule(mode)];
+
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    expect(screen.getByText('18:00 · Lotado')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+
+    const firstSlot = screen.getByRole('checkbox', { name: 'Marcar horário 18:00 como lotado' });
+    const secondSlot = screen.getByRole('checkbox', { name: 'Marcar horário 19:00 como lotado' });
+    expect(screen.getByText('Marque como lotado para manter o horário visível e impedir novas reservas pela página pública.')).toBeInTheDocument();
+    expect(firstSlot).toBeChecked();
+    expect(secondSlot).not.toBeChecked();
+
+    fireEvent.click(firstSlot);
+    fireEvent.click(secondSlot);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'rule-1',
+      blocks: [expect.objectContaining({
+        availability_mode: mode,
+        slots: [
+          expect.objectContaining({ time: '18:00', is_full: false }),
+          expect.objectContaining({ time: '19:00', is_full: true }),
+        ],
+      })],
+    }));
+  });
+
+  it('preserva os horarios lotados ao duplicar a regra', async () => {
+    hooks.rules = [makeSlottedRule()];
+
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    await act(async () => fireEvent.click(screen.getByLabelText('Duplicar Noite')));
+
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({
+      id: undefined,
+      name: 'Cópia de Noite',
+      enabled: false,
+      blocks: [expect.objectContaining({
+        slots: [
+          expect.objectContaining({ time: '18:00', is_full: true }),
+          expect.objectContaining({ time: '19:00', is_full: false }),
+        ],
+      })],
+    }));
+  });
+
+  it('mantem a capacidade obrigatoria para reservas manuais mesmo em horario marcado como lotado', async () => {
+    const rule = makeSlottedRule('capacity');
+    rule.reservation_schedule_rule_blocks[0].reservation_schedule_rule_slots[0].max_guests_per_slot = null;
+    hooks.rules = [rule];
+
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 18:00 como lotado' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' }));
+
+    expect(screen.getByText('Informe a capacidade total de todos os horários em "Padrão".')).toBeInTheDocument();
+    expect(hooks.save).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Capacidade total às 18:00'), { target: { value: '20' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({
+      blocks: [expect.objectContaining({
+        slots: [
+          expect.objectContaining({ time: '18:00', is_full: true, max_guests_per_slot: 20 }),
+          expect.objectContaining({ time: '19:00', is_full: false, max_guests_per_slot: 20 }),
+        ],
+      })],
+    }));
+  });
+
+  it('preserva o estado lotado em regras antigas sem blocos e em blocos duplicados', () => {
+    const rule = makeSlottedRule();
+    hooks.rules = [{
+      ...rule,
+      reservation_schedule_rule_blocks: [],
+      reservation_schedule_rule_slots: rule.reservation_schedule_rule_blocks[0].reservation_schedule_rule_slots,
+    }];
+
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    expect(screen.getByText('18:00 · Lotado')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 18:00 como lotado' })).toBeChecked();
+    fireEvent.click(screen.getByLabelText('Duplicar bloco Padrão'));
+
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 18:00 como lotado' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 19:00 como lotado' })).not.toBeChecked();
+  });
+
+  it('replica o estado lotado e inicia novos horarios disponiveis', async () => {
+    hooks.rules = [makeSlottedRule()];
+
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+    fireEvent.click(screen.getByLabelText('Replicar configurações do horário 18:00 para os demais'));
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 19:00 como lotado' })).toBeChecked();
+
+    fireEvent.change(screen.getByLabelText('Horário para adicionar no bloco Padrão'), { target: { value: '20:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Adicionar$/ }));
+    expect(screen.getByRole('checkbox', { name: 'Marcar horário 20:00 como lotado' })).not.toBeChecked();
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({
+      blocks: [expect.objectContaining({
+        slots: [
+          expect.objectContaining({ time: '18:00', is_full: true }),
+          expect.objectContaining({ time: '19:00', is_full: true }),
+          expect.objectContaining({ time: '20:00', is_full: false }),
+        ],
+      })],
+    }));
   });
 
   it('agrupa excecoes que ja passaram e nao as anuncia como ativas', () => {
@@ -109,6 +261,7 @@ describe('ReservationScheduleRulesCard', () => {
         name: 'Padrão',
         weekdays: null,
         availability_mode: 'tables',
+        default_duration_minutes: null,
         sort_order: 10,
         created_at: '2026-05-01T12:00:00.000Z',
         updated_at: '2026-05-01T12:00:00.000Z',

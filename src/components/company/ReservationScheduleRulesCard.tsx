@@ -124,6 +124,7 @@ const DURATION_OPTIONS = [
 
 interface SlotFormValue {
   time: string;
+  is_full: boolean;
   duration_minutes: string;
   max_party_size_per_reservation: string;
   max_reservations_per_slot: string;
@@ -170,6 +171,7 @@ function getStoredWeekdaysForForm(scope: ReservationScheduleRuleScope, weekdays:
 function createSlotFormValue(time: string): SlotFormValue {
   return {
     time,
+    is_full: false,
     duration_minutes: '',
     max_party_size_per_reservation: '',
     max_reservations_per_slot: '',
@@ -392,6 +394,7 @@ function RuleDateRangeField({
 function getSlotsFromBlock(block: ReservationScheduleRuleBlock, rule: ReservationScheduleRule) {
   return sortReservationScheduleSlotSettings((block.reservation_schedule_rule_slots ?? []).map((slot) => ({
     time: slot.time,
+    is_full: slot.is_full === true,
     duration_minutes: formatOptionalNumberInput(slot.duration_minutes),
     max_party_size_per_reservation: formatOptionalNumberInput(
       slot.max_party_size_per_reservation ?? rule.max_party_size_per_reservation,
@@ -418,6 +421,7 @@ function getInitialBlocks(rule: ReservationScheduleRule): BlockFormValue[] {
     availability_mode: rule.availability_mode ?? 'tables',
     slots: sortReservationScheduleSlotSettings((rule.reservation_schedule_rule_slots ?? []).map((slot) => ({
       time: slot.time,
+      is_full: slot.is_full === true,
       duration_minutes: formatOptionalNumberInput(slot.duration_minutes),
       max_party_size_per_reservation: formatOptionalNumberInput(
         slot.max_party_size_per_reservation ?? rule.max_party_size_per_reservation,
@@ -503,6 +507,7 @@ function buildRuleDraft(form: FormState, companyId: string, ruleId?: string) {
     company_id: companyId,
     name: form.name,
     scope: form.scope,
+    weekdays: null,
     start_date: form.scope === 'weekly' ? null : form.start_date,
     end_date: form.scope === 'date_range' ? form.end_date : form.start_date,
     enabled: form.enabled,
@@ -514,6 +519,7 @@ function buildRuleDraft(form: FormState, companyId: string, ruleId?: string) {
       availability_mode: block.availability_mode,
       slots: block.slots.map((slot) => ({
         time: slot.time,
+        is_full: slot.is_full,
         duration_minutes: toNumberOrNull(slot.duration_minutes),
         max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),
         max_reservations_per_slot: toNumberOrNull(slot.max_reservations_per_slot),
@@ -707,7 +713,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
     }));
   }
 
-  function updateSlot(block: BlockFormValue, time: string, key: keyof Omit<SlotFormValue, 'time'>, value: string) {
+  function updateSlot<K extends keyof Omit<SlotFormValue, 'time'>>(block: BlockFormValue, time: string, key: K, value: SlotFormValue[K]) {
     updateBlock(block.clientId, (current) => ({
       ...current,
       slots: current.slots.map((slot) => (
@@ -724,6 +730,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
           ? slot
           : {
               ...slot,
+              is_full: source.is_full,
               duration_minutes: source.duration_minutes,
               max_party_size_per_reservation: source.max_party_size_per_reservation,
               max_reservations_per_slot: source.max_reservations_per_slot,
@@ -1037,6 +1044,9 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                     <p className="mt-1 text-xs text-muted-foreground">
                       Capacidade total limita pessoas simultâneas; em mesas, deixe vazio para usar o limite global. A duração é definida por horário.
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Marque como lotado para manter o horário visível e impedir novas reservas pela página pública.
+                    </p>
                   </div>
 
                   <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -1065,18 +1075,22 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      <div className="hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4.75rem]">
+                      <div className="hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4rem_3rem]">
                         <span>Horário</span>
                         <span>Duração</span>
                         <span>Máx. pessoas por reserva</span>
                         <span>Máx. reservas</span>
                         <span>Capacidade total</span>
+                        <span className="text-center">Lotado</span>
                         <span>Ações</span>
                       </div>
                       {activeBlock.slots.map((slot) => (
                         <div
                           key={slot.time}
-                          className="grid gap-2 border-t border-[rgba(0,0,0,0.08)] py-2 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4.75rem] sm:items-center"
+                          className={cn(
+                            'grid gap-2 border-t border-[rgba(0,0,0,0.08)] py-2 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4rem_3rem] sm:items-center',
+                            slot.is_full && 'bg-muted/20',
+                          )}
                         >
                           <div className="flex items-center justify-between gap-1 rounded-md bg-primary/5 px-2 py-1.5 text-sm font-semibold text-primary">
                             <span>{slot.time}</span>
@@ -1134,6 +1148,14 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                             className={FIELD_CLASS}
                             aria-label={`Capacidade total às ${slot.time}`}
                           />
+                          <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:justify-center">
+                            <Checkbox
+                              checked={slot.is_full}
+                              onCheckedChange={(checked) => updateSlot(activeBlock, slot.time, 'is_full', checked === true)}
+                              aria-label={`Marcar horário ${slot.time} como lotado`}
+                            />
+                            <span className="sm:sr-only">Lotado</span>
+                          </label>
                           <button
                             type="button"
                             onClick={() => updateBlock(activeBlock.clientId, (current) => ({
@@ -1238,9 +1260,15 @@ function SlotChips({ slots, showDetails, className }: {
       {slots.map((slot) => (
         <span
           key={slot.id}
-          className="rounded-md border border-primary/15 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-primary"
+          className={cn(
+            'rounded-md border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+            slot.is_full
+              ? 'border-muted-foreground/20 bg-muted/40 text-muted-foreground'
+              : 'border-primary/15 bg-white text-primary',
+          )}
         >
           {slot.time.slice(0, 5)}
+          {slot.is_full && ' · Lotado'}
           {showDetails && formatScheduleSlotLimitsDetail(slot)}
         </span>
       ))}
@@ -1270,6 +1298,7 @@ function RuleCard({ rule, onEdit, onDuplicate, onArchive }: {
           rule_id: rule.id,
           block_id: block.clientId,
           time: slot.time,
+          is_full: slot.is_full,
           sort_order: (slotIndex + 1) * 10,
           duration_minutes: toNumberOrNull(slot.duration_minutes),
           max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),
