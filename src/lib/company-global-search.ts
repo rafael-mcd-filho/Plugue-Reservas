@@ -1,10 +1,11 @@
 import { supabase } from '@/integrations/supabase/client';
-import { fetchCrmLeadsPage, type CrmLeadRow } from '@/hooks/useCrmLeads';
+import { normalizeCrmLeadRow, type CrmLeadRow } from '@/hooks/useCrmLeads';
 import { getPhoneLookupVariants } from '@/lib/phone';
 
 export const COMPANY_GLOBAL_SEARCH_MIN_LENGTH = 3;
 export const COMPANY_GLOBAL_SEARCH_MAX_LENGTH = 200;
-export const COMPANY_GLOBAL_SEARCH_PAGE_SIZE = 8;
+// 10 por grupo: reservas mais recentes primeiro e clientes na ordem do CRM; "Carregar mais" busca os próximos 10.
+export const COMPANY_GLOBAL_SEARCH_PAGE_SIZE = 10;
 
 export interface GlobalSearchReservation {
   id: string;
@@ -154,25 +155,63 @@ async function searchReservations(
   };
 }
 
+/**
+ * Confere a página de search_crm_leads: cada cliente no formato da tela Clientes,
+ * sem repetir, e "has_more" só com a página cheia.
+ */
+export function normalizeCustomerSearchPage(value: unknown, page: number): CompanyGlobalSearchSection<CrmLeadRow> {
+  const source = Array.isArray(value) && value.length === 1 ? value[0] : value;
+  const record = typeof source === 'object' && source !== null && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : null;
+  const meta = record && typeof record.meta === 'object' && record.meta !== null && !Array.isArray(record.meta)
+    ? record.meta as Record<string, unknown>
+    : null;
+  if (!record || !Array.isArray(record.leads) || !meta) {
+    throw new Error('A busca de clientes retornou dados inválidos.');
+  }
+
+  const leads: CrmLeadRow[] = [];
+  const keys = new Set<string>();
+  for (const raw of record.leads) {
+    const lead = normalizeCrmLeadRow(raw);
+    if (!lead || keys.has(lead.customer_key)) {
+      throw new Error('A busca de clientes retornou registros inválidos ou repetidos.');
+    }
+    keys.add(lead.customer_key);
+    leads.push(lead);
+  }
+
+  const hasMore = meta.has_more;
+  if (meta.page !== page
+    || meta.page_size !== COMPANY_GLOBAL_SEARCH_PAGE_SIZE
+    || typeof hasMore !== 'boolean'
+    || leads.length > COMPANY_GLOBAL_SEARCH_PAGE_SIZE
+    || (hasMore && leads.length !== COMPANY_GLOBAL_SEARCH_PAGE_SIZE)) {
+    throw new Error('A busca de clientes retornou uma página inconsistente.');
+  }
+
+  return { items: leads, page, hasMore, error: null };
+}
+
+// search_crm_leads filtra antes de montar as fichas: get_crm_leads_page monta a
+// ficha de todos os clientes da unidade e passa do tempo limite em unidades grandes.
 async function searchCustomers(
   companyId: string,
   query: string,
   page: number,
   signal?: AbortSignal,
 ): Promise<CompanyGlobalSearchSection<CrmLeadRow>> {
-  const result = await fetchCrmLeadsPage({
-    companyId,
-    search: query,
-    page,
-    pageSize: COMPANY_GLOBAL_SEARCH_PAGE_SIZE,
-  }, signal);
+  const request = (supabase as any).rpc('search_crm_leads', {
+    _company_id: companyId,
+    _search: query,
+    _page: page,
+    _page_size: COMPANY_GLOBAL_SEARCH_PAGE_SIZE,
+  });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
   throwIfAborted(signal);
-  return {
-    items: result.leads,
-    page,
-    hasMore: page * COMPANY_GLOBAL_SEARCH_PAGE_SIZE < result.meta.filtered_leads,
-    error: null,
-  };
+  if (error) throw error;
+  return normalizeCustomerSearchPage(data, page);
 }
 
 async function resolveSection<T>(
@@ -188,6 +227,37 @@ async function resolveSection<T>(
     if (error instanceof Error && error.name === 'AbortError') throw error;
     return { ...emptySection<T>(page), error: errorMessage };
   }
+}
+
+export interface CompanyGlobalSearchSectionParams {
+  companyId: string;
+  query: string;
+  page: number;
+  signal?: AbortSignal;
+}
+
+function readySectionQuery(params: CompanyGlobalSearchSectionParams) {
+  const query = normalizeCompanyGlobalSearchQuery(params.query);
+  const page = pageNumber(params.page);
+  throwIfAborted(params.signal);
+  if (query.length > COMPANY_GLOBAL_SEARCH_MAX_LENGTH) {
+    throw new Error(`Use até ${COMPANY_GLOBAL_SEARCH_MAX_LENGTH} caracteres na busca.`);
+  }
+  return { query, page, companyId: params.companyId.trim(), ready: isCompanyGlobalSearchQueryReady(query) && !!params.companyId.trim() };
+}
+
+/** Só as reservas: a tela mostra este grupo assim que ele chega, sem esperar os clientes. */
+export async function searchCompanyReservations(params: CompanyGlobalSearchSectionParams) {
+  const { query, page, companyId, ready } = readySectionQuery(params);
+  if (!ready) return emptySection<GlobalSearchReservation>(page);
+  return searchReservations(companyId, query, page, params.signal);
+}
+
+/** Só os clientes: mesma ficha e mesma ordem da tela Clientes, filtrando antes de montar as fichas. */
+export async function searchCompanyCustomers(params: CompanyGlobalSearchSectionParams) {
+  const { query, page, companyId, ready } = readySectionQuery(params);
+  if (!ready) return emptySection<CrmLeadRow>(page);
+  return searchCustomers(companyId, query, page, params.signal);
 }
 
 export async function searchCompanyGlobal(params: CompanyGlobalSearchParams): Promise<CompanyGlobalSearchResult> {

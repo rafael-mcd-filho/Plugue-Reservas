@@ -3,16 +3,16 @@ import {
   buildCompanyReservationSearchFilter,
   isCompanyGlobalSearchQueryReady,
   normalizeCompanyGlobalSearchQuery,
+  normalizeCustomerSearchPage,
   searchCompanyGlobal,
 } from './company-global-search';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
-  fetchCustomers: vi.fn(),
+  rpc: vi.fn(),
 }));
 
-vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: mocks.from } }));
-vi.mock('@/hooks/useCrmLeads', () => ({ fetchCrmLeadsPage: mocks.fetchCustomers }));
+vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: mocks.from, rpc: mocks.rpc } }));
 
 function reservation(id = 'reservation-1', companyId = 'unit-a') {
   return {
@@ -22,11 +22,41 @@ function reservation(id = 'reservation-1', companyId = 'unit-a') {
   };
 }
 
-function customers(total = 0) {
+function lead(index = 0) {
   return {
-    leads: total ? [{ customer_key: 'phone:5562999659667', latest_name: 'Ana Silva' }] : [],
-    meta: { filtered_leads: total },
+    customer_key: `phone:55629996596${String(index).padStart(2, '0')}`,
+    phone_normalized: `55629996596${String(index).padStart(2, '0')}`,
+    display_phone: '(62) 99965-9667',
+    latest_name: 'Ana Silva',
+    latest_email: null,
+    latest_birthdate: null,
+    first_seen_at: '2026-10-01T12:00:00+00:00',
+    last_visit_date: null,
+    last_visit_time: null,
+    state_code: 'GO',
+    state_name: 'Goiás',
+    source: 'reservation_holder',
+    canonical_visit_count: 1,
+    is_import_only: false,
+    crm_lead: null,
   };
+}
+
+function customers(count = 0, { page = 1, hasMore = false } = {}) {
+  return {
+    leads: Array.from({ length: count }, (_, index) => lead(index)),
+    meta: { page, page_size: 10, has_more: hasMore, generated_at: '2026-11-23T12:00:00+00:00' },
+  };
+}
+
+function customerRequest(response: { data: unknown; error: unknown }) {
+  const request = {
+    abortSignal: vi.fn(),
+    then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise.resolve(response).then(resolve, reject),
+  };
+  request.abortSignal.mockReturnValue(request);
+  mocks.rpc.mockReturnValue(request);
+  return request;
 }
 
 function reservationRequest(response: { data: unknown; error: unknown } | Promise<{ data: unknown; error: unknown }>) {
@@ -46,7 +76,7 @@ const params = {
 beforeEach(() => {
   vi.clearAllMocks();
   reservationRequest({ data: [], error: null });
-  mocks.fetchCustomers.mockResolvedValue(customers());
+  customerRequest({ data: customers(), error: null });
 });
 
 describe('company global search', () => {
@@ -60,7 +90,7 @@ describe('company global search', () => {
     expect(result.query).toBe('An');
     expect(result.reservations.items).toEqual([]);
     expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.fetchCustomers).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('never queries without a current unit or authorized section', async () => {
@@ -68,21 +98,22 @@ describe('company global search', () => {
     await searchCompanyGlobal({ ...params, companyId: ' ' });
     await searchCompanyGlobal({ ...params, canViewCustomers: false, canViewReservations: false });
     expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.fetchCustomers).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('gates reservations and customer RPCs independently', async () => {
     await searchCompanyGlobal({ ...params, canViewReservations: false });
     expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.fetchCustomers).toHaveBeenCalledOnce();
-    mocks.fetchCustomers.mockClear();
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+    mocks.rpc.mockClear();
     await searchCompanyGlobal({ ...params, canViewCustomers: false });
     expect(mocks.from).toHaveBeenCalledOnce();
-    expect(mocks.fetchCustomers).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('scopes the server query, selects only search fields and preserves deterministic pagination', async () => {
     const request = reservationRequest({ data: [reservation()], error: null });
+    const customerCall = customerRequest({ data: customers(0, { page: 3 }), error: null });
     const controller = new AbortController();
     const result = await searchCompanyGlobal({ ...params, query: '  Ana   Silva ', reservationsPage: 2, customersPage: 3, signal: controller.signal });
     expect(request.eq).toHaveBeenCalledWith('company_id', 'unit-a');
@@ -90,32 +121,46 @@ describe('company global search', () => {
     expect(request.order.mock.calls).toEqual([
       ['date', { ascending: false }], ['time', { ascending: false }], ['id', { ascending: true }],
     ]);
-    expect(request.range).toHaveBeenCalledWith(8, 16);
+    expect(request.range).toHaveBeenCalledWith(10, 20);
     expect(request.abortSignal).toHaveBeenCalledWith(controller.signal);
-    expect(mocks.fetchCustomers).toHaveBeenCalledWith({ companyId: 'unit-a', search: 'Ana Silva', page: 3, pageSize: 8 }, controller.signal);
+    expect(mocks.rpc).toHaveBeenCalledWith('search_crm_leads', { _company_id: 'unit-a', _search: 'Ana Silva', _page: 3, _page_size: 10 });
+    expect(customerCall.abortSignal).toHaveBeenCalledWith(controller.signal);
+    expect(result.customers).toMatchObject({ page: 3, hasMore: false, error: null });
     expect(result.reservations).toMatchObject({ page: 2, hasMore: false, error: null });
     expect(result.query).toBe('Ana Silva');
   });
 
-  it('uses the ninth reservation only as an explicit next-page indicator', async () => {
-    reservationRequest({ data: Array.from({ length: 9 }, (_, index) => reservation(`r-${index}`)), error: null });
-    mocks.fetchCustomers.mockResolvedValue(customers(9));
+  it('uses the eleventh reservation only as an explicit next-page indicator', async () => {
+    reservationRequest({ data: Array.from({ length: 11 }, (_, index) => reservation(`r-${index}`)), error: null });
+    customerRequest({ data: customers(10, { hasMore: true }), error: null });
     const result = await searchCompanyGlobal(params);
-    expect(result.reservations.items).toHaveLength(8);
+    expect(result.reservations.items).toHaveLength(10);
     expect(result.reservations.hasMore).toBe(true);
     expect(result.customers.hasMore).toBe(true);
   });
 
-  it('uses the CRM count for the requested customer page', async () => {
-    mocks.fetchCustomers.mockResolvedValue(customers(16));
+  it('uses the server next-page flag for the requested customer page', async () => {
+    customerRequest({ data: customers(10, { page: 2 }), error: null });
     const result = await searchCompanyGlobal({ ...params, customersPage: 2 });
+    expect(result.customers.items).toHaveLength(10);
     expect(result.customers.hasMore).toBe(false);
     expect(result.customers.page).toBe(2);
   });
 
+  it('rejects inconsistent customer pages instead of showing partial data', async () => {
+    expect(() => normalizeCustomerSearchPage(customers(1, { page: 2 }), 1)).toThrow('inconsistente');
+    expect(() => normalizeCustomerSearchPage(customers(3, { hasMore: true }), 1)).toThrow('inconsistente');
+    expect(() => normalizeCustomerSearchPage({ leads: [lead(), lead()], meta: customers().meta }, 1)).toThrow('repetidos');
+    expect(() => normalizeCustomerSearchPage({ leads: [{ latest_name: 'Sem chave' }], meta: customers().meta }, 1)).toThrow('repetidos');
+    expect(() => normalizeCustomerSearchPage({ leads: [] }, 1)).toThrow('inválidos');
+    expect(normalizeCustomerSearchPage([customers(2)], 1).items.map((item) => item.customer_key)).toEqual(['phone:5562999659600', 'phone:5562999659601']);
+    customerRequest({ data: customers(11), error: null });
+    expect((await searchCompanyGlobal(params)).customers.error).toBe('Não foi possível buscar clientes. Tente novamente.');
+  });
+
   it('keeps section errors explicit while allowing the other section to work', async () => {
     reservationRequest({ data: null, error: { message: 'database internal details' } });
-    mocks.fetchCustomers.mockResolvedValue(customers(1));
+    customerRequest({ data: customers(1), error: null });
     const result = await searchCompanyGlobal(params);
     expect(result.reservations).toMatchObject({ items: [], hasMore: false, error: 'Não foi possível buscar reservas. Tente novamente.' });
     expect(result.customers.items).toHaveLength(1);
@@ -124,7 +169,7 @@ describe('company global search', () => {
 
   it('does not turn a customer RPC failure into an empty successful section', async () => {
     reservationRequest({ data: [reservation()], error: null });
-    mocks.fetchCustomers.mockRejectedValue(new Error('failed'));
+    customerRequest({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } });
     const result = await searchCompanyGlobal(params);
     expect(result.customers.error).toBe('Não foi possível buscar clientes. Tente novamente.');
     expect(result.reservations.items).toHaveLength(1);
@@ -164,7 +209,7 @@ describe('company global search', () => {
     await expect(searchCompanyGlobal({ ...params, reservationsPage: 0 })).rejects.toThrow('página');
     await expect(searchCompanyGlobal({ ...params, customersPage: 1.5 })).rejects.toThrow('página');
     expect(mocks.from).not.toHaveBeenCalled();
-    expect(mocks.fetchCustomers).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });
 
