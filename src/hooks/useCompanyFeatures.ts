@@ -207,10 +207,10 @@ export function useSaveCompanyFeatures() {
       queryClient.invalidateQueries({ queryKey: ['companies-feature-matrix'] });
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       queryClient.invalidateQueries({ queryKey: ['company-public'] });
-      toast.success('Features atualizadas.');
+      toast.success('Recursos atualizados.');
     },
     onError: (error: any) => {
-      toast.error(`Erro ao salvar features: ${error.message}`);
+      toast.error(`Erro ao salvar os recursos: ${error.message}`);
     },
   });
 }

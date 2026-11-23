@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { DateRange } from 'react-day-picker';
 import {
@@ -6,6 +6,7 @@ import {
   getRecommendedReportGranularity,
   getReportRangeError,
   getReportTodayInTimeZone,
+  getReportTimestampRange,
   isReportGranularity,
   isReportPeriodPreset,
   parseReportDateOnly,
@@ -49,7 +50,33 @@ export function useReportFilters({
   const customFromParam = searchParams.get('from');
   const customToParam = searchParams.get('to');
 
-  const reportToday = useMemo(() => getReportTodayInTimeZone(timeZone), [timeZone]);
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const now = new Date();
+      setClock(now);
+      let delay = 60_000;
+      try {
+        const today = getReportTodayInTimeZone(timeZone, now);
+        const bounds = getReportTimestampRange(toReportDateOnlyRange({ from: today, to: today }), timeZone);
+        delay = Math.min(delay, Math.max(25, new Date(bounds.toExclusive).getTime() - now.getTime() + 5));
+      } catch {
+        // Invalid cached time zones remain subject to the report API's checks.
+      }
+      timeout = setTimeout(tick, delay);
+    };
+    const resume = () => { clearTimeout(timeout); tick(); };
+    tick();
+    window.addEventListener('focus', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener('focus', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [timeZone]);
+  const reportToday = useMemo(() => getReportTodayInTimeZone(timeZone, clock), [timeZone, clock]);
   const range = useMemo(
     () => resolveReportDateRange(
       periodPreset,

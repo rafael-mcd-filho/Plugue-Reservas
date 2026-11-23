@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -35,6 +35,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ReportFilterBar from '@/components/reports/ReportFilterBar';
 import { ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
+import ReportAnalysisPanel from '@/components/reports/ReportAnalysisPanel';
+import ReportRecordsSheet from '@/components/reports/ReportRecordsSheet';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useOccupancyCapacityReport } from '@/hooks/useOccupancyCapacityReport';
 import { useOccupancyWaitlistSeries } from '@/hooks/useOccupancyWaitlistSeries';
@@ -42,15 +44,19 @@ import { useReportFilters } from '@/hooks/useReportFilters';
 import {
   OCCUPANCY_CAPACITY_MODES,
   OCCUPANCY_CAPACITY_OUTCOMES,
+  buildOccupancyCapacityRpcParams,
+  normalizeOccupancyCapacityReport,
   type OccupancyCapacityHeatmapCell,
   type OccupancyCapacityModeFilter,
   type OccupancyCapacityOutcomeFilter,
+  type OccupancyCapacityReservationRow,
 } from '@/lib/occupancy-capacity-report';
+import { buildCapacityInsights, buildCapacityMatrix, capacityMatrixValue, filterOccupancyRecords, getCapacityPeriodWindow, retainCapacityMatrixContributors, type CapacityMatrixMetric, type OccupancyRecordSelection } from '@/lib/occupancy-capacity-analysis';
+import { loadCompleteReportRecords, type ReportReservationRecord } from '@/lib/report-records';
+import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 
-// The report no longer lists individual reservations, but the RPC contract still
-// requires a valid page window. Asking for the smallest page keeps the response
-// free of personal data we do not render.
+// Detail pages are loaded only when a person opens an indicator or matrix cell.
 const DETAILS_PAGE_SIZE = 1;
 const numberFormatter = new Intl.NumberFormat('pt-BR');
 const decimalFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -62,7 +68,7 @@ const UI = {
   errorTitle: 'N\u00e3o foi poss\u00edvel carregar o relat\u00f3rio',
   errorDescription: 'Confira sua conex\u00e3o e tente novamente. Os dados n\u00e3o foram tratados como zero.',
   retry: 'Tentar novamente',
-  capacity: 'Capacidade publicada',
+  capacity: 'Lugares ofertados',
   pressure: 'Press\u00e3o da demanda',
   occupancy: 'Check-ins sobre capacidade',
   checkins: 'pessoas com check-in',
@@ -74,8 +80,8 @@ const UI = {
   unavailableTitle: 'Capacidade n\u00e3o encontrada',
   evolutionTitle: 'Capacidade, demanda e presen\u00e7a',
   evolutionDescription: 'A demanda inclui reservas que terminaram em no-show; cancelamentos e pagamentos expirados ficam fora.',
-  heatmapTitle: 'Mapa de press\u00e3o por dia e hor\u00e1rio',
-  heatmapDescription: 'Cada c\u00e9lula agrega os mesmos hor\u00e1rios no per\u00edodo. A cor representa pessoas reservadas sobre capacidade publicada.',
+  heatmapTitle: 'Dias e horários',
+  heatmapDescription: 'Compare os mesmos horários entre os dias da semana. Os valores somam todas as ocorrências do período selecionado.',
   waitlistHourTitle: 'Fila por hor\u00e1rio de entrada',
   waitlistHourDescription: 'Entradas, pessoas sentadas e sa\u00eddas sem sentar. O tempo m\u00e9dio considera somente quem foi sentado.',
   noShowHourTitle: 'No-show por hor\u00e1rio da reserva',
@@ -97,11 +103,11 @@ const UI = {
   comparisonUnavailable: 'Comparação indisponível',
   comparisonLimited: 'Comparação limitada',
   waitlistScope: 'Fila de espera: os indicadores e o gráfico consideram todo o período selecionado e não mudam com “Modo de capacidade”.',
-  capacityHelp: 'Soma dos lugares publicados em cada horário do período. Como acumula todos os dias analisados, fica bem acima da lotação da casa em um único dia.',
+  capacityHelp: 'Soma dos lugares publicados em cada horário e dia do período. É oferta acumulada, não a lotação física simultânea da casa. A lista de reservas desse recorte não representa lugares individualizados.',
   pressureHelp: 'Pessoas reservadas divididas pela capacidade publicada, ambas somadas no mesmo período. Inclui reservas que terminaram em no-show.',
   occupancyHelp: 'Pessoas que fizeram check-in divididas pela capacidade publicada do período.',
   waitlistHelp: 'Entradas registradas na fila de espera no período. O tempo médio de espera considera apenas quem chegou a ser sentado.',
-  noShowHelp: 'Reservas válidas no horário que não compareceram. Canceladas e pagamentos expirados ficam fora da contagem.',
+  noShowHelp: 'Reservas que não compareceram e possuem horário publicado correspondente. Canceladas e pagamentos expirados ficam fora. A análise por horário também permite investigar no-shows sem base publicada.',
 };
 
 const MODE_LABELS: Record<OccupancyCapacityModeFilter, string> = {
@@ -186,51 +192,61 @@ function ReportLoading() {
   );
 }
 
-function Heatmap({ cells }: { cells: OccupancyCapacityHeatmapCell[] }) {
-  const weekdays = useMemo(() => {
-    const grouped = new Map<number, { label: string; cells: OccupancyCapacityHeatmapCell[] }>();
-    for (const cell of cells) {
-      const group = grouped.get(cell.weekday) ?? { label: cell.weekday_label, cells: [] };
-      group.cells.push(cell);
-      grouped.set(cell.weekday, group);
-    }
-    return [...grouped.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([weekday, value]) => ({ weekday, ...value, cells: value.cells.sort((a, b) => a.time_slot.localeCompare(b.time_slot)) }));
-  }, [cells]);
-
-  if (weekdays.length === 0) {
+function Heatmap({ cells, metric, onMetricChange, onSelect }: {
+  cells: OccupancyCapacityHeatmapCell[];
+  metric: CapacityMatrixMetric;
+  onMetricChange: (metric: CapacityMatrixMetric) => void;
+  onSelect: (cell: OccupancyCapacityHeatmapCell) => void;
+}) {
+  const matrix = useMemo(() => buildCapacityMatrix(cells), [cells]);
+  const labels = { offer: 'Oferta', reserved: 'Reservas', checked_in: 'Check-ins' };
+  if (matrix.rows.length === 0) {
     return <p className="py-14 text-center text-sm text-muted-foreground">{UI.noBase}</p>;
   }
-
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-      {weekdays.map((day) => (
-        <section key={day.weekday} className="rounded-xl bg-muted/40 p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{day.label}</h3>
-          <div className="space-y-1.5">
-            {day.cells.map((cell) => (
-              <div
-                key={`${cell.weekday}-${cell.time_slot}`}
-                className={cn('grid grid-cols-[48px_1fr_auto] items-center gap-2 rounded-lg border px-2.5 py-2', heatTone(cell.capacity_pressure_rate))}
-                title={`${formatInteger(cell.reserved_people)} reservadas / ${formatInteger(cell.published_capacity)} de capacidade`}
-              >
-                <span className="text-xs font-semibold tabular-nums">{formatTime(cell.time_slot)}</span>
-                <span className="text-[11px] tabular-nums opacity-80">
-                  {formatInteger(cell.reserved_people)} / {formatInteger(cell.published_capacity)}
-                </span>
-                <strong className="text-xs tabular-nums">{formatPercent(cell.capacity_pressure_rate)}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1" aria-label="Métrica da matriz">
+          {(Object.keys(labels) as CapacityMatrixMetric[]).map(value => (
+            <button key={value} type="button" aria-pressed={metric === value} onClick={() => onMetricChange(value)} className={cn('min-h-9 rounded-md px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', metric === value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+              {labels[value]}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">{metric === 'offer' ? 'Lugares ofertados · soma dos horários publicados' : 'Pessoas / lugares ofertados · taxa sobre a oferta'}</p>
+      </div>
+      <div className="max-w-full overflow-x-auto rounded-xl border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} role="region" aria-label="Matriz por dia da semana e horário; role para ver todos os horários">
+        <table className="w-full border-separate border-spacing-0 text-left" aria-label={`Matriz de ${labels[metric].toLowerCase()} por dia e horário`}>
+          <caption className="sr-only">Dias da semana nas linhas e horários nas colunas. Selecione uma célula para abrir as reservas desse recorte.</caption>
+          <thead><tr><th scope="col" className="sticky left-0 z-10 min-w-20 border-b border-border bg-card px-3 py-3 text-xs font-semibold">Dia</th>{matrix.times.map(time => <th key={time} scope="col" className="min-w-36 border-b border-border bg-muted/20 px-2 py-3 text-center text-xs font-semibold">{formatTime(time)}</th>)}</tr></thead>
+          <tbody>{matrix.rows.map(day => <tr key={day.weekday}>
+            <th scope="row" className="sticky left-0 z-10 border-b border-border bg-card px-3 py-3 text-xs font-semibold">{day.label}</th>
+            {day.cells.map((cell, index) => {
+              if (!cell) return <td key={matrix.times[index]} className="border-b border-border p-1 text-center text-muted-foreground"><span aria-label="Sem horário publicado">—</span></td>;
+              const value = capacityMatrixValue(cell, metric);
+              return <td key={cell.time_slot} className="border-b border-border p-1">
+                <button type="button" onClick={() => onSelect(cell)} aria-label={`Abrir reservas de ${day.label} às ${formatTime(cell.time_slot)}: ${formatInteger(value.people)} ${metric === 'offer' ? 'lugares ofertados' : 'pessoas'}`} className={cn('flex min-h-24 w-full flex-col items-center justify-center rounded-lg border px-3 py-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', metric === 'offer' ? 'border-primary/15 bg-primary/5 text-foreground' : heatTone(value.rate ?? 0))}>
+                  <strong className="text-base tabular-nums">{formatInteger(value.people)}{metric !== 'offer' && <span className="text-xs font-normal opacity-80"> / {formatInteger(cell.published_capacity)}</span>}</strong>
+                  {metric !== 'offer' && <span className="text-xs font-medium tabular-nums">{value.rate === null ? 'Sem base para taxa' : formatPercent(value.rate)}</span>}
+                  <span className="mt-1 text-[11px] opacity-80">{cell.slot_count} {cell.slot_count === 1 ? 'horário' : 'horários'} · {cell.data_quality === 'snapshot' ? 'Histórico' : cell.data_quality === 'mixed' ? 'Base mista' : 'Estimativa'}</span>
+                </button>
+              </td>;
+            })}
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground" aria-label="Legenda da matriz">
+        {metric !== 'offer' && <><span>0%: sem pessoas registradas</span><span>Até 79%: abaixo da oferta</span><span>80–99%: próximo da oferta</span><span>100% ou mais: oferta atingida</span></>}
+        <span>—: sem horário publicado</span>
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">A matriz é uma análise acumulada do período. Não representa a ocupação física simultânea do salão. A oferta informa o contexto; ao selecionar uma célula, são abertas as reservas correspondentes, conforme a métrica.</p>
     </div>
   );
 }
 
 export default function OccupancyCapacityReport() {
-  const { companyId, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
+  const { companyId, slug, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
+  const [selectedRecords, setSelectedRecords] = useState<OccupancyRecordSelection | null>(null);
   const filters = useReportFilters({
     defaultPreset: 'last_30_days',
     defaultComparisonEnabled: true,
@@ -251,6 +267,9 @@ export default function OccupancyCapacityReport() {
   const waitlistView: WaitlistEvolutionView = isWaitlistEvolutionView(searchParams.get('waitlist_view'))
     ? searchParams.get('waitlist_view') as WaitlistEvolutionView
     : 'period';
+  const matrixMetric: CapacityMatrixMetric = ['offer', 'reserved', 'checked_in'].includes(searchParams.get('capacity_matrix') ?? '')
+    ? searchParams.get('capacity_matrix') as CapacityMatrixMetric : 'reserved';
+  useEffect(() => { setSelectedRecords(null); }, [companyId, filters.dateOnlyRange.from, filters.dateOnlyRange.to, availabilityMode]);
 
   const reportQuery = useOccupancyCapacityReport({
     companyId,
@@ -395,6 +414,54 @@ export default function OccupancyCapacityReport() {
     if (filters.comparisonDateOnlyRange) void comparisonQuery.refetch();
   };
 
+  const loadSelectedRecords = async (signal?: AbortSignal): Promise<ReportReservationRecord[]> => {
+    if (!companyId || !selectedRecords) return [];
+    const rows = await loadCompleteReportRecords<OccupancyCapacityReservationRow>({
+      signal,
+      fetchPage: async page => {
+        const params = buildOccupancyCapacityRpcParams({
+          companyId,
+          periodStart: filters.dateOnlyRange.from,
+          periodEnd: filters.dateOnlyRange.to,
+          granularity: filters.granularity,
+          availabilityMode,
+          outcome: 'all',
+          page,
+          pageSize: 100,
+        });
+        let request = (supabase as any).rpc('get_occupancy_capacity_report', params);
+        if (signal && typeof request.abortSignal === 'function') request = request.abortSignal(signal);
+        const { data, error } = await request;
+        if (error) throw error;
+        const response = normalizeOccupancyCapacityReport(data, params);
+        return { rows: response.details, total: response.meta.details_total };
+      },
+    });
+    let selectedRows = filterOccupancyRecords(rows, selectedRecords);
+    // In a matrix cell, the published slot's mode must also match. A legacy
+    // reservation's created mode alone is not enough to prove contribution.
+    if (availabilityMode !== 'all' && selectedRecords.weekday !== undefined) {
+      selectedRows = await retainCapacityMatrixContributors(selectedRows, selectedRecords, async date => {
+        const params = buildOccupancyCapacityRpcParams({
+          companyId, periodStart: date, periodEnd: date, granularity: 'day',
+          availabilityMode, outcome: 'all', page: 1, pageSize: 1,
+        });
+        let request = (supabase as any).rpc('get_occupancy_capacity_report', params);
+        if (signal && typeof request.abortSignal === 'function') request = request.abortSignal(signal);
+        const { data, error } = await request;
+        if (error) throw error;
+        return normalizeOccupancyCapacityReport(data, params).heatmap;
+      }, signal);
+    }
+    return selectedRows.map(row => ({
+      id: row.id, guest_name: row.guest_name, date: row.date, time: row.time,
+      party_size: row.party_size, status: row.status,
+      note: row.outcome === 'checked_in'
+        ? `${row.checked_in_party_size ?? row.party_size} pessoas com check-in`
+        : `${row.party_size} pessoas reservadas`,
+    }));
+  };
+
   const filterBar = (
     <ReportFilterBar filters={filters} isRefreshing={!companyTimeZoneResolved || reportQuery.isFetching || waitlistSeriesQuery.isFetching} onRefresh={refresh}>
       <div className="min-w-0 flex-1 space-y-1 sm:w-44 sm:flex-none">
@@ -479,6 +546,7 @@ export default function OccupancyCapacityReport() {
               detail={qualityLabel(report.meta.capacity_history)}
               explanation={UI.capacityHelp}
               icon={CalendarRange}
+              onClick={() => setSelectedRecords({ title: 'Reservas associadas à oferta do período', metric: 'offer' })}
             />
             <ReportKpiTile
               label={UI.pressure}
@@ -486,6 +554,7 @@ export default function OccupancyCapacityReport() {
               detail={report.meta.capacity_history === 'unavailable' ? UI.noBase : pressureComparisonDetail}
               explanation={UI.pressureHelp}
               icon={Users}
+              onClick={() => setSelectedRecords({ title: 'Reservas da pressão da demanda', metric: 'reserved' })}
             />
             <ReportKpiTile
               label={UI.occupancy}
@@ -493,6 +562,7 @@ export default function OccupancyCapacityReport() {
               detail={`${formatInteger(report.summary.checked_in_people)} ${UI.checkins}`}
               explanation={UI.occupancyHelp}
               icon={CheckCircle2}
+              onClick={() => setSelectedRecords({ title: 'Reservas com check-in e base de capacidade', metric: 'checked_in' })}
             />
             <ReportKpiTile
               label={UI.waitlist}
@@ -507,9 +577,12 @@ export default function OccupancyCapacityReport() {
               detail={`${formatInteger(report.summary.no_show_people)} pessoas \u00b7 ${UI.noShowDetail}`}
               explanation={UI.noShowHelp}
               icon={AlertCircle}
+              onClick={() => setSelectedRecords({ title: 'No-shows com base de capacidade', metric: 'no_show' })}
             />
           </ReportKpiStrip>
 
+          <p className="text-xs leading-relaxed text-muted-foreground">Base: {formatDate(filters.dateOnlyRange.from)} a {formatDate(filters.dateOnlyRange.to)} · fuso {companyTimeZone}. Os lugares ofertados e as pessoas são somados por horário; reservas sem base publicada ficam identificadas separadamente.</p>
+          <ReportAnalysisPanel insights={buildCapacityInsights(report)}>
           <Card className="overflow-hidden border-border shadow-sm">
             <CardHeader className="space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -561,7 +634,9 @@ export default function OccupancyCapacityReport() {
                     {evolutionView === 'volumes' ? (
                       <>
                         <Area type="monotone" dataKey="published_capacity" name={UI.capacity} fill="hsl(var(--primary) / 0.12)" stroke="hsl(var(--primary))" strokeWidth={2} />
-                        <Bar dataKey="reserved_people" name="Pessoas reservadas" fill="hsl(var(--warning))" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="reserved_people" name="Pessoas reservadas" fill="hsl(var(--warning))" radius={[3, 3, 0, 0]} cursor="pointer" onClick={(point: any) => {
+                          if (point?.payload?.period) setSelectedRecords({ title: `Reservas de ${formatDate(point.payload.period)}`, metric: 'reserved', ...getCapacityPeriodWindow(point.payload.period, filters.granularity) });
+                        }} />
                         <Line type="monotone" dataKey="checked_in_people" name="Check-ins" stroke="hsl(var(--success))" strokeWidth={2.5} dot={false} />
                       </>
                     ) : (
@@ -596,7 +671,12 @@ export default function OccupancyCapacityReport() {
                 <div><CardTitle className="text-base">{UI.heatmapTitle}</CardTitle><CardDescription className="mt-1">{UI.heatmapDescription}</CardDescription></div>
               </div>
             </CardHeader>
-            <CardContent><Heatmap cells={report.heatmap} /></CardContent>
+            <CardContent><Heatmap cells={report.heatmap} metric={matrixMetric} onMetricChange={value => setViewParam('capacity_matrix', value, 'reserved')} onSelect={cell => setSelectedRecords({
+              title: `${matrixMetric === 'checked_in' ? 'Check-ins' : matrixMetric === 'offer' ? 'Reservas na oferta' : 'Reservas'} · ${cell.weekday_label}, ${formatTime(cell.time_slot)}`,
+              metric: matrixMetric,
+              weekday: cell.weekday,
+              timeSlot: cell.time_slot,
+            })} /></CardContent>
           </Card>
 
           <section className="grid gap-4 xl:grid-cols-2">
@@ -778,7 +858,9 @@ export default function OccupancyCapacityReport() {
                       <YAxis yAxisId="rate" orientation="right" tickFormatter={(value) => `${value}%`} tick={{ fontSize: 11 }} />
                       <RechartsTooltip labelFormatter={(value) => formatTime(String(value))} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar yAxisId="count" dataKey="reservations" name="No-shows" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} />
+                      <Bar yAxisId="count" dataKey="reservations" name="No-shows" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} cursor="pointer" onClick={(point: any) => {
+                        if (point?.payload?.hour) setSelectedRecords({ title: `No-shows às ${formatTime(point.payload.hour)}`, metric: 'no_show', hour: point.payload.hour, basisOnly: false });
+                      }} />
                       <Line yAxisId="rate" type="monotone" dataKey="rate" name="Taxa" stroke="hsl(var(--warning))" strokeWidth={2.5} dot={false} />
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -793,7 +875,17 @@ export default function OccupancyCapacityReport() {
               </CardContent>
             </Card>
           </section>
-
+          </ReportAnalysisPanel>
+          {companyId && selectedRecords && <ReportRecordsSheet
+            open={!!selectedRecords}
+            onOpenChange={open => { if (!open) setSelectedRecords(null); }}
+            title={selectedRecords.title}
+            description={`${formatDate(filters.dateOnlyRange.from)} a ${formatDate(filters.dateOnlyRange.to)} · ${MODE_LABELS[availabilityMode]}. ${selectedRecords.metric === 'offer' ? 'A oferta é o denominador; esta lista mostra as reservas de demanda associadas aos horários publicados.' : selectedRecords.basisOnly === false ? 'Inclui os resultados do horário mesmo quando não há capacidade publicada correspondente.' : 'Mesma base publicada usada no indicador; a quantidade de registros representa reservas, enquanto os indicadores de pessoas somam os tamanhos dos grupos.'}`}
+            companyId={companyId}
+            slug={slug ?? ''}
+            scopeKey={['capacity', filters.dateOnlyRange.from, filters.dateOnlyRange.to, availabilityMode, report.meta.generated_at, selectedRecords]}
+            loadRecords={loadSelectedRecords}
+          />}
         </div>
       ) : null}
     </ReportShell>

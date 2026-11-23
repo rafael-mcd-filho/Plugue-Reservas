@@ -1,12 +1,10 @@
 import {
-  useCallback,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowUpDown,
   Building2,
@@ -19,11 +17,13 @@ import {
   Pencil,
   Play,
   Plus,
+  ReceiptText,
+  ScrollText,
   Search,
   ShieldAlert,
-  SkipForward,
   Trash2,
   Undo2,
+  Users,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -41,7 +41,6 @@ import {
   useCancelCompanyDeletion,
   useCompanies,
   useCompanyDeletionRequests,
-  useForceSkipCompanyDeletionTeardown,
   useRequestCompanyDeletion,
   useUpdateCompany,
   type Company,
@@ -50,7 +49,10 @@ import {
 import { useCompaniesFeatureMatrix, type CompanyFeatureState } from '@/hooks/useCompanyFeatures';
 import { getPlanDefaultFeatures, normalizeCompanyPlanTier } from '@/lib/companyFeatures';
 import CompanyDialog from '@/components/company/CompanyDialog';
-import { CompanyFeatureBadges } from '@/components/company/CompanyFeatureSwitchList';
+import { CompanyDeletionRecoveryActions } from '@/components/company/CompanyDeletionRecoveryActions';
+import { CompanyFeatureSummary } from '@/components/company/CompanyFeatureSwitchList';
+import AdminPageHeader from '@/components/admin/AdminPageHeader';
+import ListPagination from '@/components/admin/ListPagination';
 import type { ManagedUser } from '@/hooks/useUsers';
 import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 import { startImpersonationSession } from '@/hooks/useImpersonation';
@@ -68,26 +70,26 @@ const statusConfig: Record<CompanyStatus, { label: string; className: string }> 
   paused: { label: 'Pausada', className: 'bg-primary-soft text-primary border-primary/20' },
 };
 
+const COMPANY_PAGE_SIZE = 25;
+
 type SortField = 'name' | 'cnpj' | 'status' | 'created_at';
 type SortDir = 'asc' | 'desc';
 
 export default function Companies() {
   const navigate = useNavigate();
-  const { id: routeCompanyId } = useParams<{ id?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user: authUser, loading: authLoading } = useAuth();
   const { data: companies = [], isLoading } = useCompanies();
   const updateCompany = useUpdateCompany();
   const requestDeletion = useRequestCompanyDeletion();
   const cancelDeletion = useCancelCompanyDeletion();
-  const forceSkipTeardown = useForceSkipCompanyDeletionTeardown();
   const { data: deletionRequests = [] } = useCompanyDeletionRequests();
   const { invokeManageUser, manageUserScopeKey } = useManageUserInvoker();
-  const { data: featureMatrix = {}, isLoading: featureMatrixLoading } = useCompaniesFeatureMatrix(companies);
-  const handledRouteRef = useRef<string | null>(null);
-  const routeDialogCompanyIdRef = useRef<string | null>(null);
+  const { data: featureMatrix = {} } = useCompaniesFeatureMatrix(companies);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [companyPage, setCompanyPage] = useState(1);
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -99,6 +101,22 @@ export default function Companies() {
   const [deleteReason, setDeleteReason] = useState('');
   const [impersonationDialogOpen, setImpersonationDialogOpen] = useState(false);
   const [companyToImpersonate, setCompanyToImpersonate] = useState<Company | null>(null);
+  const [impersonationDestination, setImpersonationDestination] = useState<'configuracoes' | null>(null);
+  const requestedImpersonation = searchParams.get('impersonar');
+  const requestedDestination = searchParams.get('destino');
+
+  useEffect(() => {
+    if (!requestedImpersonation || isLoading || authLoading || !authUser?.id) return;
+    const company = companies.find((item) => item.id === requestedImpersonation);
+    const consumed = new URLSearchParams(searchParams);
+    consumed.delete('impersonar');
+    consumed.delete('destino');
+    setSearchParams(consumed, { replace: true });
+    if (!company) return;
+    setCompanyToImpersonate(company);
+    setImpersonationDestination(requestedDestination === 'configuracoes' ? 'configuracoes' : null);
+    setImpersonationDialogOpen(true);
+  }, [authLoading, authUser?.id, companies, isLoading, requestedDestination, requestedImpersonation, searchParams, setSearchParams]);
 
   const activeDeletionRequests = deletionRequests.filter((request) =>
     ['grace_period', 'running', 'needs_attention'].includes(request.status));
@@ -136,10 +154,6 @@ export default function Companies() {
     && (deleteConfirmationText === companyToDelete.name || deleteConfirmationText === companyToDelete.slug)
     && deleteReason.trim().length > 0;
 
-  const resolveFeatures = useCallback((company: Company) =>
-    featureMatrix[company.id] ?? getPlanDefaultFeatures(normalizeCompanyPlanTier(company.plan_tier)),
-  [featureMatrix]);
-
   const { data: impersonationCandidates = [], isLoading: impersonationCandidatesLoading, isError: impersonationCandidatesError, error: impersonationCandidatesErrorObj } = useQuery({
     queryKey: ['impersonation-candidates', companyToImpersonate?.id, manageUserScopeKey],
     queryFn: async () => {
@@ -175,42 +189,19 @@ export default function Companies() {
     refetchOnWindowFocus: false,
   });
 
-  const clearDialogSelection = useCallback(() => {
-    setSelectedCompany(null);
-    setDialogFeatures(null);
-    routeDialogCompanyIdRef.current = null;
-  }, []);
-
-  const resetDialogState = useCallback(() => {
-    setDialogOpen(false);
-    clearDialogSelection();
-  }, [clearDialogSelection]);
-
-  const closeDialog = useCallback((options?: { clearSelection?: boolean }) => {
-    setDialogOpen(false);
-
-    if (options?.clearSelection) {
-      clearDialogSelection();
-    }
-  }, [clearDialogSelection]);
-
+  // O cadastro de uma empresa existente fica na página /empresas/:id;
+  // este diálogo serve só para criar empresas novas.
   const openCreate = () => {
-    handledRouteRef.current = null;
-    routeDialogCompanyIdRef.current = null;
     setSelectedCompany(null);
     setDialogFeatures(getPlanDefaultFeatures(normalizeCompanyPlanTier(undefined)));
     setDialogOpen(true);
   };
 
-  const openEdit = useCallback((company: Company, options?: { openedFromRoute?: boolean }) => {
-    routeDialogCompanyIdRef.current = options?.openedFromRoute ? company.id : null;
-    setSelectedCompany(company);
-    setDialogFeatures(resolveFeatures(company));
-    setDialogOpen(true);
-  }, [resolveFeatures]);
+  const openCompany = (company: Company) => navigate(`/empresas/${company.id}`);
 
   const openImpersonationDialog = (company: Company) => {
     setCompanyToImpersonate(company);
+    setImpersonationDestination(null);
     setImpersonationDialogOpen(true);
   };
 
@@ -232,53 +223,22 @@ export default function Companies() {
       startedAt: new Date().toISOString(),
     });
 
+    const target = user.effective_role === 'admin' && impersonationDestination === 'configuracoes'
+      ? `/${company.slug}/admin/configuracoes/empresa`
+      : `/${company.slug}/admin`;
     setImpersonationDialogOpen(false);
     setCompanyToImpersonate(null);
-    navigate(`/${company.slug}/admin`);
+    setImpersonationDestination(null);
+    navigate(target);
   };
 
   const handleDialogOpenChange = (open: boolean) => {
-    if (open) {
-      setDialogOpen(true);
-      return;
-    }
-
-    closeDialog();
-
-    if (routeCompanyId) {
-      navigate('/empresas', { replace: true });
+    setDialogOpen(open);
+    if (!open) {
+      setSelectedCompany(null);
+      setDialogFeatures(null);
     }
   };
-
-  useEffect(() => {
-    if (!routeCompanyId) {
-      handledRouteRef.current = null;
-      return;
-    }
-
-    if (isLoading || featureMatrixLoading) return;
-
-    const company = companies.find((item) => item.id === routeCompanyId);
-
-    if (!company) {
-      resetDialogState();
-      navigate('/empresas', { replace: true });
-      return;
-    }
-
-    if (handledRouteRef.current === routeCompanyId && dialogOpen && selectedCompany?.id === routeCompanyId) {
-      return;
-    }
-
-    openEdit(company, { openedFromRoute: true });
-    handledRouteRef.current = routeCompanyId;
-  }, [routeCompanyId, isLoading, featureMatrixLoading, companies, dialogOpen, navigate, openEdit, resetDialogState, selectedCompany?.id]);
-
-  useEffect(() => {
-    if (!routeCompanyId && routeDialogCompanyIdRef.current && dialogOpen) {
-      closeDialog({ clearSelection: true });
-    }
-  }, [routeCompanyId, closeDialog, dialogOpen]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -321,6 +281,12 @@ export default function Companies() {
       const valueB = companyB[sortField] ?? '';
       return valueA < valueB ? -direction : valueA > valueB ? direction : 0;
     });
+  const companyPageCount = Math.max(1, Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE));
+  const currentCompanyPage = Math.min(companyPage, companyPageCount);
+  const pagedCompanies = filteredCompanies.slice(
+    (currentCompanyPage - 1) * COMPANY_PAGE_SIZE,
+    currentCompanyPage * COMPANY_PAGE_SIZE,
+  );
 
   const SortHeader = ({ field, children }: { field: SortField; children: ReactNode }) => (
     <Button variant="ghost" size="sm" className="-ml-3 h-auto gap-1 py-1 font-medium" onClick={() => toggleSort(field)}>
@@ -331,16 +297,17 @@ export default function Companies() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Empresas</h1>
-          <p className="mt-1 text-muted-foreground">Gerencie cadastro, configurações e recursos das empresas.</p>
-        </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Nova Empresa
-        </Button>
-      </div>
+      <AdminPageHeader
+        eyebrow="Principal"
+        title="Empresas"
+        description="Cadastro, situação e recursos das empresas."
+        actions={(
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nova empresa
+          </Button>
+        )}
+      />
 
       {activeDeletionRequests.length > 0 && (
         <Card className="border-destructive/30 bg-destructive/5">
@@ -376,15 +343,7 @@ export default function Companies() {
                       <Undo2 className="h-3.5 w-3.5" /> Cancelar
                     </Button>
                   )}
-                  {request.status === 'needs_attention' && (
-                    <Button
-                      type="button" size="sm" variant="outline" className="gap-1.5"
-                      disabled={forceSkipTeardown.isPending}
-                      onClick={() => forceSkipTeardown.mutate(request.company_id)}
-                    >
-                      <SkipForward className="h-3.5 w-3.5" /> Pular etapa externa
-                    </Button>
-                  )}
+                  <CompanyDeletionRecoveryActions request={request} />
                   {request.status === 'running' && (
                     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Clock className="h-3.5 w-3.5" /> Em processamento
@@ -403,7 +362,7 @@ export default function Companies() {
           <Input
             placeholder="Buscar por nome, CNPJ ou responsável..."
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => { setSearch(event.target.value); setCompanyPage(1); }}
             className="pl-10"
           />
         </div>
@@ -413,7 +372,7 @@ export default function Companies() {
               key={status}
               variant={statusFilter === status ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => { setStatusFilter(status); setCompanyPage(1); }}
               className="gap-1.5"
             >
               {status === 'all' ? 'Todas' : statusConfig[status].label}
@@ -446,22 +405,22 @@ export default function Companies() {
                 <TableHead><SortHeader field="name">Nome Fantasia</SortHeader></TableHead>
                 <TableHead><SortHeader field="cnpj">CNPJ</SortHeader></TableHead>
                 <TableHead><SortHeader field="status">Status</SortHeader></TableHead>
-                <TableHead>Features</TableHead>
+                <TableHead>Recursos</TableHead>
                 <TableHead><SortHeader field="created_at">Cadastro</SortHeader></TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredCompanies.map((company) => {
+              {pagedCompanies.map((company) => {
                 const companyStatus = statusConfig[company.status];
 
                 return (
                   <TableRow
                     key={company.id}
                     className="cursor-pointer"
-                    onClick={() => openEdit(company)}
+                    onClick={() => openCompany(company)}
                     tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openEdit(company); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openCompany(company); }}
                   >
                     <TableCell>
                       <div>
@@ -487,7 +446,7 @@ export default function Companies() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <CompanyFeatureBadges features={featureMatrix[company.id]} />
+                      <CompanyFeatureSummary features={featureMatrix[company.id]} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(company.created_at), 'dd/MM/yyyy', { locale: ptBR })}
@@ -504,9 +463,20 @@ export default function Companies() {
                             <DropdownMenuItem onClick={() => openImpersonationDialog(company)}>
                               <ExternalLink className="mr-2 h-4 w-4" /> Escolher impersonação
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openEdit(company)} disabled={!!company.deletion_requested_at}>
-                              <Pencil className="mr-2 h-4 w-4" /> Editar e configurar
+                            <DropdownMenuItem onClick={() => openCompany(company)}>
+                              <Pencil className="mr-2 h-4 w-4" /> Abrir empresa
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => navigate(`/usuarios?empresa=${company.id}`)}>
+                              <Users className="mr-2 h-4 w-4" /> Ver usuários
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/financeiro/empresa/${company.id}`)}>
+                              <ReceiptText className="mr-2 h-4 w-4" /> Ver financeiro
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/logs?empresa=${company.id}&periodo=todos`)}>
+                              <ScrollText className="mr-2 h-4 w-4" /> Ver ações na auditoria
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => togglePause(company)} disabled={!!company.deletion_requested_at}>
                               {company.status === 'paused' ? (
                                 <><Play className="mr-2 h-4 w-4" /> Ativar</>
@@ -534,6 +504,14 @@ export default function Companies() {
               })}
             </TableBody>
           </Table>
+          <ListPagination
+            page={currentCompanyPage}
+            pageSize={COMPANY_PAGE_SIZE}
+            total={filteredCompanies.length}
+            onPageChange={setCompanyPage}
+            itemLabel={['empresa', 'empresas']}
+            className="border-t border-border"
+          />
         </Card>
       )}
 
@@ -548,7 +526,10 @@ export default function Companies() {
         open={impersonationDialogOpen}
         onOpenChange={(open) => {
           setImpersonationDialogOpen(open);
-          if (!open) setCompanyToImpersonate(null);
+          if (!open) {
+            setCompanyToImpersonate(null);
+            setImpersonationDestination(null);
+          }
         }}
       >
         <DialogContent className="max-w-xl">

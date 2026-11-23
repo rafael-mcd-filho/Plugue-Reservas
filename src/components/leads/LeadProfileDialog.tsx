@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -34,6 +34,7 @@ import {
   type CrmLeadProfile,
 } from '@/lib/crm-lead-profile';
 import { toast } from 'sonner';
+import LeadRelationshipPanel from './LeadRelationshipPanel';
 
 export interface LeadProfileDialogProps {
   open: boolean;
@@ -51,6 +52,10 @@ export interface LeadProfileDialogProps {
    */
   onRefreshLead?: (lead: CrmLeadProfile) => Promise<boolean>;
   onEdit?: (lead: CrmLeadProfile) => void;
+  canViewReservations?: boolean;
+  readOnly?: boolean;
+  showEventHistory?: boolean;
+  showLeadHistory?: boolean;
 }
 
 const PRESENCE_PAGE_SIZE = 25;
@@ -66,8 +71,18 @@ export default function LeadProfileDialog({
   onRetryProfile,
   onRefreshLead,
   onEdit,
+  canViewReservations = true,
+  readOnly = false,
+  showEventHistory = true,
+  showLeadHistory = false,
 }: LeadProfileDialogProps) {
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
+  const [relationshipAccess, setRelationshipAccess] = useState<{ scope: string; allowed: boolean } | null>(null);
+  const profileScope = `${companyId ?? ''}:${lead?.key ?? ''}`;
+  const effectiveReservationAccess = open && canViewReservations && relationshipAccess?.scope === profileScope && relationshipAccess.allowed;
+  const handleReservationAccessChange = useCallback((allowed: boolean) => {
+    setRelationshipAccess((current) => current?.scope === profileScope && current.allowed === allowed ? current : { scope: profileScope, allowed });
+  }, [profileScope]);
   const [retryingHistory, setRetryingHistory] = useState(false);
   const [presencePage, setPresencePage] = useState(1);
   const historyListRef = useRef<HTMLDivElement | null>(null);
@@ -83,21 +98,30 @@ export default function LeadProfileDialog({
       setSelectedReservationId(null);
       setRetryingHistory(false);
       setPresencePage(1);
+      setRelationshipAccess(null);
     }
   }, [open]);
 
   useEffect(() => {
     setSelectedReservationId(null);
     setPresencePage(1);
-  }, [lead?.key]);
+  }, [lead?.key, companyId]);
+
+  useEffect(() => {
+    if (!effectiveReservationAccess) setSelectedReservationId(null);
+  }, [effectiveReservationAccess]);
 
   const {
     data: selectedReservation,
     isLoading: selectedReservationLoading,
     error: selectedReservationError,
   } = useQuery({
-    queryKey: ['lead-reservation-details', companyId, selectedReservationId],
-    queryFn: async () => {
+    queryKey: ['lead-reservation-details', companyId, lead?.key, selectedReservationId],
+    queryFn: async ({ signal }) => {
+      if (!effectiveReservationAccess || !companyId || !selectedReservationId) {
+        throw new Error('O acesso aos detalhes da reserva não está disponível.');
+      }
+
       const { data, error } = await supabase
         .from('reservations' as never)
         .select(
@@ -105,6 +129,7 @@ export default function LeadProfileDialog({
         )
         .eq('company_id', companyId!)
         .eq('id', selectedReservationId!)
+        .abortSignal(signal)
         .maybeSingle();
 
       if (error) {
@@ -117,7 +142,8 @@ export default function LeadProfileDialog({
 
       return data as ReservationDetails;
     },
-    enabled: !!companyId && !!selectedReservationId,
+    enabled: effectiveReservationAccess && !!companyId && !!selectedReservationId,
+    gcTime: 0,
   });
 
   useEffect(() => {
@@ -147,7 +173,7 @@ export default function LeadProfileDialog({
   };
 
   const openReservationDetails = (visit: CrmLeadPresenceVisit) => {
-    if (visit.visit_origin === 'reservation') {
+    if (effectiveReservationAccess && visit.visit_origin === 'reservation') {
       setSelectedReservationId(visit.visit_id);
     }
   };
@@ -284,7 +310,7 @@ export default function LeadProfileDialog({
                   </div>
                 )}
 
-                {onEdit && (
+                {!readOnly && onEdit && (
                   <Button
                     type="button"
                     variant="outline"
@@ -297,7 +323,10 @@ export default function LeadProfileDialog({
                 )}
               </div>
 
-              <div className="pt-4">
+              {companyId && <LeadRelationshipPanel key={`${companyId}:${lead.key}`} open={open}
+                companyId={companyId} customerKey={lead.key} canViewReservations={canViewReservations}
+                onOpenReservation={setSelectedReservationId} onReservationAccessChange={handleReservationAccessChange}>
+              <div>
                 <h4 className="mb-3 text-sm font-semibold text-foreground">
                   Histórico de Presenças ({lead.total_reservations})
                 </h4>
@@ -335,7 +364,7 @@ export default function LeadProfileDialog({
                   <div>
                     <div ref={historyListRef} className="max-h-60 space-y-2 overflow-y-auto">
                       {visiblePresenceEvents.map((visit) => {
-                      const canOpenReservation = visit.visit_origin === 'reservation';
+                      const canOpenReservation = effectiveReservationAccess && visit.visit_origin === 'reservation';
                       const content = (
                         <>
                           <div className="min-w-0 flex-1">
@@ -421,6 +450,7 @@ export default function LeadProfileDialog({
                   </div>
                 )}
               </div>
+              </LeadRelationshipPanel>}
             </>
           ) : (
             <>
@@ -439,18 +469,21 @@ export default function LeadProfileDialog({
       </Dialog>
 
       <ReservationDetailsDialog
-        open={!!selectedReservationId}
+        open={effectiveReservationAccess && !!selectedReservationId}
         onOpenChange={(reservationOpen) => {
           if (!reservationOpen) {
             setSelectedReservationId(null);
           }
         }}
-        reservation={selectedReservation ?? null}
+        reservation={effectiveReservationAccess ? selectedReservation ?? null : null}
         slug={slug}
         companyId={companyId}
         loading={selectedReservationLoading}
         onBackToList={() => setSelectedReservationId(null)}
         backLabel="Voltar para o lead"
+        readOnly={readOnly}
+        showEventHistory={showEventHistory}
+        showLeadHistory={showLeadHistory}
       />
     </>
   );

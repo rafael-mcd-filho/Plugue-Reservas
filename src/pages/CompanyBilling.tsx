@@ -179,7 +179,7 @@ export function CompanyBillingView({
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-warning-soft text-amber-800">
               <AlertTriangle className="h-5 w-5" />
             </div>
-            <h2 className="font-semibold">Não foi possível carregar o Financeiro</h2>
+            <h2 className="font-semibold">Não foi possível carregar a assinatura</h2>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
               A leitura falhou, por isso nenhum total foi exibido como zero e nenhuma lista foi tratada como vazia. As demais áreas continuam disponíveis.
             </p>
@@ -212,7 +212,7 @@ export function CompanyBillingView({
               <WalletCards className="h-5 w-5" />
             </div>
             <h2 className="font-semibold">
-              {!moduleStatus?.enabled ? 'Financeiro temporariamente indisponível' : 'Financeiro ainda não liberado'}
+              {!moduleStatus?.enabled ? 'Assinatura temporariamente indisponível' : 'Assinatura ainda não liberada'}
             </h2>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
               {!moduleStatus?.enabled
@@ -243,11 +243,11 @@ export function CompanyBillingView({
               <ReceiptText className="h-5 w-5" />
             </div>
             <h2 className="font-semibold">
-              {effectiveLinkStatus === 'error' ? 'Vínculo financeiro precisa de atenção' : 'Financeiro em configuração'}
+              {effectiveLinkStatus === 'error' ? 'Cobranças da assinatura precisam de atenção' : 'Assinatura em configuração'}
             </h2>
             <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
               {effectiveLinkStatus === 'error'
-                ? 'A Plug Guest foi notificada para revisar a conexão desta unidade com o Asaas. A operação do sistema não é afetada.'
+                ? 'A Plug Guest foi notificada para revisar a conexão financeira desta unidade. A operação do sistema não é afetada.'
                 : 'A Plug Guest ainda está vinculando as cobranças desta unidade. Quando a configuração for concluída, suas faturas aparecerão aqui automaticamente.'}
             </p>
           </CardContent>
@@ -295,7 +295,7 @@ export function CompanyBillingView({
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo financeiro">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo da assinatura">
         <SummaryCard
           icon={CalendarClock}
           label="Próximo vencimento"
@@ -325,7 +325,7 @@ export function CompanyBillingView({
 
       {(effectiveLastSyncError || linkQuery.isError || summaryQuery.isError || invoicesQuery.isError) && (
         <div className="rounded-lg border border-warning/25 bg-warning-soft px-4 py-3 text-sm text-amber-900">
-          Não foi possível atualizar todos os dados financeiros. As informações abaixo são a última cópia disponível.
+          Não foi possível atualizar todos os dados da assinatura. As informações abaixo são a última cópia disponível.
         </div>
       )}
 
@@ -496,7 +496,7 @@ export function CompanyBillingView({
       />
 
       <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-        Os pagamentos são processados pelo Asaas. Uma confirmação pode levar até quatro horas para aparecer neste painel.
+        A confirmação de um pagamento pode levar até quatro horas para aparecer neste painel.
       </p>
     </div>
   );
@@ -509,7 +509,7 @@ function PageHeader({ companyName }: { companyName: string }) {
         <WalletCards className="h-3.5 w-3.5" />
         Conta da unidade
       </div>
-      <h1 className="text-2xl font-semibold tracking-tight">Financeiro</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Minha assinatura</h1>
       <p className="mt-1 text-sm text-muted-foreground">Plano e cobranças de {companyName}.</p>
     </div>
   );
@@ -533,7 +533,7 @@ function BillingPreviewBanner({
           {!globalEnabled
             ? 'O Financeiro global está desativado. Você pode conferir o vínculo, sincronizar e revisar esta tela; os administradores da empresa ainda não veem o módulo.'
             : !companyEnabled
-              ? 'O Financeiro desta empresa está desativado. A prévia e a sincronização manual continuam disponíveis somente para você; o admin da empresa não vê o módulo.'
+              ? 'A área Minha assinatura desta empresa está desativada. A prévia e a sincronização manual continuam disponíveis somente para você; o admin da empresa não vê o módulo.'
               : 'Esta é uma prévia administrativa. Os dados continuam protegidos para os demais perfis.'}
         </p>
       </div>

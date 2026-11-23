@@ -2,8 +2,8 @@
 // zona do NPS, status real do convite (o banco só marca "expired" quando alguém
 // tenta responder depois do prazo) e os agrupamentos dos gráficos.
 
-import { eachWeekOfInterval, endOfWeek, format, getDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { getDay } from 'date-fns';
+import { getReportDateOnlyInTimeZone } from '@/lib/report-filters';
 
 export type NpsCategory = 'promoter' | 'passive' | 'detractor';
 export type ReviewEffectiveStatus = 'submitted' | 'pending' | 'expired';
@@ -43,7 +43,7 @@ export function formatNpsScore(score: number) {
 }
 
 interface ReviewForNps {
-  submitted_at: string;
+  submitted_at: string | null;
   nps_category: NpsCategory | null;
 }
 
@@ -63,24 +63,37 @@ export interface WeeklyNpsPoint {
 
 // Semanas sem resposta ficam com nps nulo: a linha quebra em vez de ligar dois
 // pontos distantes como se houvesse dado no meio.
-export function computeWeeklyNps(reviews: ReviewForNps[], fromDate: string, toDate: string): WeeklyNpsPoint[] {
+export function computeWeeklyNps(reviews: ReviewForNps[], fromDate: string, toDate: string, timeZone = 'America/Fortaleza'): WeeklyNpsPoint[] {
   if (!reviews.length) return [];
-  const start = new Date(`${fromDate}T00:00:00`);
-  const end = new Date(`${toDate}T23:59:59`);
-
-  return eachWeekOfInterval({ start, end }, { weekStartsOn: 1 }).map((weekStart) => {
-    const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
-    const weekReviews = reviews.filter((review) => {
-      const submittedAt = new Date(review.submitted_at);
-      return submittedAt >= weekStart && submittedAt <= weekEnd;
-    });
-
-    return {
-      week: format(weekStart, 'dd/MM', { locale: ptBR }),
-      nps: computeNps(weekReviews),
-      responses: weekReviews.length,
-    };
+  const dated = reviews.flatMap(review => {
+    if (!review.submitted_at || !Number.isFinite(new Date(review.submitted_at).getTime())) return [];
+    return [{ review, date: getReportDateOnlyInTimeZone(review.submitted_at, timeZone) }];
   });
+  if (!dated.length) return [];
+  // The cohort follows invitation dates. Late replies remain included here.
+  const startKey = dated.reduce((minimum, row) => row.date < minimum ? row.date : minimum, fromDate);
+  const endKey = dated.reduce((maximum, row) => row.date > maximum ? row.date : maximum, toDate);
+  const mondayOf = (date: string) => {
+    const value = new Date(`${date}T12:00:00Z`);
+    value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
+    return value.toISOString().slice(0, 10);
+  };
+  const groups = new Map<string, ReviewForNps[]>();
+  for (const row of dated) {
+    const key = mondayOf(row.date);
+    const group = groups.get(key) ?? [];
+    group.push(row.review);
+    groups.set(key, group);
+  }
+  const result: WeeklyNpsPoint[] = [];
+  const cursor = new Date(`${mondayOf(startKey)}T12:00:00Z`);
+  while (cursor.toISOString().slice(0, 10) <= endKey) {
+    const key = cursor.toISOString().slice(0, 10);
+    const weekReviews = groups.get(key) ?? [];
+    result.push({ week: `${key.slice(8, 10)}/${key.slice(5, 7)}`, nps: computeNps(weekReviews), responses: weekReviews.length });
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return result;
 }
 
 // Eixo que acompanha os dados: com tudo entre +80 e +100, a escala inteira de

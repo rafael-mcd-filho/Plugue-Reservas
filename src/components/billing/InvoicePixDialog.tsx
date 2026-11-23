@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { AlertTriangle, Check, Copy, Loader2, QrCode, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { paymentMessage } from '@/lib/payment-messages';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -51,8 +52,10 @@ function formatPixExpiration(value: string | null | undefined) {
 }
 
 function errorMessage(error: unknown) {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return 'Não foi possível gerar o Pix desta fatura.';
+  return paymentMessage(
+    error instanceof Error ? error.message : undefined,
+    'Não foi possível gerar o Pix desta fatura.',
+  );
 }
 
 async function copyTextToClipboard(value: string) {

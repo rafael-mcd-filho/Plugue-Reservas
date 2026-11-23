@@ -1,3 +1,4 @@
+import { normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildReservationDispatchKey,
@@ -11,10 +12,10 @@ import {
   buildReservationParameters,
   enqueuePlugueChatMessage,
   getCompanyChannels,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
+import { belongsToCurrentReservationChange, reservationChangeDispatchKey } from "../_shared/reservation-change-notifications.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -185,13 +186,13 @@ Deno.serve(async (req) => {
         .eq("enabled", true),
       supabaseAdmin
         .from("whatsapp_message_logs")
-        .select("reservation_id, type")
+        .select("*")
         .in("reservation_id", reservationIds)
         .in("type", REMINDER_TYPES)
         .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]),
       supabaseAdmin
         .from("whatsapp_message_queue")
-        .select("reservation_id, type")
+        .select("*")
         .in("reservation_id", reservationIds)
         .in("type", REMINDER_TYPES),
       supabaseAdmin
@@ -202,21 +203,26 @@ Deno.serve(async (req) => {
         .eq("enabled", true),
       supabaseAdmin
         .from("pluguechat_message_logs")
-        .select("reservation_id, type")
+        .select("*")
         .in("reservation_id", reservationIds)
         .in("type", REMINDER_TYPES),
       supabaseAdmin
         .from("pluguechat_message_queue")
-        .select("reservation_id, type")
+        .select("*")
         .in("reservation_id", reservationIds)
         .in("type", REMINDER_TYPES)
         .neq("status", "cancelled"),
     ]);
 
-    const sentSet = new Set((alreadySent || []).map((log: any) => `${log.reservation_id}:${log.type}`));
-    const queuedSet = new Set((alreadyQueued || []).map((item: any) => `${item.reservation_id}:${item.type}`));
-    const pcLogSet = new Set((plugueChatLogs || []).map((l: any) => `${l.reservation_id}:${l.type}`));
-    const pcQueueSet = new Set((plugueChatQueue || []).map((i: any) => `${i.reservation_id}:${i.type}`));
+    const reservationsById = new Map(allReservations.map((reservation: any) => [reservation.id, reservation]));
+    const currentRecords = (records: any[] | null, kind: "queue" | "log") => (records || []).filter((item: any) => {
+      const reservation = reservationsById.get(item.reservation_id);
+      return reservation && belongsToCurrentReservationChange(reservation, item, kind);
+    });
+    const sentSet = new Set(currentRecords(alreadySent, "log").map((log: any) => `${log.reservation_id}:${log.type}`));
+    const queuedSet = new Set(currentRecords(alreadyQueued, "queue").map((item: any) => `${item.reservation_id}:${item.type}`));
+    const pcLogSet = new Set(currentRecords(plugueChatLogs, "log").map((log: any) => `${log.reservation_id}:${log.type}`));
+    const pcQueueSet = new Set(currentRecords(plugueChatQueue, "queue").map((item: any) => `${item.reservation_id}:${item.type}`));
 
     let queued = 0;
     let skipped = 0;
@@ -235,9 +241,10 @@ Deno.serve(async (req) => {
         );
         if (!template?.template_id) { skipped++; continue; }
 
-        const phone = normalizePhone(reservation.guest_phone);
+        const phone = normalizeStoredPhoneE164((reservation.guest_phone_e164 ?? reservation.guest_phone));
+        if (!phone) { skipped++; continue; }
         const parameters = buildReservationParameters(reminderType, reservation);
-        const idempotencyKey = `pluguechat:reservation:${reservation.id}:${reminderType}`;
+        const idempotencyKey = reservationChangeDispatchKey(`pluguechat:reservation:${reservation.id}:${reminderType}`, reservation.last_public_change_at);
 
         const result = await enqueuePlugueChatMessage(supabaseAdmin, {
           company_id: reservation.company_id,
@@ -250,6 +257,7 @@ Deno.serve(async (req) => {
           scheduled_for: schedule.scheduledFor.toISOString(),
           expires_at: schedule.expiresAt.toISOString(),
           idempotency_key: idempotencyKey,
+          ...(reservation.last_public_change_at ? { reservation_change_revision: reservation.last_public_change_at } : {}),
         });
 
         pcQueueSet.add(key);
@@ -266,9 +274,10 @@ Deno.serve(async (req) => {
       );
       if (!automation?.message_template) { skipped++; continue; }
 
-      const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const phone = formatPhoneForWhatsApp((reservation.guest_phone_e164 ?? reservation.guest_phone));
+      if (!phone) { skipped++; continue; }
       const message = replaceTemplateVars(automation.message_template, reservation);
-      const deliveryKey = buildReservationDispatchKey(reminderType, reservation.id);
+      const deliveryKey = reservationChangeDispatchKey(buildReservationDispatchKey(reminderType, reservation.id), reservation.last_public_change_at);
       const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
         deliveryKey,
         companyId: reservation.company_id,
@@ -288,6 +297,7 @@ Deno.serve(async (req) => {
         scheduled_for: schedule.scheduledFor.toISOString(),
         expires_at: schedule.expiresAt.toISOString(),
         priority: schedule.priority,
+        ...(reservation.last_public_change_at ? { reservation_change_revision: reservation.last_public_change_at } : {}),
       });
 
       await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "queued" });

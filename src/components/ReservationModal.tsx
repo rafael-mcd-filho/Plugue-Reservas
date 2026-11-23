@@ -1,6 +1,6 @@
 import { normalizePhoneE164, isValidPhone } from '@/lib/phone';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addDays,
   eachDayOfInterval,
@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import PlatformTermsDialog from '@/components/legal/PlatformTermsDialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -47,7 +48,7 @@ import {
   normalizePublicReservationSchedule,
   type PublicReservationSchedule,
 } from '@/lib/public-reservation-schedule';
-import { createReservationPayment } from '@/lib/asaas-prepayment-api';
+import { createReservationPayment, getReservationPaymentRequirement } from '@/lib/asaas-prepayment-api';
 import {
   getEmailValidationMessage,
   getPhoneValidationMessage,
@@ -404,6 +405,7 @@ export default function ReservationModal({
   exitRecoverySecondaryText,
   exitRecoverySecondaryTextSize,
 }: ReservationModalProps) {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState('');
@@ -418,6 +420,7 @@ export default function ReservationModal({
   const [pendingDateAdvance, setPendingDateAdvance] = useState(false);
   const [pendingTimeAdvance, setPendingTimeAdvance] = useState(false);
   const [observationOpen, setObservationOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
   const [dateWindowOffset, setDateWindowOffset] = useState(() => getDateWindowOffsetForDate(initialDate));
   const [availableTables, setAvailableTables] = useState<AvailableTable[]>([]);
@@ -435,6 +438,7 @@ export default function ReservationModal({
   const [identityFieldsCollapsed, setIdentityFieldsCollapsed] = useState(false);
   const [showExitRecoveryPrompt, setShowExitRecoveryPrompt] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const termsButtonRef = useRef<HTMLButtonElement | null>(null);
   const partySizeHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const prefillRequestIdRef = useRef(0);
   const dateSelectTrackedRef = useRef(false);
@@ -462,7 +466,10 @@ export default function ReservationModal({
   const hasExitRecoverySecondaryText = resolvedExitRecoverySecondaryText.trim().length > 0;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSelectedDate(undefined);
+      return;
+    }
 
     setStep(1);
     setSelectedDate(initialDate ? new Date(`${initialDate}T12:00:00`) : undefined);
@@ -489,6 +496,7 @@ export default function ReservationModal({
     setPendingDateAdvance(false);
     setPendingTimeAdvance(false);
     setObservationOpen(false);
+    setTermsOpen(false);
     prefillRequestIdRef.current = 0;
     dateSelectTrackedRef.current = false;
     tableAvailabilityRequestIdRef.current += 1;
@@ -583,6 +591,25 @@ export default function ReservationModal({
   }, [selectedDate, dateWindowDays]);
 
   const selectedDateKey = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+  const paymentRequirementQueryKey = useMemo(() => ['public-reservation-payment-requirement', companyId, selectedDateKey], [companyId, selectedDateKey]);
+  const paymentRequirementQuery = useQuery({
+    queryKey: paymentRequirementQueryKey,
+    queryFn: ({ signal }) => getReservationPaymentRequirement(companyId, selectedDateKey, signal),
+    enabled: open && !!companyId && !!selectedDateKey && step !== 4,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  // The rule applies to the day. Look it up before personal details, without adding UI or extra group/time reads.
+  useEffect(() => {
+    if (!open || !selectedDateKey) return;
+    return () => { void queryClient.cancelQueries({ queryKey: paymentRequirementQueryKey, exact: true }); };
+  }, [open, paymentRequirementQueryKey, queryClient, selectedDateKey]);
+  const requiresPayment = paymentRequirementQuery.data?.company_id === companyId
+    && paymentRequirementQuery.data?.date === selectedDateKey
+    && paymentRequirementQuery.data.requires_payment === true;
   const {
     data: bookingContext,
     error: bookingContextError,
@@ -851,6 +878,7 @@ export default function ReservationModal({
   }, [selectedDate, selectedTime, companyId, selectedPartySize, step, allTables.length, tablesLoading, tableMapsLoading, getEligibleTables, tableLookupKey, resolvedTableLookupKey, availabilityRetryToken, slotAvailability, publicSchedule?.availability_mode]);
 
   const handleReset = () => {
+    setTermsOpen(false);
     setStep(1);
     setSelectedDate(undefined);
     setSelectedTime('');
@@ -2320,16 +2348,16 @@ export default function ReservationModal({
             </div>
 
             <p className="text-xs text-muted-foreground text-center">
-              Ao continuar você concorda com nossos{' '}
-              <button type="button" className="underline text-primary hover:text-primary/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
-                Termos e Condições
+              Ao continuar, você concorda com os{' '}
+              <button ref={termsButtonRef} type="button" onClick={() => setTermsOpen(true)} className="underline text-primary hover:text-primary/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+                Termos de Uso
               </button>
             </p>
 
             <div className="sticky bottom-0 -mx-5 bg-card/95 px-5 pb-1 pt-3 shadow-[0_-12px_24px_rgba(255,255,255,0.92)] backdrop-blur">
               <Button ref={confirmButtonRef} type="submit" className="animate-attention-pulse w-full rounded-md text-base shadow-sm disabled:animate-none" disabled={submitting}>
                 {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                Confirmar Reserva
+                {requiresPayment ? 'Continuar para pagamento' : 'Confirmar Reserva'}
               </Button>
             </div>
           </form>
@@ -2410,6 +2438,7 @@ export default function ReservationModal({
           </div>
         )}
       </DialogContent>
+      <PlatformTermsDialog open={open && termsOpen} onOpenChange={setTermsOpen} companyName={companyName} returnFocusRef={termsButtonRef} />
     </Dialog>
   );
 }

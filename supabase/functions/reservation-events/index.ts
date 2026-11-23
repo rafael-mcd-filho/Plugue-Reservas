@@ -1,3 +1,4 @@
+import { normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import {
   createSupabaseAdminClient,
   getRequestAuthContext,
@@ -22,9 +23,9 @@ import {
   buildWaitlistParameters,
   enqueuePlugueChatMessage,
   getCompanyChannel,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { getFirstName } from "../_shared/names.ts";
+import { getWaitlistCallEligibility, isEvolutionCallFailureRetryable } from "../_shared/waitlist-call-eligibility.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +38,7 @@ interface ReservationData {
   company_id: string;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   guest_email: string | null;
   date: string;
   time: string;
@@ -54,26 +56,39 @@ interface WaitlistData {
   company_id: string;
   guest_name: string;
   guest_phone: string;
+  guest_phone_e164?: string | null;
   party_size: number;
   position: number | null;
   status: string;
   tracking_code?: string | null;
   notes?: string | null;
   created_at?: string | null;
+  called_at?: string | null;
 }
 
 interface WhatsAppMessagePayload {
   company_id: string;
   reservation_id?: string | null;
+  waitlist_id?: string | null;
+  waitlist_called_at?: string | null;
+  expires_at?: string;
+  queue_status?: "pending" | "failed";
   phone: string;
   message: string;
   type: string;
-  status?: "sent" | "error";
+  status?: "pending" | "sent" | "error";
   error_details?: string | null;
 }
 
 const RESERVATION_AUTOMATION_EVENTS = new Set(["reservation_created", "reservation_cancelled"]);
 const PLUGUECHAT_TRANSACTIONAL_PRIORITY = 10;
+
+function getWaitlistCallDeadline(waitlist: WaitlistData): string | null {
+  const calledAt = Date.parse(waitlist.called_at ?? "");
+  if (waitlist.status !== "called" || !Number.isFinite(calledAt)) return null;
+  const deadline = calledAt + 5 * 60 * 1000;
+  return deadline > Date.now() ? new Date(deadline).toISOString() : null;
+}
 
 function replaceTemplateVars(
   template: string,
@@ -376,6 +391,9 @@ async function enqueueWhatsAppMessage(
   await enqueueWhatsAppMessageOnce(supabaseAdmin, {
     company_id: payload.company_id,
     reservation_id: payload.reservation_id ?? null,
+    ...(payload.waitlist_id ? { waitlist_id: payload.waitlist_id, waitlist_called_at: payload.waitlist_called_at ?? null } : {}),
+    ...(payload.expires_at ? { expires_at: payload.expires_at } : {}),
+    ...(payload.queue_status ? { status: payload.queue_status } : {}),
     phone: payload.phone,
     message: payload.message,
     type: payload.type,
@@ -419,12 +437,12 @@ async function enqueuePlugueChatReservation(
     .eq("enabled", true)
     .maybeSingle();
 
-  if (!template?.template_id || !reservation.guest_phone) {
+  if (!template?.template_id || !(reservation.guest_phone_e164 ?? reservation.guest_phone)) {
     results.whatsapp = "pluguechat_template_not_configured";
     return;
   }
 
-  const phone = normalizePhone(reservation.guest_phone);
+  const phone = normalizeStoredPhoneE164((reservation.guest_phone_e164 ?? reservation.guest_phone));
   const idempotencyKey = `pluguechat:reservation:${reservation.id}:${automationType}`;
   const parameters = buildReservationParameters(automationType, reservation as any, trackingUrl);
 
@@ -452,26 +470,51 @@ async function enqueuePlugueChatWaitlist(
 ) {
   const automationType = event === "waitlist_added" ? "waitlist_entry" : "waitlist_called";
 
-  const { data: template } = await supabaseAdmin
+  const callExpiresAt = event === "waitlist_called" ? getWaitlistCallDeadline(waitlist) : null;
+  if (event === "waitlist_called" && !callExpiresAt) {
+    results.whatsapp = "skipped_waitlist_call_inactive";
+    return;
+  }
+
+  const { data: template, error: templateError } = await supabaseAdmin
     .from("pluguechat_automation_templates")
-    .select("template_id, template_name")
+    .select("template_id, template_name, enabled")
     .eq("company_id", waitlist.company_id)
     .eq("type", automationType)
-    .eq("enabled", true)
     .maybeSingle();
 
-  if (!template?.template_id || !waitlist.guest_phone) {
+  if (templateError) throw new Error("Nao foi possivel consultar a automacao da fila.");
+  if (!template?.enabled) {
+    results.whatsapp = "skipped_disabled";
+    return;
+  }
+
+  if (!template?.template_id?.trim() || !(waitlist.guest_phone_e164 ?? waitlist.guest_phone)) {
+    if (callExpiresAt && (waitlist.guest_phone_e164 ?? waitlist.guest_phone)) {
+      // An active but unconfigured template is a durable configuration failure,
+      // not a disabled automation and not a provider send attempt.
+      await enqueuePlugueChatMessage(supabaseAdmin, {
+        company_id: waitlist.company_id, waitlist_id: waitlist.id, waitlist_called_at: waitlist.called_at,
+        phone: waitlist.guest_phone_e164 ?? waitlist.guest_phone, type: automationType,
+        template_id: "", template_name: template.template_name ?? null,
+        parameters: buildWaitlistParameters(automationType, waitlist as unknown as Record<string, unknown>, trackingUrl),
+        priority: PLUGUECHAT_TRANSACTIONAL_PRIORITY,
+        expires_at: callExpiresAt, status: "failed", error_details: "Template da chamada não configurado.",
+        idempotency_key: `pluguechat:waitlist:${waitlist.id}:${automationType}`,
+      });
+    }
     results.whatsapp = "pluguechat_template_not_configured";
     return;
   }
 
-  const phone = normalizePhone(waitlist.guest_phone);
+  const phone = normalizeStoredPhoneE164((waitlist.guest_phone_e164 ?? waitlist.guest_phone));
   const idempotencyKey = `pluguechat:waitlist:${waitlist.id}:${automationType}`;
   const parameters = buildWaitlistParameters(automationType, waitlist as any, trackingUrl);
 
   const result = await enqueuePlugueChatMessage(supabaseAdmin, {
     company_id: waitlist.company_id,
     waitlist_id: waitlist.id,
+    ...(callExpiresAt ? { waitlist_called_at: waitlist.called_at, expires_at: callExpiresAt } : {}),
     phone,
     type: automationType,
     template_id: template.template_id,
@@ -509,7 +552,7 @@ async function sendReservationAutomation(
     .eq("enabled", true)
     .maybeSingle();
 
-  if (!automation?.message_template || !reservation.guest_phone) return;
+  if (!automation?.message_template || !(reservation.guest_phone_e164 ?? reservation.guest_phone)) return;
 
   const deliveryKey = buildReservationDispatchKey(logType, reservation.id);
   const [{ data: existingLogs }, { data: existingQueue }] = await Promise.all([
@@ -534,7 +577,7 @@ async function sendReservationAutomation(
     return;
   }
 
-  const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+  const phone = formatPhoneForWhatsApp((reservation.guest_phone_e164 ?? reservation.guest_phone));
   const claimed = await claimWhatsAppDispatch(supabaseAdmin, {
     deliveryKey,
     companyId: reservation.company_id,
@@ -688,8 +731,14 @@ async function sendWaitlistAutomation(
 
   const automationType = event === "waitlist_added" ? "waitlist_entry" : "waitlist_called";
   const messageType = event === "waitlist_added" ? "waitlist_entry" : "waitlist_called";
+  const callExpiresAt = event === "waitlist_called" ? getWaitlistCallDeadline(waitlist) : null;
+  if (event === "waitlist_called" && !callExpiresAt) {
+    results.whatsapp = "skipped_waitlist_call_inactive";
+    return;
+  }
+  const callQueueContext = callExpiresAt ? { waitlist_id: waitlist.id, waitlist_called_at: waitlist.called_at, expires_at: callExpiresAt } : {};
 
-  const { data: automation } = await supabaseAdmin
+  const { data: automation, error: automationError } = await supabaseAdmin
     .from("automation_settings")
     .select("*")
     .eq("company_id", waitlist.company_id)
@@ -697,7 +746,11 @@ async function sendWaitlistAutomation(
     .eq("enabled", true)
     .maybeSingle();
 
-  if (!automation?.message_template) return;
+  if (automationError) throw new Error("Nao foi possivel consultar a automacao da fila.");
+  if (!automation?.message_template) {
+    results.whatsapp = "skipped_disabled";
+    return;
+  }
 
   const message = automation.message_template
     .replace(/\{nome\}/g, getFirstName(waitlist.guest_name))
@@ -706,7 +759,7 @@ async function sendWaitlistAutomation(
     .replace(/\{link_acompanhamento\}/g, trackingUrl || "")
     .replace(/\{telefone\}/g, waitlist.guest_phone || "");
 
-  const phone = formatPhoneForWhatsApp(waitlist.guest_phone);
+  const phone = formatPhoneForWhatsApp((waitlist.guest_phone_e164 ?? waitlist.guest_phone));
   const deliveryKey = buildWaitlistDispatchKey(messageType, waitlist.id);
   const [{ data: existingLogs }, { data: existingQueue }] = await Promise.all([
     supabaseAdmin
@@ -750,6 +803,7 @@ async function sendWaitlistAutomation(
     results.whatsapp = failure.error.code;
     await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
+      ...callQueueContext,
       phone,
       message,
       type: messageType,
@@ -774,6 +828,7 @@ async function sendWaitlistAutomation(
     results.whatsapp = failure.error.code;
     await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
+      ...callQueueContext,
       phone,
       message,
       type: messageType,
@@ -792,6 +847,7 @@ async function sendWaitlistAutomation(
     results.whatsapp = failure.error.code;
     await recordQueuedFailure(supabaseAdmin, {
       company_id: waitlist.company_id,
+      ...callQueueContext,
       phone,
       message,
       type: messageType,
@@ -803,6 +859,18 @@ async function sendWaitlistAutomation(
       errorDetails: serializeWhatsAppFailure(failure.error),
     });
     return;
+  }
+
+  if (callExpiresAt) {
+    const eligibility = await getWaitlistCallEligibility(supabaseAdmin, {
+      company_id: waitlist.company_id, type: messageType,
+      waitlist_id: waitlist.id, waitlist_called_at: waitlist.called_at,
+    }, "evolution");
+    if (!eligibility.eligible) {
+      results.whatsapp = "skipped_waitlist_call_inactive";
+      await finalizeWhatsAppDispatch(supabaseAdmin, { deliveryKey, status: "failed" });
+      return;
+    }
   }
 
   const sendResult = await sendWhatsAppText(
@@ -846,6 +914,8 @@ async function sendWaitlistAutomation(
 
   await enqueueWhatsAppMessage(supabaseAdmin, {
     company_id: waitlist.company_id,
+    ...callQueueContext,
+    ...(callExpiresAt && !isEvolutionCallFailureRetryable(sendResult.error) ? { queue_status: "failed" as const } : {}),
     phone,
     message,
     type: messageType,
@@ -853,7 +923,7 @@ async function sendWaitlistAutomation(
   });
   await finalizeWhatsAppDispatch(supabaseAdmin, {
     deliveryKey,
-    status: "queued",
+    status: callExpiresAt && !isEvolutionCallFailureRetryable(sendResult.error) ? "failed" : "queued",
     errorDetails: serializedError,
   });
 }

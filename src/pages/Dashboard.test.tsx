@@ -302,7 +302,7 @@ describe('Dashboard — blocos operacionais protegidos', () => {
 
     expect(screen.getByText('Ao Vivo')).toBeInTheDocument();
     expect(screen.getByText('Resumo de Atendimentos')).toBeInTheDocument();
-    expect(screen.getByText('Funil de Conversão')).toBeInTheDocument();
+    expect(screen.getByText('Resultados dos atendimentos')).toBeInTheDocument();
 
     expect(screen.getByText('1.234')).toBeInTheDocument();
     expect(screen.getAllByText('1.345').length).toBeGreaterThanOrEqual(2);
@@ -394,7 +394,7 @@ describe('Dashboard — blocos operacionais protegidos', () => {
 
     expect(screen.getByText('Ao Vivo')).toBeInTheDocument();
     expect(screen.getByText('Resumo de Atendimentos')).toBeInTheDocument();
-    expect(screen.getByText('Funil de Conversão')).toBeInTheDocument();
+    expect(screen.getByText('Resultados dos atendimentos')).toBeInTheDocument();
     expect(screen.getByText('1.234')).toBeInTheDocument();
     expect(screen.getAllByText('5.678').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('Reservas por dia')).not.toBeInTheDocument();
@@ -410,7 +410,7 @@ describe('Dashboard — blocos operacionais protegidos', () => {
     renderDashboard();
 
     expect(screen.queryByText('Resumo de Atendimentos')).not.toBeInTheDocument();
-    expect(screen.getByText('Funil de Conversão')).toBeInTheDocument();
+    expect(screen.getByText('Resultados dos atendimentos')).toBeInTheDocument();
     expect(screen.queryByText('Reservas por dia')).not.toBeInTheDocument();
     expect(screen.getByText('Reservas por empresa')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mensal' })).toBeInTheDocument();

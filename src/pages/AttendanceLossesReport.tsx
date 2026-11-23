@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSearchParams } from 'react-router-dom';
@@ -26,6 +26,8 @@ import {
 import ReportFilterBar from '@/components/reports/ReportFilterBar';
 import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
+import ReportAnalysisPanel from '@/components/reports/ReportAnalysisPanel';
+import ReportRecordsSheet from '@/components/reports/ReportRecordsSheet';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,10 +48,9 @@ import {
 } from '@/lib/attendance-losses-report';
 import type { ReportGranularity } from '@/lib/report-filters';
 import { cn } from '@/lib/utils';
+import { getAttendanceReadings, loadAttendanceInvestigation, type AttendanceInvestigation } from '@/lib/report-investigation';
 
-// The report no longer lists individual reservations, but the RPC contract still
-// requires a valid page window. Asking for the smallest page keeps the response
-// free of personal data we do not render.
+// Individual records are requested only when an investigation is opened.
 const DETAILS_PAGE_SIZE = 1;
 const integerFormatter = new Intl.NumberFormat('pt-BR');
 const decimalFormatter = new Intl.NumberFormat('pt-BR', {
@@ -142,7 +143,8 @@ function ReportSkeleton() {
 }
 
 export default function AttendanceLossesReport() {
-  const { companyId, companyName, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
+  const { companyId, companyName, companyTimeZone, companyTimeZoneResolved, slug } = useCompanySlug();
+  const [investigation, setInvestigation] = useState<AttendanceInvestigation | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const reportFilters = useReportFilters({
     defaultPreset: 'current_month',
@@ -157,6 +159,12 @@ export default function AttendanceLossesReport() {
   const entryMethod: AttendanceEntryMethodFilter = isEntryMethodFilter(entryMethodParam) ? entryMethodParam : 'all';
   const segmentDimension: AttendanceSegmentDimension = isSegmentDimension(segmentParam) ? segmentParam : 'weekday';
   const { dateOnlyRange, rangeError } = reportFilters;
+  useEffect(() => { setInvestigation(null); }, [companyId, dateOnlyRange.from, dateOnlyRange.to, outcome, entryMethod]);
+  const loadInvestigation = useCallback((signal?: AbortSignal) => investigation
+    ? loadAttendanceInvestigation({
+      companyId, periodStart: dateOnlyRange.from, periodEnd: dateOnlyRange.to, outcome, entryMethod,
+    }, investigation, signal)
+    : Promise.resolve([]), [companyId, dateOnlyRange.from, dateOnlyRange.to, outcome, entryMethod, investigation]);
 
   const reportQuery = useAttendanceLossesReport({
     companyId,
@@ -315,13 +323,15 @@ export default function AttendanceLossesReport() {
           <ReportKpiStrip aria-label="Indicadores do período">
             <ReportKpiTile
               label="Reservas no período"
+              onClick={() => setInvestigation({ title: 'Reservas pela data da visita' })}
               value={formatInteger(report.summary.reservations)}
               detail={`${formatInteger(report.summary.reserved_people)} pessoas reservadas`}
-              explanation="Todas as reservas com data agendada dentro do período, no fuso da empresa, independentemente do resultado."
+              explanation="Todas as reservas com data de visita no período e com os filtros selecionados. Pagamentos expirados ou cancelados entram em Cancelamentos; demais pendências entram em abertas."
               icon={Users}
             />
             <ReportKpiTile
               label="Comparecimento"
+              onClick={() => setInvestigation({ title: 'Reservas com comparecimento', outcome: 'attended' })}
               value={formatPercent(report.summary.attendance_rate)}
               detail={`${formatInteger(report.summary.attended)} reservas · ${formatInteger(report.summary.attended_people)} pessoas presentes`}
               explanation="Comparecimentos divididos por comparecimentos + no-shows. Reservas canceladas ou ainda abertas ficam fora da base."
@@ -332,6 +342,7 @@ export default function AttendanceLossesReport() {
             />
             <ReportKpiTile
               label="No-show"
+              onClick={() => setInvestigation({ title: 'Reservas com no-show', outcome: 'no_show' })}
               value={formatPercent(report.summary.no_show_rate)}
               detail={`${formatInteger(report.summary.no_show)} reservas sem comparecimento`}
               explanation="No-shows divididos por comparecimentos + no-shows. Canceladas e abertas ficam fora da taxa."
@@ -349,13 +360,15 @@ export default function AttendanceLossesReport() {
             />
             <ReportKpiTile
               label="Cancelamentos"
+              onClick={() => setInvestigation({ title: 'Reservas canceladas', outcome: 'cancelled' })}
               value={formatInteger(report.summary.cancelled)}
               detail={`Taxa combinada de perdas: ${formatPercent(report.summary.loss_rate)}`}
-              explanation="Reservas canceladas no período. A taxa de perdas soma cancelamentos e no-shows sobre o total de reservas."
+              explanation="Reservas com visita no período que estão canceladas, incluindo pagamentos expirados/cancelados. Taxa de perdas: (cancelamentos + no-shows) ÷ (comparecimentos + no-shows + cancelamentos); abertas ficam fora."
               icon={Clock3}
             />
             <ReportKpiTile
               label="Pessoas em perdas"
+              onClick={() => setInvestigation({ title: 'Reservas que compõem as pessoas em perdas', outcome: 'losses' })}
               value={formatInteger(report.summary.lost_people)}
               detail="Ligadas a no-shows ou cancelamentos"
               explanation="Soma das pessoas das reservas que viraram no-show ou cancelamento. Não estima receita nem assentos não revendidos."
@@ -363,6 +376,11 @@ export default function AttendanceLossesReport() {
             />
           </ReportKpiStrip>
 
+          <ReportAnalysisPanel insights={getAttendanceReadings(report)}>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Base: data da visita de {formatDateOnly(dateOnlyRange.from)} a {formatDateOnly(dateOnlyRange.to)}, fuso {companyTimeZone}.
+            {' '}Os filtros de resultado e forma de entrada se aplicam a todos os volumes. Selecione um indicador ou segmento para consultar suas reservas.
+          </p>
           <Card className="border-border shadow-sm">
             <CardHeader className="gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -512,7 +530,7 @@ export default function AttendanceLossesReport() {
                     {selectedSegmentRows.map((row: AttendanceLossesSegment) => {
                       const max = Math.max(...selectedSegmentRows.map((item) => item.reservations), 1);
                       return (
-                        <div key={row.key} className="rounded-lg bg-muted/40 p-3">
+                        <button key={row.key} type="button" className="block w-full rounded-lg bg-muted/40 p-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setInvestigation({ title: `Reservas: ${row.label}`, dimension: segmentDimension, segmentKey: row.key })} aria-label={`Ver ${row.reservations} reservas de ${row.label}`}>
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-medium text-foreground">{row.label}</p>
@@ -528,7 +546,7 @@ export default function AttendanceLossesReport() {
                           <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                             <div className="h-full rounded-full bg-primary/70" style={{ width: `${(row.reservations / max) * 100}%` }} />
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -551,7 +569,7 @@ export default function AttendanceLossesReport() {
                 </div>
                 <div className="space-y-3">
                   {report.cancellation_curve.buckets.map((bucket) => (
-                    <div key={bucket.key}>
+                    <button key={bucket.key} type="button" className="block w-full rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setInvestigation({ title: `Cancelamentos: ${bucket.label}`, cancellationBucket: bucket.key })} aria-label={`Ver ${bucket.reservations} cancelamentos: ${bucket.label}`}>
                       <div className="flex items-center justify-between gap-3 text-xs">
                         <span className="text-foreground">{bucket.label}</span>
                         <span className="tabular-nums text-muted-foreground">{formatInteger(bucket.reservations)} · {formatPercent(bucket.percentage)}</span>
@@ -559,15 +577,26 @@ export default function AttendanceLossesReport() {
                       <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
                         <div className="h-full rounded-full bg-warning" style={{ width: `${Math.max(0, Math.min(100, bucket.percentage))}%` }} />
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardContent>
             </Card>
           </div>
+          </ReportAnalysisPanel>
         </>
       )}
 
+      {companyId && investigation && (
+        <ReportRecordsSheet
+          open onOpenChange={open => { if (!open) setInvestigation(null); }}
+          title={investigation.title}
+          description={`Visitas de ${formatDateOnly(dateOnlyRange.from)} a ${formatDateOnly(dateOnlyRange.to)} · ${companyTimeZone} · ${OUTCOME_LABELS[outcome]} · ${ENTRY_METHOD_LABELS[entryMethod]}. A lista mostra reservas; a quantidade de pessoas é exibida em cada registro.`}
+          companyId={companyId} slug={slug}
+          scopeKey={['attendance', dateOnlyRange.from, dateOnlyRange.to, outcome, entryMethod, report?.meta.generated_at, investigation]}
+          loadRecords={loadInvestigation}
+        />
+      )}
     </ReportShell>
   );
 }

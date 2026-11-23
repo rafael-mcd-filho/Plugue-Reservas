@@ -28,6 +28,7 @@ import {
 import type { DateRange } from 'react-day-picker';
 import { toast } from 'sonner';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
+import QueryFeedback from '@/components/QueryFeedback';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -188,10 +189,15 @@ export default function Affiliates() {
   const { companyId, companyName, slug } = useCompanySlug();
   const [activeTab, setActiveTab] = useState<'links' | 'reports'>('links');
   const [reportRange, setReportRange] = useState<DateRange | undefined>(createDefaultRange);
-  const [reportLinkFilter, setReportLinkFilter] = useState<string>(ALL_LINKS_FILTER);
+  const [reportLinkSelection, setReportLinkSelection] = useState({ companyId, value: ALL_LINKS_FILTER });
+  const reportLinkFilter = reportLinkSelection.companyId === companyId ? reportLinkSelection.value : ALL_LINKS_FILTER;
+  const setReportLinkFilter = (value: string) => setReportLinkSelection({ companyId, value });
   const [formDialogOpen, setFormDialogOpen] = useState(false);
   const [formState, setFormState] = useState<AffiliateLinkFormState>(createFormState());
-  const [selectedLink, setSelectedLink] = useState<AffiliateLinkStatsRow | null>(null);
+  const [linkSelection, setLinkSelection] = useState<{
+    scope: string;
+    link: AffiliateLinkStatsRow;
+  } | null>(null);
 
   const effectiveReportRange = useMemo(() => {
     if (!reportRange?.from) return undefined;
@@ -203,8 +209,10 @@ export default function Affiliates() {
 
   const rangeStartAt = effectiveReportRange?.from ? startOfDay(effectiveReportRange.from).toISOString() : null;
   const rangeEndAt = effectiveReportRange?.to ? endOfDay(effectiveReportRange.to).toISOString() : null;
+  const selectionScope = JSON.stringify([companyId, rangeStartAt, rangeEndAt]);
+  const setSelectedLink = (link: AffiliateLinkStatsRow | null) => setLinkSelection(link ? { scope: selectionScope, link } : null);
 
-  const { data: linkStats = [], isLoading } = useQuery({
+  const linkStatsQuery = useQuery({
     queryKey: ['affiliate-link-stats', companyId, rangeStartAt, rangeEndAt],
     queryFn: async () => {
       const { data, error } = await (supabase as any).rpc('get_affiliate_link_stats', {
@@ -225,12 +233,16 @@ export default function Affiliates() {
       }));
     },
     enabled: !!companyId,
-    placeholderData: (previousData) => previousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+  const { data: linkStats = [] } = linkStatsQuery;
+  const hasLinkStatsData = linkStatsQuery.data !== undefined;
+  const selectedLink = linkSelection?.scope === selectionScope
+    ? linkStats.find((link) => link.affiliate_link_id === linkSelection.link.affiliate_link_id) ?? null
+    : null;
 
-  const { data: dailyStats = [] } = useQuery({
+  const dailyStatsQuery = useQuery({
     queryKey: ['affiliate-link-daily-stats', companyId, rangeStartAt, rangeEndAt, reportLinkFilter],
     queryFn: async () => {
       const { data, error } = await (supabase as any).rpc('get_affiliate_link_daily_stats', {
@@ -251,12 +263,12 @@ export default function Affiliates() {
       }));
     },
     enabled: !!companyId && !!effectiveReportRange?.from && !!effectiveReportRange?.to,
-    placeholderData: (previousData) => previousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+  const { data: dailyStats = [] } = dailyStatsQuery;
 
-  const { data: selectedLinkReservations = [], isLoading: reservationsLoading } = useQuery({
+  const reservationsQuery = useQuery({
     queryKey: ['affiliate-link-reservations', companyId, selectedLink?.affiliate_link_id, rangeStartAt, rangeEndAt],
     queryFn: async () => {
       const query = supabase
@@ -273,17 +285,18 @@ export default function Affiliates() {
         : await withStart;
 
       if (error) throw error;
-      return (data ?? []) as AffiliateReservationRow[];
+      return (data ?? []) as unknown as AffiliateReservationRow[];
     },
     enabled: !!companyId && !!selectedLink?.affiliate_link_id,
   });
+  const { data: selectedLinkReservations = [], isLoading: reservationsLoading } = reservationsQuery;
 
   const saveLinkMutation = useMutation({
     mutationFn: async () => {
       const normalizedCode = normalizeAffiliateLinkCode(formState.code);
 
       if (!formState.reference_name.trim()) {
-        throw new Error('Informe o nome de referência do filiado.');
+        throw new Error('Informe o nome de referência do parceiro.');
       }
 
       if (!isValidAffiliateLinkCode(normalizedCode)) {
@@ -416,14 +429,6 @@ export default function Affiliates() {
     setFormDialogOpen(true);
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-[320px] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="space-y-6">
@@ -433,19 +438,21 @@ export default function Affiliates() {
             <div className="max-w-2xl space-y-3">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-white/70">
                 <Sparkles className="h-3.5 w-3.5" />
-                Módulo Filiados
+                {companyName}
               </div>
               <div className="space-y-2">
-                <h1 className="text-2xl font-semibold tracking-tight">{companyName}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">Parceiros</h1>
                 <p className="max-w-xl text-sm leading-relaxed text-white/72">
-                  Crie links de indicação por filiado, acompanhe visitas e veja quais reservas vieram de cada origem sem mexer no fluxo principal de reservas.
+                  Crie links de indicação por parceiro, acompanhe visitas e veja quais reservas vieram de cada origem sem mexer no fluxo principal de reservas.
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {companyId && <QueryFeedback queries={[{ label: 'os parceiros', ...linkStatsQuery }]} />}
+
+        {hasLinkStatsData && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             icon={Link2}
             label="Links ativos"
@@ -462,15 +469,15 @@ export default function Affiliates() {
             icon={Users}
             label="Reservas atribuídas"
             value={formatShortNumber(totals.totalReservations)}
-            description="Reservas criadas com origem afiliada."
+            description="Reservas criadas pelos links dos parceiros."
           />
           <MetricCard
             icon={TrendingUp}
             label="Pessoas reservadas"
             value={formatShortNumber(totals.totalPartySize)}
-            description="Soma das pessoas em reservas originadas por filiados."
+            description="Soma das pessoas em reservas originadas por parceiros."
           />
-        </div>
+        </div>}
 
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'links' | 'reports')} className="space-y-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -493,7 +500,7 @@ export default function Affiliates() {
                 <div>
                   <h2 className="text-base font-semibold">Links de indicação</h2>
                   <p className="text-sm text-muted-foreground">
-                    Cada link representa a origem de um filiado. Quando a reserva nasce desse acesso, a origem fica registrada.
+                    Cada link representa a origem de um parceiro. Quando a reserva nasce desse acesso, a origem fica registrada.
                   </p>
                 </div>
                 <Button variant="outline" className="gap-2" onClick={handleOpenCreate}>
@@ -505,7 +512,7 @@ export default function Affiliates() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-center">Filiado</TableHead>
+                    <TableHead className="text-center">Parceiro</TableHead>
                     <TableHead className="w-[110px] text-center">Visitas</TableHead>
                     <TableHead className="w-[110px] text-center">Reservas</TableHead>
                     <TableHead className="w-[110px] text-center">Conversão</TableHead>
@@ -515,7 +522,7 @@ export default function Affiliates() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedLinks.length === 0 ? (
+                  {!hasLinkStatsData ? null : sortedLinks.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
                         Nenhum link criado ainda.
@@ -563,13 +570,13 @@ export default function Affiliates() {
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="flex justify-center gap-2">
-                              <Button type="button" variant="outline" size="icon" onClick={() => void handleCopyLink(link.code)}>
+                              <Button type="button" variant="outline" size="icon" aria-label={`Copiar link de ${link.reference_name}`} onClick={() => void handleCopyLink(link.code)}>
                                 <Copy className="h-4 w-4" />
                               </Button>
-                              <Button type="button" variant="outline" size="icon" onClick={() => setSelectedLink(link)}>
+                              <Button type="button" variant="outline" size="icon" aria-label={`Ver reservas de ${link.reference_name}`} onClick={() => setSelectedLink(link)}>
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              <Button type="button" variant="outline" size="icon" onClick={() => handleOpenEdit(link)}>
+                              <Button type="button" variant="outline" size="icon" aria-label={`Editar link de ${link.reference_name}`} onClick={() => handleOpenEdit(link)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
                             </div>
@@ -587,9 +594,9 @@ export default function Affiliates() {
             <div className="rounded-2xl border border-border bg-card shadow-sm">
               <div className="flex flex-col gap-4 border-b border-border px-5 py-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                  <h2 className="text-base font-semibold">Performance por filiado</h2>
+                  <h2 className="text-base font-semibold">Performance por parceiro</h2>
                   <p className="text-sm text-muted-foreground">
-                    Gráfico diário de reservas e pessoas por link. A origem do relatório é o próprio link do filiado.
+                    Gráfico diário de reservas e pessoas por link. A origem do relatório é o próprio link do parceiro.
                   </p>
                 </div>
 
@@ -621,8 +628,9 @@ export default function Affiliates() {
                     </div>
                   </div>
 
+                  {companyId && effectiveReportRange && <QueryFeedback queries={[{ label: 'o gráfico dos parceiros', ...dailyStatsQuery }]} className="mb-3" />}
                   <div className="h-[320px]">
-                    {chartData.length === 0 ? (
+                    {dailyStatsQuery.data === undefined ? null : chartData.length === 0 ? (
                       <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">
                         Sem eventos no período selecionado.
                       </div>
@@ -659,7 +667,7 @@ export default function Affiliates() {
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    {sortedLinks.length === 0 ? (
+                    {!hasLinkStatsData ? null : sortedLinks.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                         Crie o primeiro link para começar a medir.
                       </div>
@@ -700,7 +708,7 @@ export default function Affiliates() {
       <Dialog open={formDialogOpen} onOpenChange={setFormDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{formState.id ? 'Editar link de filiado' : 'Novo link de filiado'}</DialogTitle>
+            <DialogTitle>{formState.id ? 'Editar link de parceiro' : 'Novo link de parceiro'}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -806,6 +814,8 @@ export default function Affiliates() {
                 </DialogDescription>
               </DialogHeader>
 
+              <QueryFeedback queries={[{ label: 'os parceiros', ...linkStatsQuery }, { label: 'as reservas deste parceiro', ...reservationsQuery }]} />
+
               <div className="grid gap-4 md:grid-cols-4">
                 <MiniMetric label="Visitas" value={formatShortNumber(selectedLink.visits)} />
                 <MiniMetric label="Reservas" value={formatShortNumber(selectedLink.reservations)} />
@@ -842,7 +852,7 @@ export default function Affiliates() {
                           <Loader2 className="mx-auto h-4 w-4 animate-spin" />
                         </TableCell>
                       </TableRow>
-                    ) : selectedLinkReservations.length === 0 ? (
+                    ) : reservationsQuery.data === undefined ? null : selectedLinkReservations.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                           Nenhuma reserva originada por este link no período atual.

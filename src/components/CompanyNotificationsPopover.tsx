@@ -32,7 +32,7 @@ export default function CompanyNotificationsPopover() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">Notificações</p>
-              <p className="text-xs text-muted-foreground">Comunicados do superadmin para esta empresa</p>
+              <p className="text-xs text-muted-foreground">Avisos para esta unidade</p>
             </div>
             <Button
               variant="ghost"

@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import { getReservationAsaasCredentials } from "../_shared/reservation-asaas-config.ts";
 import {
   deleteAsaasPayment,
   deleteAsaasPaymentLink,
@@ -9,6 +10,7 @@ import {
   getAsaasRefundedValue,
   isAsaasPaidStatus,
   listAsaasPayments,
+  type AsaasCredentials,
 } from "../_shared/asaas.ts";
 import {
   buildPaymentLinkExternalReference,
@@ -17,19 +19,8 @@ import {
   jsonResponse,
   markReservationPaymentProviderOutcome,
   recordPaymentEvent,
+  recordReservationPaymentInstallment,
 } from "../_shared/reservation-payments.ts";
-
-async function getApiToken(supabaseAdmin: any, companyId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("company_asaas_configs")
-    .select("api_token, status")
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "configured") return null;
-  return data.api_token as string;
-}
 
 async function recordRetryableFailure(
   supabaseAdmin: any,
@@ -90,7 +81,7 @@ async function expirePaymentLocally(
   return true;
 }
 
-async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: string) {
+async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: AsaasCredentials) {
   if (payment.asaas_payment_id) return payment;
 
   const externalReference = payment.payment_link_external_reference
@@ -121,15 +112,9 @@ async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, pay
   }
 }
 
-async function getAsaasPaymentSnapshot(apiToken: string, paymentId: string) {
-  const asaasStatus = await getAsaasPaymentStatus(apiToken, paymentId);
-  let asaasPayment = null;
-
-  try {
-    asaasPayment = await getAsaasPayment(apiToken, paymentId);
-  } catch (error) {
-    console.warn("Failed to retrieve full Asaas payment during expiration", error);
-  }
+async function getAsaasPaymentSnapshot(apiToken: AsaasCredentials, paymentId: string) {
+  const asaasPayment = await getAsaasPayment(apiToken, paymentId);
+  const asaasStatus = asaasPayment.status ?? await getAsaasPaymentStatus(apiToken, paymentId);
 
   return {
     asaasStatus: asaasPayment?.status ?? asaasStatus,
@@ -166,6 +151,7 @@ Deno.serve(async (req) => {
       expired_cancelled_in_asaas: 0,
       confirmed: 0,
       provider_outcomes: 0,
+      installment_manual_review: 0,
       failed: 0,
     };
 
@@ -186,7 +172,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const apiToken = await getApiToken(supabaseAdmin, payment.company_id);
+        const apiToken = await getReservationAsaasCredentials(supabaseAdmin, payment);
         if (!apiToken) {
           await recordRetryableFailure(
             supabaseAdmin,
@@ -198,14 +184,21 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const providerLinkedPayment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
+        let providerLinkedPayment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
 
         let asaasStatus: string | null = null;
         if (providerLinkedPayment.asaas_payment_id) {
           const snapshot = await getAsaasPaymentSnapshot(apiToken, providerLinkedPayment.asaas_payment_id);
           asaasStatus = snapshot.asaasStatus;
+          providerLinkedPayment = await recordReservationPaymentInstallment(supabaseAdmin,providerLinkedPayment,snapshot.asaasPayment,"expire_job");
 
           const providerOutcome = getAsaasExternalPaymentOutcome(null, asaasStatus, snapshot.asaasPayment);
+          if (providerLinkedPayment.metadata?.asaas_installment_id && (providerOutcome || !isAsaasPaidStatus(asaasStatus))) {
+            await recordRetryableFailure(supabaseAdmin,providerLinkedPayment.id,now,
+              "Parcelamento requer conferencia no Asaas; nenhuma parcela foi cancelada automaticamente");
+            summary.installment_manual_review += 1;
+            continue;
+          }
           if (providerOutcome) {
             await markReservationPaymentProviderOutcome(supabaseAdmin, providerLinkedPayment, providerOutcome, {
               source: "expire_job",
@@ -225,6 +218,13 @@ Deno.serve(async (req) => {
             summary.confirmed += 1;
             continue;
           }
+        }
+
+        if (providerLinkedPayment.metadata?.asaas_installment_id) {
+          await recordRetryableFailure(supabaseAdmin,providerLinkedPayment.id,now,
+            "Parcelamento requer conferencia no Asaas; nenhuma parcela foi cancelada automaticamente");
+          summary.installment_manual_review += 1;
+          continue;
         }
 
         const expired = await expirePaymentLocally(

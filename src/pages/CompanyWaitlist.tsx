@@ -1,8 +1,9 @@
 import { formatPhone, getPhoneLookupVariants, normalizePhoneE164, isValidPhone } from '@/lib/phone';
-import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
+import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bell,
+  AlertCircle,
   CalendarDays,
   CheckCircle2,
   Clock3,
@@ -13,6 +14,7 @@ import {
   Mail,
   Phone,
   Plus,
+  RotateCcw,
   Save,
   Trash2,
   UserCheck,
@@ -23,6 +25,7 @@ import { endOfDay, format, formatDistanceToNow, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
 import { ReservationStatusBadge } from '@/components/StatusBadge';
+import QueryFeedback from '@/components/QueryFeedback';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -59,6 +62,7 @@ import {
   WAITLIST_CALL_TIMEOUT_MINUTES,
 } from '@/lib/waitlist';
 import { useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
+import { getWaitlistCallNotifications, retryWaitlistCallNotification, type WaitlistCallFailure } from '@/lib/waitlist-call-notifications';
 import { toast } from 'sonner';
 
 interface WaitlistEntry {
@@ -282,7 +286,7 @@ export default function CompanyWaitlist() {
     [contactHistoryEntry?.guest_email],
   );
 
-  const { data: entries = [], isLoading } = useQuery({
+  const entriesQuery = useQuery({
     queryKey: ['waitlist', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -298,12 +302,51 @@ export default function CompanyWaitlist() {
     enabled: !!companyId,
     refetchInterval: 10000,
   });
+  const { data: entries = [], isLoading } = entriesQuery;
+  const hasEntriesData = entriesQuery.data !== undefined;
+  const noticeActionLocks = useRef(new Set<string>());
+  const currentCompanyId = useRef(companyId);
+  currentCompanyId.current = companyId;
+  const callNotificationsQuery = useQuery({
+    queryKey: ['waitlist-call-notifications', companyId],
+    queryFn: ({ signal }) => getWaitlistCallNotifications(companyId!, signal),
+    enabled: !!companyId && entries.some((entry) => entry.status === 'called'),
+    refetchInterval: 10000,
+    retry: false,
+  });
+  const callFailureById = useMemo(() => {
+    const snapshot = callNotificationsQuery.data;
+    if (callNotificationsQuery.isError || !snapshot?.automation_enabled || snapshot.company_id !== companyId) return new Map<string, WaitlistCallFailure>();
+    return new Map(snapshot.failures.map((failure) => [failure.waitlist_id, failure]));
+  }, [callNotificationsQuery.data, callNotificationsQuery.isError, companyId]);
+  const retryCallNoticeMutation = useMutation({
+    mutationFn: ({ scopeCompanyId, waitlistId, calledAt }: { scopeCompanyId: string; waitlistId: string; calledAt: string }) => (
+      retryWaitlistCallNotification(scopeCompanyId, waitlistId, calledAt)
+    ),
+    onSuccess: (snapshot, variables) => {
+      qc.setQueryData(['waitlist-call-notifications', variables.scopeCompanyId], snapshot);
+    },
+    onError: (_error, variables) => {
+      if (currentCompanyId.current === variables.scopeCompanyId) toast.error('Não foi possível tentar o aviso novamente. Atualize a fila e tente outra vez.');
+    },
+    onSettled: (_snapshot, _error, variables) => {
+      void qc.invalidateQueries({ queryKey: ['waitlist-call-notifications', variables.scopeCompanyId], exact: true });
+    },
+  });
+  const retryCallNotice = async (entry: WaitlistEntry) => {
+    const failure = callFailureById.get(entry.id);
+    const key = `${companyId}:${entry.id}`;
+    if (!companyId || !entry.called_at || entry.status !== 'called' || !failure?.can_retry
+      || Date.parse(failure.called_at) !== Date.parse(entry.called_at) || hasWaitlistCallExpired(entry.called_at)
+      || noticeActionLocks.current.has(key)) return;
+    noticeActionLocks.current.add(key);
+    try {
+      await retryCallNoticeMutation.mutateAsync({ scopeCompanyId: companyId, waitlistId: entry.id, calledAt: entry.called_at });
+    } catch { /* The original failure stays visible; the mutation reports the request error. */ }
+    finally { noticeActionLocks.current.delete(key); }
+  };
 
-  const {
-    data: contactHistoryReservations = [],
-    isLoading: contactHistoryLoading,
-    error: contactHistoryError,
-  } = useQuery({
+  const contactHistoryQuery = useQuery({
     queryKey: ['waitlist-contact-history', companyId, contactHistoryPhone, contactHistoryEmail],
     queryFn: async () => {
       if (!companyId) {
@@ -365,10 +408,11 @@ export default function CompanyWaitlist() {
     },
     enabled: !!companyId && !!contactHistoryEntry && (!!contactHistoryPhone || !!contactHistoryEmail),
   });
+  const { data: contactHistoryReservations = [], isLoading: contactHistoryLoading } = contactHistoryQuery;
 
   const todayKey = format(new Date(), 'yyyy-MM-dd');
 
-  const { data: seatedTodayEntries = [] } = useQuery({
+  const seatedTodayQuery = useQuery({
     queryKey: ['waitlist-seated-today', companyId, todayKey],
     queryFn: async () => {
       const now = new Date();
@@ -389,6 +433,8 @@ export default function CompanyWaitlist() {
     enabled: !!companyId,
     refetchInterval: 30000,
   });
+  const { data: seatedTodayEntries = [] } = seatedTodayQuery;
+  const hasSeatedTodayData = seatedTodayQuery.data !== undefined;
 
   useEffect(() => {
     if (!seatEntry) return;
@@ -549,12 +595,13 @@ export default function CompanyWaitlist() {
     }
 
     const whatsappResult = data?.results?.whatsapp;
-    if (!whatsappResult || whatsappResult === 'sent') {
+    if (!whatsappResult || whatsappResult === 'sent' || whatsappResult === 'pluguechat_queued'
+      || whatsappResult === 'automation_disabled' || whatsappResult === 'skipped_automation_disabled') {
       return;
     }
 
     if (whatsappResult === 'skipped_duplicate') {
-      toast.message('A automação foi ignorada porque já houve um envio recente para esse WhatsApp.');
+      if (event !== 'waitlist_called') toast.message('A automação foi ignorada porque já houve um envio recente para esse WhatsApp.');
       return;
     }
 
@@ -562,14 +609,21 @@ export default function CompanyWaitlist() {
   };
 
   const handleCallEntry = async (entry: WaitlistEntry) => {
-    await updateStatus.mutateAsync({ id: entry.id, status: 'called' });
-
+    const scopeCompanyId = companyId;
+    const key = `${scopeCompanyId}:${entry.id}`;
+    if (!scopeCompanyId || entry.status !== 'waiting' || noticeActionLocks.current.has(key)) return;
+    noticeActionLocks.current.add(key);
     try {
-      await triggerWaitlistAutomation('waitlist_called', entry.id);
-    } catch (error) {
-      console.warn('Waitlist call notification error:', error);
-      toast.error('O cliente foi chamado, mas a mensagem do WhatsApp não foi disparada.');
-    }
+      await updateStatus.mutateAsync({ id: entry.id, status: 'called' });
+      try {
+        await triggerWaitlistAutomation('waitlist_called', entry.id);
+      } catch {
+        if (currentCompanyId.current === scopeCompanyId) toast.error('Não foi possível consultar o resultado do aviso. A chamada foi mantida.');
+      } finally {
+        void qc.invalidateQueries({ queryKey: ['waitlist-call-notifications', scopeCompanyId], exact: true });
+      }
+    } catch { /* updateStatus already reports a failed call registration. */ }
+    finally { noticeActionLocks.current.delete(key); }
   };
 
   const seatEntryMutation = useMutation({
@@ -838,7 +892,7 @@ export default function CompanyWaitlist() {
             size="sm"
             className="gap-2 rounded-md bg-card px-3"
             onClick={callNext}
-            disabled={waitingCount === 0}
+            disabled={!hasEntriesData || entriesQuery.isError || waitingCount === 0}
           >
             <Bell className="h-4 w-4" />
             Chamar próximo
@@ -850,13 +904,15 @@ export default function CompanyWaitlist() {
         </div>
       </div>
 
+      {companyId && <QueryFeedback queries={[{ label: 'a fila', ...entriesQuery }, { label: 'os atendimentos de hoje', ...seatedTodayQuery }]} />}
+
       <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
         <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-semibold text-foreground">Fila atual</h3>
               <span className="inline-flex h-6 items-center rounded-md bg-primary-soft px-2 text-xs font-semibold text-primary">
-                {waitingCount} aguardando
+                {hasEntriesData ? waitingCount : '—'} aguardando
               </span>
               {calledCount > 0 && (
                 <span className="inline-flex h-6 items-center rounded-md bg-info-soft px-2 text-xs font-semibold text-info">
@@ -865,7 +921,7 @@ export default function CompanyWaitlist() {
               )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Espera média de hoje: {seatedTodayStats.avgWaitMin}min
+              Espera média de hoje: {hasSeatedTodayData ? `${seatedTodayStats.avgWaitMin}min` : '—'}
             </p>
           </div>
 
@@ -877,15 +933,8 @@ export default function CompanyWaitlist() {
               onClick={() => setShowSeatedToday(true)}
             >
               <UserCheck className="h-3.5 w-3.5 text-success" />
-              Sentados hoje: <span className="font-semibold text-foreground">{seatedTodayStats.seated}</span>
+              Sentados hoje: <span className="font-semibold text-foreground">{hasSeatedTodayData ? seatedTodayStats.seated : '—'}</span>
             </button>
-            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-background px-2.5 text-xs text-muted-foreground ring-1 ring-black/[0.05]">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-              </span>
-              Atualizado agora
-            </span>
           </div>
         </div>
 
@@ -896,7 +945,7 @@ export default function CompanyWaitlist() {
                 <Skeleton key={item} className="h-14 w-full rounded-md" />
               ))}
             </div>
-          ) : entries.length === 0 ? (
+          ) : !hasEntriesData ? null : entries.length === 0 ? (
             <div className="flex min-h-[240px] flex-col items-center justify-center px-6 py-12 text-center">
               <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
                 <Users className="h-6 w-6 opacity-60" />
@@ -917,6 +966,13 @@ export default function CompanyWaitlist() {
                 const calledExpired = entry.status === 'called'
                   ? hasWaitlistCallExpired(entry.called_at, nowMs)
                   : false;
+                const callFailure = entry.status === 'called' && entry.called_at
+                  && Date.parse(callFailureById.get(entry.id)?.called_at ?? '') === Date.parse(entry.called_at)
+                  ? callFailureById.get(entry.id)
+                  : undefined;
+                const retryingNotice = retryCallNoticeMutation.isPending
+                  && retryCallNoticeMutation.variables?.scopeCompanyId === companyId
+                  && retryCallNoticeMutation.variables?.waitlistId === entry.id;
                 const rowAccent = entry.status === 'called'
                   ? (calledExpired ? 'border-l-destructive' : 'border-l-info')
                   : entry.status === 'waiting'
@@ -986,6 +1042,30 @@ export default function CompanyWaitlist() {
                             {calledExpired
                               ? `Tempo esgotado · ${formatWaitlistCountdown(calledRemainingMs)}`
                               : `Tempo restante ${formatWaitlistCountdown(calledRemainingMs)} de ${WAITLIST_CALL_TIMEOUT_MINUTES}:00`}
+                          </div>
+                        )}
+
+                        {callFailure && (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs" role="alert">
+                            <span className="inline-flex items-center gap-1.5 font-medium text-destructive">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              Falha ao enviar o WhatsApp
+                            </span>
+                            <button
+                              type="button"
+                              disabled={!callFailure.can_retry || calledExpired || retryingNotice || callNotificationsQuery.isFetching}
+                              aria-label={`Tentar envio novamente para ${entry.guest_name}`}
+                              title={calledExpired ? 'O prazo da chamada terminou.' : !callFailure.can_retry ? 'Uma nova tentativa ainda não está disponível.' : 'Repetir somente o aviso, sem reiniciar a chamada ou o prazo.'}
+                              className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={(event) => {
+                                stopRowAction(event);
+                                void retryCallNotice(entry);
+                              }}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {retryingNotice ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                              {retryingNotice ? 'Tentando...' : 'Tentar novamente'}
+                            </button>
                           </div>
                         )}
 
@@ -1098,13 +1178,17 @@ export default function CompanyWaitlist() {
           <DialogHeader>
             <DialogTitle>Sentados hoje</DialogTitle>
             <DialogDescription>
-              {seatedTodayStats.seated > 0
+              {!hasSeatedTodayData
+                ? `Consulte os atendimentos de ${format(new Date(), 'dd/MM')}.`
+                : seatedTodayStats.seated > 0
                 ? `${seatedTodayStats.seated} ${seatedTodayStats.seated === 1 ? 'cliente sentado' : 'clientes sentados'} em ${format(new Date(), 'dd/MM')} · ${seatedTodayStats.totalPeople} ${seatedTodayStats.totalPeople === 1 ? 'pessoa' : 'pessoas'}`
                 : `Nenhum cliente sentado em ${format(new Date(), 'dd/MM')}`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
+            <QueryFeedback queries={[{ label: 'os atendimentos de hoje', ...seatedTodayQuery }]} />
+            {hasSeatedTodayData && <>
             <div className="grid grid-cols-3 gap-2.5">
               <div className="rounded-xl border border-success/20 bg-success-soft/50 p-3">
                 <div className="flex items-center gap-1.5 text-success">
@@ -1206,6 +1290,7 @@ export default function CompanyWaitlist() {
                 })}
               </div>
             )}
+            </>}
           </div>
         </DialogContent>
       </Dialog>
@@ -1548,6 +1633,7 @@ export default function CompanyWaitlist() {
         <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-3xl overflow-x-hidden overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Histórico do contato</DialogTitle>
+            <DialogDescription className="sr-only">Reservas deste contato nesta unidade.</DialogDescription>
           </DialogHeader>
 
           {contactHistoryEntry && (
@@ -1571,6 +1657,9 @@ export default function CompanyWaitlist() {
                 </p>
               </div>
 
+              {(contactHistoryPhone || contactHistoryEmail) && (
+                <QueryFeedback queries={[{ label: 'o histórico deste contato', ...contactHistoryQuery }]} />
+              )}
               {contactHistoryLoading ? (
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1582,10 +1671,8 @@ export default function CompanyWaitlist() {
                     <Skeleton key={item} className="h-28 w-full rounded-2xl" />
                   ))}
                 </div>
-              ) : contactHistoryError ? (
-                <div className="rounded-2xl border border-destructive/20 bg-destructive-soft p-4 text-sm text-destructive">
-                  Nao foi possivel carregar o historico deste contato.
-                </div>
+              ) : contactHistoryQuery.data === undefined && (contactHistoryPhone || contactHistoryEmail) ? (
+                null
               ) : contactHistoryReservations.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-muted/10 p-8 text-center">
                   <p className="text-base font-semibold text-foreground">Nenhuma reserva encontrada</p>

@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useReportFilters } from './useReportFilters';
 
 function createWrapper(initialEntry: string) {
@@ -11,6 +11,7 @@ function createWrapper(initialEntry: string) {
 }
 
 describe('useReportFilters', () => {
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
   it('hydrates custom period, granularity and comparison from the URL', () => {
     const { result } = renderHook(() => useReportFilters(), {
       wrapper: createWrapper('/relatorio?period=custom&from=2026-08-01&to=2026-08-20&granularity=week&compare=0'),
@@ -51,5 +52,32 @@ describe('useReportFilters', () => {
     });
 
     expect(result.current.rangeError).toContain('366');
+  });
+
+  it('moves rolling windows at the unit midnight while preserving equal comparison lengths', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-27T02:59:59.000Z'));
+    const { result } = renderHook(() => useReportFilters({ timeZone: 'America/Fortaleza' }), {
+      wrapper: createWrapper('/relatorio'),
+    });
+    expect(result.current.dateOnlyRange).toEqual({ from: '2026-08-28', to: '2026-09-26' });
+    expect(result.current.comparisonDateOnlyRange).toEqual({ from: '2026-07-29', to: '2026-08-27' });
+    act(() => { vi.advanceTimersByTime(1_020); });
+    expect(result.current.dateOnlyRange).toEqual({ from: '2026-08-29', to: '2026-09-27' });
+    expect(result.current.comparisonDateOnlyRange).toEqual({ from: '2026-07-30', to: '2026-08-28' });
+  });
+
+  it('refreshes today on window focus after a suspended tab and resolves a changed unit time zone', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-27T02:30:00Z'));
+    const { result, rerender } = renderHook(({ timeZone }) => useReportFilters({ timeZone }), {
+      initialProps: { timeZone: 'America/Manaus' }, wrapper: createWrapper('/relatorio?period=today'),
+    });
+    expect(result.current.dateOnlyRange.to).toBe('2026-09-26');
+    rerender({ timeZone: 'Europe/Lisbon' });
+    expect(result.current.dateOnlyRange.to).toBe('2026-09-27');
+    vi.setSystemTime(new Date('2026-09-28T09:00:00Z'));
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(result.current.dateOnlyRange.to).toBe('2026-09-28');
   });
 });

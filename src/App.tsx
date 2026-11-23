@@ -9,7 +9,9 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { CompanySlugProvider } from "@/contexts/CompanySlugContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
+import { isServiceTodayEnabled } from '@/lib/service-today-enabled';
 import AppErrorBoundary from "@/components/AppErrorBoundary";
+import SystemFavicon from "@/components/SystemFavicon";
 import PublicPageSkeleton from "@/components/PublicPageSkeleton";
 import CompanyFeatureRouteGate from "@/components/company/CompanyFeatureRouteGate";
 import CompanyPanelEntryRoute from "@/components/company/CompanyPanelEntryRoute";
@@ -18,6 +20,7 @@ import { useCompanyPermissions } from "@/hooks/useCompanyPermissions";
 import type { AppRole, CompanyPanelPermission } from "@/lib/companyPermissions";
 import type { CompanyFeatureKey } from "@/lib/companyFeatures";
 import { lazyWithReload } from "@/lib/lazyReload";
+import { isPublicApplicationPath } from "@/lib/publicRoutes";
 
 const Dashboard = lazyWithReload(() => import("@/pages/Dashboard"));
 const SupportCompanies = lazyWithReload(() => import("@/pages/SupportCompanies"));
@@ -30,11 +33,11 @@ const ReservationsList = lazyWithReload(() => import("@/pages/ReservationsList")
 const TableMap = lazyWithReload(() => import("@/pages/TableMap"));
 const CalendarView = lazyWithReload(() => import("@/pages/CalendarView"));
 const Companies = lazyWithReload(() => import("@/pages/Companies"));
-const SettingsPage = lazyWithReload(() => import("@/pages/Settings"));
+const PlatformSettings = lazyWithReload(() => import("@/pages/PlatformSettings"));
 const AdminNotifications = lazyWithReload(() => import("@/pages/AdminNotifications"));
 const AuditLogs = lazyWithReload(() => import("@/pages/AuditLogs"));
-const AdminIntegrations = lazyWithReload(() => import("@/pages/AdminIntegrations"));
-const AdminFinance = lazyWithReload(() => import("@/pages/AdminFinance"));
+const AdminFinancialHub = lazyWithReload(() => import("@/pages/AdminFinancialHub"));
+const CompanyDetail = lazyWithReload(() => import("@/pages/CompanyDetail"));
 const AdminCompanyBillingPreview = lazyWithReload(() => import("@/pages/AdminCompanyBillingPreview"));
 const CompanySettings = lazyWithReload(() => import("@/pages/CompanySettings"));
 const CompanyEvents = lazyWithReload(() => import("@/pages/CompanyEvents"));
@@ -42,12 +45,13 @@ const CompanyAutomations = lazyWithReload(() => import("@/pages/CompanyAutomatio
 const CompanyPrepayments = lazyWithReload(() => import("@/pages/CompanyPrepayments"));
 const CompanyBilling = lazyWithReload(() => import("@/pages/CompanyBilling"));
 const CompanyUsers = lazyWithReload(() => import("@/pages/CompanyUsers"));
-const CompanyWaitlist = lazyWithReload(() => import("@/pages/CompanyWaitlist"));
 const OperatorTodayReservations = lazyWithReload(() => import("@/pages/OperatorTodayReservations"));
+const ServiceToday = lazyWithReload(() => import("@/pages/ServiceToday"));
 const PublicWaitlistPage = lazyWithReload(() => import("@/pages/PublicWaitlistPage"));
 const WaitlistTracking = lazyWithReload(() => import("@/pages/WaitlistTracking"));
 const ReservationTracking = lazyWithReload(() => import("@/pages/ReservationTracking"));
 const PublicReservationPayment = lazyWithReload(() => import("@/pages/PublicReservationPayment"));
+const PlatformTerms = lazyWithReload(() => import("@/pages/PlatformTerms"));
 const AffiliateCompanyPublicPage = lazyWithReload(() => import("@/pages/AffiliateCompanyPublicPage"));
 const ReservationReview = lazyWithReload(() => import("@/pages/ReservationReview"));
 const CompanyNpsReports = lazyWithReload(() => import("@/pages/CompanyNpsReports"));
@@ -140,6 +144,21 @@ function SuspenseRoute({
   fallback: ReactNode;
 }) {
   return <Suspense fallback={fallback}>{children}</Suspense>;
+}
+
+function PublicTermsRouteBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  const firstSegment = pathname.split('/').filter(Boolean)[0];
+  // Tenant routes such as /:slug/fila outrank /termos-de-uso/*.
+  // Reject this reserved prefix before a company route can be mounted.
+  if (firstSegment === 'termos-de-uso' && !isPublicApplicationPath(pathname)) {
+    return (
+      <SuspenseRoute fallback={<PublicPageSkeleton />}>
+        <NotFound />
+      </SuspenseRoute>
+    );
+  }
+  return <>{children}</>;
 }
 
 function SuperadminRoute({ children }: { children: ReactNode }) {
@@ -294,8 +313,17 @@ function LegacyCalendarRedirect() {
   return <Navigate to={`/${slug}/admin/reservas/calendario`} replace />;
 }
 
+function LegacyWaitlistRedirect() {
+  const { slug } = useParams<{ slug: string }>();
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set('tab', 'fila');
+  return <Navigate to={`/${slug}/admin/servico?${params}`} replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <SystemFavicon />
     <TooltipProvider>
       <AppErrorBoundary>
         <Toaster />
@@ -307,7 +335,22 @@ const App = () => (
           }}
         >
           <AuthProvider>
+            <PublicTermsRouteBoundary>
             <Routes>
+              <Route
+                path="/termos-de-uso"
+                element={
+                  <SuspenseRoute fallback={<PublicPageSkeleton />}>
+                    <PlatformTerms />
+                  </SuspenseRoute>
+                }
+              />
+              <Route
+                path="/termos-de-uso/*"
+                element={
+                  <SuspenseRoute fallback={<PublicPageSkeleton />}><NotFound /></SuspenseRoute>
+                }
+              />
               <Route
                 path="/login"
                 element={
@@ -351,7 +394,7 @@ const App = () => (
                 path="/empresas/:id"
                 element={
                   <SuperadminRoute>
-                    <Companies />
+                    <CompanyDetail />
                   </SuperadminRoute>
                 }
               />
@@ -367,7 +410,7 @@ const App = () => (
                 path="/configuracoes"
                 element={
                   <SuperadminRoute>
-                    <SettingsPage />
+                    <PlatformSettings />
                   </SuperadminRoute>
                 }
               />
@@ -389,17 +432,17 @@ const App = () => (
               />
               <Route
                 path="/integracoes"
-                element={
-                  <SuperadminRoute>
-                    <AdminIntegrations />
-                  </SuperadminRoute>
-                }
+                element={<Navigate to="/configuracoes?aba=pagamentos" replace />}
+              />
+              <Route
+                path="/repasses"
+                element={<Navigate to="/financeiro?aba=repasses" replace />}
               />
               <Route
                 path="/financeiro"
                 element={
                   <SuperadminRoute>
-                    <AdminFinance />
+                    <AdminFinancialHub />
                   </SuperadminRoute>
                 }
               />
@@ -541,6 +584,14 @@ const App = () => (
                   </CompanyAdminRoute>
                 }
               />
+              {isServiceTodayEnabled() && <Route
+                path="/:slug/admin/servico"
+                element={
+                  <CompanyAdminRoute allowedRoles={["admin", "operator", "superadmin"]}>
+                    <ServiceToday />
+                  </CompanyAdminRoute>
+                }
+              />}
               <Route
                 path="/:slug/admin/check-ins"
                 element={
@@ -589,7 +640,7 @@ const App = () => (
                 path="/:slug/admin/mesas"
                 element={
                   <CompanyAdminRoute
-                    allowedRoles={["admin", "operator", "superadmin"]}
+                    allowedRoles={["admin", "superadmin"]}
                     requiredCompanyPermission="tables_view"
                   >
                     <TableMap />
@@ -671,7 +722,7 @@ const App = () => (
                     allowedRoles={["admin", "operator", "superadmin"]}
                     requiredCompanyPermission="waitlist_view"
                   >
-                    <CompanyWaitlist />
+                    <LegacyWaitlistRedirect />
                   </CompanyAdminRoute>
                 }
               />
@@ -738,6 +789,7 @@ const App = () => (
                 }
               />
             </Routes>
+            </PublicTermsRouteBoundary>
           </AuthProvider>
         </BrowserRouter>
       </AppErrorBoundary>

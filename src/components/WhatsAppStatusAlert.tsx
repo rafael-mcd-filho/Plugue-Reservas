@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -8,7 +9,7 @@ import { useWhatsAppInstance } from '@/hooks/useAutomations';
 import { useWhatsAppChannel } from '@/hooks/useWhatsAppChannel';
 
 export default function WhatsAppStatusAlert() {
-  const { companyId } = useCompanySlug();
+  const { companyId, slug } = useCompanySlug();
   const { data: featureFlags } = useCompanyFeatureFlags(companyId);
   const { data: activeChannel, isLoading: channelLoading } = useWhatsAppChannel(companyId);
   const { data: instance, isLoading: instanceLoading } = useWhatsAppInstance(companyId);
@@ -52,19 +53,30 @@ export default function WhatsAppStatusAlert() {
     channel === 'pluguechat_official'
       ? 'PlugueChat sem credenciais completas'
       : 'Evolution desconectada';
+  const queueLabel = queueCount > 0
+    ? `${queueCount.toLocaleString('pt-BR')} ${queueCount === 1 ? 'mensagem' : 'mensagens'} na fila`
+    : null;
+
+  // Abre Mensagens já na aba Canal, onde a conexão é refeita.
+  const openChannelTab = () => {
+    try {
+      window.sessionStorage.setItem(`automations:tab:${companyId}`, 'channel');
+    } catch { /* Sem armazenamento, a tela abre na aba padrão, que também é Canal. */ }
+  };
 
   return (
-    <div
-      className="flex min-w-0 max-w-[46vw] shrink items-center gap-1.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-1.5 text-sm sm:max-w-xs"
-      title={`WhatsApp desconectado - ${detail}`}
+    <Link
+      to={`/${slug}/admin/automacoes`}
+      onClick={openChannelTab}
+      className="inline-flex min-h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-destructive/25 bg-card px-3 py-1 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+      title={`WhatsApp desconectado: ${detail}. Abrir Mensagens › Canal para reconectar.`}
+      aria-label={`WhatsApp desconectado${queueLabel ? `, ${queueLabel}` : ''}. Abrir o canal para reconectar`}
     >
-      <WifiOff className="h-4 w-4 shrink-0 text-destructive" />
-      <span className="min-w-0 truncate font-medium text-destructive">WhatsApp desconectado</span>
-      {queueCount > 0 && (
-        <span className="hidden truncate text-destructive/70 sm:inline">
-          {' - '}{queueCount} {queueCount === 1 ? 'mensagem' : 'mensagens'} na fila
-        </span>
+      <WifiOff aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+      <span>WhatsApp desconectado</span>
+      {queueLabel && (
+        <span className="hidden font-medium text-destructive/75 md:inline">· {queueLabel}</span>
       )}
-    </div>
+    </Link>
   );
 }

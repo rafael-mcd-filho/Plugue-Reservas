@@ -48,6 +48,8 @@ export interface Company {
   max_guests_per_slot: number | null;
   large_party_whatsapp_threshold?: number | null;
   reservation_late_tolerance_minutes?: number | null;
+  public_reservation_changes_enabled?: boolean | null;
+  public_reservation_change_min_notice_minutes?: number | null;
   status: CompanyStatus;
   deletion_requested_at?: string | null;
   created_at: string;
@@ -234,12 +236,27 @@ export function getCompanyDeletionRequestErrorMessage(err: any): string {
 }
 
 export function useCompanyDeletionRequests() {
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: ['company-deletion-requests'],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('list_company_deletion_requests' as any);
       if (error) throw error;
-      return (data ?? []) as CompanyDeletionRequest[];
+      const requests = (data ?? []) as CompanyDeletionRequest[];
+      const previousRequests = queryClient.getQueryData<CompanyDeletionRequest[]>(['company-deletion-requests']);
+
+      // The existing poll observes completion before the companies query does.
+      // Refresh once for each new completion, without invalidating on history
+      // loaded initially or on every subsequent poll of the completed request.
+      if (previousRequests) {
+        const previousStatuses = new Map(previousRequests.map((request) => [request.id, request.status]));
+        if (requests.some((request) => request.status === 'completed' && previousStatuses.get(request.id) !== 'completed')) {
+          queryClient.invalidateQueries({ queryKey: ['companies'] });
+        }
+      }
+
+      return requests;
     },
     // Light polling so progress/status are visible without a manual refresh
     // while a deletion is in its grace period or actively running.

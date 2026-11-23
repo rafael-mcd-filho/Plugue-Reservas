@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, Building2, Calendar, Circle, Clock3, Mail, MapPin,
-  Loader2, Pause, Pencil, Phone, Play, ShieldAlert, ShieldCheck, SkipForward, Trash2, Undo2, User, Users,
+  Loader2, Pause, Pencil, Phone, Play, ShieldAlert, ShieldCheck, Trash2, Undo2, User, Users,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -25,7 +25,6 @@ import {
   useCancelCompanyDeletion,
   useCompanies,
   useCompanyDeletionRequests,
-  useForceSkipCompanyDeletionTeardown,
   useRequestCompanyDeletion,
   useUpdateCompany,
   COMPANY_DELETION_REQUEST_STATUS_LABEL,
@@ -42,6 +41,7 @@ import {
   normalizeCompanyPlanTier,
 } from '@/lib/companyFeatures';
 import CompanyFeatureSwitchList from '@/components/company/CompanyFeatureSwitchList';
+import { CompanyDeletionRecoveryActions } from '@/components/company/CompanyDeletionRecoveryActions';
 import { toast } from 'sonner';
 import {
   formatCnpj,
@@ -93,7 +93,6 @@ export default function CompanyProfile() {
   const updateCompany = useUpdateCompany();
   const requestDeletion = useRequestCompanyDeletion();
   const cancelDeletion = useCancelCompanyDeletion();
-  const forceSkipTeardown = useForceSkipCompanyDeletionTeardown();
   const { data: deletionRequests = [] } = useCompanyDeletionRequests();
   const saveCompanyFeatures = useSaveCompanyFeatures();
   const [editOpen, setEditOpen] = useState(false);
@@ -384,15 +383,7 @@ export default function CompanyProfile() {
                 <Undo2 className="h-3.5 w-3.5" /> Cancelar exclusão
               </Button>
             )}
-            {activeDeletionRequest.status === 'needs_attention' && (
-              <Button
-                type="button" size="sm" variant="outline" className="gap-1.5"
-                disabled={forceSkipTeardown.isPending}
-                onClick={() => forceSkipTeardown.mutate(company.id)}
-              >
-                <SkipForward className="h-3.5 w-3.5" /> Pular etapa externa
-              </Button>
-            )}
+            <CompanyDeletionRecoveryActions request={activeDeletionRequest} />
           </CardContent>
         </Card>
       )}

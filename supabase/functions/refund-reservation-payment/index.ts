@@ -1,5 +1,8 @@
+import { synchronizeReservationSettlement } from "../_shared/reservation-settlement-sync.ts";
 import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
+import { getReservationAsaasCredentials } from "../_shared/reservation-asaas-config.ts";
 import {
+  AsaasApiError,
   getAsaasActiveChargebackStatus,
   getAsaasExternalPaymentOutcome,
   getAsaasPayment,
@@ -11,6 +14,7 @@ import {
   jsonResponse,
   markReservationPaymentProviderOutcome,
   readJson,
+  recordPaymentEvent,
   toPublicPaymentSummary,
 } from "../_shared/reservation-payments.ts";
 
@@ -37,18 +41,6 @@ async function loadPaymentContext(supabaseAdmin: any, companyId: string, payment
   return { payment, reservation, company };
 }
 
-async function getApiToken(supabaseAdmin: any, companyId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("company_asaas_configs")
-    .select("api_token, status")
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "configured") throw new Error("Integração Asaas não configurada");
-  return data.api_token as string;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -73,6 +65,14 @@ Deno.serve(async (req) => {
     const { supabaseAdmin } = await assertUserCanAccessCompany(req, companyId, ["admin"]);
     const { payment, reservation, company } = await loadPaymentContext(supabaseAdmin, companyId, paymentToken);
 
+    if (body.value !== undefined && (
+      typeof body.value !== "number" || !Number.isFinite(requestedValue) || requestedValue <= 0
+      || Math.abs(requestedValue * 100 - Math.round(requestedValue * 100)) > 0.000001
+      || requestedValue > Number(payment.charged_amount ?? payment.base_amount)
+    )) {
+      return jsonResponse({ error: "Informe um valor de estorno positivo, em centavos, que nao ultrapasse a cobranca." }, 400);
+    }
+
     if (!["paid", "late_paid"].includes(payment.status)) {
       return jsonResponse({ error: "Somente pagamentos recebidos podem ser estornados pelo sistema" }, 409);
     }
@@ -80,12 +80,77 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Pagamento sem identificador Asaas" }, 409);
     }
 
-    const apiToken = await getApiToken(supabaseAdmin, companyId);
+    const apiToken = await getReservationAsaasCredentials(supabaseAdmin, payment);
+    // The saved ID may identify just one installment. Refunding that ID alone
+    // must never be presented as a refund of the complete reservation amount.
+    const providerPayment = await getAsaasPayment(apiToken, payment.asaas_payment_id);
+    if (providerPayment.installment) {
+      return jsonResponse({
+        error: "Este pagamento e parcelado. Estorne o parcelamento completo no painel Asaas e confira todas as parcelas antes de concluir a conciliacao.",
+        code: "INSTALLMENT_REFUND_REQUIRES_ASAAS",
+      }, 409);
+    }
     const refundPayload = Number.isFinite(requestedValue) && requestedValue > 0
       ? { value: requestedValue, description }
       : { description };
 
-    await refundAsaasPayment(apiToken, payment.asaas_payment_id, refundPayload);
+    const refundRequestId = crypto.randomUUID();
+    const requestedAt = new Date().toISOString();
+    const refundRequest = {
+      id: refundRequestId,
+      requested_at: requestedAt,
+      previous_status: payment.status,
+      value: refundPayload.value ?? null,
+      description,
+      result: "submitting",
+    };
+    // Claim the original version before any irreversible provider request.
+    // A second submission or concurrent webhook makes this CAS lose safely.
+    const { data: claimedPayment, error: claimError } = await supabaseAdmin.from("reservation_payments")
+      .update({
+        status: "refund_pending",
+        error_details: "Solicitacao de estorno em processamento; nao repita a solicitacao",
+        metadata: { ...payment.metadata, refund_request_id: refundRequestId, refund_request: refundRequest },
+      })
+      .eq("id", payment.id).eq("company_id", companyId).eq("status", payment.status)
+      .eq("updated_at", payment.updated_at).select("*").maybeSingle();
+    if (claimError) throw new Error(claimError.message);
+    if (!claimedPayment) {
+      return jsonResponse({ error: "Este pagamento mudou ou ja possui estorno em processamento. Atualize o painel antes de continuar.",
+        code: "REFUND_ALREADY_CLAIMED" }, 409);
+    }
+    await recordPaymentEvent(supabaseAdmin, claimedPayment, "payment_refund_requested", {
+      refund_request_id: refundRequestId, requested_value: refundPayload.value ?? null, description,
+    });
+
+    try {
+      await refundAsaasPayment(apiToken, payment.asaas_payment_id, refundPayload);
+    } catch (providerError: any) {
+      const definitive = providerError instanceof AsaasApiError
+        && providerError.status >= 400 && providerError.status < 500
+        && ![408, 409, 425, 429].includes(providerError.status);
+      const uncertainMessage = "Resposta do Asaas inconclusiva. Nao repita o estorno; aguarde a conciliacao ou confira o pagamento no Asaas.";
+      const result = definitive ? "rejected" : "uncertain";
+      const { error: finishError } = await supabaseAdmin.from("reservation_payments").update({
+        status: definitive ? payment.status : "refund_pending",
+        error_details: definitive ? providerError.message : uncertainMessage,
+        metadata: { ...claimedPayment.metadata, refund_request: { ...refundRequest, result,
+          finished_at: new Date().toISOString(), provider_error: providerError?.message ?? "Resposta inconclusiva" } },
+      }).eq("id", payment.id).eq("company_id", companyId).eq("status", "refund_pending")
+        .eq("metadata->>refund_request_id", refundRequestId).eq("updated_at", claimedPayment.updated_at);
+      // A webhook may have already completed the refund. Never restore the
+      // previous status after a different writer has updated this claim.
+      if (finishError) console.error("Failed to finalize reservation refund request", finishError);
+      await recordPaymentEvent(supabaseAdmin, claimedPayment, definitive ? "payment_refund_rejected" : "payment_refund_uncertain", {
+        refund_request_id: refundRequestId, provider_status: providerError?.status ?? null,
+        provider_error: providerError?.message ?? "Resposta inconclusiva",
+      });
+      if (!definitive || finishError) {
+        return jsonResponse({ error: uncertainMessage, code: "REFUND_RESULT_UNCERTAIN", refund_request_id: refundRequestId }, 502);
+      }
+      return jsonResponse({ error: providerError.message, code: "REFUND_REJECTED", refund_request_id: refundRequestId },
+        providerError.status === 400 || providerError.status === 422 ? 400 : 502);
+    }
 
     let asaasPayment = null;
     try {
@@ -95,7 +160,7 @@ Deno.serve(async (req) => {
     }
 
     const outcome = getAsaasExternalPaymentOutcome("PAYMENT_REFUND_IN_PROGRESS", asaasPayment?.status ?? null, asaasPayment);
-    await markReservationPaymentProviderOutcome(supabaseAdmin, payment, outcome ?? "refund_pending", {
+    await markReservationPaymentProviderOutcome(supabaseAdmin, claimedPayment, outcome ?? "refund_pending", {
       source: "manual_refund",
       asaasStatus: asaasPayment?.status ?? "PAYMENT_REFUND_IN_PROGRESS",
       eventType: "PAYMENT_REFUND_IN_PROGRESS",
@@ -110,6 +175,8 @@ Deno.serve(async (req) => {
 
     const { payment: refreshedPayment, reservation: refreshedReservation, company: refreshedCompany } =
       await loadPaymentContext(supabaseAdmin, companyId, paymentToken);
+
+    await synchronizeReservationSettlement(supabaseAdmin, refreshedPayment, "manual_refund");
 
     return jsonResponse({
       ...toPublicPaymentSummary(refreshedPayment, refreshedReservation ?? reservation, refreshedCompany ?? company),

@@ -1,3 +1,4 @@
+import { normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildReservationDispatchKey,
@@ -10,7 +11,6 @@ import {
   buildReservationParameters,
   enqueuePlugueChatMessage,
   getCompanyChannels,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { buildPlugueChatPostVisitParameters, getPostVisitReviewToken, renderPostVisitWhatsAppTemplate } from "../_shared/post-visit.ts";
 import { formatDateKeyInTimeZone, getZonedParts } from "../_shared/timezone.ts";
@@ -179,7 +179,8 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const phone = normalizePhone(reservation.guest_phone);
+        const phone = normalizeStoredPhoneE164((reservation.guest_phone_e164 ?? reservation.guest_phone));
+        if (!phone) { skipped++; continue; }
         // PlugueChat already has the URL prefix in its approved template.
         // Its dynamic parameter must not depend on APP_URL or the company's slug.
         const legacyReviewUrl = (legacyAppOrigin && companySlug && reviewToken)
@@ -236,7 +237,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const phone = formatPhoneForWhatsApp((reservation.guest_phone_e164 ?? reservation.guest_phone));
+      if (!phone) { skipped++; continue; }
       const message = renderPostVisitWhatsAppTemplate(automation.message_template, reservation, reviewUrl);
       const deliveryKey = buildReservationDispatchKey("post_visit", reservation.id);
       const claimed = await claimWhatsAppDispatch(supabaseAdmin, { deliveryKey, companyId: reservation.company_id, automationType: "post_visit", reservationId: reservation.id, phone });

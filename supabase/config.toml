@@ -63,6 +63,9 @@ verify_jwt = true
 [functions.save-asaas-config]
 verify_jwt = true
 
+[functions.manage-reservation-asaas-config]
+verify_jwt = true
+
 [functions.create-reservation-payment]
 verify_jwt = false
 
@@ -97,4 +100,19 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.whatsapp-automation-channel]
+verify_jwt = false
+
+[functions.waitlist-call-notification]
+verify_jwt = false
+
+[functions.manage-reservation-settlements]
+verify_jwt = true
+
+[functions.reconcile-reservation-settlements]
+verify_jwt = false
+
+[functions.platform-whatsapp-notices]
+verify_jwt = true
+
+[functions.process-platform-whatsapp-notices]
 verify_jwt = false

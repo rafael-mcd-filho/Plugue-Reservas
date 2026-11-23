@@ -82,6 +82,15 @@ export interface CreateReservationPaymentRequest {
   };
 }
 
+export type ReservationPaymentRequirement = {
+  schema: 'reservation-payment-requirement';
+  version: 1;
+  company_id: string;
+  date: string;
+  requires_payment: boolean;
+  reason?: 'feature_disabled' | 'no_rule';
+};
+
 export type CreateReservationPaymentResponse = {
   requires_payment: boolean;
   reason?: 'feature_disabled' | 'no_rule';
@@ -114,6 +123,8 @@ export interface PublicReservationPaymentSummary {
   payment_link_external_reference: string | null;
   pix_qr_code_base64: string | null;
   pix_copy_paste: string | null;
+  needs_manual_installment_reconciliation?: boolean;
+  asaas_installment_id?: string | null;
   rule_name: string;
   customer_notice: string | null;
   cancellation_policy: string | null;
@@ -136,7 +147,7 @@ export interface PublicReservationPaymentSummary {
 
 export const DEFAULT_ASAAS_CONFIG_PREVIEW: AsaasCompanyConfigPreview = {
   status: 'not_configured',
-  fromCompanyAccount: true,
+  fromCompanyAccount: false,
   lastValidatedAt: null,
   lastError: null,
 };

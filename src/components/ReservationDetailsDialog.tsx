@@ -95,6 +95,7 @@ interface ReservationDetailsDialogProps {
   onCancel?: (reservation: ReservationDetails) => void;
   showEventHistory?: boolean;
   showLeadHistory?: boolean;
+  readOnly?: boolean;
   onReservationSelect?: (reservation: ReservationDetails) => void;
 }
 
@@ -276,6 +277,7 @@ export default function ReservationDetailsDialog({
   onCancel,
   showEventHistory = true,
   showLeadHistory = false,
+  readOnly = false,
   onReservationSelect,
 }: ReservationDetailsDialogProps) {
   const { roles, user } = useAuth();
@@ -747,6 +749,7 @@ export default function ReservationDetailsDialog({
                   date={reservation.date}
                   time={reservation.time}
                   partySize={reservation.party_size}
+                  readOnly={readOnly}
                 />
               )}
 

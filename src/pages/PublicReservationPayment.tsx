@@ -650,7 +650,9 @@ function PaymentActionArea({
               icon="card"
               title="Cartão"
               amount={payment.credit_card_amount}
-              description={`Em até ${payment.max_credit_card_installments ?? 1}x no cartão.`}
+              description={payment.status === 'pending' && payment.billing_type === 'CREDIT_CARD' && payment.payment_link_url && (payment.max_credit_card_installments ?? 1) > 1
+                ? `Cobrança anterior: em até ${payment.max_credit_card_installments} parcelas.`
+                : 'À vista, em parcela única.'}
               disabled={payment.status === 'pending' || Boolean(selectingBillingType)}
               loading={selectingBillingType === 'CREDIT_CARD'}
               selected={payment.billing_type === 'CREDIT_CARD'}
@@ -850,6 +852,11 @@ function PaymentSummary({
           </CardContent>
         </Card>
       ) : null}
+      <p className="text-center text-sm text-muted-foreground">
+        <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center py-2 text-foreground underline underline-offset-4">
+          Termos de Uso
+        </a>
+      </p>
     </aside>
   );
 }

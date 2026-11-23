@@ -22,6 +22,7 @@ interface PublicCompanyPreview {
 
 // Mantido em sincronia com src/lib/branding.ts (a função roda fora do bundle do app).
 const DEFAULT_SYSTEM_NAME = 'Plug Guest';
+const DEFAULT_SYSTEM_ICON_PATH = '/favicon.png?v=plug-guest-20261122';
 const DEFAULT_DESCRIPTION = 'Plataforma de reservas para restaurantes com página pública, painel por unidade e automações via WhatsApp.';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_SUPABASE_URL = 'https://hdpxqqiudiotanrybvcf.supabase.co';
@@ -88,7 +89,7 @@ function toAbsoluteUrl(url: string | null | undefined, origin: string) {
   }
 }
 
-async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> {
+function getPublicSupabaseConfig() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL
     ?? process.env.SUPABASE_URL
     ?? DEFAULT_SUPABASE_URL;
@@ -96,6 +97,12 @@ async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> 
     ?? process.env.VITE_SUPABASE_ANON_KEY
     ?? process.env.SUPABASE_ANON_KEY
     ?? DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+
+  return { supabaseUrl, supabaseKey };
+}
+
+async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> {
+  const { supabaseUrl, supabaseKey } = getPublicSupabaseConfig();
 
   const url = new URL('/rest/v1/companies_public', supabaseUrl);
   url.searchParams.set('slug', `eq.${slug}`);
@@ -113,6 +120,33 @@ async function fetchCompany(slug: string): Promise<PublicCompanyPreview | null> 
 
   const rows = await response.json() as PublicCompanyPreview[];
   return rows[0] ?? null;
+}
+
+async function fetchSystemLogo(origin: string): Promise<string | null> {
+  try {
+    const { supabaseUrl, supabaseKey } = getPublicSupabaseConfig();
+    const response = await fetch(new URL('/rest/v1/rpc/get_public_system_branding', supabaseUrl), {
+      method: 'POST',
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+
+    const data: unknown = await response.json();
+    const row = Array.isArray(data) ? data[0] : data;
+    const logoUrl = row && typeof row === 'object' && 'system_logo_url' in row
+      ? row.system_logo_url
+      : null;
+    return typeof logoUrl === 'string' ? toAbsoluteUrl(logoUrl.trim(), origin) : null;
+  } catch {
+    // A branding failure must not suppress the public HTML or restore a legacy icon.
+    return null;
+  }
 }
 
 function renderPreviewHtml({
@@ -181,6 +215,9 @@ export default async function handler(request: PreviewRequest, response: Preview
     : null;
   const companyLogo = toAbsoluteUrl(company?.logo_url, origin);
   const companyImage = toAbsoluteUrl(heroImage, origin) ?? companyLogo;
+  const faviconLogo = (company?.logo_url?.trim() ? companyLogo : null)
+    ?? await fetchSystemLogo(origin)
+    ?? new URL(DEFAULT_SYSTEM_ICON_PATH, origin).toString();
   const companyDescription = richTextToPlainText(company?.description);
   // Mesmos textos de CompanyPublicPage: aba curta, card descritivo.
   const title = company
@@ -206,6 +243,6 @@ export default async function handler(request: PreviewRequest, response: Preview
     description,
     canonicalUrl,
     imageUrl: companyImage,
-    logoUrl: companyLogo,
+    logoUrl: faviconLogo,
   }));
 }

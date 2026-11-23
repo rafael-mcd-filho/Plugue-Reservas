@@ -4,6 +4,7 @@ import {
   buildAttendanceLossesQueryKey,
   buildAttendanceLossesRpcParams,
   normalizeAttendanceLossesReport,
+  normalizeAttendanceLossesReservation,
   normalizeAttendanceLossesSearch,
   type AttendanceLossesReservationRow,
 } from '@/lib/attendance-losses-report';
@@ -187,5 +188,11 @@ describe('attendance losses report contract', () => {
     expect(weekly[0]).toMatchObject({ reservations: 4, attended: 2, no_show: 2, attendance_rate: 50 });
     expect(monthly.map((point) => point.date)).toEqual(['2026-07-01', '2026-08-01']);
     expect(monthly[1].reservations).toBe(4);
+  });
+
+  it('preserves signed cancellation lead hours for cancellations after the appointment', () => {
+    expect(normalizeAttendanceLossesReservation({ ...reservation('r1'), cancellation_lead_hours: -1.5 }).cancellation_lead_hours).toBe(-1.5);
+    expect(() => normalizeAttendanceLossesReservation({ ...reservation('r1'), cancellation_lead_hours: Number.NaN })).toThrow();
+    expect(() => normalizeAttendanceLossesReservation({ ...reservation('r1'), cancellation_lead_hours: Number.POSITIVE_INFINITY })).toThrow();
   });
 });

@@ -24,3 +24,4 @@ logs/**
 playwright-*.png
 backup_before_repair.sql
 skills-lock.json
+app-operador

@@ -8,12 +8,16 @@ import {
   CheckCircle2,
   Copy,
   CreditCard,
-  KeyRound,
+  ChartNoAxesCombined,
+  ArrowDownToLine,
+  SlidersHorizontal,
+  Download,
+
   Loader2,
   MessageCircle,
   Plus,
   RefreshCw,
-  ShieldCheck,
+
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
@@ -62,9 +66,8 @@ import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { supabase } from '@/integrations/supabase/client';
 import type { DateRange } from 'react-day-picker';
-import { checkReservationPayment, getAsaasConfig, refundReservationPayment, saveAsaasConfig, testAsaasConfig } from '@/lib/asaas-prepayment-api';
+import { checkReservationPayment, refundReservationPayment } from '@/lib/asaas-prepayment-api';
 import {
-  DEFAULT_ASAAS_CONFIG_PREVIEW,
   calculateReservationPaymentAmount,
   formatPrepaymentAmount,
   getAmountTypeLabel,
@@ -77,6 +80,10 @@ import {
 } from '@/lib/asaas-prepayment-contracts';
 import { toStoredWhatsAppNumber } from '@/lib/phone';
 import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
+import { fetchCompanyReservationPayments, fetchCompanyReservationPaymentUsage } from '@/lib/asaas-prepayment-queries';
+import { paymentMessage } from '@/lib/payment-messages';
+import CompanySettlements from '@/components/billing/CompanySettlements';
+import PrepaymentBalanceDashboard from '@/components/billing/PrepaymentBalanceDashboard';
 
 interface RuleFormState {
   name: string;
@@ -88,13 +95,13 @@ interface RuleFormState {
   pix_amount: string;
   credit_card_enabled: boolean;
   credit_card_amount: string;
-  max_credit_card_installments: string;
   payment_deadline_minutes: string;
   customer_notice: string;
   cancellation_policy: string;
 }
 
-type RuleTab = 'active' | 'inactive' | 'archived' | 'new';
+type RuleTab = 'active' | 'inactive' | 'archived';
+type PrepaymentTab = 'summary' | 'payments' | 'withdrawals' | 'rules';
 type SummaryPeriodPreset = 'today' | 'last_7_days' | 'last_30_days' | 'this_month' | 'last_month' | 'custom';
 type PaymentStatusFilter = 'all' | ReservationPaymentStatus;
 
@@ -115,6 +122,10 @@ interface BulkCheckResult {
 
 interface ReservationPaymentRow {
   id: string;
+  reservation_id: string | null;
+  asaas_payment_id: string | null;
+  asaas_payment_link_id: string | null;
+  external_reference: string | null;
   payment_token: string | null;
   customer_name: string;
   customer_phone: string | null;
@@ -144,12 +155,14 @@ interface FinancialDailyPoint {
   refunded: number;
   chargeback: number;
   refundPending: number;
+  cancelled: number;
   paidCount: number;
   expiredCount: number;
   pendingCount: number;
   refundedCount: number;
   chargebackCount: number;
   refundPendingCount: number;
+  cancelledCount: number;
 }
 
 const today = new Date();
@@ -194,10 +207,14 @@ function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
   const providerRefundedAmount = Number(providerStatusCheck?.refunded_value ?? 0);
   const refundedAmount = Number.isFinite(providerRefundedAmount) && providerRefundedAmount > 0
     ? providerRefundedAmount
-    : amount;
+    : row?.status === 'partial_refunded' ? 0 : amount;
 
   return {
     id: row?.id ?? '',
+    reservation_id: row?.reservation_id ?? reservation?.id ?? null,
+    asaas_payment_id: row?.asaas_payment_id ?? null,
+    asaas_payment_link_id: row?.asaas_payment_link_id ?? null,
+    external_reference: row?.payment_link_external_reference ?? null,
     payment_token: row?.payment_token ?? null,
     customer_name: reservation?.guest_name ?? 'Cliente',
     customer_phone: reservation?.guest_phone ?? null,
@@ -236,12 +253,14 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
       refunded: 0,
       chargeback: 0,
       refundPending: 0,
+      cancelled: 0,
       paidCount: 0,
       expiredCount: 0,
       pendingCount: 0,
       refundedCount: 0,
       chargebackCount: 0,
       refundPendingCount: 0,
+      cancelledCount: 0,
     });
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -285,6 +304,9 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
     } else if (payment.status === 'chargeback') {
       bucket.chargeback += payment.amount;
       bucket.chargebackCount += 1;
+    } else if (payment.status === 'cancelled') {
+      bucket.cancelled += payment.amount;
+      bucket.cancelledCount += 1;
     }
   }
 
@@ -293,10 +315,6 @@ function buildDailyFinancialBuckets(payments: ReservationPaymentRow[], from: Dat
 
 const DEFAULT_CUSTOMER_NOTICE = 'O valor pago será abatido da conta no dia da visita.';
 const DEFAULT_CANCELLATION_POLICY = 'Se o pagamento não for confirmado dentro do prazo, a pré-reserva expira e a mesa volta a ficar disponível.';
-const SUPABASE_FUNCTIONS_BASE_URL = (
-  import.meta.env.VITE_SUPABASE_URL || 'https://hdpxqqiudiotanrybvcf.supabase.co'
-).replace(/\/+$/, '');
-
 const LEGACY_CUSTOMER_NOTICES = new Set([
   'Este valor sera abatido da conta no dia da visita.',
   'Este valor será abatido da conta no dia da visita.',
@@ -325,7 +343,6 @@ function createRuleForm(): RuleFormState {
     pix_amount: '80,00',
     credit_card_enabled: true,
     credit_card_amount: '90,00',
-    max_credit_card_installments: '2',
     payment_deadline_minutes: '10',
     customer_notice: DEFAULT_CUSTOMER_NOTICE,
     cancellation_policy: DEFAULT_CANCELLATION_POLICY,
@@ -491,7 +508,7 @@ function getRuleImpact(rule: ReservationPaymentRuleDraft) {
   return [
     `${samplePartySize} pessoas: sinal ${formatPrepaymentAmount(amount)}`,
     pixAmount ? `Pix ${formatPrepaymentAmount(pixAmount)}` : null,
-    cardAmount ? `Cartão ${formatPrepaymentAmount(cardAmount)}${rule.max_credit_card_installments ? ` em até ${rule.max_credit_card_installments}x` : ''}` : null,
+    cardAmount ? `Cartão ${formatPrepaymentAmount(cardAmount)} à vista` : null,
   ].filter(Boolean).join(' · ');
 }
 
@@ -540,7 +557,8 @@ function isLatePaidPayment(payment: Pick<ReservationPaymentRow, 'status' | 'rese
 }
 
 function canRefundPayment(payment: ReservationPaymentRow) {
-  return Boolean(payment.payment_token) && (payment.status === 'paid' || payment.status === 'late_paid');
+  return Boolean(payment.payment_token) && !payment.metadata?.asaas_installment_id
+    && (payment.status === 'paid' || payment.status === 'late_paid');
 }
 
 function buildCompanyPublicReservationUrl(companySlug: string) {
@@ -565,12 +583,6 @@ function buildExpiredReservationWhatsappUrl(payment: ReservationPaymentRow, comp
     `Faça uma nova reserva pelo link: ${reservationUrl}`;
 
   return buildWhatsAppMessageUrl(whatsappNumber, message);
-}
-
-function getAsaasStatusLabel(status: string) {
-  if (status === 'configured') return 'Configurado';
-  if (status === 'error') return 'Erro';
-  return 'Não configurado';
 }
 
 function getRuleBillingTypes(rule: Pick<ReservationPaymentRuleDraft, 'pix_enabled' | 'credit_card_enabled'>) {
@@ -617,17 +629,15 @@ export default function CompanyPrepayments() {
   const { companyId, slug } = useCompanySlug();
   const queryClient = useQueryClient();
   const { data: featureFlags, isLoading: featureFlagsLoading } = useCompanyFeatureFlags(companyId);
-  const [asaasConfig, setAsaasConfig] = useState(DEFAULT_ASAAS_CONFIG_PREVIEW);
-  const [tokenDraft, setTokenDraft] = useState('');
-  const [savedWebhookUrl, setSavedWebhookUrl] = useState<string | null>(null);
-  const [webhookAuthToken, setWebhookAuthToken] = useState<string | null>(null);
-  const [isEditingAsaasConfig, setIsEditingAsaasConfig] = useState(false);
   const [ruleForm, setRuleForm] = useState<RuleFormState>(() => createRuleForm());
   const [ruleTab, setRuleTab] = useState<RuleTab>('active');
+  const [activeTab, setActiveTab] = useState<PrepaymentTab>('summary');
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all');
   const [paymentPeriodPreset, setPaymentPeriodPreset] = useState<SummaryPeriodPreset>('last_7_days');
   const [paymentRange, setPaymentRange] = useState<DateRange>(() => getSummaryPresetRange('last_7_days'));
   const [paymentSearchTerm, setPaymentSearchTerm] = useState('');
+  const [isExportingPayments, setIsExportingPayments] = useState(false);
   const [paymentPage, setPaymentPage] = useState(1);
   const [pendingRuleAction, setPendingRuleAction] = useState<PendingRuleAction | null>(null);
   const [pendingRefundPayment, setPendingRefundPayment] = useState<ReservationPaymentRow | null>(null);
@@ -638,42 +648,6 @@ export default function CompanyPrepayments() {
   const [summaryRange, setSummaryRange] = useState<DateRange>(() => getSummaryPresetRange('last_7_days'));
 
   const prepaymentEnabled = featureFlags?.features.reservation_prepayment ?? false;
-  const asaasConfigQuery = useQuery({
-    queryKey: ['asaas-config', companyId],
-    queryFn: () => {
-      if (!companyId) throw new Error('Empresa não identificada.');
-      return getAsaasConfig(companyId);
-    },
-    enabled: Boolean(companyId),
-  });
-  const asaasConfigMutation = useMutation({
-    mutationFn: ({ apiToken, mode }: { apiToken?: string; mode: 'save' | 'test' }) => {
-      if (!companyId) throw new Error('Empresa não identificada.');
-      return mode === 'test'
-        ? testAsaasConfig(companyId, apiToken)
-        : saveAsaasConfig(companyId, apiToken ?? '');
-    },
-    onSuccess: (result) => {
-      setAsaasConfig({
-        status: result.status,
-        fromCompanyAccount: true,
-        lastValidatedAt: result.last_validated_at,
-        lastError: result.last_error,
-      });
-      setSavedWebhookUrl(result.webhook_url);
-      setWebhookAuthToken(result.webhook_auth_token);
-
-      if (result.status === 'configured') {
-        toast.success('Token Asaas salvo e validado.');
-      } else {
-        toast.warning(result.last_error || 'Token salvo, mas a validação retornou erro.');
-      }
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a configuração Asaas.');
-    },
-  });
-
   const rulesQuery = useQuery({
     queryKey: ['reservation-payment-rules', companyId],
     queryFn: async () => {
@@ -692,14 +666,8 @@ export default function CompanyPrepayments() {
       const usageCounts = new Map<string, number>();
 
       if (ruleIds.length > 0) {
-        const { data: payments, error: paymentsError } = await supabase
-          .from('reservation_payments' as any)
-          .select('rule_id')
-          .in('rule_id', ruleIds);
-
-        if (paymentsError) throw paymentsError;
-
-        ((payments ?? []) as any[]).forEach((payment) => {
+        const payments = await fetchCompanyReservationPaymentUsage(companyId, ruleIds);
+        payments.forEach((payment) => {
           if (!payment.rule_id) return;
           usageCounts.set(payment.rule_id, (usageCounts.get(payment.rule_id) ?? 0) + 1);
         });
@@ -727,10 +695,11 @@ export default function CompanyPrepayments() {
       invalidateRules();
       setRuleForm(createRuleForm());
       setRuleTab('inactive');
+      setRuleDialogOpen(false);
       toast.success('Regra adicionada em Desativadas.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a regra.');
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível salvar a regra.'));
     },
   });
 
@@ -751,7 +720,7 @@ export default function CompanyPrepayments() {
       toast.success(variables.enabled ? 'Regra ativada.' : 'Regra desativada.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível atualizar a regra.');
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível atualizar a regra.'));
     },
   });
 
@@ -787,23 +756,9 @@ export default function CompanyPrepayments() {
       }
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível remover a regra.');
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível remover a regra.'));
     },
   });
-
-  useEffect(() => {
-    if (!asaasConfigQuery.data) return;
-
-    const result = asaasConfigQuery.data;
-    setAsaasConfig({
-      status: result.status,
-      fromCompanyAccount: true,
-      lastValidatedAt: result.last_validated_at,
-      lastError: result.last_error,
-    });
-    setSavedWebhookUrl(result.webhook_url);
-    setWebhookAuthToken(result.webhook_auth_token);
-  }, [asaasConfigQuery.data]);
 
   useEffect(() => {
     setRuleForm((current) => {
@@ -846,29 +801,14 @@ export default function CompanyPrepayments() {
     queryFn: async () => {
       const from = summaryRange!.from!;
       const to = summaryRange?.to ?? from;
-      const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
-      const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
-      const rangeFilter = [
-        `and(created_at.gte.${startIso},created_at.lte.${endIso})`,
-        `and(paid_at.gte.${startIso},paid_at.lte.${endIso})`,
-        `and(cancelled_at.gte.${startIso},cancelled_at.lte.${endIso})`,
-        `and(expires_at.gte.${startIso},expires_at.lte.${endIso})`,
-      ].join(',');
-
-      const { data, error } = await (supabase as any)
-        .from('reservation_payments')
-        .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, guest_phone, status, date, time, party_size)'
-        )
-        .eq('company_id', companyId)
-        .or(rangeFilter)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return ((data ?? []) as any[]).map(mapPaymentRowFromDb);
+      const data = await fetchCompanyReservationPayments({ companyId: companyId!, from, to });
+      return data.map(mapPaymentRowFromDb);
     },
   });
   const summaryPayments = useMemo(() => summaryPaymentsQuery.data ?? [], [summaryPaymentsQuery.data]);
+  const summaryHasUnknownRefundAmount = summaryPayments.some((payment) =>
+    payment.status === 'partial_refunded'
+    && !(Number(payment.metadata?.provider_status_check?.refunded_value) > 0));
 
   const filteredFinancialDaily = useMemo<FinancialDailyPoint[]>(() => {
     const from = summaryRange?.from;
@@ -885,12 +825,14 @@ export default function CompanyPrepayments() {
         refunded: acc.refunded + item.refunded,
         chargeback: acc.chargeback + item.chargeback,
         refundPending: acc.refundPending + item.refundPending,
+        cancelled: acc.cancelled + item.cancelled,
         paidCount: acc.paidCount + item.paidCount,
         expiredCount: acc.expiredCount + item.expiredCount,
         pendingCount: acc.pendingCount + item.pendingCount,
         refundedCount: acc.refundedCount + item.refundedCount,
         chargebackCount: acc.chargebackCount + item.chargebackCount,
         refundPendingCount: acc.refundPendingCount + item.refundPendingCount,
+        cancelledCount: acc.cancelledCount + item.cancelledCount,
       }),
       {
         paid: 0,
@@ -899,12 +841,14 @@ export default function CompanyPrepayments() {
         refunded: 0,
         chargeback: 0,
         refundPending: 0,
+        cancelled: 0,
         paidCount: 0,
         expiredCount: 0,
         pendingCount: 0,
         refundedCount: 0,
         chargebackCount: 0,
         refundPendingCount: 0,
+        cancelledCount: 0,
       },
     ),
     [filteredFinancialDaily],
@@ -937,33 +881,8 @@ export default function CompanyPrepayments() {
     queryFn: async () => {
       const from = paymentRange!.from!;
       const to = paymentRange?.to ?? from;
-      const startIso = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0).toISOString();
-      const endIso = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999).toISOString();
-      const rangeFilter = [
-        `and(created_at.gte.${startIso},created_at.lte.${endIso})`,
-        `and(paid_at.gte.${startIso},paid_at.lte.${endIso})`,
-        `and(cancelled_at.gte.${startIso},cancelled_at.lte.${endIso})`,
-        `and(expires_at.gte.${startIso},expires_at.lte.${endIso})`,
-      ].join(',');
-
-      let query = (supabase as any)
-        .from('reservation_payments')
-        .select(
-          'id, status, billing_type, max_installments, base_amount, charged_amount, rule_snapshot, payment_token, expires_at, paid_at, cancelled_at, metadata, created_at, reservation:reservations!reservation_payments_reservation_id_fkey(id, guest_name, guest_phone, status, date, time, party_size)'
-        )
-        .eq('company_id', companyId)
-        .or(rangeFilter)
-        .order('created_at', { ascending: false });
-
-      if (paymentStatusFilter === 'pending') {
-        query = query.in('status', ['pending', 'awaiting_method']);
-      } else if (paymentStatusFilter !== 'all') {
-        query = query.eq('status', paymentStatusFilter);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return ((data ?? []) as any[])
+      const data = await fetchCompanyReservationPayments({ companyId: companyId!, from, to, status: paymentStatusFilter });
+      return data
         .map(mapPaymentRowFromDb)
         .sort((a, b) => new Date(getFinancialEventDate(b)).getTime() - new Date(getFinancialEventDate(a)).getTime());
     },
@@ -1022,37 +941,37 @@ export default function CompanyPrepayments() {
         return;
       }
       if (data.status === 'refunded') {
-        toast.warning('Pagamento estornado no Asaas.');
+        toast.warning('Pagamento estornado.');
         return;
       }
       if (data.status === 'partial_refunded') {
-        toast.warning('Pagamento parcialmente estornado no Asaas.');
+        toast.warning('Pagamento parcialmente estornado.');
         return;
       }
       if (data.status === 'refund_pending') {
-        toast.warning('Estorno em processamento no Asaas.');
+        toast.warning('Estorno em processamento.');
         return;
       }
       if (data.status === 'refund_denied') {
-        toast.error('Estorno negado no Asaas.');
+        toast.error('Estorno negado.');
         return;
       }
       if (data.status === 'chargeback') {
-        toast.warning('Pagamento com chargeback no Asaas.');
+        toast.warning('Pagamento com chargeback.');
         return;
       }
       if (data.status === 'cancelled') {
-        toast.warning('Pagamento cancelado no Asaas.');
+        toast.warning('Pagamento cancelado.');
         return;
       }
       if (data.message) {
-        toast.info(data.message);
+        toast.info(paymentMessage(data.message));
         return;
       }
       toast.info('Status atualizado.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível consultar o pagamento.');
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível consultar o pagamento.'));
     },
   });
   const bulkCheckPaymentsMutation = useMutation({
@@ -1089,7 +1008,7 @@ export default function CompanyPrepayments() {
               previousStatus: payment.status,
               currentStatus,
               changed: statusChanged,
-              message: data.message ?? null,
+              message: data.message ? paymentMessage(data.message) : null,
               error: null,
             },
           ]);
@@ -1106,7 +1025,7 @@ export default function CompanyPrepayments() {
               currentStatus: null,
               changed: false,
               message: null,
-              error: error instanceof Error ? error.message : 'Falha ao consultar pagamento.',
+              error: paymentMessage(error instanceof Error ? error.message : error, 'Falha ao consultar pagamento.'),
             },
           ]);
         } finally {
@@ -1127,7 +1046,7 @@ export default function CompanyPrepayments() {
         : `${checked} pagamentos consultados sem mudança de status.`);
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível consultar os pagamentos.');
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível consultar os pagamentos.'));
     },
   });
   const refundPaymentMutation = useMutation({
@@ -1142,13 +1061,15 @@ export default function CompanyPrepayments() {
       setPendingRefundPayment(null);
       refreshPaymentsData();
       if (data.status === 'refunded') {
-        toast.success('Pagamento estornado no Asaas.');
+        toast.success('Pagamento estornado.');
         return;
       }
-      toast.success('Estorno solicitado no Asaas.');
+      toast.success('Estorno solicitado.');
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível solicitar o estorno.');
+      setPendingRefundPayment(null);
+      refreshPaymentsData();
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível solicitar o estorno.'));
     },
   });
   const bulkCheckDone = bulkCheckProgress?.done ?? bulkCheckResults.length;
@@ -1161,12 +1082,6 @@ export default function CompanyPrepayments() {
   const paymentPeriodLabel = formatDateRangePickerLabel(paymentRange);
   const pendingRule = pendingRuleAction ? rules.find((rule) => rule.id === pendingRuleAction.ruleId) : null;
   const ruleActionIsArchive = Boolean(pendingRule && pendingRule.usage_count > 0);
-  const fallbackWebhookUrl = companyId
-    ? `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=${encodeURIComponent(companyId)}`
-    : `${SUPABASE_FUNCTIONS_BASE_URL}/functions/v1/asaas-webhook?company_id=<empresa>`;
-  const webhookUrl = savedWebhookUrl ?? fallbackWebhookUrl;
-  const hasSavedAsaasToken = asaasConfig.status !== 'not_configured' && Boolean(webhookAuthToken || asaasConfig.lastValidatedAt);
-  const asaasStatusLabel = asaasConfigQuery.isLoading ? 'Carregando...' : getAsaasStatusLabel(asaasConfig.status);
 
   const handleSummaryPresetChange = (preset: SummaryPeriodPreset) => {
     setSummaryPeriodPreset(preset);
@@ -1202,56 +1117,47 @@ export default function CompanyPrepayments() {
     setPaymentPage(1);
   };
 
-  const handleCopyWebhookUrl = async () => {
+  const handleExportPayments = async () => {
+    if (paymentsListQuery.isError || paymentsListQuery.isLoading || filteredPayments.length === 0) return;
+    setIsExportingPayments(true);
     try {
-      await navigator.clipboard.writeText(webhookUrl);
-      toast.success('URL do webhook copiada.');
-    } catch {
-      toast.error('Não foi possível copiar a URL.');
+      const { downloadSpreadsheet } = await import('@/lib/export-utils');
+      await downloadSpreadsheet({
+        filename: `pagamentos-antecipados-${slug || companyId}-${format(new Date(), 'yyyy-MM-dd')}.xlsx`,
+        sheetName: 'Pagamentos antecipados',
+        columns: [
+          { header: 'Empresa (ID)', width: 38 },
+          { header: 'Pagamento (ID)', width: 38 },
+          { header: 'Reserva (ID)', width: 38 },
+          { header: 'Identificador da cobrança', width: 28 },
+          { header: 'Identificador do link de pagamento', width: 32 },
+          { header: 'Referência externa', width: 55 },
+          { header: 'Cliente', width: 28 },
+          { header: 'Regra', width: 26 },
+          { header: 'Data da reserva', width: 18 },
+          { header: 'Hora da reserva', width: 18 },
+          { header: 'Status do pagamento', width: 24 },
+          { header: 'Status da reserva', width: 22 },
+          { header: 'Forma de pagamento', width: 22 },
+          { header: 'Valor da cobrança (R$)', width: 25, format: '#,##0.00' },
+          { header: 'Criado em', width: 28 },
+          { header: 'Pago em', width: 28 },
+          { header: 'Cancelado/estornado em', width: 28 },
+        ],
+        rows: filteredPayments.map((payment) => [
+          companyId, payment.id, payment.reservation_id, payment.asaas_payment_id,
+          payment.asaas_payment_link_id, payment.external_reference, payment.customer_name,
+          payment.rule_name, payment.reservation_date, payment.reservation_time,
+          getPaymentStatusLabel(payment.status), payment.reservation_status,
+          payment.billing_type ? getBillingTypeLabel(payment.billing_type) : '', payment.amount,
+          payment.created_at, payment.paid_at, payment.cancelled_at,
+        ]),
+      });
+    } catch (error) {
+      toast.error(paymentMessage(error instanceof Error ? error.message : error, 'Não foi possível exportar os pagamentos.'));
+    } finally {
+      setIsExportingPayments(false);
     }
-  };
-
-  const handleCopyWebhookToken = async () => {
-    if (!webhookAuthToken) {
-      toast.error('Salve o token Asaas para gerar o token do webhook.');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(webhookAuthToken);
-      toast.success('Token do webhook copiado.');
-    } catch {
-      toast.error('Não foi possível copiar o token do webhook.');
-    }
-  };
-
-  const submitAsaasConfig = (mode: 'save' | 'test', clearTokenAfterSave: boolean) => {
-    const apiToken = tokenDraft.trim();
-    if (mode === 'save' && !apiToken) {
-      toast.error('Informe um token Asaas.');
-      return;
-    }
-    if (mode === 'test' && !apiToken && !hasSavedAsaasToken) {
-      toast.error('Salve um token Asaas antes de testar a conexão.');
-      return;
-    }
-
-    asaasConfigMutation.mutate({ apiToken: apiToken || undefined, mode }, {
-      onSuccess: (data) => {
-        if (clearTokenAfterSave) setTokenDraft('');
-        if (mode === 'save' && data.status === 'configured') {
-          setIsEditingAsaasConfig(false);
-        }
-      },
-    });
-  };
-
-  const handleConfigTest = () => {
-    submitAsaasConfig('test', false);
-  };
-
-  const handleConfigSave = () => {
-    submitAsaasConfig('save', true);
   };
 
   const handleRuleSave = () => {
@@ -1259,7 +1165,6 @@ export default function CompanyPrepayments() {
     const amount = parseCurrencyInput(ruleForm.amount);
     const pixAmount = parseCurrencyInput(ruleForm.pix_amount);
     const creditCardAmount = parseCurrencyInput(ruleForm.credit_card_amount);
-    const maxCreditCardInstallments = Number.parseInt(ruleForm.max_credit_card_installments, 10);
     const deadline = Number.parseInt(ruleForm.payment_deadline_minutes, 10);
 
     if (!companyId) {
@@ -1290,10 +1195,6 @@ export default function CompanyPrepayments() {
       toast.error('Informe um valor de cartão maior que zero.');
       return;
     }
-    if (ruleForm.credit_card_enabled && (!Number.isFinite(maxCreditCardInstallments) || maxCreditCardInstallments < 1)) {
-      toast.error('Informe o máximo de parcelas do cartão.');
-      return;
-    }
     if (!Number.isFinite(deadline) || deadline < 1) {
       toast.error('Informe um prazo de pagamento válido.');
       return;
@@ -1311,7 +1212,7 @@ export default function CompanyPrepayments() {
       pix_amount: ruleForm.pix_enabled ? pixAmount : null,
       credit_card_enabled: ruleForm.credit_card_enabled,
       credit_card_amount: ruleForm.credit_card_enabled ? creditCardAmount : null,
-      max_credit_card_installments: ruleForm.credit_card_enabled ? maxCreditCardInstallments : null,
+      max_credit_card_installments: ruleForm.credit_card_enabled ? 1 : null,
       payment_deadline_minutes: deadline,
       customer_notice: ruleForm.customer_notice.trim(),
       cancellation_policy: ruleForm.cancellation_policy.trim(),
@@ -1367,28 +1268,30 @@ export default function CompanyPrepayments() {
       pix_amount: selectedRule.pix_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) ?? '',
       credit_card_enabled: selectedRule.credit_card_enabled,
       credit_card_amount: selectedRule.credit_card_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) ?? '',
-      max_credit_card_installments: selectedRule.max_credit_card_installments ? String(selectedRule.max_credit_card_installments) : '',
       payment_deadline_minutes: String(selectedRule.payment_deadline_minutes),
       customer_notice: selectedRule.customer_notice,
       cancellation_policy: selectedRule.cancellation_policy,
     });
-    setRuleTab('new');
+    setRuleDialogOpen(true);
     toast.success('Regra copiada para nova regra.');
   };
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-6 sm:space-y-8">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Pagamentos Antecipados</h1>
-          <Badge variant={prepaymentEnabled ? 'default' : 'secondary'}>
-            {prepaymentEnabled ? 'Funcionalidade ativa' : 'Funcionalidade desativada'}
-          </Badge>
-          <Badge variant="outline">Pix + cartão</Badge>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">Pagamentos das reservas</h1>
         </div>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Configure sinais para datas especiais com Pix e cartão. O valor do sinal continua sendo abatido da conta no dia da visita.
+        <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">
+          Acompanhe seus recebimentos, consulte cobranças e organize os repasses.
         </p>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className={`h-1.5 w-1.5 rounded-full ${prepaymentEnabled ? 'bg-success' : 'bg-muted-foreground'}`} />
+        <span>{prepaymentEnabled ? 'Antecipações ativas' : 'Antecipações desativadas'}</span>
+        <span className="mx-1 text-border">/</span><span>Pix e cartão</span>
+      </div>
       </div>
 
       {!prepaymentEnabled && !featureFlagsLoading && (
@@ -1396,218 +1299,37 @@ export default function CompanyPrepayments() {
           <AlertTriangle className="h-4 w-4 text-warning" />
           <AlertTitle>Módulo ainda não ativo para esta empresa</AlertTitle>
           <AlertDescription>
-            Novas reservas continuam no fluxo atual até a funcionalidade ser habilitada e o backend real entrar em operação.
+            Novas reservas continuam sem antecipação até a funcionalidade ser habilitada pela plataforma. Seu histórico financeiro permanece disponível.
           </AlertDescription>
         </Alert>
       )}
 
-      <Tabs defaultValue="config" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:w-[760px]">
-          <TabsTrigger value="config" className="min-h-9 px-2 text-xs sm:text-sm">Configurações</TabsTrigger>
-          <TabsTrigger value="rules" className="min-h-9 px-2 text-xs sm:text-sm">Regras</TabsTrigger>
-          <TabsTrigger value="payments" className="min-h-9 px-2 text-xs sm:text-sm">Pagamentos</TabsTrigger>
-          <TabsTrigger value="summary" className="min-h-9 px-2 text-xs sm:text-sm">Resumo financeiro</TabsTrigger>
+      <PrepaymentBalanceDashboard companyId={companyId} onOpenWithdrawals={() => setActiveTab('withdrawals')} />
+
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as PrepaymentTab)} className="space-y-6">
+        <TabsList aria-label="Áreas dos pagamentos" className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl border border-border/80 bg-muted/35 p-1.5 sm:grid-cols-4">
+          <TabsTrigger value="summary" className="min-h-11 gap-2 rounded-lg px-2 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm sm:text-sm"><ChartNoAxesCombined className="hidden h-4 w-4 sm:block" />Resumo financeiro</TabsTrigger>
+          <TabsTrigger value="payments" className="min-h-11 gap-2 rounded-lg px-2 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm sm:text-sm"><CreditCard className="hidden h-4 w-4 sm:block" />Pagamentos</TabsTrigger>
+          <TabsTrigger value="withdrawals" className="min-h-11 gap-2 rounded-lg px-2 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm sm:text-sm"><ArrowDownToLine className="hidden h-4 w-4 sm:block" />Saques</TabsTrigger>
+          <TabsTrigger value="rules" className="min-h-11 gap-2 rounded-lg px-2 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm sm:text-sm"><SlidersHorizontal className="hidden h-4 w-4 sm:block" />Regras</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="config" className="space-y-4">
-          <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-            <Card className="border-border shadow-card">
-              <CardHeader>
-                <CardTitle>Conta Asaas da empresa</CardTitle>
-                <CardDescription>
-                  Cada empresa usa o próprio token para gerar links de pagamento Pix e cartão na conta real da empresa.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {hasSavedAsaasToken && asaasConfig.status === 'configured' && !isEditingAsaasConfig ? (
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3 rounded-lg border border-success/20 bg-success/5 p-4">
-                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-semibold text-foreground">Conta Asaas configurada</p>
-                        <p className="text-xs text-muted-foreground">
-                          Integração ativa. Última validação: {formatDateTime(asaasConfig.lastValidatedAt)}
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setIsEditingAsaasConfig(true)}
-                    >
-                      <KeyRound className="mr-2 h-4 w-4" />
-                      Editar configuração
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <Label htmlFor="asaas-token">Token Asaas</Label>
-                        {hasSavedAsaasToken && (
-                          <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
-                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                            Token salvo
-                          </Badge>
-                        )}
-                      </div>
-                      <Input
-                        id="asaas-token"
-                        type="password"
-                        value={tokenDraft}
-                        onChange={(event) => setTokenDraft(event.target.value)}
-                        placeholder={hasSavedAsaasToken ? 'Token configurado. Cole um novo token para substituir.' : '$aact_YTU5...'}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {hasSavedAsaasToken
-                          ? 'Por segurança, o token salvo não é exibido. Use este campo apenas para substituir.'
-                          : 'Depois de salvo, o token não deve ser exibido novamente.'}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border border-border bg-background p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Status da integração</p>
-                          <p className="mt-1 text-sm font-medium text-foreground">{asaasStatusLabel}</p>
-                        </div>
-                        <Badge variant={asaasConfig.status === 'configured' ? 'default' : 'secondary'}>
-                          Conta real
-                        </Badge>
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Última validação: {formatDateTime(asaasConfig.lastValidatedAt)}
-                      </p>
-                      {asaasConfig.lastError && (
-                        <p className="mt-1 text-xs text-destructive">{asaasConfig.lastError}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>URL do webhook</Label>
-                      <div className="flex gap-2">
-                        <Input value={webhookUrl} readOnly className="font-mono text-xs" />
-                        <Button type="button" variant="outline" size="icon" onClick={handleCopyWebhookUrl} aria-label="Copiar URL do webhook">
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Cadastre esta URL no painel Asaas em Integrações → Webhooks.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Token do webhook</Label>
-                      <div className="flex gap-2">
-                        <Input value={webhookAuthToken ?? 'Salve o token Asaas para gerar'} readOnly className="font-mono text-xs" />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={handleCopyWebhookToken}
-                          disabled={!webhookAuthToken}
-                          aria-label="Copiar token do webhook"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Configure este token no header <code>asaas-access-token</code> do webhook no painel Asaas.
-                      </p>
-                    </div>
-
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Button onClick={handleConfigSave} disabled={asaasConfigMutation.isPending}>
-                        {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                        {hasSavedAsaasToken ? 'Atualizar token' : 'Salvar token'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={handleConfigTest}
-                        disabled={asaasConfigMutation.isPending || (!tokenDraft.trim() && !hasSavedAsaasToken)}
-                      >
-                        {asaasConfigMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                        Testar conexão
-                      </Button>
-                    </div>
-
-                    {hasSavedAsaasToken && asaasConfig.status === 'configured' && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="w-full"
-                        onClick={() => {
-                          setIsEditingAsaasConfig(false);
-                          setTokenDraft('');
-                        }}
-                      >
-                        Voltar para visão simplificada
-                      </Button>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border shadow-card">
-              <CardHeader>
-                <CardTitle>Como configurar no Asaas</CardTitle>
-                <CardDescription>
-                  Siga este passo a passo na conta Asaas da empresa para liberar os pagamentos.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <TutorialStep
-                  number={1}
-                  title="Crie ou acesse a conta Asaas da empresa"
-                  description="Use a conta Asaas (sandbox para testes ou produção) que receberá os pagamentos. Cada empresa precisa ter o próprio token."
-                />
-                <TutorialStep
-                  number={2}
-                  title="Gere o token de integração"
-                  description="No painel Asaas, abra Minha Conta → Integrações → API e gere um token. Copie o token gerado."
-                />
-                <TutorialStep
-                  number={3}
-                  title="Salve o token aqui"
-                  description="Cole o token no campo Token Asaas ao lado e clique em Salvar token. Vamos validar a conexão e gerar a URL e o token do webhook."
-                />
-                <TutorialStep
-                  number={4}
-                  title="Cadastre o site no Asaas (cartão)"
-                  description="Em Minha Conta → Informações, cadastre o domínio público da reserva (https://plugguest.com.br). É exigência da Asaas para liberar cobrança por cartão."
-                />
-                <TutorialStep
-                  number={5}
-                  title="Configure o webhook no painel Asaas"
-                  description="Em Integrações → Webhooks, adicione a URL e o token mostrados ao lado. Marque pelo menos os eventos PAYMENT_RECEIVED, PAYMENT_CONFIRMED e PAYMENT_RECEIVED_IN_CASH."
-                />
-                <TutorialStep
-                  number={6}
-                  title="Crie sua primeira regra"
-                  description="Vá para a aba Regras e crie uma regra de pagamento antecipado para a data ou evento desejado. A regra entra desativada para revisão antes de afetar o fluxo público."
-                />
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
         <TabsContent value="rules" className="space-y-4">
-          <Alert className="border-warning/30 bg-warning-soft/40">
-            <AlertTriangle className="h-4 w-4 text-warning" />
-            <AlertTitle>Regras não são retroativas</AlertTitle>
-            <AlertDescription>
-              Ao ativar uma regra para um período que já possui reservas, apenas novas reservas criadas depois da ativação passam a exigir pagamento.
-            </AlertDescription>
-          </Alert>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div><h2 className="text-lg font-semibold tracking-tight">Regras de antecipação</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Defina quando pedir um sinal e quanto cobrar por reserva ou por pessoa.</p></div>
+            <Button className="shrink-0 gap-2 self-start" onClick={() => { setRuleForm(createRuleForm()); setRuleDialogOpen(true); }}><Plus className="h-4 w-4" />Nova regra</Button>
+          </div>
 
+          {rulesQuery.isError ? (
+            <QueryErrorNotice message="Não foi possível carregar as regras de antecipação. Tente novamente." onRetry={() => rulesQuery.refetch()} />
+          ) : rulesQuery.isLoading ? (
+            <p role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando regras…</p>
+          ) : (
           <Tabs value={ruleTab} onValueChange={(value) => setRuleTab(value as RuleTab)} className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:w-[680px]">
-              <TabsTrigger value="active" className="min-h-9 px-2 text-xs sm:text-sm">Ativas</TabsTrigger>
-              <TabsTrigger value="inactive" className="min-h-9 px-2 text-xs sm:text-sm">Desativadas</TabsTrigger>
-              <TabsTrigger value="archived" className="min-h-9 px-2 text-xs sm:text-sm">Arquivadas</TabsTrigger>
-              <TabsTrigger value="new" className="min-h-9 px-2 text-xs sm:text-sm">Nova regra</TabsTrigger>
+            <TabsList aria-label="Situação das regras" className="h-auto max-w-full justify-start gap-1 rounded-lg bg-muted/50 p-1">
+              <TabsTrigger value="active" className="min-h-9 gap-2 px-3 text-xs sm:text-sm">Ativas <span className="text-[11px] tabular-nums text-muted-foreground">{activeRules.length}</span></TabsTrigger>
+              <TabsTrigger value="inactive" className="min-h-9 gap-2 px-3 text-xs sm:text-sm">Desativadas <span className="text-[11px] tabular-nums text-muted-foreground">{inactiveRules.length}</span></TabsTrigger>
+              <TabsTrigger value="archived" className="min-h-9 gap-2 px-3 text-xs sm:text-sm">Arquivadas <span className="text-[11px] tabular-nums text-muted-foreground">{archivedRules.length}</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="active">
@@ -1616,6 +1338,7 @@ export default function CompanyPrepayments() {
                 description="Somente uma regra ativa pode ocupar cada dia."
                 emptyTitle="Nenhuma regra ativa"
                 emptyDescription="Ative uma regra desativada ou crie uma nova regra para datas especiais."
+                onCreateRule={() => { setRuleForm(createRuleForm()); setRuleDialogOpen(true); }}
                 rules={activeRules}
                 onToggleRule={toggleRule}
                 onRemoveOrArchiveRule={removeOrArchiveRule}
@@ -1649,15 +1372,15 @@ export default function CompanyPrepayments() {
               />
             </TabsContent>
 
-            <TabsContent value="new">
-              <Card className="border-border shadow-card">
-                <CardHeader>
-                  <CardTitle>Nova regra</CardTitle>
-                  <CardDescription>
-                    A regra será adicionada desativada para revisão antes de entrar no fluxo público.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+          </Tabs>
+          )}
+          <p className="flex items-start gap-2 rounded-lg bg-muted/35 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>As regras valem apenas para novas reservas criadas após a ativação. Reservas anteriores permanecem como estão.</span></p>
+        </TabsContent>
+
+      <Dialog open={ruleDialogOpen} onOpenChange={(open) => { if (!createRuleMutation.isPending) setRuleDialogOpen(open); }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>Nova regra de antecipação</DialogTitle><DialogDescription>Escolha o período, os valores e as formas de pagamento. A regra entra desativada para você revisar antes de ativar.</DialogDescription></DialogHeader>
+          <div className="space-y-4 pt-2">
                 <div className="space-y-2">
                   <Label htmlFor="rule-name">Nome da regra</Label>
                   <Input
@@ -1718,13 +1441,14 @@ export default function CompanyPrepayments() {
 
                 <div className="rounded-lg border border-border bg-background p-4">
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-1 items-start justify-between gap-3">
                         <div>
                           <Label>Pix</Label>
-                          <p className="text-xs text-muted-foreground">Cria um link Pix no checkout do Asaas.</p>
+                          <p className="text-xs text-muted-foreground">Gera o QR Code Pix e o código copia e cola da reserva.</p>
                         </div>
                         <Switch
+                          className="mt-0.5 shrink-0"
                           checked={ruleForm.pix_enabled}
                           onCheckedChange={(checked) => setRuleForm((current) => ({ ...current, pix_enabled: checked }))}
                         />
@@ -1741,38 +1465,27 @@ export default function CompanyPrepayments() {
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-1 items-start justify-between gap-3">
                         <div>
-                          <Label>Cartão</Label>
-                          <p className="text-xs text-muted-foreground">Redireciona o cliente para pagamento no Asaas.</p>
+                          <Label>Cartão de crédito à vista</Label>
+                          <p className="text-xs text-muted-foreground">Pagamento em parcela única.</p>
                         </div>
                         <Switch
+                          className="mt-0.5 shrink-0"
                           checked={ruleForm.credit_card_enabled}
                           onCheckedChange={(checked) => setRuleForm((current) => ({ ...current, credit_card_enabled: checked }))}
                         />
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                        <div className="space-y-2">
-                          <Label htmlFor="card-amount">Valor no cartão</Label>
-                          <Input
-                            id="card-amount"
-                            inputMode="decimal"
-                            value={ruleForm.credit_card_amount}
-                            disabled={!ruleForm.credit_card_enabled}
-                            onChange={(event) => setRuleForm((current) => ({ ...current, credit_card_amount: event.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="card-installments">Parcelas</Label>
-                          <Input
-                            id="card-installments"
-                            inputMode="numeric"
-                            value={ruleForm.max_credit_card_installments}
-                            disabled={!ruleForm.credit_card_enabled}
-                            onChange={(event) => setRuleForm((current) => ({ ...current, max_credit_card_installments: event.target.value }))}
-                          />
-                        </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="card-amount">Valor no cartão</Label>
+                        <Input
+                          id="card-amount"
+                          inputMode="decimal"
+                          value={ruleForm.credit_card_amount}
+                          disabled={!ruleForm.credit_card_enabled}
+                          onChange={(event) => setRuleForm((current) => ({ ...current, credit_card_amount: event.target.value }))}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1819,26 +1532,34 @@ export default function CompanyPrepayments() {
                   )}
                   {createRuleMutation.isPending ? 'Salvando regra...' : 'Adicionar regra'}
                 </Button>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </TabsContent>
+          </div>
+        </DialogContent>
+      </Dialog>
 
         <TabsContent value="payments" className="space-y-4">
           <Card className="border-border shadow-card">
             <CardHeader className="gap-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Pagamentos de reservas</CardTitle>
+                  <CardTitle className="text-lg">Pagamentos de reservas</CardTitle>
                   <CardDescription>
                     Atualiza automaticamente a cada 30 segundos. O período considera criação, pagamento, estorno ou expiração.
                   </CardDescription>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isExportingPayments || paymentsListQuery.isError || paymentsListQuery.isLoading || filteredPayments.length === 0}
+                  onClick={handleExportPayments}
+                >
+                  {isExportingPayments ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Exportar Excel
+                </Button>
                 <Button
                   type="button"
                   className="shrink-0 border border-primary/20 bg-primary px-4 text-primary-foreground shadow-sm hover:bg-primary/90"
-                  disabled={bulkCheckPaymentsMutation.isPending || filteredCheckablePayments.length === 0}
+                  disabled={paymentsListQuery.isError || paymentsListQuery.isLoading || bulkCheckPaymentsMutation.isPending || filteredCheckablePayments.length === 0}
                   onClick={() => {
                     setBulkCheckResults([]);
                     setBulkCheckProgress({ done: 0, total: filteredCheckablePayments.length });
@@ -1855,6 +1576,7 @@ export default function CompanyPrepayments() {
                     ? `Consultando ${bulkCheckProgress.done}/${bulkCheckProgress.total}`
                     : 'Consultar período'}
                 </Button>
+                </div>
               </div>
               <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_180px_220px_minmax(220px,1fr)]">
                 <div className="space-y-2">
@@ -1942,12 +1664,16 @@ export default function CompanyPrepayments() {
                   <AlertTriangle className="h-4 w-4 text-warning" />
                   <AlertTitle>Pagamento recebido em reserva cancelada</AlertTitle>
                   <AlertDescription>
-                    {cancelledReceivedPayments.length} pagamento{cancelledReceivedPayments.length === 1 ? '' : 's'} pago{cancelledReceivedPayments.length === 1 ? '' : 's'} neste filtro pertence{cancelledReceivedPayments.length === 1 ? '' : 'm'} a reserva cancelada. Cancelar a reserva não estorna automaticamente no Asaas.
+                    {cancelledReceivedPayments.length} pagamento{cancelledReceivedPayments.length === 1 ? '' : 's'} pago{cancelledReceivedPayments.length === 1 ? '' : 's'} neste filtro pertence{cancelledReceivedPayments.length === 1 ? '' : 'm'} a reserva cancelada. Cancelar a reserva não estorna automaticamente o pagamento.
                   </AlertDescription>
                 </Alert>
               )}
 
-              {filteredPayments.length === 0 ? (
+              {paymentsListQuery.isError ? (
+                <QueryErrorNotice message="Não foi possível carregar os pagamentos. A lista pode estar incompleta; tente novamente." onRetry={() => paymentsListQuery.refetch()} />
+              ) : paymentsListQuery.isLoading ? (
+                <p role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando pagamentos…</p>
+              ) : filteredPayments.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border bg-background p-8 text-center">
                   <p className="text-sm font-medium text-foreground">Nenhum pagamento encontrado</p>
                   <p className="mt-1 text-sm text-muted-foreground">Altere o nome, status ou período para visualizar outros pagamentos.</p>
@@ -2006,19 +1732,18 @@ export default function CompanyPrepayments() {
         </TabsContent>
 
         <TabsContent value="summary" className="space-y-4">
-          <Card className="border-border shadow-card">
-            <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Período do resumo</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Filtra pela data do evento financeiro: pagamento, estorno, chargeback ou expiração.
+                <h2 className="text-lg font-semibold tracking-tight text-foreground">Movimentação por período</h2>
+                <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                  Consulte a posição das cobranças por sua última movimentação. Este filtro não altera o saldo acumulado acima.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-[220px_minmax(240px,1fr)] lg:w-[560px]">
+              <div className="grid shrink-0 gap-3 sm:grid-cols-[180px_minmax(220px,1fr)] xl:w-[480px]">
                 <div className="space-y-2">
-                  <Label>Período</Label>
+                  <Label htmlFor="summary-period">Período</Label>
                   <Select value={summaryPeriodPreset} onValueChange={(value) => handleSummaryPresetChange(value as SummaryPeriodPreset)}>
-                    <SelectTrigger>
+                    <SelectTrigger id="summary-period">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -2046,42 +1771,54 @@ export default function CompanyPrepayments() {
                   )}
                 </div>
               </div>
-            </CardContent>
-          </Card>
+          </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {summaryPaymentsQuery.isError ? (
+            <QueryErrorNotice message="Não foi possível carregar o resumo financeiro. Os totais não estão disponíveis; tente novamente." onRetry={() => summaryPaymentsQuery.refetch()} />
+          ) : summaryPaymentsQuery.isLoading ? (
+            <p role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando resumo financeiro…</p>
+          ) : summaryHasUnknownRefundAmount ? (
+            <Alert className="border-warning/40 bg-warning-soft/30">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertTitle>Valor de estorno parcial não informado</AlertTitle>
+              <AlertDescription>Consulte as cobranças com estorno parcial na aba Pagamentos para atualizar os valores devolvidos. Os totais ficam indisponíveis até a conciliação desses registros.</AlertDescription>
+            </Alert>
+          ) : (
+          <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Composição do valor confirmado">
             <MetricCard
               icon={CheckCircle2}
-              label="Pagamentos pagos"
-              value={String(grossPaidCount)}
-              detail="Reservas com pagamento confirmado (inclui estornados)"
-            />
-            <MetricCard
-              icon={Banknote}
-              label="Receita liquida"
-              value={formatPrepaymentAmount(netRevenue)}
-              detail="Pagos menos estornos e chargebacks"
+              label="Confirmados (bruto)"
+              value={formatPrepaymentAmount(grossPaid)}
+              detail={`${grossPaidCount} pagamento${grossPaidCount === 1 ? '' : 's'} confirmado${grossPaidCount === 1 ? '' : 's'}, antes das devoluções`}
             />
             <MetricCard
               icon={RefreshCw}
-              label="Estornos"
-              value={formatPrepaymentAmount(chartTotals.refunded)}
+              label="Estornos realizados"
+              value={`− ${formatPrepaymentAmount(chartTotals.refunded)}`}
               detail={`${chartTotals.refundedCount} pagamento${chartTotals.refundedCount === 1 ? '' : 's'} estornado${chartTotals.refundedCount === 1 ? '' : 's'}`}
             />
             <MetricCard
               icon={AlertTriangle}
               label="Chargebacks"
-              value={formatPrepaymentAmount(chartTotals.chargeback)}
-              detail={`${chartTotals.chargebackCount} ocorrencia${chartTotals.chargebackCount === 1 ? '' : 's'}`}
+              value={`− ${formatPrepaymentAmount(chartTotals.chargeback)}`}
+              detail={`${chartTotals.chargebackCount} ocorrência${chartTotals.chargebackCount === 1 ? '' : 's'}`}
+            />
+            <MetricCard
+              icon={Banknote}
+              label="Após devoluções"
+              value={`= ${formatPrepaymentAmount(netRevenue)}`}
+              detail="Confirmados menos estornos e chargebacks"
+              result
             />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
             <Card className="border-border shadow-card">
               <CardHeader>
                 <CardTitle>Valores por dia</CardTitle>
                 <CardDescription>
-                  Valores por evento financeiro entre {summaryPeriodLabel}, separados por status financeiro.
+                  Cobranças por estado atual e última movimentação entre {summaryPeriodLabel}.
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[320px]">
@@ -2116,7 +1853,6 @@ export default function CompanyPrepayments() {
                       <Bar dataKey="paid" name="Pagas" stackId="payments" fill="hsl(var(--success))" radius={[0, 0, 4, 4]} />
                       <Bar dataKey="refunded" name="Estornadas" stackId="payments" fill="hsl(var(--muted-foreground))" />
                       <Bar dataKey="chargeback" name="Chargeback" stackId="payments" fill="hsl(var(--destructive))" />
-                      <Bar dataKey="refundPending" name="Estorno pendente" stackId="payments" fill="hsl(var(--warning))" />
                       <Bar dataKey="expired" name="Expiradas" stackId="payments" fill="hsl(var(--destructive))" />
                       <Bar dataKey="pending" name="Pendentes" stackId="payments" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
                     </BarChart>
@@ -2128,17 +1864,27 @@ export default function CompanyPrepayments() {
             <Card className="border-border shadow-card">
               <CardHeader>
                 <CardTitle>Totais do período</CardTitle>
-                <CardDescription>Eventos financeiros entre {summaryPeriodLabel}.</CardDescription>
+                <CardDescription>Posição atual das cobranças com movimentação entre {summaryPeriodLabel}.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <SummaryLine label="Pagamentos pagos" value={String(grossPaidCount)} tone="success" />
-                <SummaryLine label="Valor pago (bruto)" value={formatPrepaymentAmount(grossPaid)} tone="success" />
-                <SummaryLine label="Receita liquida" value={formatPrepaymentAmount(netRevenue)} tone="success" />
-                <SummaryLine label="Valor estornado" value={formatPrepaymentAmount(chartTotals.refunded)} tone="default" />
-                <SummaryLine label="Chargeback" value={formatPrepaymentAmount(chartTotals.chargeback)} tone="destructive" />
+                <SummaryLine label="Valor bruto confirmado" value={formatPrepaymentAmount(grossPaid)} tone="success" />
+                <SummaryLine label="Menos estornos" value={`− ${formatPrepaymentAmount(chartTotals.refunded)}`} tone="default" />
+                <SummaryLine label="Menos chargebacks" value={`− ${formatPrepaymentAmount(chartTotals.chargeback)}`} tone="destructive" />
+                <div className="border-t border-border pt-3">
+                  <SummaryLine label="Após devoluções" value={`= ${formatPrepaymentAmount(netRevenue)}`} tone="success" />
+                </div>
+                <div className="border-t border-border pt-3">
+                  <p className="mb-3 text-xs font-medium text-muted-foreground">Em acompanhamento</p>
                 <SummaryLine label="Estorno pendente" value={formatPrepaymentAmount(chartTotals.refundPending)} tone="warning" />
+                </div>
                 <SummaryLine label="Valor expirado" value={formatPrepaymentAmount(chartTotals.expired)} tone="destructive" />
                 <SummaryLine label="Valor pendente" value={formatPrepaymentAmount(chartTotals.pending)} tone="warning" />
+                <SummaryLine label="Valor cancelado" value={formatPrepaymentAmount(chartTotals.cancelled)} tone="default" />
+                <p className="text-xs text-muted-foreground">Valores antes da liberação e das taxas. Este resumo não representa o saldo disponível para saque. Estornos pendentes só são descontados quando concluídos.</p>
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium">Como o resumo é calculado</summary>
+                  <p className="mt-2">O resumo considera a situação atual das cobranças. Mudanças de status podem alterar os valores de períodos anteriores. Cobranças antigas parceladas exigem conferência de todas as parcelas pela plataforma.</p>
+                </details>
                 <Button
                   variant="outline"
                   className="mt-2 w-full"
@@ -2155,6 +1901,11 @@ export default function CompanyPrepayments() {
               </CardContent>
             </Card>
           </div>
+          </>
+          )}
+        </TabsContent>
+        <TabsContent value="withdrawals" className="space-y-4">
+          <CompanySettlements companyId={companyId} showOverview={false} />
         </TabsContent>
       </Tabs>
 
@@ -2172,7 +1923,7 @@ export default function CompanyPrepayments() {
         <DialogContent className="sm:max-w-2xl" hideCloseButton={bulkCheckPaymentsMutation.isPending}>
           <DialogHeader>
             <DialogTitle>
-              {bulkCheckPaymentsMutation.isPending ? 'Consultando pagamentos no Asaas' : 'Consulta de pagamentos concluída'}
+              {bulkCheckPaymentsMutation.isPending ? 'Consultando pagamentos' : 'Consulta de pagamentos concluída'}
             </DialogTitle>
             <DialogDescription>
               {bulkCheckTotal > 0
@@ -2215,7 +1966,7 @@ export default function CompanyPrepayments() {
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-background">
               {bulkCheckResults.length === 0 ? (
                 <div className="p-4 text-sm text-muted-foreground">
-                  Aguardando a primeira resposta do Asaas.
+                  Aguardando a primeira resposta da consulta.
                 </div>
               ) : (
                 <div className="divide-y divide-border">
@@ -2244,10 +1995,10 @@ export default function CompanyPrepayments() {
                         )}
                       </div>
                       {result.error && (
-                        <p className="text-xs text-destructive">{result.error}</p>
+                        <p className="text-xs text-destructive">{paymentMessage(result.error)}</p>
                       )}
                       {!result.error && result.message && (
-                        <p className="text-xs text-muted-foreground">{result.message}</p>
+                        <p className="text-xs text-muted-foreground">{paymentMessage(result.message)}</p>
                       )}
                     </div>
                   ))}
@@ -2284,8 +2035,8 @@ export default function CompanyPrepayments() {
             <AlertDialogTitle>Estornar pagamento?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingRefundPayment
-                ? `O estorno de ${formatPrepaymentAmount(pendingRefundPayment.amount)} para ${pendingRefundPayment.customer_name} será solicitado no Asaas. A confirmação final depende do retorno do provedor.`
-                : 'O estorno será solicitado no Asaas.'}
+                ? `Será solicitado o estorno de ${formatPrepaymentAmount(pendingRefundPayment.amount)} para ${pendingRefundPayment.customer_name}. A conclusão será exibida após a confirmação do processamento.`
+                : 'O estorno será solicitado. Acompanhe a confirmação do processamento nesta tela.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2339,47 +2090,25 @@ function MetricCard({
   label,
   value,
   detail,
+  result = false,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   detail: string;
+  result?: boolean;
 }) {
   return (
-    <Card className="border-border shadow-card">
-      <CardContent className="flex items-center gap-4 p-4">
-        <div className="rounded-lg bg-primary/10 p-3 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
+    <Card className={result ? 'border-success/20 bg-success/5 shadow-none' : 'border-border shadow-none'}>
+      <CardContent className="flex items-start justify-between gap-3 p-4 sm:p-5">
         <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 truncate text-lg font-semibold text-foreground">{value}</p>
-          <p className="text-xs text-muted-foreground">{detail}</p>
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <p className={`my-2 truncate text-xl font-semibold tracking-tight tabular-nums ${result ? 'text-success' : 'text-foreground'}`}>{value}</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{detail}</p>
         </div>
+        <Icon className={`h-4 w-4 shrink-0 ${result ? 'text-success' : 'text-muted-foreground/60'}`} />
       </CardContent>
     </Card>
-  );
-}
-
-function TutorialStep({
-  number,
-  title,
-  description,
-}: {
-  number: number;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-        {number}
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
-        <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
-      </div>
-    </div>
   );
 }
 
@@ -2392,6 +2121,7 @@ function RulesCard({
   onToggleRule,
   onRemoveOrArchiveRule,
   onCloneRule,
+  onCreateRule,
 }: {
   title: string;
   description: string;
@@ -2401,18 +2131,21 @@ function RulesCard({
   onToggleRule: (ruleId: string, enabled: boolean) => void;
   onRemoveOrArchiveRule: (ruleId: string) => void;
   onCloneRule: (ruleId: string) => void;
+  onCreateRule?: () => void;
 }) {
   return (
-    <Card className="border-border shadow-card">
+    <Card className="border-border shadow-none">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {rules.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-background p-8 text-center">
+          <div className="flex min-h-[230px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/15 px-5 py-10 text-center">
+            <div className="mb-4 rounded-full border border-border bg-card p-3"><SlidersHorizontal className="h-5 w-5 text-muted-foreground" /></div>
             <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{emptyDescription}</p>
+            <p className="mt-1 max-w-md text-sm text-muted-foreground">{emptyDescription}</p>
+            {onCreateRule && <Button variant="outline" className="mt-5 gap-2" onClick={onCreateRule}><Plus className="h-4 w-4" />Criar primeira regra</Button>}
           </div>
         ) : (
           rules.map((rule) => (
@@ -2513,7 +2246,9 @@ function PaymentListItem({
       : '';
   const reservationWasCancelled = isReservationCancelledStatus(payment.reservation_status);
   const receivedAndCancelled = reservationWasCancelled && isReceivedPaymentStatus(payment.status);
-  const requiresManualAction = isLatePaidPayment(payment);
+  const requiresLateReview = isLatePaidPayment(payment);
+  const installmentReview = payment.metadata?.needs_manual_installment_reconciliation === true;
+  const requiresManualAction = requiresLateReview || installmentReview;
   const expiredWhatsappUrl = buildExpiredReservationWhatsappUrl(payment, companySlug);
   const containerClassName = requiresManualAction
     ? 'rounded-md border border-warning/60 bg-warning-soft/30 px-3 py-2.5 shadow-sm'
@@ -2556,7 +2291,8 @@ function PaymentListItem({
           <p className="text-sm font-medium text-foreground">{formatPrepaymentAmount(payment.amount)}</p>
           <p className="text-xs text-muted-foreground">
             {payment.billing_type ? getBillingTypeLabel(payment.billing_type) : 'Método não escolhido'}
-            {payment.installments && payment.installments > 1 ? ` ${payment.installments}x` : ''}
+            {payment.installments && payment.installments > 1 ? ` em até ${payment.installments}x` : ''}
+            {payment.billing_type === 'CREDIT_CARD' && payment.installments === 1 ? ' à vista' : ''}
           </p>
         </div>
 
@@ -2602,9 +2338,21 @@ function PaymentListItem({
           </Button>
         </div>
       </div>
-      {requiresManualAction && (
+      {(payment.asaas_payment_id || payment.asaas_payment_link_id || payment.external_reference) && (
+        <div className="mt-2 space-y-1 break-all text-xs text-muted-foreground">
+          {payment.asaas_payment_id && <p>Identificador da cobrança: <span className="font-mono">{payment.asaas_payment_id}</span></p>}
+          {!payment.asaas_payment_id && payment.asaas_payment_link_id && <p>Identificador do link de pagamento: <span className="font-mono">{payment.asaas_payment_link_id}</span></p>}
+          {payment.external_reference && <p>Referência: <span className="font-mono">{payment.external_reference}</span></p>}
+        </div>
+      )}
+      {requiresLateReview && (
         <div className="mt-2 rounded-md border border-warning/40 bg-background/80 px-3 py-2 text-xs font-medium text-warning">
-          Pagamento recebido após expiração. A reserva não foi confirmada porque houve conflito de disponibilidade. Avalie reagendamento ou estorno.
+          Pagamento recebido sem confirmação automática da reserva. Confira o cancelamento e a disponibilidade antes de reagendar ou estornar.
+        </div>
+      )}
+      {installmentReview && (
+        <div className="mt-2 rounded-md border border-warning/40 bg-background/80 px-3 py-2 text-xs font-medium text-warning">
+          Parcelamento identificado. A plataforma precisa conferir todas as parcelas e os estornos; o valor confirmado da reserva não representa o saldo já liquidado. Para solicitar o estorno do parcelamento completo, entre em contato com o suporte.
         </div>
       )}
       {receivedAndCancelled && (
@@ -2613,6 +2361,19 @@ function PaymentListItem({
         </div>
       )}
     </div>
+  );
+}
+
+function QueryErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Alert variant="destructive">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>Falha ao carregar dados</AlertTitle>
+      <AlertDescription className="space-y-3">
+        <p>{message}</p>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>Tentar novamente</Button>
+      </AlertDescription>
+    </Alert>
   );
 }
 

@@ -11,11 +11,11 @@ export default function CompanyPanelEntryRoute({
   loadingFallback: ReactNode;
 }) {
   const { slug } = useParams<{ slug: string }>();
-  const { hasPermission, permissionsLoading } = useCompanyPermissions();
+  const { hasPermission, permissionsLoading, activeRoles } = useCompanyPermissions();
 
   if (permissionsLoading) return <>{loadingFallback}</>;
 
-  const entryPath = slug ? getCompanyPanelEntryPath(slug, hasPermission) : null;
+  const entryPath = slug ? getCompanyPanelEntryPath(slug, hasPermission, activeRoles) : null;
   if (!entryPath) return <Navigate to="/acesso-negado" replace />;
   if (entryPath !== `/${slug}/admin`) return <Navigate to={entryPath} replace />;
 

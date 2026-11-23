@@ -316,7 +316,10 @@ export function normalizeAttendanceLossesReservation(value: unknown): Attendance
   }
 
   const nullableString = (key: string) => asString(value[key], true);
-  const nullableNumber = (key: string) => value[key] === null ? null : asNumber(value[key]);
+  const cancellationLeadHours = value.cancellation_lead_hours === null
+    ? null
+    : Number(value.cancellation_lead_hours);
+  if (cancellationLeadHours !== null && !Number.isFinite(cancellationLeadHours)) throw new Error('cancellation hours');
   const checkedInPartySize = value.checked_in_party_size === null
     ? null
     : asInteger(value.checked_in_party_size);
@@ -345,7 +348,8 @@ export function normalizeAttendanceLossesReservation(value: unknown): Attendance
     entry_method: value.entry_method,
     lead_days: asInteger(value.lead_days),
     cancelled_at: nullableString('cancelled_at'),
-    cancellation_lead_hours: nullableNumber('cancellation_lead_hours'),
+    // Negative means the cancellation was recorded after the scheduled time.
+    cancellation_lead_hours: cancellationLeadHours,
     whatsapp_evolution: asBoolean(value.whatsapp_evolution),
     whatsapp_pluguechat: asBoolean(value.whatsapp_pluguechat),
     has_whatsapp: asBoolean(value.has_whatsapp),

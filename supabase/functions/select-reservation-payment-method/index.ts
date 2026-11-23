@@ -1,4 +1,6 @@
+import { asaasCustomerPhone } from "../_shared/phone.ts";
 import { createSupabaseAdminClient } from "../_shared/internal-auth.ts";
+import { getReservationAsaasCredentials } from "../_shared/reservation-asaas-config.ts";
 import {
   AsaasApiError,
   createAsaasCustomer,
@@ -10,6 +12,7 @@ import {
   getAsaasPaymentLinkUrl,
   getAsaasPixQrCode,
   type AsaasBillingType,
+  type AsaasCredentials,
   type AsaasPaymentLinkPayload,
 } from "../_shared/asaas.ts";
 import {
@@ -22,7 +25,6 @@ import {
   corsHeaders,
   dateOnlyInTimeZone,
   getAvailableBillingTypes,
-  getMaxInstallments,
   jsonResponse,
   paymentIsExpired,
   readJson,
@@ -52,49 +54,29 @@ async function resolvePaymentContext(supabaseAdmin: any, paymentToken: string) {
   return { payment, reservation, company };
 }
 
-async function getAsaasConfig(supabaseAdmin: any, companyId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("company_asaas_configs")
-    .select("api_token, status")
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "configured") {
-    throw new Error("Integracao Asaas nao configurada");
-  }
-
-  return data;
-}
-
 function getPaymentLinkPayload(
   payment: any,
   reservation: any,
   company: any,
   billingType: AsaasBillingType,
   chargedAmount: number,
-  maxInstallments: number,
 ): AsaasPaymentLinkPayload {
-  const isInstallmentCard = billingType === "CREDIT_CARD" && maxInstallments > 1;
   const payload: AsaasPaymentLinkPayload = {
     name: buildPaymentLinkName(payment, reservation, billingType),
     description: buildPaymentLinkDescription(payment, reservation, company),
     value: chargedAmount,
     billingType,
-    chargeType: isInstallmentCard ? "INSTALLMENT" : "DETACHED",
+    chargeType: "DETACHED",
     dueDateLimitDays: 1,
     externalReference: buildPaymentLinkExternalReference(payment.payment_token, billingType),
     notificationEnabled: false,
+    limit: 1,
     isAddressRequired: false,
     callback: {
       successUrl: buildPaymentUrl(payment.payment_token),
       autoRedirect: true,
     },
   };
-
-  if (isInstallmentCard) {
-    payload.maxInstallmentCount = maxInstallments;
-  }
 
   return payload;
 }
@@ -134,7 +116,7 @@ function isValidCpfCnpj(value: string) {
 
 async function handlePixPayment(
   supabaseAdmin: any,
-  apiToken: string,
+  apiToken: AsaasCredentials,
   payment: any,
   reservation: any,
   company: any,
@@ -150,7 +132,7 @@ async function handlePixPayment(
   const customerPayload = {
     name: reservation.guest_name?.trim() || "Cliente Plug Guest",
     cpfCnpj,
-    mobilePhone: cleanDigits(reservation.guest_phone) || undefined,
+    mobilePhone: asaasCustomerPhone(reservation.guest_phone_e164 ?? reservation.guest_phone),
     email: reservation.guest_email?.trim() || undefined,
     externalReference,
     notificationDisabled: true,
@@ -265,12 +247,11 @@ async function handlePixPayment(
 
 async function handleCardPayment(
   supabaseAdmin: any,
-  apiToken: string,
+  apiToken: AsaasCredentials,
   payment: any,
   reservation: any,
   company: any,
   chargedAmount: number,
-  maxInstallments: number,
 ) {
   const externalReference = buildPaymentLinkExternalReference(payment.payment_token, "CREDIT_CARD");
   const paymentLinkPayload = getPaymentLinkPayload(
@@ -279,7 +260,6 @@ async function handleCardPayment(
     company,
     "CREDIT_CARD",
     chargedAmount,
-    maxInstallments,
   );
 
   let asaasPaymentLink;
@@ -342,7 +322,7 @@ async function handleCardPayment(
       status: "pending",
       billing_type: "CREDIT_CARD",
       charged_amount: chargedAmount,
-      max_installments: maxInstallments,
+      max_installments: 1,
       asaas_payment_link_id: asaasPaymentLink.id,
       payment_link_url: paymentLinkUrl,
       payment_link_external_reference: asaasPaymentLink.externalReference ?? externalReference,
@@ -371,7 +351,7 @@ async function handleCardPayment(
   await recordPaymentEvent(supabaseAdmin, updatedPayment, "payment_link_created", {
     billing_type: "CREDIT_CARD",
     charged_amount: chargedAmount,
-    max_installments: maxInstallments,
+    max_installments: 1,
     asaas_payment_link_id: asaasPaymentLink.id,
     payment_link_external_reference: asaasPaymentLink.externalReference ?? externalReference,
   });
@@ -456,14 +436,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Metodo nao habilitado para esta regra" }, 400);
     }
 
-    const asaasConfig = await getAsaasConfig(supabaseAdmin, payment.company_id);
+    const asaasCredentials = await getReservationAsaasCredentials(supabaseAdmin, payment);
     const chargedAmount = calculateMethodAmount(payment, reservation, billingType);
-    const maxInstallments = billingType === "CREDIT_CARD" ? getMaxInstallments(payment) : 1;
 
     if (billingType === "PIX") {
       return await handlePixPayment(
         supabaseAdmin,
-        asaasConfig.api_token,
+        asaasCredentials,
         payment,
         reservation,
         company,
@@ -474,12 +453,11 @@ Deno.serve(async (req) => {
 
     return await handleCardPayment(
       supabaseAdmin,
-      asaasConfig.api_token,
+      asaasCredentials,
       payment,
       reservation,
       company,
       chargedAmount,
-      maxInstallments,
     );
   } catch (error: any) {
     console.error("select-reservation-payment-method error", error);

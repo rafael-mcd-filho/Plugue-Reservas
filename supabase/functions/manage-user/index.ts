@@ -1,3 +1,4 @@
+import { normalizePhoneE164, isValidPhone } from "../_shared/phone.ts";
 import { getRequestAuthContext, impersonationAuditDetails, type SupabaseAdminClient, type SupabaseRequestClient } from "../_shared/internal-auth.ts";
 import {
   assertAssignableManagedRole,
@@ -22,6 +23,7 @@ type ProfileRow = {
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  phone_e164?: string | null;
   company_id: string | null;
   is_active: boolean;
   created_at: string | null;
@@ -51,7 +53,6 @@ type CallerContext = {
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
 const MIN_PASSWORD_LENGTH = 8;
 const PASSWORD_REQUIREMENTS_ERROR = `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`;
 const PASSWORD_POLICY_REJECTED_ERROR = "A senha foi rejeitada pela politica de seguranca. Tente uma senha menos obvia e diferente de dados pessoais.";
@@ -104,7 +105,8 @@ function normalizeEmailValue(value: unknown) {
 }
 
 function normalizePhoneValue(value: unknown) {
-  return normalizeOptionalText(value);
+  const text = normalizeOptionalText(value);
+  return text ? normalizePhoneE164(text) || text : null;
 }
 
 function normalizePasswordValue(value: unknown) {
@@ -113,15 +115,6 @@ function normalizePasswordValue(value: unknown) {
 
 function isValidEmail(value: string) {
   return EMAIL_PATTERN.test(value);
-}
-
-function isValidBrazilPhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-  const localDigits = digits.length > 11 && digits.startsWith("55")
-    ? digits.slice(2)
-    : digits;
-
-  return BRAZIL_PHONE_PATTERN.test(localDigits);
 }
 
 function isStrongPassword(value: string) {
@@ -152,7 +145,7 @@ async function getUserContext(supabaseAdmin: SupabaseAdminClient, userId: string
       .eq("user_id", userId),
     supabaseAdmin
       .from("profiles")
-      .select("id, full_name, email, phone, company_id, is_active, created_at")
+      .select("id, full_name, email, phone, phone_e164, company_id, is_active, created_at")
       .eq("id", userId)
       .maybeSingle(),
   ]);
@@ -679,7 +672,7 @@ Deno.serve(async (req) => {
         if (userIds.length > 0) {
           const profilesResult = await context.supabaseAdmin
             .from("profiles")
-            .select("id, full_name, email, phone, company_id, is_active, created_at")
+            .select("id, full_name, email, phone, phone_e164, company_id, is_active, created_at")
             .in("id", userIds);
 
           if (profilesResult.error) throw new Error(profilesResult.error.message);
@@ -718,7 +711,8 @@ Deno.serve(async (req) => {
               id: uid,
               full_name: profile?.full_name || "",
               email: profile?.email || "",
-              phone: profile?.phone || "",
+              phone: profile?.phone_e164 ?? profile?.phone ?? "",
+              phone_e164: profile?.phone_e164 ?? null,
               company_id: managedRole?.company_id ?? profile?.company_id ?? null,
               roles: [...new Set(userRoles.map((role) => role.role))],
               company_panel_permission_overrides: permissionMap.get(uid) ?? null,
@@ -798,7 +792,7 @@ Deno.serve(async (req) => {
       case "update_user": {
         assertCallerCanManageUsers(context);
 
-        const { user_id, full_name, email, phone, company_id, role } = body;
+        const { user_id, full_name, email, phone, phone_e164, company_id, role } = body;
         if (!user_id) throw new Error("user_id e obrigatorio");
 
         const normalizedFullName = full_name !== undefined ? normalizeFullNameValue(full_name) : undefined;
@@ -816,8 +810,8 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (normalizedPhone && !isValidBrazilPhone(normalizedPhone)) {
-          throw new Error("Informe um telefone valido com DDD");
+        if (normalizedPhone && !isValidPhone(normalizedPhone)) {
+          throw new Error("Informe um telefone valido para o pais selecionado");
         }
 
         const { roles, profile } = await getUserContext(context.supabaseAdmin, user_id);
@@ -1199,8 +1193,8 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          if (normalizedPhone && !isValidBrazilPhone(normalizedPhone)) {
-            results.push({ email: normalizedEmail, error: "Informe um telefone valido com DDD" });
+          if (normalizedPhone && !isValidPhone(normalizedPhone)) {
+            results.push({ email: normalizedEmail, error: "Informe um telefone valido para o pais selecionado" });
             continue;
           }
 

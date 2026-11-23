@@ -1,4 +1,4 @@
-import type { CompanyPanelPermission } from '@/lib/companyPermissions';
+import type { AppRole, CompanyPanelPermission } from '@/lib/companyPermissions';
 
 const ENTRY_ROUTES: ReadonlyArray<readonly [CompanyPanelPermission, string]> = [
   ['dashboard_view', ''],
@@ -6,13 +6,15 @@ const ENTRY_ROUTES: ReadonlyArray<readonly [CompanyPanelPermission, string]> = [
   ['reservations_view', '/reservas'],
   ['calendar_view', '/reservas/calendario'],
   ['tables_view', '/mesas'],
-  ['waitlist_view', '/fila'],
+  ['waitlist_view', '/servico?tab=fila'],
 ];
 
 export function getCompanyPanelEntryPath(
   slug: string,
   hasPermission: (permission: CompanyPanelPermission) => boolean,
+  roles: readonly AppRole[] = [],
 ): string | null {
-  const route = ENTRY_ROUTES.find(([permission]) => hasPermission(permission));
+  const canConfigureTables = roles.includes('admin') || roles.includes('superadmin');
+  const route = ENTRY_ROUTES.find(([permission]) => hasPermission(permission) && (permission !== 'tables_view' || canConfigureTables));
   return route ? `/${slug}/admin${route[1]}` : null;
 }

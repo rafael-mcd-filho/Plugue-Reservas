@@ -13,6 +13,8 @@ export interface AutomationSetting {
   updated_at: string;
 }
 
+type AutomationWrite = Pick<AutomationSetting, 'company_id' | 'type' | 'enabled' | 'message_template'>;
+
 export interface WhatsAppInstance {
   id: string;
   company_id: string;
@@ -38,11 +40,12 @@ export interface EvolutionApiPayload {
 export function useAutomationSettings(companyId?: string, enabled = true) {
   return useQuery({
     queryKey: ['automation-settings', companyId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const { data, error } = await supabase
         .from('automation_settings' as any)
         .select('*')
-        .eq('company_id', companyId!);
+        .eq('company_id', companyId!)
+        .abortSignal(signal);
 
       if (error) throw error;
       return (data ?? []) as unknown as AutomationSetting[];
@@ -55,8 +58,11 @@ export function useUpsertAutomation() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (automation: { company_id: string; type: string; enabled: boolean; message_template: string }) => {
-      const { error } = await supabase
+    onMutate: async (automation: AutomationWrite) => {
+      await qc.cancelQueries({ queryKey: ['automation-settings', automation.company_id], exact: true });
+    },
+    mutationFn: async (automation: AutomationWrite) => {
+      const { data, error } = await supabase
         .from('automation_settings' as any)
         .upsert(
           {
@@ -64,15 +70,22 @@ export function useUpsertAutomation() {
             updated_at: new Date().toISOString(),
           } as any,
           { onConflict: 'company_id,type' },
-        );
+        )
+        .select('*')
+        .single();
 
       if (error) throw error;
+      return data as unknown as AutomationSetting;
     },
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ['automation-settings', vars.company_id] });
+    onSuccess: async (saved, vars) => {
+      await qc.cancelQueries({ queryKey: ['automation-settings', vars.company_id], exact: true });
+      qc.setQueryData<AutomationSetting[]>(['automation-settings', vars.company_id], (previous = []) => [
+        ...previous.filter((item) => item.type !== vars.type), saved,
+      ]);
+      void qc.invalidateQueries({ queryKey: ['automation-settings', vars.company_id], exact: true });
       toast.success('Automação salva!');
     },
-    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+    onError: () => toast.error('Erro ao salvar automação. Tente novamente.'),
   });
 }
 

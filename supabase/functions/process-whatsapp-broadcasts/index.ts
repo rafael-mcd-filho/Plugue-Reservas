@@ -12,6 +12,7 @@ import {
   serializeWhatsAppFailure,
   sleep,
   type WhatsAppFailureDetails,
+  type WhatsAppSendResult,
 } from "../_shared/whatsapp.ts";
 import {
   checkWhatsAppCircuit,
@@ -51,6 +52,7 @@ interface RecipientRow {
   company_id: string;
   reservation_id: string | null;
   phone: string;
+  phone_e164?: string | null;
   phone_normalized?: string | null;
   guest_name: string | null;
   status?: string;
@@ -226,7 +228,7 @@ async function processBroadcast(
       break;
     }
 
-    const phone = formatPhoneForWhatsApp(activeRecipient.phone || "");
+    const phone = formatPhoneForWhatsApp(activeRecipient.phone_e164 ?? activeRecipient.phone ?? "");
     if (!phone) {
       const failureDetails: WhatsAppFailureDetails = {
         code: "invalid_payload",
@@ -248,7 +250,7 @@ async function processBroadcast(
       continue;
     }
 
-    let result;
+    let result: WhatsAppSendResult;
     try {
       if (broadcast.image_url) {
         const { mime: mimeFromUrl, ext } = mimeTypeFromUrl(broadcast.image_url);
@@ -301,7 +303,7 @@ async function processBroadcast(
           .insert({
             company_id: broadcast.company_id,
             reservation_id: activeRecipient.reservation_id,
-            phone: activeRecipient.phone,
+            phone: phone || activeRecipient.phone,
             message: broadcast.message,
             type: "broadcast",
             status: logStatus,

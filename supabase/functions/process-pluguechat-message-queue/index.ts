@@ -1,3 +1,5 @@
+import { getStoredPhoneLookupVariants, matchesCanonicalPhone, normalizeStoredPhoneE164 } from "../_shared/phone.ts";
+import { getReservationChangeMessageEligibility } from "../_shared/reservation-change-notifications.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import { normalizePlugueChatPostVisitParameters } from "../_shared/post-visit.ts";
 import {
@@ -8,6 +10,7 @@ import {
   getPlugueChatCompanyConfig,
   sendPlugueChatMessage,
 } from "../_shared/pluguechat.ts";
+import { getWaitlistCallEligibility, isPlugueChatCallFailureRetryable } from "../_shared/waitlist-call-eligibility.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,6 +23,29 @@ const SENT_RECHECK_WINDOW_DAYS = 7;
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
 
+/** Ignore a late result for a call once its queue row belongs to another attempt. */
+async function updateQueueAttempt(
+  supabaseAdmin: SupabaseAdmin,
+  item: any,
+  patch: Record<string, unknown>,
+  expected: any = item,
+): Promise<boolean> {
+  let query = supabaseAdmin.from("pluguechat_message_queue").update(patch).eq("id", item.id);
+  if (item.type !== "waitlist_called") {
+    await query;
+    return true;
+  }
+  query = query.eq("company_id", item.company_id).eq("status", expected.status);
+  query = expected.provider_message_id
+    ? query.eq("provider_message_id", expected.provider_message_id)
+    : query.is("provider_message_id", null);
+  if (expected.last_attempt_at) query = query.eq("last_attempt_at", expected.last_attempt_at);
+  if (item.waitlist_called_at) query = query.eq("waitlist_called_at", item.waitlist_called_at);
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error) console.warn("Could not persist the current waitlist call attempt.");
+  return !error && !!data;
+}
+
 async function upsertPlugueChatLog(
   supabaseAdmin: SupabaseAdmin,
   item: any,
@@ -27,13 +53,27 @@ async function upsertPlugueChatLog(
   providerStatus: string | null,
   errorDetails: string | null,
 ) {
+  if (item.type === "waitlist_called") {
+    // The queue may have been retried after its final status was written. Let the
+    // database lock and match the exact attempt before touching its durable log.
+    const { error } = await supabaseAdmin.rpc("write_waitlist_call_notification_log", {
+      _queue_id: item.id,
+      _called_at: item.waitlist_called_at,
+      _last_attempt_at: item.last_attempt_at,
+      _status: status,
+      _provider_message_id: item.provider_message_id ?? null,
+    });
+    if (error) console.warn("Could not persist the current waitlist call log.");
+    return;
+  }
   const { error } = await supabaseAdmin.from("pluguechat_message_logs").upsert(
     {
       queue_id: item.id,
       company_id: item.company_id,
       reservation_id: item.reservation_id ?? null,
+      ...(item.reservation_change_revision ? { reservation_change_revision: item.reservation_change_revision } : {}),
       waitlist_id: item.waitlist_id ?? null,
-      phone: item.phone,
+      phone: normalizeStoredPhoneE164(item.phone_e164 ?? item.phone) || item.phone,
       type: item.type,
       template_id: item.template_id,
       template_name: item.template_name ?? null,
@@ -51,7 +91,7 @@ async function upsertPlugueChatLog(
   }
 }
 
-async function updateBroadcastRecipient(
+export async function updateBroadcastRecipient(
   supabaseAdmin: SupabaseAdmin,
   item: any,
   status: string,
@@ -63,6 +103,19 @@ async function updateBroadcastRecipient(
   const broadcastId = match?.[1];
   if (!broadcastId) return;
 
+  const phone = normalizeStoredPhoneE164(item.phone_e164 ?? item.phone);
+  if (!phone) return;
+  const variants = getStoredPhoneLookupVariants(phone).map((value) => JSON.stringify(value)).join(',');
+  const { data: candidates, error: lookupError } = await supabaseAdmin
+    .from('pluguechat_broadcast_recipients')
+    .select('id, phone, phone_e164')
+    .eq('broadcast_id', broadcastId)
+    .eq('company_id', item.company_id)
+    .or(`phone_e164.eq.${phone},phone.in.(${variants})`);
+  if (lookupError) throw new Error(`Erro ao localizar destinatario: ${lookupError.message}`);
+  const recipientIds = candidates?.filter((candidate) => matchesCanonicalPhone(candidate, phone)).map((candidate) => candidate.id) ?? [];
+  if (recipientIds.length === 0) return;
+
   const { error } = await supabaseAdmin
     .from("pluguechat_broadcast_recipients")
     .update({
@@ -72,7 +125,8 @@ async function updateBroadcastRecipient(
       error_details: errorDetails,
     })
     .eq("broadcast_id", broadcastId)
-    .eq("phone", item.phone);
+    .eq("company_id", item.company_id)
+    .in('id', recipientIds);
 
   if (error) {
     console.error("pluguechat broadcast recipient update error", error);
@@ -86,26 +140,35 @@ async function finalizeProviderQueuedMessage(
   providerStatus: string | null,
   errorDetails: string | null,
   checkedAt: string,
+  expected: any = item,
 ) {
+  const patch = {
+    status: finalStatus,
+    provider_message_id: item.provider_message_id ?? null,
+    provider_status_url: item.provider_status_url ?? null,
+    provider_status: providerStatus,
+    provider_status_checked_at: checkedAt,
+    error_details: errorDetails,
+    last_attempt_at: checkedAt,
+  };
+  if (item.type === "waitlist_called") {
+    // A stale reconciler must not write a log or overwrite a manually retried row.
+    if (!await updateQueueAttempt(supabaseAdmin, item, patch, expected)) return false;
+    await upsertPlugueChatLog(supabaseAdmin, { ...item, last_attempt_at: checkedAt }, finalStatus, providerStatus, errorDetails);
+    return true;
+  }
   await upsertPlugueChatLog(supabaseAdmin, item, finalStatus, providerStatus, errorDetails);
 
   await supabaseAdmin
     .from("pluguechat_message_queue")
-    .update({
-      status: finalStatus,
-      provider_message_id: item.provider_message_id ?? null,
-      provider_status_url: item.provider_status_url ?? null,
-      provider_status: providerStatus,
-      provider_status_checked_at: checkedAt,
-      error_details: errorDetails,
-      last_attempt_at: checkedAt,
-    })
+    .update(patch)
     .eq("id", item.id);
 
   await updateBroadcastRecipient(supabaseAdmin, item, finalStatus, errorDetails);
+  return true;
 }
 
-async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now: string, companyId: string | null) {
+async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now: string, companyId: string | null, queueId: string | null = null) {
   let providerQueuedQuery = supabaseAdmin
     .from("pluguechat_message_queue")
     .select("*")
@@ -113,6 +176,7 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
     .order("provider_status_checked_at", { ascending: true })
     .limit(STATUS_CHECK_BATCH_SIZE);
   if (companyId) providerQueuedQuery = providerQueuedQuery.eq("company_id", companyId);
+  if (queueId) providerQueuedQuery = providerQueuedQuery.eq("id", queueId);
   const { data: providerQueuedItems, error } = await providerQueuedQuery;
 
   if (error) {
@@ -132,6 +196,7 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
       .order("last_attempt_at", { ascending: false })
       .limit(remainingLimit);
   if (companyId) sentQuery = sentQuery.eq("company_id", companyId);
+  if (queueId) sentQuery = sentQuery.eq("id", queueId);
   const { data: sentWithoutProviderStatus, error: sentFetchError } = remainingLimit > 0
     ? await sentQuery : { data: [], error: null };
 
@@ -151,7 +216,7 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
   for (const item of items ?? []) {
     const expiresAt = item.expires_at ? Date.parse(item.expires_at) : Number.NaN;
     if (item.status === "provider_queued" && !Number.isNaN(expiresAt) && expiresAt <= Date.parse(now)) {
-      await finalizeProviderQueuedMessage(
+      const finalized = await finalizeProviderQueuedMessage(
         supabaseAdmin,
         item,
         "failed",
@@ -159,12 +224,12 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
         item.error_details ?? "Tempo limite para confirmacao de envio excedido.",
         now,
       );
-      confirmedFailed++;
+      if (finalized) confirmedFailed++;
       continue;
     }
 
     if (!item.provider_message_id) {
-      await finalizeProviderQueuedMessage(
+      const finalized = await finalizeProviderQueuedMessage(
         supabaseAdmin,
         item,
         "failed",
@@ -172,7 +237,7 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
         "A PlugueChat aceitou a requisicao, mas nao retornou ID da mensagem para confirmar o status.",
         now,
       );
-      confirmedFailed++;
+      if (finalized) confirmedFailed++;
       continue;
     }
 
@@ -183,14 +248,11 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
     }
 
     if (!config) {
-      await supabaseAdmin
-        .from("pluguechat_message_queue")
-        .update({
+      const persisted = await updateQueueAttempt(supabaseAdmin, item, {
           error_details: "Configuracao PlugueChat indisponivel para verificar status da mensagem.",
           provider_status_checked_at: now,
-        })
-        .eq("id", item.id);
-      checkFailed++;
+        });
+      if (persisted) checkFailed++;
       continue;
     }
 
@@ -203,14 +265,11 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
     checked++;
 
     if (!statusResult.ok) {
-      await supabaseAdmin
-        .from("pluguechat_message_queue")
-        .update({
+      const persisted = await updateQueueAttempt(supabaseAdmin, item, {
           error_details: statusResult.error,
           provider_status_checked_at: now,
-        })
-        .eq("id", item.id);
-      checkFailed++;
+        });
+      if (persisted) checkFailed++;
       continue;
     }
 
@@ -224,8 +283,8 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
         provider_message_id: statusResult.provider_message_id ?? item.provider_message_id,
         provider_status_url: providerStatusUrl,
       };
-      await finalizeProviderQueuedMessage(supabaseAdmin, nextItem, "sent", providerStatus, null, now);
-      confirmedSent++;
+      const finalized = await finalizeProviderQueuedMessage(supabaseAdmin, nextItem, "sent", providerStatus, null, now, item);
+      if (finalized) confirmedSent++;
       continue;
     }
 
@@ -235,31 +294,29 @@ async function reconcileProviderQueuedMessages(supabaseAdmin: SupabaseAdmin, now
         provider_message_id: statusResult.provider_message_id ?? item.provider_message_id,
         provider_status_url: providerStatusUrl,
       };
-      await finalizeProviderQueuedMessage(
+      const finalized = await finalizeProviderQueuedMessage(
         supabaseAdmin,
         nextItem,
         "failed",
         providerStatus,
         errorDetails ?? `PlugueChat retornou status ${providerStatus ?? "FAILED"}.`,
         now,
+        item,
       );
-      confirmedFailed++;
+      if (finalized) confirmedFailed++;
       continue;
     }
 
-    await supabaseAdmin
-      .from("pluguechat_message_queue")
-      .update({
+    const persisted = await updateQueueAttempt(supabaseAdmin, item, {
         status: "provider_queued",
         provider_message_id: statusResult.provider_message_id ?? item.provider_message_id,
         provider_status: providerStatus,
         provider_status_url: providerStatusUrl,
         provider_status_checked_at: now,
         error_details: errorDetails,
-      })
-      .eq("id", item.id);
+      });
 
-    waiting++;
+    if (persisted) waiting++;
   }
 
   return { checked, confirmedSent, confirmedFailed, waiting, checkFailed };
@@ -282,6 +339,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const requestedCompanyId = typeof body.company_id === "string" && body.company_id.length > 0
       ? body.company_id : null;
+    const requestedQueueId = typeof body.queue_id === "string" && body.queue_id.length > 0 ? body.queue_id : null;
+    if (requestedQueueId && !requestedCompanyId) {
+      return new Response(JSON.stringify({ error: "company_id e obrigatorio para uma mensagem especifica" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const now = new Date().toISOString();
 
     // Busca itens pendentes prontos para envio
@@ -291,12 +354,12 @@ Deno.serve(async (req) => {
       .eq("status", "pending")
       .lte("scheduled_for", now)
       .gt("expires_at", now)
-      .lt("attempts", 3)
       .order("priority", { ascending: true })
       .order("scheduled_for", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(BATCH_SIZE);
     if (requestedCompanyId) itemsQuery = itemsQuery.eq("company_id", requestedCompanyId);
+    if (requestedQueueId) itemsQuery = itemsQuery.eq("id", requestedQueueId);
     const { data: items, error: fetchError } = await itemsQuery;
 
     if (fetchError) {
@@ -308,7 +371,7 @@ Deno.serve(async (req) => {
     }
 
     if (!items || items.length === 0) {
-      const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId);
+      const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId, requestedQueueId);
 
       return new Response(JSON.stringify({
         sent: 0,
@@ -329,10 +392,18 @@ Deno.serve(async (req) => {
     let waitingProvider = 0;
 
     for (const item of items) {
+      if (item.attempts >= item.max_attempts) {
+        await supabaseAdmin.from("pluguechat_message_queue").update({ status: "failed" })
+          .eq("id", item.id).eq("status", "pending");
+        skipped++;
+        continue;
+      }
       // Marca como em processamento para evitar reprocessamento paralelo
       const { data: claimedItem, error: claimError } = await supabaseAdmin
         .from("pluguechat_message_queue")
-        .update({ status: "processing", last_attempt_at: now, attempts: item.attempts + 1 })
+        .update({ status: "processing", last_attempt_at: now, attempts: item.attempts + 1,
+          ...(item.type === 'waitlist_called' ? { error_details: null, provider_message_id: null, provider_status: null, provider_status_url: null, provider_status_checked_at: null } : {}),
+        })
         .eq("id", item.id)
         .eq("status", "pending")
         .select("id")
@@ -342,14 +413,28 @@ Deno.serve(async (req) => {
         skipped++;
         continue;
       }
+      const currentAttempt = {
+        ...item, status: "processing", last_attempt_at: now,
+        provider_message_id: item.type === "waitlist_called" ? null : item.provider_message_id,
+      };
 
       // Valida que o canal ainda é PlugueChat
       const channel = await getCompanyChannel(supabaseAdmin, item.company_id);
       if (channel !== "pluguechat_official") {
-        await supabaseAdmin
-          .from("pluguechat_message_queue")
-          .update({ status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now })
-          .eq("id", item.id);
+        await updateQueueAttempt(supabaseAdmin, item, { status: "cancelled", cancel_reason: "channel_changed", cancelled_at: now }, currentAttempt);
+        skipped++;
+        continue;
+      }
+
+      const callEligibility = await getWaitlistCallEligibility(supabaseAdmin, item, 'pluguechat_official');
+      if (!callEligibility.eligible) {
+        await updateQueueAttempt(supabaseAdmin, item, {
+          status: callEligibility.reason === 'lookup_failed' ? 'pending' : 'cancelled',
+          attempts: item.attempts,
+          ...(callEligibility.reason === 'lookup_failed'
+            ? { scheduled_for: new Date(Date.now() + 30_000).toISOString() }
+            : { cancel_reason: callEligibility.reason, cancelled_at: now }),
+        }, currentAttempt);
         skipped++;
         continue;
       }
@@ -357,26 +442,50 @@ Deno.serve(async (req) => {
       // Busca configuração da empresa
       const config = await getPlugueChatCompanyConfig(supabaseAdmin, item.company_id);
       if (!config) {
-        await supabaseAdmin
-          .from("pluguechat_message_queue")
-          .update({
+        await updateQueueAttempt(supabaseAdmin, item, {
             status: item.attempts + 1 >= item.max_attempts ? "failed" : "pending",
             error_details: "Configuração PlugueChat não encontrada ou incompleta.",
             last_attempt_at: now,
-          })
-          .eq("id", item.id);
+          }, currentAttempt);
         failed++;
         continue;
       }
 
       const payload = buildPlugueChatPayload(
         config.fromNumber,
-        item.phone,
+        item.phone_e164 ?? item.phone,
         item.template_id,
         item.type === "post_visit"
           ? normalizePlugueChatPostVisitParameters(item.parameters ?? {})
           : item.parameters ?? {},
       );
+
+      // Configuration may have changed while it was loaded above.
+      const finalCallEligibility = await getWaitlistCallEligibility(supabaseAdmin, item, 'pluguechat_official');
+      if (!finalCallEligibility.eligible) {
+        await updateQueueAttempt(supabaseAdmin, item, {
+          status: finalCallEligibility.reason === 'lookup_failed' ? 'pending' : 'cancelled',
+          attempts: item.attempts,
+          ...(finalCallEligibility.reason === 'lookup_failed'
+            ? { scheduled_for: new Date(Date.now() + 30_000).toISOString() }
+            : { cancel_reason: finalCallEligibility.reason, cancelled_at: new Date().toISOString() }),
+        }, currentAttempt);
+        skipped++;
+        continue;
+      }
+
+      const reservationEligibility = await getReservationChangeMessageEligibility(supabaseAdmin, item);
+      if (!reservationEligibility.eligible) {
+        await updateQueueAttempt(supabaseAdmin, item, {
+          status: reservationEligibility.reason === "lookup_failed" ? "pending" : "cancelled",
+          attempts: item.attempts,
+          ...(reservationEligibility.reason === "lookup_failed"
+            ? { scheduled_for: new Date(Date.now() + 30_000).toISOString() }
+            : { cancel_reason: "public_reservation_changed", cancelled_at: new Date().toISOString() }),
+        }, currentAttempt);
+        skipped++;
+        continue;
+      }
 
       const result = await sendPlugueChatMessage(config.apiUrl, config.apiToken, payload);
 
@@ -389,42 +498,42 @@ Deno.serve(async (req) => {
         };
 
         if (deliveryState === "sent") {
-          await finalizeProviderQueuedMessage(
+          const finalized = await finalizeProviderQueuedMessage(
             supabaseAdmin,
             nextItem,
             "sent",
             result.provider_status ?? null,
             null,
             now,
+            currentAttempt,
           );
-          sent++;
+          if (finalized) sent++;
           continue;
         }
 
         if (!result.provider_message_id) {
-          await finalizeProviderQueuedMessage(
+          const finalized = await finalizeProviderQueuedMessage(
             supabaseAdmin,
             nextItem,
             "failed",
             result.provider_status ?? "MISSING_MESSAGE_ID",
             "A PlugueChat aceitou a requisicao, mas nao retornou ID da mensagem para confirmar o status.",
             now,
+            currentAttempt,
           );
-          failed++;
+          if (finalized) failed++;
           continue;
         }
 
-        await supabaseAdmin
-          .from("pluguechat_message_queue")
-          .update({
+        const persisted = await updateQueueAttempt(supabaseAdmin, item, {
             status: "provider_queued",
             provider_message_id: result.provider_message_id,
             provider_status: result.provider_status ?? null,
             provider_status_url: result.provider_status_url ?? null,
             provider_status_checked_at: now,
             error_details: null,
-          })
-          .eq("id", item.id);
+          }, currentAttempt);
+        if (!persisted) continue;
 
         await updateBroadcastRecipient(
           supabaseAdmin,
@@ -438,16 +547,14 @@ Deno.serve(async (req) => {
 
         waitingProvider++;
       } else {
-        const isFinal = item.attempts + 1 >= item.max_attempts;
+        const isFinal = item.attempts + 1 >= item.max_attempts || (item.type === 'waitlist_called' && !isPlugueChatCallFailureRetryable(result));
         const nextItem = {
           ...item,
           provider_message_id: result.provider_message_id ?? null,
           provider_status_url: result.provider_status_url ?? null,
         };
 
-        await supabaseAdmin
-          .from("pluguechat_message_queue")
-          .update({
+        const persisted = await updateQueueAttempt(supabaseAdmin, item, {
             status: isFinal ? "failed" : "pending",
             provider_message_id: result.provider_message_id ?? null,
             provider_status: result.provider_status ?? null,
@@ -455,13 +562,13 @@ Deno.serve(async (req) => {
             provider_status_checked_at: now,
             error_details: result.error,
             last_attempt_at: now,
-          })
-          .eq("id", item.id);
+          }, currentAttempt);
+        if (!persisted) continue;
 
         if (isFinal) {
           await upsertPlugueChatLog(
             supabaseAdmin,
-            nextItem,
+            item.type === "waitlist_called" ? { ...nextItem, last_attempt_at: now } : nextItem,
             "failed",
             result.provider_status ?? null,
             result.error,
@@ -473,7 +580,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId);
+    const providerStatusSummary = await reconcileProviderQueuedMessages(supabaseAdmin, now, requestedCompanyId, requestedQueueId);
 
     return new Response(JSON.stringify({
       sent,

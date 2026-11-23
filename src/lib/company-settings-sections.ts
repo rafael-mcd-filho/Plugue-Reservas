@@ -8,15 +8,14 @@ export const COMPANY_SETTINGS_SECTIONS = [
 
 export type CompanySettingsSection = (typeof COMPANY_SETTINGS_SECTIONS)[number];
 
-// Como as seções aparecem no menu: o que descreve a casa fica em "Empresa"; o
-// que o cliente encontra na hora de reservar fica em "Configurações".
+// Cadastro pertence a Empresa. Agenda e experiência de reserva ficam em Operação.
 export const COMPANY_PROFILE_SETTINGS_SECTIONS = [
   'empresa',
-  'agenda',
-  'reservas',
 ] as const satisfies readonly CompanySettingsSection[];
 
-export const COMPANY_EXPERIENCE_SETTINGS_SECTIONS = [
+export const COMPANY_OPERATION_SETTINGS_SECTIONS = [
+  'agenda',
+  'reservas',
   'disponibilidade',
   'pagina-publica',
 ] as const satisfies readonly CompanySettingsSection[];
@@ -30,6 +29,13 @@ export const COMPANY_SETTINGS_SECTION_LABELS: Record<CompanySettingsSection, str
   reservas: 'Regras de reservas',
   disponibilidade: 'Disponibilidade',
   'pagina-publica': 'Página Pública',
+};
+
+// Rótulos compactos só para a navegação; os títulos das páginas mantêm contexto.
+export const COMPANY_SETTINGS_SECTION_NAV_LABELS: Record<CompanySettingsSection, string> = {
+  ...COMPANY_SETTINGS_SECTION_LABELS,
+  reservas: 'Regras',
+  'pagina-publica': 'Página pública',
 };
 
 // As descricoes de Horarios, Regras e Disponibilidade se citam entre si: as tres

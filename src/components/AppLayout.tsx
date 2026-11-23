@@ -4,8 +4,6 @@ import {
   Activity,
   BarChart3,
   Bell,
-  Bot,
-  Briefcase,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -27,7 +25,6 @@ import {
   MessageSquareQuote,
   Pin,
   PinOff,
-  Plug,
   ReceiptText,
   Repeat2,
   type LucideIcon,
@@ -39,6 +36,7 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import { isCompanyNavGroupActive } from '@/lib/company-nav-groups';
+import { SERVICE_TODAY_PERMISSION_SETS } from '@/lib/service-today';
 import { cn } from '@/lib/utils';
 import { buildWhatsAppMessageUrl } from '@/lib/whatsapp-links';
 import { useAuth } from '@/contexts/AuthContext';
@@ -48,6 +46,7 @@ import { useSystemBranding } from '@/hooks/useSettings';
 import { useFaviconOverride } from '@/lib/publicCompanyIcons';
 import WhatsAppStatusAlert from '@/components/WhatsAppStatusAlert';
 import CompanyNotificationsPopover from '@/components/CompanyNotificationsPopover';
+import CompanyGlobalSearch from '@/components/CompanyGlobalSearch';
 import NotificationBanner from '@/components/NotificationBanner';
 import { reportAccessAuditFailure, trackAccessAudit } from '@/lib/accessAudit';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
@@ -64,14 +63,15 @@ import {
   useCompanyBillingSummary,
   usePlatformBillingModuleStatus,
 } from '@/hooks/usePlatformBilling';
+import { usePendingWithdrawalCount } from '@/hooks/useAdminSettlements';
 import OverdueBillingBanner from '@/components/billing/OverdueBillingBanner';
 import OverdueBillingDialog from '@/components/billing/OverdueBillingDialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
-  COMPANY_EXPERIENCE_SETTINGS_SECTIONS,
+  COMPANY_OPERATION_SETTINGS_SECTIONS,
   COMPANY_PROFILE_SETTINGS_SECTIONS,
   COMPANY_SETTINGS_SECTION_DESCRIPTIONS,
-  COMPANY_SETTINGS_SECTION_LABELS,
+  COMPANY_SETTINGS_SECTION_NAV_LABELS,
   getCompanySettingsSectionPath,
   type CompanySettingsSection,
 } from '@/lib/company-settings-sections';
@@ -83,11 +83,25 @@ interface NavItem {
   path: string;
   showFor: AppRole[];
   requiredPermission?: CompanyPanelPermission;
+  requiredPermissionSets?: CompanyPanelPermission[][];
   requiredFeature?: CompanyFeatureKey;
   matchPrefix?: boolean;
   badgeCount?: number;
+  /** Texto lido por leitores de tela para o contador; padrão: faturas vencidas. */
+  badgeLabel?: [string, string];
+  badgeTone?: 'danger' | 'warning';
   statusLabel?: string;
+  /** Grupo visual do menu global do superadmin. */
+  group?: SuperadminNavGroup;
 }
+
+type SuperadminNavGroup = 'principal' | 'gestao' | 'plataforma';
+
+const SUPERADMIN_NAV_GROUPS: Array<{ id: SuperadminNavGroup; label: string }> = [
+  { id: 'principal', label: 'Principal' },
+  { id: 'gestao', label: 'Gestão' },
+  { id: 'plataforma', label: 'Plataforma' },
+];
 
 const ROLE_LABELS: Record<AppRole, string> = {
   superadmin: 'Superadmin',
@@ -152,21 +166,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [reportsNavOpen, setReportsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'reports'));
   const [reservationsNavOpen, setReservationsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'reservations'));
-  const [settingsNavOpen, setSettingsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'settings'));
-  const [profileNavOpen, setProfileNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'profile'));
-  const [businessNavOpen, setBusinessNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'business'));
-  const [automationNavOpen, setAutomationNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'automation'));
+  const [operationsNavOpen, setOperationsNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'operations'));
+  const [companyNavOpen, setCompanyNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'company'));
+  const [communicationNavOpen, setCommunicationNavOpen] = useState(() => isCompanyNavGroupActive(location.pathname, 'communication'));
   const [overdueBillingDialogOpen, setOverdueBillingDialogOpen] = useState(false);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(DESKTOP_SIDEBAR_PINNED_STORAGE_KEY) === 'true';
   });
   const { user, profile, roles, loading, signOut } = useAuth();
-  const { data: systemBranding, isLoading: systemBrandingLoading } = useSystemBranding();
+  const { data: systemBranding } = useSystemBranding();
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
   const { data: companyFeatureFlags, isLoading: companyFeatureFlagsLoading } = useCompanyFeatureFlags(companyContext?.companyId);
   const systemLogo = systemBranding?.system_logo_url || '';
-  useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
+  useFaviconOverride(systemBranding?.system_logo_url);
   const userId = user?.id;
   const isSupportAccount = roles.includes('support');
 
@@ -195,6 +208,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const companyBillingSummaryQuery = useCompanyBillingSummary(companyContext?.companyId, {
     enabled: canViewCompanyBilling,
   });
+  const pendingWithdrawalQuery = usePendingWithdrawalCount({
+    enabled: !slug && rolesLoaded && activeRoles.includes('superadmin'),
+  });
+  const pendingWithdrawalCount = pendingWithdrawalQuery.data ?? 0;
   const companyBillingSummary = companyBillingSummaryQuery.data;
   const sidebarContextLabel = slug ? 'Painel da unidade' : 'Painel global';
   const companyName = companyContext?.companyName || slug || 'Unidade';
@@ -219,12 +236,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           requiredPermission: 'checkins_view',
         },
         {
-          label: 'Lista de Espera',
-          description: 'Fila e chamadas',
-          icon: ClipboardList,
-          path: `/${slug}/admin/fila`,
+          label: 'Serviços de Hoje',
+          description: 'Chegadas, salão e fila',
+          icon: UtensilsCrossed,
+          path: `/${slug}/admin/servico`,
           showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'waitlist_view',
+          requiredPermissionSets: SERVICE_TODAY_PERMISSION_SETS,
         },
       ]
     : [];
@@ -299,48 +316,29 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       ]
     : [];
 
-  // Gestao reune o que se acompanha por cliente e por acesso; automacoes reune o
-  // que dispara sozinho. Financeiro e Filiados seguem soltos.
-  const companyBusinessNavItems: NavItem[] = slug
+  const companyDirectNavItems: NavItem[] = slug
     ? [
         {
+          label: 'Clientes',
+          description: 'Contatos e histórico de presenças',
+          icon: Contact,
+          path: `/${slug}/admin/leads`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'leads_view',
+        },
+        {
           label: 'Pagamentos',
-          description: 'Sinal Asaas por data',
+          description: 'Recebimentos das reservas',
           icon: CreditCard,
           path: `/${slug}/admin/pagamentos-antecipados`,
           showFor: ['admin', 'superadmin'],
           requiredPermission: 'settings_view',
           requiredFeature: 'reservation_prepayment',
         },
-        {
-          label: 'Avaliações',
-          description: 'NPS e satisfação pós-visita',
-          icon: MessageSquareQuote,
-          path: `/${slug}/admin/avaliacoes`,
-          showFor: ['admin', 'superadmin'],
-          requiredPermission: 'nps_view',
-          requiredFeature: 'nps_surveys',
-        },
-        {
-          label: 'Usuários',
-          description: 'Acesso da unidade',
-          icon: Users,
-          path: `/${slug}/admin/usuarios`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'users_view',
-        },
-        {
-          label: 'Leads',
-          description: 'Clientes e histórico',
-          icon: Contact,
-          path: `/${slug}/admin/leads`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'leads_view',
-        },
       ]
     : [];
 
-  const companyAutomationNavItems: NavItem[] = slug
+  const companyCommunicationNavItems: NavItem[] = slug
     ? [
         {
           label: 'Mensagens',
@@ -352,28 +350,34 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           requiredFeature: 'whatsapp_integration',
         },
         {
-          label: 'Eventos',
-          description: 'Tracking e Meta CAPI',
-          icon: Activity,
-          path: `/${slug}/admin/eventos`,
-          showFor: ['admin', 'operator', 'superadmin'],
-          requiredPermission: 'events_view',
+          label: 'Avaliações',
+          description: 'NPS e satisfação pós-visita',
+          icon: MessageSquareQuote,
+          path: `/${slug}/admin/avaliacoes`,
+          showFor: ['admin', 'superadmin'],
+          requiredPermission: 'nps_view',
+          requiredFeature: 'nps_surveys',
         },
       ]
     : [];
 
-  const companyManagementNavItems: NavItem[] = slug
+  const companySubscriptionNavItems: NavItem[] = slug
     ? [
         {
-          label: 'Financeiro',
+          label: 'Minha assinatura',
           description: 'Plano e faturas da unidade',
           icon: ReceiptText,
           path: `/${slug}/admin/financeiro`,
           showFor: ['admin', 'superadmin'],
           badgeCount: companyBillingSummary?.overdueCount ?? 0,
         },
+      ]
+    : [];
+
+  const companyPartnerNavItems: NavItem[] = slug
+    ? [
         {
-          label: 'Filiados',
+          label: 'Parceiros',
           description: 'Links de indicação e origem',
           icon: Link2,
           path: `/${slug}/admin/filiados`,
@@ -383,11 +387,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       ]
     : [];
 
-  // Empresa responde "como a casa funciona"; configuracoes, "o que o cliente
-  // encontra". As secoes sao as mesmas paginas de sempre, repartidas entre os
-  // dois grupos.
   const buildSettingsNavItem = (section: CompanySettingsSection): NavItem => ({
-    label: COMPANY_SETTINGS_SECTION_LABELS[section],
+    label: COMPANY_SETTINGS_SECTION_NAV_LABELS[section],
     description: COMPANY_SETTINGS_SECTION_DESCRIPTIONS[section],
     icon: COMPANY_SETTINGS_SECTION_ICONS[section],
     path: getCompanySettingsSectionPath(slug ?? '', section),
@@ -395,21 +396,42 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     requiredPermission: 'settings_view',
   });
 
-  const companyProfileNavItems: NavItem[] = slug
-    ? COMPANY_PROFILE_SETTINGS_SECTIONS.map(buildSettingsNavItem)
+  const companyAccountNavItems: NavItem[] = slug
+    ? [
+        ...COMPANY_PROFILE_SETTINGS_SECTIONS.map(buildSettingsNavItem),
+        {
+          label: 'Equipe',
+          description: 'Pessoas e acessos da unidade',
+          icon: Users,
+          path: `/${slug}/admin/usuarios`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'users_view',
+        },
+        {
+          label: 'Rastreamento',
+          description: 'Rastreamento e integrações de marketing',
+          icon: Activity,
+          path: `/${slug}/admin/eventos`,
+          showFor: ['admin', 'operator', 'superadmin'],
+          requiredPermission: 'events_view',
+        },
+      ]
     : [];
 
-  const companySettingsNavItems: NavItem[] = slug
+  const companyOperationsNavItems: NavItem[] = slug
     ? [
-        ...COMPANY_EXPERIENCE_SETTINGS_SECTIONS.map(buildSettingsNavItem),
+        ...COMPANY_OPERATION_SETTINGS_SECTIONS
+          .filter((section) => section !== 'pagina-publica')
+          .map(buildSettingsNavItem),
         {
-          label: 'Mesas e Seções',
+          label: 'Mesas',
           description: 'Mapas, seções e capacidade',
           icon: Grid3X3,
           path: `/${slug}/admin/mesas`,
-          showFor: ['admin', 'operator', 'superadmin'],
+          showFor: ['admin', 'superadmin'],
           requiredPermission: 'tables_view',
         },
+        buildSettingsNavItem('pagina-publica'),
       ]
     : [];
 
@@ -421,6 +443,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           icon: BarChart3,
           path: '/dashboard',
           showFor: ['superadmin'],
+          group: 'principal',
         },
         {
           label: 'Empresas',
@@ -429,14 +452,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           path: '/empresas',
           showFor: ['superadmin', 'support'],
           matchPrefix: true,
-        },
-        {
-          label: 'Financeiro',
-          description: 'Mensalidades da plataforma',
-          icon: ReceiptText,
-          path: '/financeiro',
-          showFor: ['superadmin'],
-          matchPrefix: true,
+          group: 'principal',
         },
         {
           label: 'Usu\u00E1rios',
@@ -444,41 +460,51 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           icon: Users,
           path: '/usuarios',
           showFor: ['superadmin'],
+          group: 'principal',
         },
         {
-          label: 'Configura\u00E7\u00F5es',
-          description: 'Par\u00E2metros globais',
-          icon: Settings,
-          path: '/configuracoes',
+          label: 'Financeiro',
+          description: 'Mensalidades e repasses',
+          icon: ReceiptText,
+          path: '/financeiro',
           showFor: ['superadmin'],
+          matchPrefix: true,
+          group: 'gestao',
+          badgeCount: pendingWithdrawalCount,
+          badgeLabel: ['saque aguardando an\u00E1lise', 'saques aguardando an\u00E1lise'],
+          badgeTone: 'warning',
         },
         {
-          label: 'Notifica\u00E7\u00F5es',
+          label: 'Avisos',
           description: 'Avisos para as empresas',
           icon: Bell,
           path: '/notificacoes',
           showFor: ['superadmin'],
+          group: 'gestao',
         },
         {
-          label: 'Logs de A\u00E7\u00F5es',
-          description: 'Hist\u00F3rico de opera\u00E7\u00F5es',
-          icon: ScrollText,
-          path: '/logs',
-          showFor: ['superadmin'],
-        },
-        {
-          label: 'Integra\u00E7\u00F5es',
-          description: 'Conex\u00F5es externas',
-          icon: Plug,
-          path: '/integracoes',
-          showFor: ['superadmin'],
-        },
-        {
-          label: 'Sa\u00FAde do Sistema',
+          label: 'Sa\u00FAde',
           description: 'Filas e monitoramento',
           icon: Activity,
           path: '/saude',
           showFor: ['superadmin'],
+          group: 'plataforma',
+        },
+        {
+          label: 'Configura\u00E7\u00F5es',
+          description: 'Identidade e integra\u00E7\u00F5es',
+          icon: Settings,
+          path: '/configuracoes',
+          showFor: ['superadmin'],
+          group: 'plataforma',
+        },
+        {
+          label: 'Auditoria',
+          description: 'Hist\u00F3rico de a\u00E7\u00F5es',
+          icon: ScrollText,
+          path: '/logs',
+          showFor: ['superadmin'],
+          group: 'plataforma',
         },
       ]
     : [];
@@ -488,6 +514,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
     if (permissionsLoading && item.requiredPermission) return false;
     if (!hasCompanyPermission(item.requiredPermission)) return false;
+    if (item.requiredPermissionSets && (permissionsLoading || !item.requiredPermissionSets.some(set => set.every(hasPermission)))) return false;
     if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
     if (companyFeatureFlags) {
       const f = companyFeatureFlags.features;
@@ -518,35 +545,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
-  const visibleManagementNavItems = companyManagementNavItems.filter((item) => {
-    if (!rolesLoaded) return false;
-    if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
-    if (permissionsLoading && item.requiredPermission) return false;
-    if (!hasCompanyPermission(item.requiredPermission)) return false;
-    if (
-      slug
-      && item.path === `/${slug}/admin/financeiro`
-      && (
-        !billingModuleQuery.data?.enabled
-        || !companyBillingSummary?.companyBillingEnabled
-      )
-    ) return false;
-    if (item.requiredFeature && (companyFeatureFlagsLoading || !companyFeatureFlags)) return false;
-    if (companyFeatureFlags) {
-      const f = companyFeatureFlags.features;
-      if (item.requiredFeature && f[item.requiredFeature] === false) return false;
-    }
-    return true;
-  });
-
-  const visibleSettingsNavItems = companySettingsNavItems.filter((item) => {
-    if (!rolesLoaded) return false;
-    if (!item.showFor.some((role) => activeRoles.includes(role))) return false;
-    if (permissionsLoading && item.requiredPermission) return false;
-    if (!hasCompanyPermission(item.requiredPermission)) return false;
-    return true;
-  });
-
   // Mesma regra de papel, permissao e feature flag dos demais grupos.
   const filterCompanyNavItems = (items: NavItem[]) => items.filter((item) => {
     if (!rolesLoaded) return false;
@@ -560,19 +558,25 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     return true;
   });
 
-  const visibleProfileNavItems = filterCompanyNavItems(companyProfileNavItems);
-  const visibleBusinessNavItems = filterCompanyNavItems(companyBusinessNavItems);
-  const visibleAutomationNavItems = filterCompanyNavItems(companyAutomationNavItems);
+  const visibleAccountNavItems = filterCompanyNavItems(companyAccountNavItems);
+  const visibleOperationsNavItems = filterCompanyNavItems(companyOperationsNavItems);
+  const visibleDirectNavItems = filterCompanyNavItems(companyDirectNavItems);
+  const visibleCommunicationNavItems = filterCompanyNavItems(companyCommunicationNavItems);
+  const visiblePartnerNavItems = filterCompanyNavItems(companyPartnerNavItems);
+  const visibleSubscriptionNavItems = filterCompanyNavItems(companySubscriptionNavItems).filter(() => (
+    billingModuleQuery.data?.enabled && companyBillingSummary?.companyBillingEnabled
+  ));
 
   const visibleNavItems = [
     ...visiblePrimaryNavItems,
     ...visibleReportsNavItems,
     ...visibleReservationsNavItems,
-    ...visibleProfileNavItems,
-    ...visibleBusinessNavItems,
-    ...visibleAutomationNavItems,
-    ...visibleManagementNavItems,
-    ...visibleSettingsNavItems,
+    ...visibleDirectNavItems,
+    ...visibleCommunicationNavItems,
+    ...visiblePartnerNavItems,
+    ...visibleOperationsNavItems,
+    ...visibleAccountNavItems,
+    ...visibleSubscriptionNavItems,
   ];
   const companyDashboardPath = slug ? `/${slug}/admin` : null;
   const visibleCompanyDashboardItem = companyDashboardPath
@@ -593,10 +597,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const activeNavItem = visibleNavItems.find((item) => isNavItemActive(item)) ?? null;
   const isReportsNavActive = visibleReportsNavItems.some((item) => isNavItemActive(item));
   const isReservationsNavActive = visibleReservationsNavItems.some((item) => isNavItemActive(item));
-  const isSettingsNavActive = visibleSettingsNavItems.some((item) => isNavItemActive(item));
-  const isProfileNavActive = visibleProfileNavItems.some((item) => isNavItemActive(item));
-  const isBusinessNavActive = visibleBusinessNavItems.some((item) => isNavItemActive(item));
-  const isAutomationNavActive = visibleAutomationNavItems.some((item) => isNavItemActive(item));
+  const isOperationsNavActive = visibleOperationsNavItems.some((item) => isNavItemActive(item));
+  const isCompanyNavActive = visibleAccountNavItems.some((item) => isNavItemActive(item));
+  const isCommunicationNavActive = visibleCommunicationNavItems.some((item) => isNavItemActive(item));
   const isProfileRoute = location.pathname === profilePath;
   const isOperatorPanel = !!slug && activeRoles.length === 1 && activeRoles[0] === 'operator';
   const showHeaderContextBadges = !isOperatorPanel;
@@ -619,23 +622,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setMobileOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   // No painel o título é só a marca; a chamada de marketing do index.html vale para o site.
   useEffect(() => {
     document.title = systemName;
   }, [systemName]);
 
-  // Abrir o grupo que cobre a rota atual. Empresa e Configurações dividem as
-  // seções de /configuracoes, então o prefixo da URL não basta para decidir.
+  // Abrir o grupo correto sem mudar as URLs já usadas por links e favoritos.
   useEffect(() => {
     if (!slug) return;
     if (isCompanyNavGroupActive(location.pathname, 'reports')) setReportsNavOpen(true);
     if (isCompanyNavGroupActive(location.pathname, 'reservations')) setReservationsNavOpen(true);
-    if (isCompanyNavGroupActive(location.pathname, 'profile')) setProfileNavOpen(true);
-    if (isCompanyNavGroupActive(location.pathname, 'settings')) setSettingsNavOpen(true);
-    if (isCompanyNavGroupActive(location.pathname, 'business')) setBusinessNavOpen(true);
-    if (isCompanyNavGroupActive(location.pathname, 'automation')) setAutomationNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'company')) setCompanyNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'operations')) setOperationsNavOpen(true);
+    if (isCompanyNavGroupActive(location.pathname, 'communication')) setCommunicationNavOpen(true);
   }, [location.pathname, slug]);
 
   useEffect(() => {
@@ -762,12 +763,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </span>
         {!!item.badgeCount && item.badgeCount > 0 && (
           <span
-            aria-label={`${item.badgeCount} ${item.badgeCount === 1 ? 'fatura vencida' : 'faturas vencidas'}`}
+            aria-label={`${item.badgeCount} ${item.badgeCount === 1
+              ? (item.badgeLabel?.[0] ?? 'fatura vencida')
+              : (item.badgeLabel?.[1] ?? 'faturas vencidas')}`}
             className={cn(
               'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums',
-              isActive
-                ? 'bg-primary-foreground text-primary'
-                : 'bg-destructive text-destructive-foreground',
+              item.badgeTone === 'warning'
+                ? isActive
+                  ? 'bg-white text-amber-900'
+                  : 'bg-amber-400 text-amber-950'
+                : 'bg-destructive text-destructive-foreground ring-1 ring-destructive-foreground/30',
             )}
           >
             {item.badgeCount > 99 ? '99+' : item.badgeCount}
@@ -846,40 +851,31 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     isActive: isReservationsNavActive,
   });
 
-  const renderSettingsNavGroup = () => renderNavGroup({
-    label: 'Configura\u00E7\u00F5es',
+  const renderOperationsNavGroup = () => renderNavGroup({
+    label: 'Operação',
     icon: Settings,
-    items: visibleSettingsNavItems,
-    open: settingsNavOpen,
-    onOpenChange: setSettingsNavOpen,
-    isActive: isSettingsNavActive,
+    items: visibleOperationsNavItems,
+    open: operationsNavOpen,
+    onOpenChange: setOperationsNavOpen,
+    isActive: isOperationsNavActive,
   });
 
-  const renderProfileNavGroup = () => renderNavGroup({
+  const renderCompanyNavGroup = () => renderNavGroup({
     label: 'Empresa',
     icon: Building2,
-    items: visibleProfileNavItems,
-    open: profileNavOpen,
-    onOpenChange: setProfileNavOpen,
-    isActive: isProfileNavActive,
+    items: visibleAccountNavItems,
+    open: companyNavOpen,
+    onOpenChange: setCompanyNavOpen,
+    isActive: isCompanyNavActive,
   });
 
-  const renderBusinessNavGroup = () => renderNavGroup({
-    label: 'Gest\u00E3o',
-    icon: Briefcase,
-    items: visibleBusinessNavItems,
-    open: businessNavOpen,
-    onOpenChange: setBusinessNavOpen,
-    isActive: isBusinessNavActive,
-  });
-
-  const renderAutomationNavGroup = () => renderNavGroup({
-    label: 'Automa\u00E7\u00F5es',
-    icon: Bot,
-    items: visibleAutomationNavItems,
-    open: automationNavOpen,
-    onOpenChange: setAutomationNavOpen,
-    isActive: isAutomationNavActive,
+  const renderCommunicationNavGroup = () => renderNavGroup({
+    label: 'Comunicação',
+    icon: MessageCircle,
+    items: visibleCommunicationNavItems,
+    open: communicationNavOpen,
+    onOpenChange: setCommunicationNavOpen,
+    isActive: isCommunicationNavActive,
   });
 
   return (
@@ -919,7 +915,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border hover:[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/30">
+        <nav className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border hover:[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/30">
           {!rolesLoaded ? (
             <div className="space-y-4" aria-busy="true" aria-label="Carregando menu">
               {slug && (
@@ -966,34 +963,49 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </div>
 
               {(
-                visibleBusinessNavItems.length > 0
-                || visibleAutomationNavItems.length > 0
-                || visibleManagementNavItems.length > 0
-                || visibleProfileNavItems.length > 0
-                || visibleSettingsNavItems.length > 0
+                visibleDirectNavItems.length > 0
+                || visibleCommunicationNavItems.length > 0
+                || visiblePartnerNavItems.length > 0
+                || visibleOperationsNavItems.length > 0
+                || visibleAccountNavItems.length > 0
+                || visibleSubscriptionNavItems.length > 0
               ) && (
                 <div className="space-y-2">
                   <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-sidebar-foreground/32">
                     Administração
                   </p>
                   <div className="space-y-1">
-                    {renderBusinessNavGroup()}
-                    {renderAutomationNavGroup()}
-                    {visibleManagementNavItems.map(renderNavLink)}
-                    {renderProfileNavGroup()}
-                    {renderSettingsNavGroup()}
+                    {visibleDirectNavItems.map(renderNavLink)}
+                    {renderCommunicationNavGroup()}
+                    {visiblePartnerNavItems.map(renderNavLink)}
+                    {renderOperationsNavGroup()}
+                    {renderCompanyNavGroup()}
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-sidebar-foreground/32">
-                Navegação
-              </p>
-              <div className="space-y-1">
-                {visiblePrimaryNavItems.map(renderNavLink)}
-              </div>
+            <div className="space-y-4">
+              {SUPERADMIN_NAV_GROUPS.map((group) => {
+                const groupItems = visiblePrimaryNavItems.filter((item) => (item.group ?? 'principal') === group.id);
+                if (groupItems.length === 0) return null;
+                return (
+                  <div key={group.id} className="space-y-2">
+                    <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-sidebar-foreground/50">
+                      {group.label}
+                    </p>
+                    <div className="space-y-1">
+                      {groupItems.map(renderNavLink)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          </div>
+          {visibleSubscriptionNavItems.length > 0 && (
+            <div className="mt-2 shrink-0 border-t border-sidebar-border bg-sidebar pt-2">
+              {visibleSubscriptionNavItems.map(renderNavLink)}
             </div>
           )}
         </nav>
@@ -1021,7 +1033,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </div>
 
               <div className="mt-2 rounded-md border border-sidebar-border bg-sidebar px-2.5 py-1.5">
-                <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/40">{'Sess\u00E3o atual'}</p>
+                <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/40">{'Sessão atual'}</p>
                 <p className="mt-0.5 text-xs text-sidebar-foreground/75">{rolesLabel}</p>
               </div>
 
@@ -1105,7 +1117,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
+            {/* A busca ocupa o espaço livre do topo, até um limite confortável de leitura. */}
+            {slug && companyContext?.companyId && (
+              <div className="flex min-w-0 flex-1 justify-end sm:mr-auto sm:max-w-[520px] sm:justify-start">
+                <CompanyGlobalSearch key={companyContext.companyId}
+                  companyId={companyContext.companyId} companyName={companyName} slug={slug} />
+              </div>
+            )}
+
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              {slug && canViewCompanyHeaderSignals && <WhatsAppStatusAlert />}
               {slug && (
                 <a
                   href={`/${slug}`}
@@ -1120,7 +1141,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 </a>
               )}
               {slug && canViewCompanyHeaderSignals && <CompanyNotificationsPopover />}
-              {slug && canViewCompanyHeaderSignals && <WhatsAppStatusAlert />}
               {isImpersonatingCompany && (
                 <Button variant="outline" size="sm" onClick={handleExitImpersonation}>
                   {'Sair da impersona\u00E7\u00E3o'}
@@ -1130,8 +1150,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
+        {/* Um aviso por vez: a faixa da fatura não aparece junto com o popup da mesma fatura. */}
         <OverdueBillingBanner
-          show={companyBillingWarningQuery.data?.showOverdueWarning === true}
+          show={companyBillingWarningQuery.data?.showOverdueWarning === true && !overdueBillingDialogOpen}
+          dismissKey={companyContext?.companyId}
           invoicesPath={canViewCompanyBilling
             && companyBillingSummary?.companyBillingEnabled
             && slug
@@ -1140,12 +1162,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         />
 
 
-        {/* Notificações do superadmin — só para admin/operator com empresa ativa */}
-        {companyContext?.companyId && !activeRoles.includes('superadmin') && (
+        {/* Notificações do superadmin — só para admin/operator com empresa ativa, e nunca por cima do popup da fatura */}
+        {companyContext?.companyId && !activeRoles.includes('superadmin') && !overdueBillingDialogOpen && (
           activeRoles.includes('admin') || activeRoles.includes('operator')
         ) && <NotificationBanner companyId={companyContext.companyId} />}
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:px-5 lg:py-4 animate-fade-in">
+        <main className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:px-5 lg:py-4 animate-fade-in', slug && location.pathname === `/${slug}/admin/servico` && '[scrollbar-gutter:stable]')}>
           {children}
         </main>
       </div>

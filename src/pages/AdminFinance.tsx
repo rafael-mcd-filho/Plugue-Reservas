@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Building2,
-  CircleDollarSign,
   Clock3,
   Eye,
   Info,
@@ -37,6 +36,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import ListPagination from '@/components/admin/ListPagination';
+import ListStateMessage from '@/components/admin/ListStateMessage';
 import {
   usePlatformAsaasConfig,
   usePlatformBillingModuleStatus,
@@ -55,7 +57,9 @@ const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   currency: 'BRL',
 });
 
-type CompanyFilter = 'all' | 'overdue' | 'enabled' | 'disabled' | 'configured' | 'unconfigured' | 'error';
+const PAGE_SIZE = 25;
+
+export type CompanyFilter = 'all' | 'overdue' | 'enabled' | 'disabled' | 'configured' | 'unconfigured' | 'error';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -75,11 +79,12 @@ function formatDateTime(value: string | null | undefined) {
   }
 }
 
-export default function AdminFinance() {
+export default function AdminFinance({ initialFilter = 'all' }: { initialFilter?: CompanyFilter } = {}) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<CompanyFilter>('all');
+  const [filter, setFilter] = useState<CompanyFilter>(initialFilter);
   const [customerLookupOpen, setCustomerLookupOpen] = useState(false);
   const [billingTarget, setBillingTarget] = useState<CompanyBillingTarget | null>(null);
+  const [page, setPage] = useState(1);
   const moduleQuery = usePlatformBillingModuleStatus();
   const configQuery = usePlatformAsaasConfig();
   const overviewQuery = useSuperadminBillingOverview();
@@ -154,104 +159,87 @@ export default function AdminFinance() {
 
   if (isLoading) return <AdminFinanceSkeleton />;
 
+  const toolbarActions = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setCustomerLookupOpen(true)}
+        disabled={!config?.configured}
+        className="gap-2"
+        title={config?.configured ? 'Pesquisar clientes no Asaas' : 'Configure o token global do Asaas primeiro'}
+      >
+        <Search className="h-4 w-4" />
+        Localizar Customer ID
+      </Button>
+      <Button asChild variant="outline" size="sm" className="gap-2">
+        <Link to="/configuracoes?aba=pagamentos">
+          <Settings2 className="h-4 w-4" />
+          Conexão do Asaas
+        </Link>
+      </Button>
+      <Button
+        size="sm"
+        onClick={handleSyncAll}
+        disabled={!moduleStatus?.enabled || !config?.configured || syncAll.isPending}
+        className="gap-2"
+      >
+        {syncAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        Sincronizar empresas
+      </Button>
+    </div>
+  );
+
   if (hasDataFailure) {
     return (
-      <div className="space-y-5">
-        <div>
-          <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            <CircleDollarSign className="h-3.5 w-3.5" />
-            Cobranças da plataforma
+      <Card className="border-destructive/20 shadow-sm">
+        <CardContent className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+          <div className="mb-4 rounded-xl bg-destructive-soft p-3 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Financeiro</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Acompanhe vínculos, mensalidades em aberto e sincronização com o Asaas.
+          <h2 className="font-semibold">
+            {structureUnavailable ? 'Mensalidades ainda não estão disponíveis neste ambiente' : 'Não foi possível carregar as mensalidades'}
+          </h2>
+          <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
+            {structureUnavailable
+              ? 'Aplique a estrutura de banco e publique as funções financeiras antes de configurar o módulo.'
+              : 'A leitura falhou, por isso os indicadores não foram exibidos como zero. Nenhuma informação financeira foi alterada.'}
           </p>
-        </div>
-
-        <Card className="border-destructive/20 shadow-sm">
-          <CardContent className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
-            <div className="mb-4 rounded-xl bg-destructive-soft p-3 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-            <h2 className="font-semibold">
-              {structureUnavailable ? 'Financeiro ainda não está disponível neste ambiente' : 'Não foi possível carregar os dados financeiros'}
-            </h2>
-            <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-              {structureUnavailable
-                ? 'Aplique a estrutura de banco e publique as funções financeiras antes de configurar o módulo.'
-                : 'A leitura falhou, por isso os indicadores não foram exibidos como zero. Nenhuma informação financeira foi alterada.'}
-            </p>
-            <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => void Promise.all([
-                  moduleQuery.refetch(),
-                  configQuery.refetch(),
-                  overviewQuery.refetch(),
-                ])}
-                className="gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Tentar novamente
-              </Button>
-              <Button asChild variant="outline" className="gap-2">
-                <Link to="/integracoes">
-                  <Settings2 className="h-4 w-4" />
-                  Abrir integração
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => void Promise.all([
+                moduleQuery.refetch(),
+                configQuery.refetch(),
+                overviewQuery.refetch(),
+              ])}
+              className="gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Tentar novamente
+            </Button>
+            <Button asChild variant="outline" className="gap-2">
+              <Link to="/configuracoes?aba=pagamentos">
+                <Settings2 className="h-4 w-4" />
+                Abrir conexão do Asaas
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
+  const pageCount = Math.max(1, Math.ceil(visibleCompanies.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedCompanies = visibleCompanies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const hasCompanies = (companies ?? []).length > 0;
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            <CircleDollarSign className="h-3.5 w-3.5" />
-            Cobranças da plataforma
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Financeiro</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Acompanhe vínculos, mensalidades em aberto e sincronização com o Asaas.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setCustomerLookupOpen(true)}
-            disabled={!config?.configured}
-            className="gap-2"
-            title={config?.configured ? 'Pesquisar clientes no Asaas' : 'Configure o token global do Asaas primeiro'}
-          >
-            <Search className="h-4 w-4" />
-            Localizar Customer ID
-          </Button>
-          <Button asChild variant="outline" className="gap-2">
-            <Link to="/integracoes">
-              <Settings2 className="h-4 w-4" />
-              Configurar Asaas
-            </Link>
-          </Button>
-          <Button
-            onClick={handleSyncAll}
-            disabled={!moduleStatus?.enabled || !config?.configured || syncAll.isPending}
-            className="gap-2"
-          >
-            {syncAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Sincronizar empresas
-          </Button>
-        </div>
-      </div>
-
       {(!moduleStatus?.available || !config?.configured || !moduleStatus.enabled) && (
         <Card className="overflow-hidden border-primary/20 shadow-sm">
-          <div className="h-1 bg-primary" />
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <div className="rounded-lg border border-primary/15 bg-primary-soft p-2 text-primary">
@@ -262,21 +250,21 @@ export default function AdminFinance() {
                   {!moduleStatus?.available
                     ? 'Estrutura financeira aguardando implantação'
                     : !config?.configured
-                      ? 'Conecte o Asaas para iniciar'
-                      : 'Financeiro global desativado'}
+                      ? 'Conecte o Asaas das mensalidades para iniciar'
+                      : 'Cobrança da assinatura desligada para todas as empresas'}
                 </p>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                   {!moduleStatus?.available
                     ? 'A página está pronta, mas as tabelas e funções financeiras ainda não estão disponíveis neste ambiente.'
                     : !config?.configured
                       ? 'Cadastre e valide o token global. Nenhuma cobrança será criada ou alterada pelo Plug Guest.'
-                      : 'Os clientes ainda não veem o módulo. O superadmin pode revisar vínculos e abrir uma prévia por empresa antes da ativação.'}
+                      : 'Os clientes ainda não veem a aba Financeiro. Você pode revisar vínculos e abrir uma prévia por empresa antes de liberar.'}
                 </p>
               </div>
             </div>
             <Button asChild variant="outline" className="shrink-0 gap-2">
-              <Link to="/integracoes">
-                Abrir integração
+              <Link to="/configuracoes?aba=pagamentos">
+                Abrir conexão
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
@@ -284,50 +272,42 @@ export default function AdminFinance() {
         </Card>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo financeiro global">
-        <MetricCard
-          icon={Building2}
-          label="Empresas vinculadas"
-          value={`${totals?.configuredCompanyCount ?? 0}`}
-          detail={`${enabledCompanyCount} ${enabledCompanyCount === 1 ? 'ativa' : 'ativas'} de ${totals?.companyCount ?? 0} ${(totals?.companyCount ?? 0) === 1 ? 'empresa' : 'empresas'}`}
-        />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo das mensalidades">
         <MetricCard
           icon={Clock3}
-          label="Total em aberto"
+          label="Em aberto"
           value={currencyFormatter.format(totals?.openTotal ?? 0)}
-          detail={`${totals?.openCount ?? 0} ${(totals?.openCount ?? 0) === 1 ? 'cobrança' : 'cobranças'}`}
+          detail={`${totals?.openCount ?? 0} ${(totals?.openCount ?? 0) === 1 ? 'cobrança' : 'cobranças'} · inclui o vencido`}
         />
         <MetricCard
           icon={AlertTriangle}
-          label="Total vencido"
+          label="Desse total, vencido"
           value={currencyFormatter.format(totals?.overdueTotal ?? 0)}
           detail={`${totals?.overdueCount ?? 0} ${(totals?.overdueCount ?? 0) === 1 ? 'cobrança vencida' : 'cobranças vencidas'}`}
           danger={(totals?.overdueCount ?? 0) > 0}
         />
         <MetricCard
+          icon={Building2}
+          label="Cobrança da assinatura ativa"
+          value={`${enabledCompanyCount} de ${totals?.companyCount ?? 0}`}
+          detail={`${totals?.configuredCompanyCount ?? 0} ${(totals?.configuredCompanyCount ?? 0) === 1 ? 'empresa vinculada' : 'empresas vinculadas'} ao Asaas`}
+        />
+        <MetricCard
           icon={Settings2}
-          label="Sem vínculo"
-          value={`${totals?.unconfiguredCompanyCount ?? 0}`}
+          label="Sem vínculo ou com atenção"
+          value={`${(totals?.unconfiguredCompanyCount ?? 0) + attentionCount}`}
           detail={attentionCount > 0
-            ? `${pendingValidationCount} para revalidar · ${totals?.errorCompanyCount ?? 0} com erro${disabledLinkCount > 0 ? ` · ${disabledLinkCount} ${disabledLinkCount === 1 ? 'vínculo desativado' : 'vínculos desativados'}` : ''}`
-            : 'Todos os vínculos configurados'}
+            ? `${totals?.unconfiguredCompanyCount ?? 0} sem vínculo · ${pendingValidationCount} para revalidar · ${totals?.errorCompanyCount ?? 0} com erro${disabledLinkCount > 0 ? ` · ${disabledLinkCount} ${disabledLinkCount === 1 ? 'desativado' : 'desativados'}` : ''}`
+            : (totals?.unconfiguredCompanyCount ?? 0) > 0
+              ? `${totals?.unconfiguredCompanyCount} sem vínculo no Asaas`
+              : 'Todos os vínculos configurados'}
           warning={(totals?.unconfiguredCompanyCount ?? 0) > 0 || attentionCount > 0}
         />
       </section>
 
-      <div className="flex items-start gap-3 rounded-xl border border-primary/15 bg-primary/[0.045] px-4 py-3.5">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-        <div>
-          <p className="text-sm font-semibold">O que significa “Ativar Financeiro”?</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            A aba Financeiro passa a aparecer para os administradores da empresa, e as faturas são sincronizadas automaticamente a cada quatro horas. Essa configuração não cria cobranças no Asaas nem suspende a conta automaticamente.
-          </p>
-        </div>
-      </div>
-
       <Card className="overflow-hidden shadow-sm">
         <CardHeader className="border-b border-border bg-muted/15">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <WalletCards className="h-4 w-4 text-primary" />
@@ -337,68 +317,100 @@ export default function AdminFinance() {
                 A sincronização considera apenas cobranças com o marcador [PLUGUEGUEST].
               </CardDescription>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative sm:w-72">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Buscar empresa ou cliente Asaas"
-                  className="pl-9"
-                />
-              </div>
-              <Select value={filter} onValueChange={(value) => setFilter(value as CompanyFilter)}>
-                <SelectTrigger className="sm:w-52">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as empresas</SelectItem>
-                  <SelectItem value="overdue">Com fatura vencida</SelectItem>
-                  <SelectItem value="enabled">Financeiro ativo</SelectItem>
-                  <SelectItem value="disabled">Financeiro desativado</SelectItem>
-                  <SelectItem value="configured">Vinculadas</SelectItem>
-                  <SelectItem value="unconfigured">Não vinculadas</SelectItem>
-                  <SelectItem value="error">Revalidar ou com erro</SelectItem>
-                </SelectContent>
-              </Select>
+            {toolbarActions}
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <div className="relative sm:w-72">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+                placeholder="Buscar empresa ou cliente Asaas"
+                aria-label="Buscar empresa ou cliente Asaas"
+                className="pl-9"
+              />
             </div>
+            <Select value={filter} onValueChange={(value) => { setFilter(value as CompanyFilter); setPage(1); }}>
+              <SelectTrigger className="sm:w-60" aria-label="Filtrar empresas">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as empresas</SelectItem>
+                <SelectItem value="overdue">Com cobrança vencida</SelectItem>
+                <SelectItem value="enabled">Cobrança da assinatura ativa</SelectItem>
+                <SelectItem value="disabled">Cobrança da assinatura desligada</SelectItem>
+                <SelectItem value="configured">Vinculadas</SelectItem>
+                <SelectItem value="unconfigured">Não vinculadas</SelectItem>
+                <SelectItem value="error">Revalidar ou com erro</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {visibleCompanies.length === 0 ? (
-            <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
-              <Search className="mb-3 h-7 w-7 text-muted-foreground/50" />
-              <p className="text-sm font-medium">Nenhuma empresa encontrada</p>
-              <p className="mt-1 text-xs text-muted-foreground">Altere a busca ou o filtro para visualizar outros registros.</p>
-            </div>
+            <ListStateMessage
+              variant={hasCompanies ? 'no-results' : 'empty'}
+              title={hasCompanies ? 'Nenhuma empresa para esse filtro' : 'Nenhuma empresa cadastrada'}
+              description={hasCompanies ? 'Altere a busca ou o filtro para ver outras empresas.' : undefined}
+              actionLabel={hasCompanies ? 'Limpar filtros' : undefined}
+              onAction={() => { setSearch(''); setFilter('all'); setPage(1); }}
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Empresa</TableHead>
-                    <TableHead>Ativar Financeiro</TableHead>
-                    <TableHead>Vínculo Asaas</TableHead>
-                    <TableHead>Próximo vencimento</TableHead>
-                    <TableHead>Em aberto</TableHead>
-                    <TableHead>Vencido</TableHead>
-                    <TableHead>Última sincronização</TableHead>
-                    <TableHead className="w-44 text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleCompanies.map((company) => (
-                    <CompanyOverviewRow
-                      key={company.companyId}
-                      company={company}
-                      configReady={!!config?.configured}
-                      globalEnabled={!!moduleStatus?.enabled}
-                      onConfigure={() => setBillingTarget(toCompanyBillingTarget(company))}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>
+                        <span className="inline-flex items-center gap-1.5">
+                          Cobrança da assinatura
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label="O que é a cobrança da assinatura?"
+                                className="rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                              >
+                                <Info className="h-3.5 w-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-72 text-xs leading-relaxed">
+                              Mostra a aba Financeiro aos admins da empresa e sincroniza as faturas a cada quatro horas.
+                              Não cria cobranças no Asaas, não suspende a conta e não liga pagamentos de reservas.
+                            </TooltipContent>
+                          </Tooltip>
+                        </span>
+                      </TableHead>
+                      <TableHead>Vínculo Asaas</TableHead>
+                      <TableHead>Próximo vencimento</TableHead>
+                      <TableHead className="text-right">Em aberto</TableHead>
+                      <TableHead>Última sincronização</TableHead>
+                      <TableHead className="w-44 text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedCompanies.map((company) => (
+                      <CompanyOverviewRow
+                        key={company.companyId}
+                        company={company}
+                        configReady={!!config?.configured}
+                        globalEnabled={!!moduleStatus?.enabled}
+                        onConfigure={() => setBillingTarget(toCompanyBillingTarget(company))}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <ListPagination
+                page={currentPage}
+                pageSize={PAGE_SIZE}
+                total={visibleCompanies.length}
+                onPageChange={setPage}
+                itemLabel={['empresa', 'empresas']}
+                className="border-t border-border"
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -463,12 +475,12 @@ function CompanyOverviewRow({
       });
       toast.success(
         pendingEnabled
-          ? `Financeiro ativado para ${company.companyName}.`
-          : `Financeiro desativado para ${company.companyName}.`,
+          ? `Cobrança da assinatura ativada para ${company.companyName}.`
+          : `Cobrança da assinatura desligada para ${company.companyName}.`,
       );
       setPendingEnabled(null);
     } catch (error: any) {
-      toast.error(error?.message || 'Não foi possível alterar o status do Financeiro desta empresa.');
+      toast.error(error?.message || 'Não foi possível alterar a cobrança da assinatura desta empresa.');
     }
   };
 
@@ -485,17 +497,17 @@ function CompanyOverviewRow({
             checked={company.billingEnabled}
             onCheckedChange={setPendingEnabled}
             disabled={!canToggle || setCompanyEnabled.isPending}
-            aria-label={`${company.billingEnabled ? 'Desativar' : 'Ativar'} Financeiro para ${company.companyName}`}
+            aria-label={`${company.billingEnabled ? 'Desligar' : 'Ativar'} a cobrança da assinatura de ${company.companyName}`}
           />
           <span className={company.billingEnabled ? 'text-xs font-semibold text-success' : 'text-xs font-medium text-muted-foreground'}>
-            {company.billingEnabled ? 'Ativo' : 'Desativado'}
+            {company.billingEnabled ? 'Ativa' : 'Desligada'}
           </span>
         </div>
         <p className="mt-1 max-w-40 text-[11px] leading-snug text-muted-foreground">
           {company.billingEnabled
             ? globalEnabled
               ? 'Aba para admins + sincronização automática'
-              : 'Aguardando ativação global'
+              : 'Aguardando liberação geral'
             : company.configured
               ? 'Somente prévia do superadmin'
               : 'Vincule um cliente primeiro'}
@@ -523,21 +535,18 @@ function CompanyOverviewRow({
           </div>
         ) : '—'}
       </TableCell>
-      <TableCell>
+      <TableCell className="text-right">
         <p className="font-medium tabular-nums">{currencyFormatter.format(company.openTotal)}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {company.openCount} {company.openCount === 1 ? 'cobrança' : 'cobranças'}
         </p>
-      </TableCell>
-      <TableCell>
-        <p className={company.overdueCount > 0 ? 'font-semibold tabular-nums text-destructive' : 'font-medium tabular-nums'}>
-          {currencyFormatter.format(company.overdueTotal)}
-        </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {company.overdueCount > 0
-            ? `${company.overdueCount} ${company.overdueCount === 1 ? 'vencida' : 'vencidas'} · ${company.oldestOverdueDays}d`
-            : 'Em dia'}
-        </p>
+        {company.overdueCount > 0 ? (
+          <p className="mt-0.5 text-xs font-semibold tabular-nums text-destructive">
+            {currencyFormatter.format(company.overdueTotal)} vencido · {company.oldestOverdueDays}d
+          </p>
+        ) : company.openCount > 0 ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">Nada vencido</p>
+        ) : null}
       </TableCell>
       <TableCell>
         <p className={syncPresentation.className}>
@@ -576,7 +585,7 @@ function CompanyOverviewRow({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingEnabled ? 'Ativar Financeiro para esta empresa?' : 'Desativar Financeiro desta empresa?'}
+              {pendingEnabled ? 'Ativar a cobrança da assinatura desta empresa?' : 'Desligar a cobrança da assinatura desta empresa?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
               <span className="block">
@@ -601,7 +610,7 @@ function CompanyOverviewRow({
               disabled={setCompanyEnabled.isPending}
             >
               {setCompanyEnabled.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {pendingEnabled ? 'Ativar Financeiro' : 'Desativar Financeiro'}
+              {pendingEnabled ? 'Ativar cobrança' : 'Desligar cobrança'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

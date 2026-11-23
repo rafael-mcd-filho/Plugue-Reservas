@@ -1,10 +1,21 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DemandConversionReport from '@/pages/DemandConversionReport';
 import type { DemandConversionReport as DemandConversionReportData } from '@/hooks/useDemandConversionReport';
 import type { DemandTemporalAnalysis } from '@/hooks/useDemandTemporalAnalysis';
+
+const investigations = vi.hoisted(() => ({ load: vi.fn(async () => []) }));
+vi.mock('@/lib/report-investigation', async () => ({
+  ...await vi.importActual<typeof import('@/lib/report-investigation')>('@/lib/report-investigation'),
+  loadDemandInvestigation: investigations.load,
+}));
+vi.mock('@/components/reports/ReportRecordsSheet', () => ({
+  default: ({ title, description, onOpenChange, loadRecords }: { title: string; description: string; onOpenChange: (open: boolean) => void; loadRecords: () => Promise<unknown> }) => (
+    <div role="dialog" aria-label={title}><p>{description}</p><button onClick={() => void loadRecords()}>Carregar registros</button><button onClick={() => onOpenChange(false)}>Voltar ao relatório</button></div>
+  ),
+}));
 
 const refetch = vi.fn();
 const temporalRefetch = vi.fn();
@@ -150,6 +161,7 @@ describe('DemandConversionReport', () => {
   beforeEach(() => {
     refetch.mockClear();
     temporalRefetch.mockClear();
+    investigations.load.mockClear();
     useDemandConversionReportMock.mockClear();
     companyTimeZoneResolved = true;
     reportQueryState = { data: report, isPending: false, isError: false, isFetching: false, refetch };
@@ -203,18 +215,18 @@ describe('DemandConversionReport', () => {
   });
 
   it('separates the total funnel from reservation-entry filters', () => {
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.getByText('Funil web total; não muda com a forma de entrada')).toBeInTheDocument();
     expect(screen.getByText(/não depende de mesa ou seção/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '1–2 pessoas' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Funil de Reservas' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Conversão web' })).toBeInTheDocument();
     expect(screen.getByText(/percentual ao fim de cada barra é sobre a base inicial/)).toBeInTheDocument();
     expect(screen.getByText(/Taxa de conversão geral:/)).toHaveTextContent('30,0%');
   });
 
   it('drops the entry-mode block, keeping the breakdown in the main chart lenses', () => {
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.queryByText('Formas de entrada')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Evolução das formas de entrada' })).not.toBeInTheDocument();
@@ -224,7 +236,7 @@ describe('DemandConversionReport', () => {
   });
 
   it('does not expose the per-reservation listing', () => {
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.queryByText('Reservas criadas no período')).not.toBeInTheDocument();
     expect(screen.queryByText('Cliente Teste')).not.toBeInTheDocument();
@@ -233,7 +245,7 @@ describe('DemandConversionReport', () => {
 
   it('preserves the visit-date entry view with a compact summary and stacked bars', () => {
     render(
-      <MemoryRouter initialEntries={['/?analysis=entry_visit']}>
+      <MemoryRouter initialEntries={['/?report_view=explore&analysis=entry_visit']}>
         <DemandConversionReport />
       </MemoryRouter>,
     );
@@ -262,7 +274,7 @@ describe('DemandConversionReport', () => {
 
   it('keeps the entry-by-capture view backed by creation-date totals', () => {
     render(
-      <MemoryRouter initialEntries={['/?analysis=entry_created']}>
+      <MemoryRouter initialEntries={['/?report_view=explore&analysis=entry_created']}>
         <DemandConversionReport />
       </MemoryRouter>,
     );
@@ -291,7 +303,7 @@ describe('DemandConversionReport', () => {
       refetch,
     };
 
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.getByText('Nenhuma jornada pública no período')).toBeInTheDocument();
     expect(screen.getByText('Sem dados para esta leitura')).toBeInTheDocument();
@@ -302,7 +314,7 @@ describe('DemandConversionReport', () => {
   it('shows a recoverable error state when no report is available', () => {
     reportQueryState = { isPending: false, isError: true, isFetching: false, error: new Error('offline'), refetch };
 
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(screen.getByText('Não foi possível abrir o relatório')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
@@ -311,10 +323,51 @@ describe('DemandConversionReport', () => {
   it('keeps the report query disabled until the company time zone is resolved', () => {
     companyTimeZoneResolved = false;
 
-    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
 
     expect(useDemandConversionReportMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByLabelText('Carregando relatório')).toBeInTheDocument();
+  });
+
+  it('starts with a concise summary that separates web identity from created reservations', () => {
+    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    expect(screen.getByRole('tab', { name: 'Resumo' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByRole('article')).toHaveLength(3);
+    expect(screen.getByText(/30 de 100 sessões chegaram à etapa final/)).toBeInTheDocument();
+    expect(screen.getByText(/42 reservas e 118 pessoas por todas as formas de entrada/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Perfil da demanda' })).not.toBeInTheDocument();
+  });
+
+  it('web KPI opens journey exploration instead of inventing a reservation list', () => {
+    render(<MemoryRouter><DemandConversionReport /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Explorar jornadas do funil web' }));
+    expect(screen.getByRole('tab', { name: 'Explorar dados' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Conversão web' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(investigations.load).not.toHaveBeenCalled();
+  });
+
+  it('opens created reservations with creation-date scope and preserves exploration on return', async () => {
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><DemandConversionReport /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir registros de Reservas criadas' }));
+    const drawer = screen.getByRole('dialog', { name: 'Reservas pela data de criação' });
+    expect(drawer).toHaveTextContent('Data de criação de 01/08/2026 a 20/08/2026');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Carregar registros' }));
+    await waitFor(() => expect(investigations.load).toHaveBeenCalledWith(
+      expect.objectContaining({ companyId: 'company-1', periodStart: '2026-08-01', periodEnd: '2026-08-20' }),
+      { title: 'Reservas pela data de criação', basis: 'created' }, undefined,
+    ));
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Voltar ao relatório' }));
+    expect(screen.getByRole('tab', { name: 'Explorar dados' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens a visit-origin segment using the visit basis', async () => {
+    render(<MemoryRouter initialEntries={['/?report_view=explore&analysis=entry_visit']}><DemandConversionReport /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver reservas de Online' }));
+    const drawer = screen.getByRole('dialog', { name: 'Online: reservas pela visita' });
+    expect(drawer).toHaveTextContent('Data da visita');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Carregar registros' }));
+    expect(investigations.load).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ basis: 'visit', entryMode: 'online' }), undefined);
   });
 });
 
@@ -323,7 +376,7 @@ describe('Reservas realizadas na evolução', () => {
   it('usa comparecimento pela data da reserva e alterna para pessoas atendidas', () => {
     companyTimeZoneResolved = true;
     reportQueryState = { data: report, isPending: false, isError: false, isFetching: false, refetch };
-    render(<MemoryRouter initialEntries={['/?analysis=created']}><DemandConversionReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore&analysis=created']}><DemandConversionReport /></MemoryRouter>);
     expect(screen.getByRole('tab', { name: 'Reservas realizadas' })).toHaveAttribute('aria-selected', 'true');
     expect(useAttendanceOutcomeSeriesMock).toHaveBeenLastCalledWith(expect.objectContaining({
       periodStart: '2026-08-01', periodEnd: '2026-08-20', granularity: 'day',

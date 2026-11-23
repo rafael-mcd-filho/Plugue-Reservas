@@ -828,9 +828,9 @@ export default function CompanyEvents() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Eventos</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Rastreamento</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Tracking persistido no banco, histórico do funil e operação da Meta CAPI para {companyName}.
+              Acompanhe o rastreamento, o histórico do funil e a integração com a Meta CAPI de {companyName}.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

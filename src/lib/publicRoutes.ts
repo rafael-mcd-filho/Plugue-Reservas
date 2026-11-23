@@ -11,9 +11,18 @@ const PRIVATE_ROOT_SEGMENTS = new Set([
   'logs',
   'integracoes',
   'financeiro',
+  'repasses',
   'perfil',
   'saude',
 ]);
+
+const GLOBAL_PUBLIC_ROOT_SEGMENTS = new Set(['pagamento', 'termos-de-uso']);
+
+/** Endereços que já pertencem ao sistema e não podem virar o slug de uma empresa. */
+export function isReservedRootSegment(segment: string) {
+  const value = segment.trim().toLowerCase();
+  return PRIVATE_ROOT_SEGMENTS.has(value) || GLOBAL_PUBLIC_ROOT_SEGMENTS.has(value);
+}
 
 function getPathSegments(pathname: string) {
   return pathname.split('?')[0].split('#')[0].split('/').filter(Boolean);
@@ -26,6 +35,7 @@ export function isPublicApplicationPath(pathname: string) {
 
   if (!first) return false;
   if (first === 'pagamento') return segments.length === 2;
+  if (first === 'termos-de-uso') return segments.length === 1;
   if (PRIVATE_ROOT_SEGMENTS.has(first) || second === 'admin') return false;
 
   if (segments.length === 1) return true;
@@ -43,7 +53,7 @@ export function getPublicCompanySlugFromPathname(pathname: string) {
   const segments = getPathSegments(pathname);
   const [first, second] = segments;
 
-  if (!first || PRIVATE_ROOT_SEGMENTS.has(first)) return null;
+  if (!first || PRIVATE_ROOT_SEGMENTS.has(first) || GLOBAL_PUBLIC_ROOT_SEGMENTS.has(first)) return null;
   if (segments.length === 1) return first;
   if (segments.length === 3 && second === 'f') return first;
   return null;
@@ -54,7 +64,7 @@ export function getPublicApplicationCompanySlug(pathname: string) {
   if (!isPublicApplicationPath(pathname)) return null;
   const [first] = getPathSegments(pathname);
 
-  // The payment route is public but its first segment is a route name, not a tenant.
-  if (!first || first === 'pagamento') return null;
+  // Global public routes have no tenant and must not bootstrap company data.
+  if (!first || GLOBAL_PUBLIC_ROOT_SEGMENTS.has(first)) return null;
   return first;
 }

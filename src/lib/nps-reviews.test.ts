@@ -85,4 +85,14 @@ describe('nps-reviews', () => {
   it('escapa curingas da busca por nome', () => {
     expect(escapeLikePattern('50%_off\\')).toBe('50\\%\\_off\\\\');
   });
+
+  it('groups response weeks in the unit time zone rather than UTC and keeps late replies', () => {
+    const result = computeWeeklyNps([
+      { submitted_at: '2026-09-21T02:30:00Z', nps_category: 'promoter' },
+      { submitted_at: '2026-10-01T12:00:00Z', nps_category: 'detractor' },
+    ], '2026-09-01', '2026-09-20', 'America/Manaus');
+    expect(result.find(point => point.week === '14/09')).toMatchObject({ responses: 1, nps: 100 });
+    expect(result.find(point => point.week === '28/09')).toMatchObject({ responses: 1, nps: -100 });
+    expect(result.reduce((sum, point) => sum + point.responses, 0)).toBe(2);
+  });
 });

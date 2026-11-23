@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { normalizeReservationStatus } from '@/lib/reservation-status';
+import { normalizeReservationStatus, RESERVATION_PAYMENT_STATUSES } from '@/lib/reservation-status';
 import {
   isOperationalActiveReservationStatus,
   isOperationalLostReservationStatus,
@@ -74,7 +74,8 @@ interface RawDailyCapacity {
 const EMPTY_RESERVATIONS: RawReservation[] = [];
 const EMPTY_WAITLIST: RawWaitlistEntry[] = [];
 const EMPTY_DAILY_CAPACITY: RawDailyCapacity[] = [];
-const DASHBOARD_OPERATIONAL_RESERVATION_SELECT = 'id, date, status, party_size, checked_in_party_size, source';
+// `time` alimenta "Horários mais procurados", que aparece também para quem não vê os relatórios avançados.
+const DASHBOARD_OPERATIONAL_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, source';
 const DASHBOARD_RESERVATION_SELECT = 'id, date, time, status, party_size, checked_in_party_size, created_at, source, origin_tracking_session_id, origin_anonymous_id, origin_affiliate_link_id, attribution_snapshot';
 const DASHBOARD_WAITLIST_SELECT = 'id, status, created_at, seated_at, expired_at, removed_at';
 
@@ -482,7 +483,20 @@ export function useDashboardData(
       if (normalizeReservationStatus(r.status) !== 'cancelled') return sum;
       return sum + (r.party_size || 1);
     }, 0);
-    return { ...base, totalGuests, checkedInGuests, noShowGuests, cancelledGuests };
+    // Reservas sem check-in, falta ou cancelamento, separadas pelo motivo de ainda estarem em aberto.
+    const todayKey = format(new Date(), 'yyyy-MM-dd');
+    const pendingBreakdown = rawReservations.reduce(
+      (acc, r) => {
+        const status = normalizeReservationStatus(r.status);
+        if (status === 'checked_in' || status === 'cancelled' || status === 'no-show') return acc;
+        if (RESERVATION_PAYMENT_STATUSES.includes(status)) acc.payment += 1;
+        else if (r.date >= todayKey) acc.upcoming += 1;
+        else acc.past += 1;
+        return acc;
+      },
+      { upcoming: 0, past: 0, payment: 0 },
+    );
+    return { ...base, totalGuests, checkedInGuests, noShowGuests, cancelledGuests, pendingBreakdown };
   }, [dailyStats, rawReservations]);
 
   const reservationOriginBreakdown = useMemo(() => {

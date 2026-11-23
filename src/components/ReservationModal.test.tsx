@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { addDays, eachDayOfInterval, format } from 'date-fns';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,19 +8,21 @@ import ReservationModal from '@/components/ReservationModal';
 const supabaseMocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: supabaseMocks.from,
     rpc: supabaseMocks.rpc,
-    functions: { invoke: vi.fn() },
+    functions: { invoke: supabaseMocks.invoke },
   },
 }));
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+vi.mock('@/lib/affiliateLinks', () => ({ getAffiliateAttribution: () => null }));
 
 function queryResult(data: unknown) {
   const result = { data, error: null };
@@ -36,12 +38,20 @@ function queryResult(data: unknown) {
   return builder;
 }
 
-function renderModal(initialDate: string, props: Partial<ComponentProps<typeof ReservationModal>> = {}) {
+function paymentRequirement(date: string, requiresPayment = false, companyId = 'company-1') {
+  return {
+    schema: 'reservation-payment-requirement', version: 1, company_id: companyId, date,
+    requires_payment: requiresPayment,
+    ...(!requiresPayment ? { reason: 'no_rule' } : {}),
+  };
+}
+
+function renderModal(initialDate: string | null, props: Partial<ComponentProps<typeof ReservationModal>> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   });
 
-  render(
+  const renderContent = (next: Partial<ComponentProps<typeof ReservationModal>> = {}) => (
     <QueryClientProvider client={queryClient}>
       <ReservationModal
         open
@@ -52,9 +62,12 @@ function renderModal(initialDate: string, props: Partial<ComponentProps<typeof R
         openingHours={[]}
         initialDate={initialDate}
         {...props}
+        {...next}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(renderContent());
+  return { ...view, queryClient, rerenderModal: (next: Partial<ComponentProps<typeof ReservationModal>>) => view.rerender(renderContent(next)) };
 }
 
 async function selectTomorrow() {
@@ -68,10 +81,50 @@ async function confirmPartySize(partySize = 2) {
   }));
 }
 
+function paymentPreviewCalls() {
+  return supabaseMocks.invoke.mock.calls.filter(([name, options]) => name === 'create-reservation-payment' && options.body?.action === 'preview');
+}
+
+function reservationCreationCalls() {
+  return supabaseMocks.invoke.mock.calls.filter(([name, options]) => name === 'create-reservation-payment' && options.body?.action !== 'preview');
+}
+
+function mockKnownCustomerPrefill() {
+  const defaultRpcImplementation = supabaseMocks.rpc.getMockImplementation()!;
+  supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_prefill'
+    ? Promise.resolve({ data: [{ guest_name: 'Maria Silva', guest_email: 'maria@example.test', guest_birthdate: '1990-08-14' }], error: null })
+    : defaultRpcImplementation(name, ...args));
+}
+
+async function fillKnownCustomer() {
+  fireEvent.change(await screen.findByLabelText('WhatsApp'), { target: { value: '+55 11 99999-8888' } });
+  await screen.findByText('Cadastro encontrado');
+  await waitFor(() => expect(screen.getByLabelText('Nome completo')).toHaveValue('Maria Silva'));
+}
+
+async function goToReservationForm() {
+  await selectTomorrow();
+  await confirmPartySize();
+  fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+  await screen.findByLabelText('WhatsApp');
+}
+
 describe('ReservationModal', () => {
   beforeEach(() => {
     supabaseMocks.from.mockReset();
     supabaseMocks.rpc.mockReset();
+    supabaseMocks.invoke.mockReset();
+    supabaseMocks.invoke.mockImplementation(async (name: string, options: { body?: Record<string, unknown> } = {}) => {
+      const body = options.body ?? {};
+      if (name === 'create-reservation-payment' && body.action === 'preview') {
+        return { data: paymentRequirement(String(body.date), false, String(body.company_id)), error: null };
+      }
+      if (name === 'create-reservation-payment') {
+        const reservation = body.reservation as { id?: string } | undefined;
+        return { data: { requires_payment: false, reason: 'no_rule', reservation_created: true, reservation_id: reservation?.id }, error: null };
+      }
+      return { data: null, error: null };
+    });
 
     supabaseMocks.from.mockImplementation((table: string) => {
       if (table === 'table_maps') {
@@ -476,6 +529,41 @@ describe('ReservationModal', () => {
     );
   });
 
+  it.each(['Voltar', 'Escape'])('consulta os termos e retorna por %s sem perder a reserva ou enviar o formulário', async (closeMethod) => {
+    const onOpenChange = vi.fn();
+    renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'), { onOpenChange, exitRecoveryEnabled: true });
+    await selectTomorrow();
+    await confirmPartySize();
+    fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+
+    fireEvent.change(await screen.findByLabelText('Nome completo'), { target: { value: 'Maria Silva' } });
+    fireEvent.change(screen.getByLabelText('E-mail (opcional)'), { target: { value: 'maria@example.com' } });
+    fireEvent.change(screen.getByLabelText('WhatsApp'), { target: { value: '+1 407 264 1934' } });
+    const phoneValue = (screen.getByLabelText('WhatsApp') as HTMLInputElement).value;
+    const trigger = screen.getByRole('button', { name: 'Termos de Uso' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const terms = screen.getByRole('dialog', { name: 'Termos de Uso' });
+    expect(within(terms).getByText(/Restaurante Teste/)).toBeInTheDocument();
+    expect(within(terms).getByText(/deve ser integralmente abatido/)).toBeInTheDocument();
+    if (closeMethod === 'Escape') {
+      fireEvent.keyDown(terms, { key: 'Escape', code: 'Escape' });
+    } else {
+      fireEvent.click(within(terms).getByRole('button', { name: 'Voltar à reserva' }));
+    }
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Termos de Uso' })).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Nome completo')).toHaveValue('Maria Silva');
+    expect(screen.getByLabelText('E-mail (opcional)')).toHaveValue('maria@example.com');
+    expect(screen.getByLabelText('WhatsApp')).toHaveValue(phoneValue);
+    expect(screen.getByText(/às 18:00/)).toBeInTheDocument();
+    expect(screen.getByText('2 pessoas')).toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(supabaseMocks.rpc.mock.calls.some(([name]) => name === 'create_public_reservation')).toBe(false);
+  });
+
   it('encaminha grupos grandes ao WhatsApp e permite reduzir para seguir pelo site', async () => {
     renderModal(format(addDays(new Date(), 1), 'yyyy-MM-dd'), {
       largePartyThreshold: 3,
@@ -514,5 +602,226 @@ describe('ReservationModal', () => {
     expect(screen.getByRole('button', { name: 'Aumentar número de pessoas' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Diminuir número de pessoas' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /Ver horários para/ })).not.toBeInTheDocument();
+  });
+
+  describe('texto do botão conforme a exigência de pagamento', () => {
+    function expectNoExtraPaymentContent() {
+      expect(screen.queryByRole('region', { name: 'Condições de pagamento da reserva' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Esta data exige pagamento de sinal|Sinal por pessoa|Sinal por reserva|Reserva sem pagamento antecipado|Consultando condições da reserva|Não foi possível consultar as condições desta data|Aguarde a consulta|Cancelamento e devolução/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/R\$\s*\d/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Tentar novamente' })).not.toBeInTheDocument();
+    }
+
+    it('consulta na escolha da data, sem nome, telefone ou criação de reserva', async () => {
+      renderModal(null);
+      expect(paymentPreviewCalls()).toHaveLength(0);
+      await selectTomorrow();
+
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(1));
+      expect(paymentPreviewCalls()[0][1].body).toEqual({
+        action: 'preview', company_id: 'company-1', date: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+      });
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      expect(reservationCreationCalls()).toHaveLength(0);
+      expect(supabaseMocks.rpc.mock.calls.some(([name]) => name === 'create_public_reservation')).toBe(false);
+      expectNoExtraPaymentContent();
+    });
+
+    it('mantém Confirmar Reserva e o espaço anterior quando não exige pagamento', async () => {
+      renderModal(null);
+      await selectTomorrow();
+      expectNoExtraPaymentContent();
+      await confirmPartySize();
+      await screen.findByRole('button', { name: /^18:00/ });
+      expectNoExtraPaymentContent();
+      fireEvent.click(screen.getByRole('button', { name: /^18:00/ }));
+
+      expect(await screen.findByRole('button', { name: 'Confirmar Reserva' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Continuar para pagamento' })).not.toBeInTheDocument();
+      expectNoExtraPaymentContent();
+      const terms = screen.getByRole('button', { name: 'Termos de Uso' });
+      expect(terms.closest('p')?.nextElementSibling).toContainElement(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+    });
+
+    it('altera somente o texto final para Continuar para pagamento quando exigido', async () => {
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? Promise.resolve({ data: paymentRequirement(String(options.body.date), true), error: null })
+        : defaultInvoke(name, options));
+      renderModal(null);
+      await selectTomorrow();
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(1));
+      expectNoExtraPaymentContent();
+      await confirmPartySize();
+      await screen.findByRole('button', { name: /^18:00/ });
+      expectNoExtraPaymentContent();
+      fireEvent.click(screen.getByRole('button', { name: /^18:00/ }));
+
+      const submit = await screen.findByRole('button', { name: 'Continuar para pagamento' });
+      expect(submit).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Confirmar Reserva' })).not.toBeInTheDocument();
+      expectNoExtraPaymentContent();
+      expect(screen.getByRole('button', { name: 'Termos de Uso' }).closest('p')?.nextElementSibling).toContainElement(submit);
+      expect(paymentPreviewCalls()).toHaveLength(1);
+    });
+
+    it('não repete a consulta ao mudar quantidade ou horário na mesma data', async () => {
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? Promise.resolve({ data: paymentRequirement(String(options.body.date), true), error: null })
+        : defaultInvoke(name, options));
+      renderModal(null);
+      await goToReservationForm();
+      expect(await screen.findByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Alterar pessoas' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Aumentar número de pessoas' }));
+      await confirmPartySize(3);
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+
+      expect(await screen.findByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+      expect(paymentPreviewCalls()).toHaveLength(1);
+      expectNoExtraPaymentContent();
+    });
+
+    it('mantém o botão original e permite a criação normal durante a consulta pendente', async () => {
+      let releaseRequirement: (value: unknown) => void = () => undefined;
+      const pendingRequirement = new Promise(resolve => { releaseRequirement = resolve; });
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? pendingRequirement
+        : defaultInvoke(name, options));
+      mockKnownCustomerPrefill();
+      renderModal(null);
+      await goToReservationForm();
+      await fillKnownCustomer();
+
+      expect(screen.getByRole('button', { name: 'Confirmar Reserva' })).toBeEnabled();
+      expectNoExtraPaymentContent();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      expect(await screen.findByText(/está tudo pronto para você/)).toBeInTheDocument();
+      await act(async () => releaseRequirement({ data: paymentRequirement(format(addDays(new Date(), 1), 'yyyy-MM-dd'), true), error: null }));
+    });
+
+    it.each([
+      { data: null, error: null },
+      { data: { requires_payment: true }, error: null },
+      { data: { schema: 'legacy', requires_payment: true }, error: null },
+      { data: null, error: { message: 'Falha de conexão na consulta antecipada.' } },
+    ])('preserva o fluxo original se a consulta falhar ou retornar contrato antigo: %j', async previewResponse => {
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? Promise.resolve(previewResponse)
+        : defaultInvoke(name, options));
+      mockKnownCustomerPrefill();
+      renderModal(null);
+      await goToReservationForm();
+      await fillKnownCustomer();
+
+      expect(screen.getByRole('button', { name: 'Confirmar Reserva' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Continuar para pagamento' })).not.toBeInTheDocument();
+      expectNoExtraPaymentContent();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      expect(await screen.findByText(/está tudo pronto para você/)).toBeInTheDocument();
+      expect(paymentPreviewCalls()).toHaveLength(1);
+    });
+
+    it('não aplica a resposta de uma data anterior depois de escolher outra', async () => {
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+      const nextDate = addDays(new Date(), 2);
+      let releaseOldRequirement: (value: unknown) => void = () => undefined;
+      const oldRequirement = new Promise(resolve => { releaseOldRequirement = resolve; });
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => {
+        if (options.body.action !== 'preview') return defaultInvoke(name, options);
+        return options.body.date === tomorrow ? oldRequirement : Promise.resolve({ data: paymentRequirement(String(options.body.date), true), error: null });
+      });
+      renderModal(null);
+      await selectTomorrow();
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Alterar data' }));
+      fireEvent.click(await screen.findByRole('button', { name: new RegExp(`\\b${format(nextDate, 'dd')}\\b`) }));
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(2));
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      expect(await screen.findByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+
+      await act(async () => releaseOldRequirement({ data: paymentRequirement(tomorrow), error: null }));
+      expect(screen.getByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+      expect(paymentPreviewCalls().map(([, options]) => options.body.date)).toEqual([tomorrow, format(nextDate, 'yyyy-MM-dd')]);
+      expectNoExtraPaymentContent();
+    });
+
+    it('isola a consulta por unidade e ignora a resposta antiga ainda pendente', async () => {
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+      let releaseOldRequirement: (value: unknown) => void = () => undefined;
+      const oldRequirement = new Promise(resolve => { releaseOldRequirement = resolve; });
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => {
+        if (options.body.action !== 'preview') return defaultInvoke(name, options);
+        return options.body.company_id === 'company-1' ? oldRequirement : Promise.resolve({
+          data: paymentRequirement(String(options.body.date), true, String(options.body.company_id)), error: null,
+        });
+      });
+      const view = renderModal(null);
+      await selectTomorrow();
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(1));
+      view.rerenderModal({ companyId: 'company-2', companyName: 'Outra unidade' });
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(2));
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      expect(await screen.findByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+
+      await act(async () => releaseOldRequirement({ data: paymentRequirement(tomorrow), error: null }));
+      expect(screen.getByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+      expect(paymentPreviewCalls().map(([, options]) => options.body.company_id)).toEqual(['company-1', 'company-2']);
+      expect(reservationCreationCalls()).toHaveLength(0);
+      expectNoExtraPaymentContent();
+    });
+
+    it('cancela a consulta ao fechar e faz uma leitura nova ao reabrir', async () => {
+      let releaseOldRequirement: (value: unknown) => void = () => undefined;
+      const oldRequirement = new Promise(resolve => { releaseOldRequirement = resolve; });
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      let attempts = 0;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview' && attempts++ === 0
+        ? oldRequirement
+        : defaultInvoke(name, options));
+      const view = renderModal(null);
+      await selectTomorrow();
+      await waitFor(() => expect(paymentPreviewCalls()).toHaveLength(1));
+      const firstSignal = paymentPreviewCalls()[0][1].signal as AbortSignal;
+      view.rerenderModal({ open: false });
+      await waitFor(() => expect(firstSignal.aborted).toBe(true));
+      view.rerenderModal({ open: true });
+      await goToReservationForm();
+      expect(await screen.findByRole('button', { name: 'Confirmar Reserva' })).toBeEnabled();
+
+      await act(async () => releaseOldRequirement({ data: paymentRequirement(format(addDays(new Date(), 1), 'yyyy-MM-dd'), true), error: null }));
+      expect(screen.getByRole('button', { name: 'Confirmar Reserva' })).toBeEnabled();
+      expect(paymentPreviewCalls()).toHaveLength(2);
+      expectNoExtraPaymentContent();
+    });
+
+    it('envia a reserva pelo contrato original, sem cotação ou fingerprint adicional', async () => {
+      mockKnownCustomerPrefill();
+      renderModal(null);
+      await goToReservationForm();
+      await fillKnownCustomer();
+      fireEvent.click(await screen.findByRole('button', { name: 'Confirmar Reserva' }));
+
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      const body = reservationCreationCalls()[0][1].body;
+      expect(Object.keys(body).sort()).toEqual(['company_id', 'complete_without_payment', 'reservation']);
+      expect(body).toEqual(expect.objectContaining({
+        company_id: 'company-1', complete_without_payment: true,
+        reservation: expect.objectContaining({ guest_name: 'Maria Silva', party_size: 2 }),
+      }));
+      expect(supabaseMocks.rpc.mock.calls.some(([name]) => name === 'create_public_reservation')).toBe(false);
+      expect(await screen.findByText(/está tudo pronto para você/)).toBeInTheDocument();
+    });
+
   });
 });

@@ -1,3 +1,4 @@
+import { normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
 import {
   encryptPlugueChatToken,
@@ -305,7 +306,7 @@ Deno.serve(async (req) => {
       if (recipientReservationIds.length > 0) {
         const { data: reservationRows, error: reservationError } = await supabaseAdmin
           .from("reservations")
-          .select("id, guest_name, guest_phone, date, time, party_size")
+          .select("id, guest_name, guest_phone, guest_phone_e164, date, time, party_size")
           .eq("company_id", companyId)
           .in("id", recipientReservationIds)
           .not("guest_phone", "is", null);
@@ -316,7 +317,7 @@ Deno.serve(async (req) => {
         }
 
         for (const reservation of reservationRows ?? []) {
-          const phone = normalizePhone(String(reservation.guest_phone ?? ""));
+          const phone = normalizeStoredPhoneE164(String(reservation.guest_phone_e164 ?? reservation.guest_phone ?? ""));
           if (!phone || uniqueRecipients.has(phone)) continue;
 
           uniqueRecipients.set(phone, {

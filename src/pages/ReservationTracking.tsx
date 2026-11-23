@@ -17,14 +17,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { PublicReservationChangeDialog } from '@/components/reservations/PublicReservationChangeDialog';
 import { getVisitorId } from '@/hooks/useFunnelTracking';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -600,15 +593,19 @@ export default function ReservationTracking() {
         </div>
       </div>
 
-      <AlterReservationDialog
+      <PublicReservationChangeDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
+        onChanged={() => Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['reservation-tracking', code] }),
+          queryClient.invalidateQueries({ queryKey: ['reservation-tracking-payment', code] }),
+        ])}
         companyName={company.name}
         companyWhatsapp={company.whatsapp ?? null}
         guestName={entry.guest_name}
-        date={entry.date}
-        time={entry.time}
-        partySize={entry.party_size}
+        trackingCode={entry.public_tracking_code}
+        reservation={{ id: entry.id, date: entry.date, time: entry.time.slice(0, 5), party_size: entry.party_size, updated_at: entry.updated_at }}
+        hasPayment={!!activePayment}
       />
 
       <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
@@ -635,66 +632,5 @@ export default function ReservationTracking() {
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
-}
-
-function AlterReservationDialog({
-  open,
-  onOpenChange,
-  companyName,
-  companyWhatsapp,
-  guestName,
-  date,
-  time,
-  partySize,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  companyName: string;
-  companyWhatsapp: string | null;
-  guestName: string;
-  date: string;
-  time: string;
-  partySize: number;
-}) {
-  const whatsappNumber = toStoredWhatsAppNumber(companyWhatsapp);
-  const formattedDate = format(new Date(`${date}T12:00:00`), "dd/MM/yyyy", { locale: ptBR });
-  const formattedTime = time.slice(0, 5);
-  const message =
-    `Olá! Gostaria de alterar uma reserva em ${companyName}.\n` +
-    `Nome: ${guestName}\n` +
-    `Data: ${formattedDate}\n` +
-    `Horário: ${formattedTime}\n` +
-    `Pessoas: ${partySize}`;
-  const whatsappUrl = whatsappNumber
-    ? buildWhatsAppMessageUrl(whatsappNumber, message)
-    : null;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Alterar reserva</DialogTitle>
-          <DialogDescription>
-            Alterações de reserva são feitas de forma rápida pelo WhatsApp. Clique no botão abaixo para falar com o restaurante.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Voltar
-          </Button>
-          {whatsappUrl ? (
-            <Button asChild className="bg-emerald-600 text-white hover:bg-emerald-700">
-              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-                <WhatsAppIcon className="mr-2 h-4 w-4" />
-                Falar pelo WhatsApp
-              </a>
-            </Button>
-          ) : (
-            <Button disabled>WhatsApp indisponível</Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

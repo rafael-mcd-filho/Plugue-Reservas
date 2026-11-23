@@ -26,13 +26,13 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 
 const queryClients: QueryClient[] = [];
-const onlyTables: CompanyPanelPermissionOverrides = {
+const onlyQueue: CompanyPanelPermissionOverrides = {
   dashboard_view: false,
   checkins_view: false,
   reservations_view: false,
   calendar_view: false,
-  tables_view: true,
-  waitlist_view: false,
+  tables_view: false,
+  waitlist_view: true,
 };
 
 function context(): SupportImpersonationContext {
@@ -80,8 +80,8 @@ function renderEntry({ withGuard = true, path = '/empresa-a/admin' } = {}) {
         <Route path="/:slug/admin" element={withGuard
           ? <ProtectedRoute allowedRoles={['admin', 'operator', 'superadmin']}>{entry}</ProtectedRoute>
           : entry} />
-        <Route path="/:slug/admin/mesas" element={<ProtectedRoute allowedRoles={['admin', 'operator']} requiredCompanyPermission="tables_view">
-          <CompanySlugProvider><p>Mesas autorizadas</p></CompanySlugProvider>
+        <Route path="/:slug/admin/servico" element={<ProtectedRoute allowedRoles={['admin', 'operator']} requiredCompanyPermission="waitlist_view">
+          <CompanySlugProvider><p>Fila autorizada</p></CompanySlugProvider>
         </ProtectedRoute>} />
         <Route path="/empresas" element={<p>Empresas autorizadas</p>} />
         <Route path="/acesso-negado" element={<p>Acesso negado</p>} />
@@ -98,7 +98,7 @@ beforeEach(() => {
   mocks.companyQuery.mockResolvedValue({ data: {
     id: 'company-one', name: 'Empresa A', slug: 'empresa-a', time_zone: 'America/Sao_Paulo',
   }, error: null });
-  mocks.permissionQuery.mockResolvedValue({ data: { permission_overrides: onlyTables }, error: null });
+  mocks.permissionQuery.mockResolvedValue({ data: { permission_overrides: onlyQueue }, error: null });
   mocks.from.mockImplementation((table: string) => {
     const query = {
       select: () => query,
@@ -129,11 +129,11 @@ describe('support company entry with real route guards', () => {
     expect(screen.queryByText('Empresas autorizadas')).not.toBeInTheDocument();
 
     await act(async () => { completeContext({ data: context(), error: null }); });
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
     expect(mocks.companyQuery).toHaveBeenCalled();
   });
 
-  it('waits for target overrides and enters Mesas when Dashboard and every other operator page are disabled', async () => {
+  it('waits for target overrides and enters Fila when Dashboard and every other operator page are disabled', async () => {
     let completePermissions!: (result: { data: { permission_overrides: CompanyPanelPermissionOverrides }; error: null }) => void;
     mocks.permissionQuery.mockImplementation(() => new Promise((resolve) => { completePermissions = resolve; }));
     startPendingSession();
@@ -145,9 +145,9 @@ describe('support company entry with real route guards', () => {
     expect(screen.queryByText('Acesso negado')).not.toBeInTheDocument();
     expect(mocks.companyQuery).not.toHaveBeenCalled();
 
-    await act(async () => { completePermissions({ data: { permission_overrides: onlyTables }, error: null }); });
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
-    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/mesas');
+    await act(async () => { completePermissions({ data: { permission_overrides: onlyQueue }, error: null }); });
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
+    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/servico');
     expect(getImpersonationSession()?.status).toBe('active');
     expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();
   });
@@ -160,14 +160,14 @@ describe('support company entry with real route guards', () => {
 
     const retry = await screen.findByRole('button', { name: 'Tentar novamente' });
     expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();
-    expect(screen.queryByText('Mesas autorizadas')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fila autorizada')).not.toBeInTheDocument();
     expect(screen.queryByText('Acesso negado')).not.toBeInTheDocument();
     expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin');
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
     expect(mocks.companyQuery).not.toHaveBeenCalled();
 
     fireEvent.click(retry);
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
     expect(mocks.permissionQuery).toHaveBeenCalledTimes(2);
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
     expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();
@@ -181,24 +181,24 @@ describe('support company entry with real route guards', () => {
     expect(await screen.findByText('Acesso negado')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Tentar novamente' })).not.toBeInTheDocument();
     expect(screen.queryByText('Dashboard autorizado')).not.toBeInTheDocument();
-    expect(screen.queryByText('Mesas autorizadas')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fila autorizada')).not.toBeInTheDocument();
   });
 
   it('suspends cached page permissions when an override refresh fails and resumes only after a successful retry', async () => {
     startPendingSession();
     const queryClient = renderEntry();
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
 
     mocks.permissionQuery.mockResolvedValueOnce({ data: null, error: { code: '503', message: 'Service unavailable' } });
     await act(async () => { await queryClient.invalidateQueries({ queryKey: ['company-panel-permission-overrides'] }); });
     const retry = await screen.findByRole('button', { name: 'Tentar novamente' });
-    expect(screen.queryByText('Mesas autorizadas')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fila autorizada')).not.toBeInTheDocument();
     expect(screen.queryByText('Acesso negado')).not.toBeInTheDocument();
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
-    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/mesas');
+    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/servico');
 
     fireEvent.click(retry);
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
   });
 
@@ -229,21 +229,21 @@ describe('support company entry with real route guards', () => {
 
     mocks.rpc.mockResolvedValue({ data: context(), error: null });
     fireEvent.click(retry);
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
   });
 
   it('does not keep rendering a previously validated company while a context refresh fails', async () => {
     startPendingSession();
     const queryClient = renderEntry();
-    expect(await screen.findByText('Mesas autorizadas')).toBeInTheDocument();
+    expect(await screen.findByText('Fila autorizada')).toBeInTheDocument();
 
     mocks.rpc.mockResolvedValue({ data: null, error: { code: '503', message: 'Service unavailable' } });
     await act(async () => { await queryClient.invalidateQueries({ queryKey: ['support-impersonation-context'] }); });
     expect(await screen.findByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
-    expect(screen.queryByText('Mesas autorizadas')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fila autorizada')).not.toBeInTheDocument();
     expect(getImpersonationSession()?.supportSessionId).toBe(context().id);
-    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/mesas');
+    expect(screen.getByTestId('path')).toHaveTextContent('/empresa-a/admin/servico');
   });
 
   it('never reuses a valid company delegation to open another company route', async () => {

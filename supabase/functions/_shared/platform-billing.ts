@@ -38,7 +38,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(value: string): Uint8Array {
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
@@ -53,7 +53,7 @@ async function getPlatformBillingEncryptionKey(): Promise<CryptoKey> {
     throw new Error("PLATFORM_BILLING_TOKEN_ENCRYPTION_KEY não configurada");
   }
 
-  let keyBytes: Uint8Array;
+  let keyBytes: Uint8Array<ArrayBuffer>;
   try {
     keyBytes = base64ToBytes(rawKey);
   } catch {

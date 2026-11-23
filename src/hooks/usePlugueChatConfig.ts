@@ -97,6 +97,9 @@ export function useUpsertPlugueChatTemplate() {
   const qc = useQueryClient();
 
   return useMutation({
+    onMutate: async (template) => {
+      await qc.cancelQueries({ queryKey: ['pluguechat-templates', template.company_id], exact: true });
+    },
     mutationFn: async (template: {
       company_id: string;
       type: string;
@@ -105,7 +108,7 @@ export function useUpsertPlugueChatTemplate() {
       template_name?: string | null;
       post_visit_include_review_link?: boolean | null;
     }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('pluguechat_automation_templates' as any)
         .upsert(
           {
@@ -113,10 +116,18 @@ export function useUpsertPlugueChatTemplate() {
             updated_at: new Date().toISOString(),
           } as any,
           { onConflict: 'company_id,type' },
-        );
+        )
+        .select('*')
+        .single();
       if (error) throw error;
+      return data as unknown as PlugueChatTemplate;
     },
-    onSuccess: (_, vars) => {
+    onSuccess: async (saved, vars) => {
+      await qc.cancelQueries({ queryKey: ['pluguechat-templates', vars.company_id], exact: true });
+      qc.setQueryData<PlugueChatTemplate[]>(['pluguechat-templates', vars.company_id], (previous = []) => [
+        ...previous.filter((template) => template.type !== saved.type),
+        saved,
+      ]);
       qc.invalidateQueries({ queryKey: ['pluguechat-templates', vars.company_id] });
       toast.success('Template salvo.');
     },

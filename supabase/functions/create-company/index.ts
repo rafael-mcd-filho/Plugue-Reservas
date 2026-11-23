@@ -1,3 +1,4 @@
+import { normalizePhoneE164, isValidPhone } from "../_shared/phone.ts";
 import { assertSuperadmin } from "../_shared/internal-auth.ts";
 
 const corsHeaders = {
@@ -7,18 +8,24 @@ const corsHeaders = {
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const BRAZIL_PHONE_PATTERN = /^[1-9][0-9](?:9?[0-9]{8})$/;
 
 function normalizeOptionalText(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function normalizeEmail(value: unknown) {
-  return normalizeOptionalText(value);
+  return normalizeOptionalText(value)?.toLowerCase() ?? null;
+}
+
+function isDuplicateEmailError(error: { code?: string; message?: string }) {
+  return error.code === "email_exists"
+    || error.code === "user_already_exists"
+    || /already been registered|email.*already.*registered/i.test(error.message ?? "");
 }
 
 function normalizePhone(value: unknown) {
-  return normalizeOptionalText(value);
+  const text = normalizeOptionalText(value);
+  return text ? normalizePhoneE164(text) || text : null;
 }
 
 function normalizeCnpj(value: unknown) {
@@ -28,15 +35,6 @@ function normalizeCnpj(value: unknown) {
 
 function isValidEmail(value: string) {
   return EMAIL_PATTERN.test(value);
-}
-
-function isValidBrazilPhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-  const localDigits = digits.length > 11 && digits.startsWith("55")
-    ? digits.slice(2)
-    : digits;
-
-  return BRAZIL_PHONE_PATTERN.test(localDigits);
 }
 
 function isValidCnpj(value: string) {
@@ -162,21 +160,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (normalizedCompanyPhone && !isValidBrazilPhone(normalizedCompanyPhone)) {
+    if (normalizedCompanyPhone && !isValidPhone(normalizedCompanyPhone)) {
       return new Response(JSON.stringify({ error: "Informe um telefone valido para a empresa" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (normalizedResponsiblePhone && !isValidBrazilPhone(normalizedResponsiblePhone)) {
+    if (normalizedResponsiblePhone && !isValidPhone(normalizedResponsiblePhone)) {
       return new Response(JSON.stringify({ error: "Informe um telefone valido para o responsavel" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (normalizedWhatsapp && !isValidBrazilPhone(normalizedWhatsapp)) {
+    if (normalizedWhatsapp && !isValidPhone(normalizedWhatsapp)) {
       return new Response(JSON.stringify({ error: "Informe um WhatsApp valido" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -191,12 +189,16 @@ Deno.serve(async (req) => {
     }
 
     let company: any = null;
-    let newUser: any = null;
+    let adminUserId: string | null = null;
+    let createdUserId: string | null = null;
+    let adminUserReused = false;
     const tempPassword = crypto.randomUUID().slice(0, 12) + "Aa1!";
 
     const rollbackProvisioning = async () => {
-      if (newUser?.user?.id) {
-        const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(newUser.user.id);
+      // An existing account belongs to the returning customer. Rollback may
+      // remove only the Auth account that this request actually created.
+      if (createdUserId) {
+        const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(createdUserId);
         if (deleteUserError) {
           console.error("Failed to rollback created user", deleteUserError);
         }
@@ -255,49 +257,82 @@ Deno.serve(async (req) => {
         email: normalizedResponsibleEmail,
         password: tempPassword,
         email_confirm: true,
+        // Keep server-controlled provenance while the original company exists.
+        // Another request must not claim a fresh account before its role is set.
+        app_metadata: { provisioning_company_id: company.id },
         user_metadata: { full_name: responsible_name || name },
       });
 
       if (userError) {
-        throw createProvisioningError(`Erro ao criar usuario: ${userError.message}`, {
-          code: userError.code,
-        });
+        if (!isDuplicateEmailError(userError)) {
+          throw createProvisioningError(`Erro ao criar usuario: ${userError.message}`, {
+            code: userError.code,
+          });
+        }
+
+        // The RPC checks the Auth email, account status and all existing
+        // permissions under row locks, and attaches profile + role atomically.
+        const { data: reusedUserId, error: reuseError } = await supabaseAdmin.rpc(
+          "reuse_unassigned_company_admin",
+          {
+            _company_id: company.id,
+            _email: normalizedResponsibleEmail,
+            _full_name: responsible_name || name,
+            _phone: normalizedResponsiblePhone,
+          },
+        );
+
+        if (reuseError) {
+          throw createProvisioningError(reuseError.message, {
+            code: reuseError.code,
+            details: reuseError.details,
+          });
+        }
+        if (typeof reusedUserId !== "string" || !reusedUserId) {
+          throw createProvisioningError("Nao foi possivel vincular a conta existente");
+        }
+        adminUserId = reusedUserId;
+        adminUserReused = true;
+      } else {
+        createdUserId = createdUser.user.id;
+        adminUserId = createdUserId;
       }
-      newUser = createdUser;
 
-      const { error: profileError } = await supabaseAdmin
-        .from("profiles")
-        .upsert({
-          id: newUser.user.id,
-          company_id: company.id,
-          email: normalizedResponsibleEmail,
-          phone: normalizedResponsiblePhone,
-          full_name: responsible_name || name,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: "id",
-        });
+      if (!adminUserReused) {
+        const { error: profileError } = await supabaseAdmin
+          .from("profiles")
+          .upsert({
+            id: adminUserId,
+            company_id: company.id,
+            email: normalizedResponsibleEmail,
+            phone: normalizedResponsiblePhone,
+            full_name: responsible_name || name,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: "id",
+          });
 
-      if (profileError) {
-        throw createProvisioningError(`Erro ao vincular perfil: ${profileError.message}`, {
-          code: profileError.code,
-          details: profileError.details,
-        });
-      }
+        if (profileError) {
+          throw createProvisioningError(`Erro ao vincular perfil: ${profileError.message}`, {
+            code: profileError.code,
+            details: profileError.details,
+          });
+        }
 
-      const { error: roleError } = await supabaseAdmin
-        .from("user_roles")
-        .insert({
-          user_id: newUser.user.id,
-          role: "admin",
-          company_id: company.id,
-        });
+        const { error: roleError } = await supabaseAdmin
+          .from("user_roles")
+          .insert({
+            user_id: adminUserId,
+            role: "admin",
+            company_id: company.id,
+          });
 
-      if (roleError) {
-        throw createProvisioningError(`Erro ao atribuir perfil admin: ${roleError.message}`, {
-          code: roleError.code,
-          details: roleError.details,
-        });
+        if (roleError) {
+          throw createProvisioningError(`Erro ao atribuir perfil admin: ${roleError.message}`, {
+            code: roleError.code,
+            details: roleError.details,
+          });
+        }
       }
     } catch (error: any) {
       await rollbackProvisioning();
@@ -331,7 +366,8 @@ Deno.serve(async (req) => {
       details: {
         company_name: company.name,
         company_slug: company.slug,
-        admin_user_id: newUser.user.id,
+        admin_user_id: adminUserId,
+        admin_user_reused: adminUserReused,
         admin_email: normalizedResponsibleEmail,
         recovery_link_generated: !recoveryError,
         recovery_link_error: recoveryError?.message || null,
@@ -346,8 +382,9 @@ Deno.serve(async (req) => {
       JSON.stringify({
         company,
         admin_user: {
-          id: newUser.user.id,
+          id: adminUserId,
           email: normalizedResponsibleEmail,
+          reused: adminUserReused,
           access_link: accessLink,
         },
         warning: recoveryError ? "Empresa criada, mas o link de recuperacao nao foi gerado automaticamente." : null,

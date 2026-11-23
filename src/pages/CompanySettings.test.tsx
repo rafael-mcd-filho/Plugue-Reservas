@@ -37,13 +37,20 @@ const db = vi.hoisted(() => ({
   upserts: [] as { table: string; payload: Record<string, unknown> }[],
   rows: {} as Record<string, unknown>,
   missingColumns: [] as string[],
+  missingSelectColumns: [] as string[],
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
   const buildFrom = (table: string) => ({
-    select: () => ({
+    select: (columns: string) => ({
       eq: () => ({
-        maybeSingle: async () => ({ data: db.rows[table] ?? null, error: null }),
+        maybeSingle: async () => {
+          const missingColumn = columns.split(',').map((column) => column.trim())
+            .find((column) => db.missingSelectColumns.includes(column));
+          return missingColumn
+            ? { data: null, error: { code: '42703', message: `column companies.${missingColumn} does not exist` } }
+            : { data: db.rows[table] ?? null, error: null };
+        },
       }),
     }),
     update: (payload: Record<string, unknown>) => {
@@ -179,6 +186,7 @@ describe('CompanySettings — salvamento por página', () => {
     db.updates.length = 0;
     db.upserts.length = 0;
     db.missingColumns = [];
+    db.missingSelectColumns = [];
     db.rows = {
       companies: COMPANY_ROW,
       company_public_notices: null,
@@ -205,6 +213,157 @@ describe('CompanySettings — salvamento por página', () => {
       'reservation_slot_interval_minutes',
     ]);
     expect(db.upserts).toHaveLength(0);
+  });
+
+  it('mantém a remarcação desativada quando as colunas ainda não estão disponíveis', async () => {
+    db.missingSelectColumns = ['public_reservation_changes_enabled', 'public_reservation_change_min_notice_minutes'];
+    renderSection('reservas');
+
+    const toggle = await screen.findByRole('switch', { name: 'Permitir remarcação pelo cliente' });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText('Remarcação indisponível no momento. O atendimento continua pelo WhatsApp.')).toBeInTheDocument();
+    expect(screen.queryByText('Não salvo')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).not.toHaveProperty('public_reservation_changes_enabled');
+    expect(companyUpdates()[0].payload).not.toHaveProperty('public_reservation_change_min_notice_minutes');
+  });
+
+  it('carrega a opção desativada e salva os dois campos somente ao clicar em Salvar', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 120,
+    };
+    renderSection('reservas');
+
+    const toggle = await screen.findByRole('switch', { name: 'Permitir remarcação pelo cliente' });
+    const notice = screen.getByRole('spinbutton', { name: 'Antecedência mínima para alterar' });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(notice).toHaveValue(120);
+    expect(notice).toBeDisabled();
+
+    fireEvent.click(toggle);
+    fireEvent.change(notice, { target: { value: '180' } });
+    expect(notice).toBeEnabled();
+    expect(companyUpdates()).toHaveLength(0);
+    expect(await screen.findByText('Não salvo')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 180,
+      reservation_duration: 60,
+    });
+    expect(companyUpdates()[0].payload).not.toHaveProperty('opening_hours');
+    expect(companyUpdates()[0].payload).not.toHaveProperty('payment_methods');
+    await waitFor(() => expect(screen.queryByText('Não salvo')).not.toBeInTheDocument());
+  });
+
+  it('persiste a desativação mantendo a antecedência configurada', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 240,
+    };
+    renderSection('reservas');
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Permitir remarcação pelo cliente' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 240,
+    });
+  });
+
+  it('salvar outras regras não ativa a remarcação de uma empresa com o padrão desativado', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 120,
+    };
+    await saveSection('reservas');
+    expect(companyUpdates()[0].payload).toMatchObject({
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 120,
+    });
+  });
+
+  it.each(['', '-1', '1.5', '10081'])('impede salvar antecedência inválida (%s) sem gravar outras regras', async (value) => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 120,
+    };
+    renderSection('reservas');
+    const notice = await screen.findByRole('spinbutton', { name: 'Antecedência mínima para alterar' });
+    fireEvent.change(notice, { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'Erro ao salvar: Informe a antecedência mínima para alterar em minutos inteiros, entre 0 e 10080.',
+    ));
+    expect(companyUpdates()).toHaveLength(0);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByText('Não salvo')).toBeInTheDocument();
+  });
+
+  it('permite antecedência zero', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 120,
+    };
+    renderSection('reservas');
+    const notice = await screen.findByRole('spinbutton', { name: 'Antecedência mínima para alterar' });
+    fireEvent.change(notice, { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 0,
+    });
+  });
+
+  it('restaura uma antecedência válida ao desativar uma edição incompleta', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: true,
+      public_reservation_change_min_notice_minutes: 240,
+    };
+    renderSection('reservas');
+    const notice = await screen.findByRole('spinbutton', { name: 'Antecedência mínima para alterar' });
+    fireEvent.change(notice, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Permitir remarcação pelo cliente' }));
+    expect(notice).toHaveValue(240);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(companyUpdates()[0].payload).toMatchObject({
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 240,
+    });
+  });
+
+  it('não oculta erro de coluna ausente quando a opção estava disponível para ativar', async () => {
+    db.rows.companies = {
+      ...COMPANY_ROW,
+      public_reservation_changes_enabled: false,
+      public_reservation_change_min_notice_minutes: 120,
+    };
+    db.missingColumns = ['public_reservation_changes_enabled'];
+    renderSection('reservas');
+    fireEvent.click(await screen.findByRole('switch', { name: 'Permitir remarcação pelo cliente' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(companyUpdates()).toHaveLength(1);
+    expect(screen.getByText('Não salvo')).toBeInTheDocument();
   });
 
   it('grava cadastro, localização e pagamentos na página Cadastro', async () => {

@@ -2,6 +2,7 @@
 // hiddenSession é sempre true; o token nunca é exposto ao frontend.
 
 import { getFirstName } from "./names.ts";
+import { normalizePhoneE164, normalizeStoredPhoneE164, toStoredWhatsAppNumber } from './phone.ts';
 
 export interface PlugueChatSendPayload {
   from: string;
@@ -51,11 +52,7 @@ export type PlugueChatStatusResult =
     };
 
 export function normalizePhone(value: string): string {
-  let digits = value.replace(/\D/g, "");
-  if (!digits.startsWith("55") && digits.length <= 11) {
-    digits = `55${digits}`;
-  }
-  return digits;
+  return normalizePhoneE164(value);
 }
 
 const TOKEN_CIPHER_PREFIX = "v1";
@@ -93,7 +90,7 @@ async function getTokenEncryptionKey(): Promise<CryptoKey> {
     keyBytes = new Uint8Array(digest);
   }
 
-  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", new Uint8Array(keyBytes).buffer, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
 export async function encryptPlugueChatToken(token: string): Promise<string> {
@@ -122,9 +119,9 @@ export async function decryptPlugueChatToken(storedToken: string): Promise<strin
 
   const key = await getTokenEncryptionKey();
   const plainText = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(ivValue) },
+    { name: "AES-GCM", iv: new Uint8Array(base64ToBytes(ivValue)).buffer },
     key,
-    base64ToBytes(cipherTextValue),
+    new Uint8Array(base64ToBytes(cipherTextValue)).buffer,
   );
 
   return new TextDecoder().decode(plainText);
@@ -137,8 +134,8 @@ export function buildPlugueChatPayload(
   parameters: Record<string, string>,
 ): PlugueChatSendPayload {
   return {
-    from: normalizePhone(fromNumber),
-    to: normalizePhone(toPhone),
+    from: toStoredWhatsAppNumber(fromNumber),
+    to: toStoredWhatsAppNumber(toPhone),
     body: { parameters, templateId },
     options: { hiddenSession: true },
   };
@@ -204,6 +201,9 @@ export async function sendPlugueChatMessage(
   apiToken: string,
   payload: PlugueChatSendPayload,
 ): Promise<PlugueChatSendResult> {
+  if (!payload.from || !payload.to) {
+    return { ok: false, error: 'Telefone internacional invalido para envio.', raw: null };
+  }
   try {
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -426,6 +426,8 @@ export async function enqueuePlugueChatMessage(
     company_id: string;
     reservation_id?: string | null;
     waitlist_id?: string | null;
+    waitlist_called_at?: string | null;
+    reservation_change_revision?: string | null;
     phone: string;
     type: string;
     template_id: string;
@@ -435,8 +437,12 @@ export async function enqueuePlugueChatMessage(
     expires_at?: string;
     priority?: number;
     idempotency_key?: string | null;
+    status?: "pending" | "failed";
+    error_details?: string | null;
   },
 ): Promise<"inserted" | "duplicate"> {
+  const phone = normalizeStoredPhoneE164(payload.phone);
+  if (!phone) throw new Error('Telefone invalido para enfileirar mensagem.');
   const now = new Date();
   const scheduledFor = payload.scheduled_for ?? now.toISOString();
   const expiresAt = payload.expires_at ?? new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
@@ -447,7 +453,9 @@ export async function enqueuePlugueChatMessage(
       company_id: payload.company_id,
       reservation_id: payload.reservation_id ?? null,
       waitlist_id: payload.waitlist_id ?? null,
-      phone: payload.phone,
+      ...(payload.waitlist_called_at ? { waitlist_called_at: payload.waitlist_called_at } : {}),
+      ...(payload.reservation_change_revision ? { reservation_change_revision: payload.reservation_change_revision } : {}),
+      phone,
       type: payload.type,
       template_id: payload.template_id,
       template_name: payload.template_name ?? null,
@@ -456,7 +464,8 @@ export async function enqueuePlugueChatMessage(
       expires_at: expiresAt,
       priority: payload.priority ?? 100,
       idempotency_key: payload.idempotency_key ?? null,
-      status: "pending",
+      status: payload.status ?? "pending",
+      ...(payload.error_details ? { error_details: payload.error_details } : {}),
     });
 
   if (error) {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CheckCheck, ChevronLeft, ChevronRight, Info, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useCompanyNotifications, useMarkNotificationsRead } from '@/hooks/useSettings';
+import { useCompanyAnnouncementNotifications, useMarkNotificationsRead } from '@/hooks/useSettings';
 
 interface NotificationBannerProps {
   companyId: string;
@@ -15,11 +15,11 @@ const TYPE_CONFIG = {
 } as const;
 
 export default function NotificationBanner({ companyId }: NotificationBannerProps) {
-  const { data: notifications = [] } = useCompanyNotifications(companyId, 20);
+  const { data: notifications = [] } = useCompanyAnnouncementNotifications(companyId, 20);
   const markRead = useMarkNotificationsRead();
   const [index, setIndex] = useState(0);
 
-  const unread = notifications.filter((n) => !n.is_read);
+  const unread = notifications.filter((n) => !n.is_read && n.type !== 'reservation_change');
   if (unread.length === 0) return null;
 
   const current = unread[Math.min(index, unread.length - 1)];

@@ -1,3 +1,4 @@
+import { normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildReservationDispatchKey,
@@ -10,7 +11,6 @@ import {
   buildReservationParameters,
   enqueuePlugueChatMessage,
   getCompanyChannels,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone, getZonedParts } from "../_shared/timezone.ts";
@@ -45,7 +45,7 @@ function getLocalDateTime(date: string, time: string) {
 function buildAttendanceContactKey(companyId: string, phone: string | null | undefined) {
   if (!phone) return null;
 
-  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhone = normalizeStoredPhoneE164(phone);
   return normalizedPhone ? `${companyId}:${normalizedPhone}` : null;
 }
 
@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
 
     const { data: attendedReservations, error: attendedReservationsError } = await supabaseAdmin
       .from("reservations")
-      .select("id, company_id, guest_phone")
+      .select("id, company_id, guest_phone, guest_phone_e164")
       .in("company_id", companyIds)
       .eq("date", yesterdayStr)
       .in("status", ["checked_in", "completed"])
@@ -115,14 +115,14 @@ Deno.serve(async (req) => {
     const attendedReservationIds = (attendedReservations || []).map((reservation: any) => reservation.id);
 
     for (const reservation of attendedReservations || []) {
-      const key = buildAttendanceContactKey(reservation.company_id, reservation.guest_phone);
+      const key = buildAttendanceContactKey(reservation.company_id, (reservation.guest_phone_e164 ?? reservation.guest_phone));
       if (key) attendedContactKeys.add(key);
     }
 
     if (attendedReservationIds.length > 0) {
       const { data: attendedCompanions, error: attendedCompanionsError } = await supabaseAdmin
         .from("reservation_companions")
-        .select("company_id, phone")
+        .select("company_id, phone, phone_e164")
         .in("reservation_id", attendedReservationIds)
         .not("phone", "is", null);
 
@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
       }
 
       for (const companion of attendedCompanions || []) {
-        const key = buildAttendanceContactKey(companion.company_id, companion.phone);
+        const key = buildAttendanceContactKey(companion.company_id, (companion.phone_e164 ?? companion.phone));
         if (key) attendedContactKeys.add(key);
       }
     }
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
     let skippedDueToAttendance = 0;
 
     for (const reservation of reservations) {
-      const attendanceKey = buildAttendanceContactKey(reservation.company_id, reservation.guest_phone);
+      const attendanceKey = buildAttendanceContactKey(reservation.company_id, (reservation.guest_phone_e164 ?? reservation.guest_phone));
       if (attendanceKey && attendedContactKeys.has(attendanceKey)) {
         skipped++;
         skippedDueToAttendance++;
@@ -173,7 +173,8 @@ Deno.serve(async (req) => {
         const template = (plugueChatTemplates || []).find((t: any) => t.company_id === reservation.company_id);
         if (!template?.template_id) { skipped++; continue; }
 
-        const phone = normalizePhone(reservation.guest_phone);
+        const phone = normalizeStoredPhoneE164((reservation.guest_phone_e164 ?? reservation.guest_phone));
+        if (!phone) { skipped++; continue; }
         const result = await enqueuePlugueChatMessage(supabaseAdmin, {
           company_id: reservation.company_id,
           reservation_id: reservation.id,
@@ -199,7 +200,8 @@ Deno.serve(async (req) => {
       const automation = (automations || []).find((a: any) => a.company_id === reservation.company_id);
       if (!automation?.message_template) { skipped++; continue; }
 
-      const phone = formatPhoneForWhatsApp(reservation.guest_phone);
+      const phone = formatPhoneForWhatsApp((reservation.guest_phone_e164 ?? reservation.guest_phone));
+      if (!phone) { skipped++; continue; }
       const message = replaceTemplateVars(automation.message_template, reservation);
       const deliveryKey = buildReservationDispatchKey("no_show", reservation.id);
       const claimed = await claimWhatsAppDispatch(supabaseAdmin, { deliveryKey, companyId: reservation.company_id, automationType: "no_show", reservationId: reservation.id, phone });

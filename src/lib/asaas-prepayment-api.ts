@@ -5,9 +5,27 @@ import type {
   CreateReservationPaymentRequest,
   CreateReservationPaymentResponse,
   PublicReservationPaymentSummary,
+  ReservationPaymentRequirement,
   ReservationPrepaymentBillingType,
   SelectReservationPaymentMethodRequest,
 } from '@/lib/asaas-prepayment-contracts';
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** An unavailable/legacy response is unknown, never an assertion that no payment is needed. */
+export function parseReservationPaymentRequirement(value: unknown, scope: { companyId: string; date: string }): ReservationPaymentRequirement {
+  const invalid = () => new Error('Não foi possível consultar a necessidade de pagamento.');
+  if (!isRecord(value) || value.schema !== 'reservation-payment-requirement' || value.version !== 1
+    || value.company_id !== scope.companyId || value.date !== scope.date
+    || typeof value.requires_payment !== 'boolean'
+    || (value.reason !== undefined && value.reason !== 'feature_disabled' && value.reason !== 'no_rule')
+    || (value.requires_payment && value.reason !== undefined)) throw invalid();
+  return {
+    schema: 'reservation-payment-requirement', version: 1, company_id: scope.companyId, date: scope.date,
+    requires_payment: value.requires_payment,
+    ...(value.reason === 'feature_disabled' || value.reason === 'no_rule' ? { reason: value.reason } : {}),
+  };
+}
 
 export interface ReservationPaymentFunctionResponse extends PublicReservationPaymentSummary {
   message?: string;
@@ -32,15 +50,20 @@ export interface GetAsaasConfigResponse {
   webhook_url: string | null;
   webhook_auth_token: string | null;
   has_api_token: boolean;
+  managed_by_platform?: boolean;
+  from_company_account?: boolean;
+  environment?: 'sandbox' | 'production' | null;
 }
 
 async function invokeReservationPaymentFunction<T>(
   functionName: string,
   body: object,
   fallbackError: string,
+  options: { signal?: AbortSignal } = {},
 ) {
   const { data, error } = await supabase.functions.invoke<T & { error?: string }>(functionName, {
     body,
+    ...(options.signal ? { signal: options.signal } : {}),
   });
 
   if (error || !data || (data as { error?: string }).error) {
@@ -51,6 +74,18 @@ async function invokeReservationPaymentFunction<T>(
   }
 
   return data as T;
+}
+
+export async function getReservationPaymentRequirement(companyId: string, date: string, signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError');
+  const response = await invokeReservationPaymentFunction<unknown>(
+    'create-reservation-payment',
+    { action: 'preview', company_id: companyId, date },
+    'Não foi possível consultar a necessidade de pagamento.',
+    { signal },
+  );
+  if (signal?.aborted) throw new DOMException('Consulta cancelada.', 'AbortError');
+  return parseReservationPaymentRequirement(response, { companyId, date });
 }
 
 export async function getReservationPayment(paymentToken: string) {

@@ -1,3 +1,4 @@
+import { canonicalPhone, normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   claimWhatsAppDispatch,
@@ -9,7 +10,6 @@ import {
   buildReactivationParameters,
   enqueuePlugueChatMessage,
   getCompanyChannels,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone } from "../_shared/timezone.ts";
@@ -79,7 +79,7 @@ async function claimLeadReactivationDispatch(
     .from("lead_reactivation_dispatches")
     .insert({
       company_id: candidate.company_id,
-      phone: candidate.guest_phone ?? candidate.phone_normalized,
+      phone: canonicalPhone(candidate.phone_normalized) || candidate.guest_phone || "",
       phone_normalized: candidate.phone_normalized,
       guest_name: candidate.guest_name ?? null,
       last_visit_date: candidate.last_visit_date,
@@ -216,7 +216,8 @@ Deno.serve(async (req) => {
         if (!claimed) { skipped++; continue; }
 
         try {
-          const phone = normalizePhone(candidate.guest_phone ?? candidate.phone_normalized);
+          const phone = normalizeStoredPhoneE164(canonicalPhone(candidate.phone_normalized) || candidate.guest_phone || "");
+          if (!phone) { skipped++; continue; }
           const result = await enqueuePlugueChatMessage(supabaseAdmin, {
             company_id: candidate.company_id,
             phone,
@@ -254,7 +255,8 @@ Deno.serve(async (req) => {
       const claimed = await claimLeadReactivationDispatch(supabaseAdmin, candidate, channel);
       if (!claimed) { skipped++; continue; }
 
-      const phone = formatPhoneForWhatsApp(candidate.guest_phone ?? candidate.phone_normalized);
+      const phone = formatPhoneForWhatsApp(canonicalPhone(candidate.phone_normalized) || candidate.guest_phone || "");
+      if (!phone) { skipped++; continue; }
       const locked = await claimWhatsAppDispatch(supabaseAdmin, {
         deliveryKey: claimed.dispatchKey,
         companyId: candidate.company_id,

@@ -1,10 +1,21 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AttendanceLossesReport from '@/pages/AttendanceLossesReport';
 import type { AttendanceLossesReport as AttendanceLossesReportData } from '@/lib/attendance-losses-report';
 import type { AttendanceOutcomeSeries } from '@/hooks/useAttendanceOutcomeSeries';
+
+const investigations = vi.hoisted(() => ({ load: vi.fn(async () => []) }));
+vi.mock('@/lib/report-investigation', async () => ({
+  ...await vi.importActual<typeof import('@/lib/report-investigation')>('@/lib/report-investigation'),
+  loadAttendanceInvestigation: investigations.load,
+}));
+vi.mock('@/components/reports/ReportRecordsSheet', () => ({
+  default: ({ title, description, onOpenChange, loadRecords }: { title: string; description: string; onOpenChange: (open: boolean) => void; loadRecords: () => Promise<unknown> }) => (
+    <div role="dialog" aria-label={title}><p>{description}</p><button onClick={() => void loadRecords()}>Carregar registros</button><button onClick={() => onOpenChange(false)}>Voltar ao relatório</button></div>
+  ),
+}));
 
 const refetch = vi.fn();
 const seriesRefetch = vi.fn();
@@ -140,6 +151,7 @@ describe('AttendanceLossesReport', () => {
   beforeEach(() => {
     refetch.mockClear();
     seriesRefetch.mockClear();
+    investigations.load.mockClear();
     reportQueryState = { data: report, isLoading: false, isError: false, isFetching: false, refetch };
     seriesQueryState = {
       data: {
@@ -166,7 +178,7 @@ describe('AttendanceLossesReport', () => {
   });
 
   it('no longer shows the observational associations block', () => {
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.queryByText('Associações observadas')).not.toBeInTheDocument();
     expect(screen.queryByText(/diferenças não comprovam que WhatsApp ou pré-pagamento causaram/)).not.toBeInTheDocument();
@@ -174,7 +186,7 @@ describe('AttendanceLossesReport', () => {
   });
 
   it('summarizes expected, realized, losses and realization for the selected unit', () => {
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     const reservationTotals = within(screen.getByTestId('attendance-series-totals'));
     expect(reservationTotals.getByText('Esperado')).toBeInTheDocument();
@@ -197,7 +209,7 @@ describe('AttendanceLossesReport', () => {
   });
 
   it('does not expose the per-reservation listing', () => {
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.queryByText('Reservas do recorte')).not.toBeInTheDocument();
     expect(screen.queryByText('Cliente Teste')).not.toBeInTheDocument();
@@ -237,7 +249,7 @@ describe('AttendanceLossesReport', () => {
       refetch,
     };
 
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText('Nenhuma reserva neste recorte')).toBeInTheDocument();
     expect(screen.getByText('Sem dados para esta dimensão.')).toBeInTheDocument();
@@ -246,7 +258,7 @@ describe('AttendanceLossesReport', () => {
   it('shows a recoverable error state when no report is available', () => {
     reportQueryState = { isLoading: false, isError: true, isFetching: false, error: new Error('offline'), refetch };
 
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText('Não foi possível carregar o relatório')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
@@ -262,10 +274,46 @@ describe('AttendanceLossesReport', () => {
       refetch,
     };
 
-    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
 
     expect(screen.getByText('Dados preservados')).toBeInTheDocument();
     expect(screen.getByText('Evolução diária dos resultados')).toBeInTheDocument();
     expect(screen.queryByText('Não foi possível carregar o relatório')).not.toBeInTheDocument();
+  });
+
+  it('starts with three readings grounded in volume and keeps exploration available', () => {
+    render(<MemoryRouter><AttendanceLossesReport /></MemoryRouter>);
+    expect(screen.getByRole('tab', { name: 'Resumo' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/6 comparecimentos, 2 no-shows e 1 cancelamentos em 10 reservas/)).toBeInTheDocument();
+    expect(screen.getByText(/Amostra pequena/)).toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(3);
+    expect(screen.queryByTestId('attendance-series-totals')).not.toBeInTheDocument();
+  });
+
+  it('opens the selected outcome with period and entry filters and returns without losing exploration', async () => {
+    render(<MemoryRouter initialEntries={['/?report_view=explore&entry=online']}><AttendanceLossesReport /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir registros de No-show' }));
+    const drawer = screen.getByRole('dialog', { name: 'Reservas com no-show' });
+    expect(drawer).toHaveTextContent('01/08/2026 a 20/08/2026');
+    expect(drawer).toHaveTextContent('America/Manaus');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Carregar registros' }));
+    await waitFor(() => expect(investigations.load).toHaveBeenCalledWith(
+      expect.objectContaining({ companyId: 'company-1', periodStart: '2026-08-01', periodEnd: '2026-08-20', entryMethod: 'online' }),
+      { title: 'Reservas com no-show', outcome: 'no_show' }, undefined,
+    ));
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Voltar ao relatório' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Explorar dados' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens a segment and a cancellation bucket with their exact keys', async () => {
+    render(<MemoryRouter initialEntries={['/?report_view=explore']}><AttendanceLossesReport /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver 10 reservas de Segunda-feira' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Carregar registros' }));
+    expect(investigations.load).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ dimension: 'weekday', segmentKey: '1' }), undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar ao relatório' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver 1 cancelamentos: Mais de 24 h antes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Carregar registros' }));
+    expect(investigations.load).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ cancellationBucket: 'more_24h' }), undefined);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,19 +11,25 @@ import { type PlugueChatTemplate, usePlugueChatTemplates, useUpsertPlugueChatTem
 import type { WhatsAppChannel } from '@/hooks/useWhatsAppChannel';
 import { getPlugueChatAutomationParameters, PLUGUECHAT_AUTOMATIONS } from '@/lib/pluguechat-automations';
 import { useCompanyNpsActivation } from '@/hooks/useCompanyNpsActivation';
+import { useAutomationDrafts } from '@/hooks/useAutomationDrafts';
+import { AUTOMATION_EXAMPLE_VALUES, getAutomationDispatchDescription } from '@/lib/automation-preview';
 import PostVisitReviewAvailability from './PostVisitReviewAvailability';
 
 interface Props {
   companyId: string;
   activeChannel: WhatsAppChannel;
+  onUnsavedChange?: (dirty: boolean) => void;
+  saveBlocked?: boolean;
 }
 
-type TemplateLocalState = Record<string, {
+type TemplateState = {
   enabled: boolean;
   template_id: string;
   template_name: string;
   post_visit_include_review_link: boolean | null;
-}>;
+};
+
+type TemplateLocalState = Record<string, TemplateState>;
 
 function buildTemplateState(templates: PlugueChatTemplate[] | undefined): TemplateLocalState {
   const next: TemplateLocalState = {};
@@ -41,24 +47,35 @@ function buildTemplateState(templates: PlugueChatTemplate[] | undefined): Templa
   return next;
 }
 
-export default function PlugueChatMessages({ companyId, activeChannel }: Props) {
-  const { data: templates, isLoading } = usePlugueChatTemplates(companyId);
+export default function PlugueChatMessages({ companyId, activeChannel, onUnsavedChange, saveBlocked = false }: Props) {
+  const { data: templates, isLoading, isError, isFetching, refetch } = usePlugueChatTemplates(companyId);
   const { data: npsConfig, isPending: npsLoading, isError: npsError } = useCompanyNpsActivation(companyId);
   const reviewsAvailable = !npsLoading && !npsError && npsConfig?.enabled === true;
   const upsert = useUpsertPlugueChatTemplate();
-  const [localState, setLocalState] = useState<TemplateLocalState>({});
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const serverState = useMemo(() => buildTemplateState(templates), [templates]);
+  const drafts = useAutomationDrafts<TemplateState>(companyId, serverState, !isLoading && !isError && !!templates);
+  const localState = drafts.states;
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const currentCompany = useRef(companyId);
+  currentCompany.current = companyId;
 
   useEffect(() => {
-    if (isLoading || hydratedFor === companyId) return;
-    setLocalState(buildTemplateState(templates));
-    setHydratedFor(companyId);
-  }, [templates, companyId, hydratedFor, isLoading]);
+    onUnsavedChange?.(drafts.hasUnsavedChanges);
+  }, [drafts.hasUnsavedChanges, onUnsavedChange]);
+
+  useEffect(() => {
+    return () => onUnsavedChange?.(false);
+  }, [onUnsavedChange]);
+
+  useEffect(() => {
+    setSaveErrors({});
+  }, [companyId]);
 
   const handleSave = (type: string) => {
     const state = localState[type];
-    if (!state) return;
+    if (!state || !drafts.isDirty(type) || upsert.isPending || isError || saveBlocked) return;
 
+    setSaveErrors((previous) => ({ ...previous, [type]: '' }));
     upsert.mutate({
       company_id: companyId,
       type,
@@ -66,29 +83,19 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
       template_id: state.template_id,
       template_name: state.template_name || null,
       ...(type === 'post_visit' ? { post_visit_include_review_link: state.post_visit_include_review_link } : {}),
+    }, {
+      onSuccess: () => {
+        if (currentCompany.current !== companyId) return;
+        drafts.commit(type, state);
+      },
+      onError: () => {
+        if (currentCompany.current !== companyId) return;
+        setSaveErrors((previous) => ({ ...previous, [type]: 'Não foi possível salvar. Suas alterações foram mantidas. Tente novamente.' }));
+      },
     });
   };
 
-  const handleToggle = async (type: string, checked: boolean) => {
-    const current = localState[type];
-    if (!current) return;
-
-    const next = { ...current, enabled: checked };
-    setLocalState((prev) => ({ ...prev, [type]: next }));
-
-    upsert.mutate(
-      {
-        company_id: companyId, type, enabled: checked,
-        template_id: current.template_id, template_name: current.template_name || null,
-        ...(type === 'post_visit' ? { post_visit_include_review_link: current.post_visit_include_review_link } : {}),
-      },
-      {
-        onError: () => setLocalState((prev) => ({ ...prev, [type]: current })),
-      },
-    );
-  };
-
-  if (isLoading) {
+  if (isLoading || (!drafts.ready && !isError)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-48 w-full" />
@@ -99,6 +106,12 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
 
   return (
     <div className="space-y-4">
+      {isError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p>Não foi possível carregar os templates. {drafts.ready ? 'Suas alterações foram mantidas. Atualize os dados antes de salvar.' : 'Tente novamente para editar com segurança.'}</p>
+          <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>Tentar novamente</Button>
+        </div>
+      )}
       {activeChannel !== 'pluguechat_official' && (
         <div className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning">
           O canal ativo não é o PlugueChat Oficial. Os templates salvos aqui só serão usados quando o canal for ativado.
@@ -109,6 +122,7 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
         <h3 className="text-lg font-semibold">Automações PlugueChat</h3>
         <p className="text-sm text-muted-foreground">
           Informe o ID do template aprovado na Meta para cada automação.
+          {' '}Ativação e demais alterações só entram em vigor ao salvar o cartão.
         </p>
       </div>
 
@@ -117,6 +131,13 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
         if (!state) return null;
 
         const Icon = automation.icon;
+        const previewParameterValue = (parameter: string) => {
+          if (automation.type !== 'post_visit' || parameter !== 'avaliacao') return AUTOMATION_EXAMPLE_VALUES[parameter] ?? 'Exemplo';
+          if (!reviewsAvailable) return '"" (vazio)';
+          return state.post_visit_include_review_link === null
+            ? AUTOMATION_EXAMPLE_VALUES.link_avaliacao
+            : AUTOMATION_EXAMPLE_VALUES.avaliacao;
+        };
 
         return (
           <Card key={automation.type} className="border border-border shadow-sm">
@@ -131,10 +152,12 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                 <Switch
                   aria-label={`Ativar ${automation.label}`}
                   checked={state.enabled}
-                  disabled={upsert.isPending}
-                  onCheckedChange={(checked) => void handleToggle(automation.type, checked)}
+                  disabled={upsert.isPending || isError}
+                  onCheckedChange={(checked) => drafts.update(automation.type, { enabled: checked })}
                 />
               </div>
+
+              <p className="text-xs leading-relaxed text-muted-foreground">{getAutomationDispatchDescription(automation.type)}</p>
 
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">
@@ -162,11 +185,8 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                     aria-labelledby="post-visit-review-label"
                     aria-describedby="post-visit-review-help"
                     value={state.post_visit_include_review_link === null ? '' : state.post_visit_include_review_link ? 'with_review' : 'without_review'}
-                    disabled={upsert.isPending}
-                    onValueChange={(value) => setLocalState((prev) => ({
-                      ...prev,
-                      post_visit: { ...prev.post_visit, post_visit_include_review_link: value === 'with_review' },
-                    }))}
+                    disabled={upsert.isPending || isError}
+                    onValueChange={(value) => drafts.update('post_visit', { post_visit_include_review_link: value === 'with_review' })}
                   >
                     <div className="flex items-center gap-2">
                       <RadioGroupItem id="post-visit-without-review" value="without_review" />
@@ -203,12 +223,8 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                   <Input
                     id={`tid-${automation.type}`}
                     value={state.template_id}
-                    onChange={(e) =>
-                      setLocalState((prev) => ({
-                        ...prev,
-                        [automation.type]: { ...prev[automation.type], template_id: e.target.value },
-                      }))
-                    }
+                    disabled={upsert.isPending || isError}
+                    onChange={(e) => drafts.update(automation.type, { template_id: e.target.value })}
                     placeholder="ex: reserva_confirmada_v1"
                   />
                 </div>
@@ -217,25 +233,52 @@ export default function PlugueChatMessages({ companyId, activeChannel }: Props) 
                   <Input
                     id={`tname-${automation.type}`}
                     value={state.template_name}
-                    onChange={(e) =>
-                      setLocalState((prev) => ({
-                        ...prev,
-                        [automation.type]: { ...prev[automation.type], template_name: e.target.value },
-                      }))
-                    }
+                    disabled={upsert.isPending || isError}
+                    onChange={(e) => drafts.update(automation.type, { template_name: e.target.value })}
                     placeholder="Opcional"
                   />
                 </div>
               </div>
 
-              <Button
-                onClick={() => handleSave(automation.type)}
-                disabled={upsert.isPending}
-                size="sm"
-                className="gap-2"
-              >
-                <Save className="h-4 w-4" /> Salvar
-              </Button>
+              <details className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Prévia dos parâmetros</summary>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Exemplo fictício, sem enviar mensagens. O texto final é o template aprovado na Meta e não pode ser consultado por esta prévia.</p>
+                {automation.type === 'post_visit' && state.post_visit_include_review_link === null && (
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Formato antigo preservado: a variável de avaliação recebe o endereço completo quando disponível ou uma string vazia quando indisponível.</p>
+                )}
+                {automation.type === 'post_visit' && state.post_visit_include_review_link === true && !reviewsAvailable && (
+                  <p className="mt-2 text-xs leading-relaxed text-warning">Sem código de avaliação disponível neste exemplo, o template com avaliação não tem envio elegível. A configuração foi preservada; confira a disponibilidade na tela Avaliações.</p>
+                )}
+                <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                  {getPlugueChatAutomationParameters(automation.type, automation.type === 'post_visit' ? state.post_visit_include_review_link : false).map((parameter) => (
+                    <div key={parameter} className="min-w-0">
+                      <dt className="font-medium">{parameter}:</dt>
+                      <dd className="break-words text-muted-foreground">{previewParameterValue(parameter)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+
+              {saveErrors[automation.type] && <p role="alert" className="text-sm text-destructive">{saveErrors[automation.type]}</p>}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() => handleSave(automation.type)}
+                  disabled={!drafts.isDirty(automation.type) || upsert.isPending || isError || saveBlocked}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <Save className="h-4 w-4" /> {saveErrors[automation.type] ? 'Tentar salvar novamente' : 'Salvar'}
+                </Button>
+                {drafts.isDirty(automation.type) && (
+                  <>
+                    <Button variant="outline" size="sm" disabled={upsert.isPending} onClick={() => {
+                      drafts.discard(automation.type);
+                      setSaveErrors((previous) => ({ ...previous, [automation.type]: '' }));
+                    }}>Descartar</Button>
+                    <span className="text-xs text-muted-foreground">Alterações não salvas</span>
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
         );

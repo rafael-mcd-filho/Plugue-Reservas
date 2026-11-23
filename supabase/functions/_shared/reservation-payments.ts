@@ -248,7 +248,7 @@ export function buildPaymentLinkName(
 }
 
 export function buildPaymentLinkDescription(
-  payment: Pick<ReservationPaymentRecord, "payment_token" | "rule_snapshot">,
+  payment: Pick<ReservationPaymentRecord, "payment_token" | "rule_snapshot" | "company_id" | "reservation_id">,
   reservation: Pick<ReservationRecord, "guest_name" | "party_size" | "public_tracking_code" | "date" | "time">,
   company: Pick<CompanyRecord, "name">,
 ) {
@@ -256,7 +256,9 @@ export function buildPaymentLinkDescription(
   const reference = reservation.public_tracking_code || payment.payment_token.slice(0, 10);
   const ruleName = String(snapshot.name || "Regra de reserva").trim();
   const companyName = String(company.name || "Empresa").trim();
-  return `Sinal de reserva | ${ruleName} | ${reservation.party_size} pessoas | ${reservation.guest_name} | ${formatReservationDateTime(reservation)} | Ref ${reference} | ${companyName}`;
+  // Keep stable reconciliation identifiers before customer-supplied text, and
+  // fit both the payment and payment-link description limits.
+  return `Sinal de reserva | Empresa ${payment.company_id} | Reserva ${payment.reservation_id} | ${companyName.slice(0, 80)} | Ref ${String(reference).slice(0, 64)} | ${formatReservationDateTime(reservation)} | ${reservation.party_size} pessoas | ${String(reservation.guest_name).slice(0, 80)} | ${ruleName.slice(0, 80)}`.slice(0, 500);
 }
 
 export function paymentIsExpired(payment: Pick<ReservationPaymentRecord, "expires_at">) {
@@ -329,6 +331,35 @@ export type ReservationPaymentProviderOutcome =
   | "chargeback"
   | "cancelled";
 
+// Installment charges are separate provider payments. Preserve observations
+// without treating one installment's refund as a refund of the whole booking.
+export async function recordReservationPaymentInstallment(
+  supabaseAdmin: any,
+  payment: ReservationPaymentRecord,
+  providerPayment: any,
+  source: string,
+) {
+  const installmentId = typeof providerPayment?.installment === "string" ? providerPayment.installment : null;
+  if (!installmentId || !providerPayment?.id) return payment;
+  const { data, error } = await supabaseAdmin.rpc("record_reservation_installment_snapshot", {
+    _payment_id: payment.id,
+    _company_id: payment.company_id,
+    _installment_id: installmentId,
+    _provider_payment_id: providerPayment.id,
+    _snapshot: {
+      source,
+      status: providerPayment.status ?? null,
+      installment_number: providerPayment.installmentNumber ?? null,
+      value: providerPayment.value ?? null,
+      net_value: providerPayment.netValue ?? null,
+      observed_at: new Date().toISOString(),
+    },
+  });
+  if (error) throw new Error(error.message);
+  if (!data?.id) throw new Error("Observacao do parcelamento sem resultado");
+  return data as ReservationPaymentRecord;
+}
+
 export async function markReservationPaymentProviderOutcome(
   supabaseAdmin: any,
   payment: ReservationPaymentRecord,
@@ -340,6 +371,14 @@ export async function markReservationPaymentProviderOutcome(
     metadata?: Record<string, unknown>;
   },
 ) {
+  if (payment.metadata?.asaas_installment_id) {
+    await recordPaymentEvent(supabaseAdmin, payment, "installment_outcome_requires_reconciliation", {
+      source: options.source, outcome, asaas_status: options.asaasStatus,
+      asaas_installment_id: payment.metadata.asaas_installment_id,
+      ...(options.metadata ?? {}),
+    });
+    return payment;
+  }
   const checkedAtIso = new Date().toISOString();
   const eventTypeByOutcome: Record<ReservationPaymentProviderOutcome, string> = {
     refunded: "payment_refunded",
@@ -360,96 +399,36 @@ export async function markReservationPaymentProviderOutcome(
   const eventType = eventTypeByOutcome[outcome];
   const errorDetails = errorDetailsByOutcome[outcome];
 
-  const metadata = {
-    ...(payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {}),
-    provider_status_check: {
+  const providerCheck = {
       source: options.source,
       outcome,
       asaas_status: options.asaasStatus,
       event_type: options.eventType ?? null,
       checked_at: checkedAtIso,
       ...(options.metadata ?? {}),
-    },
   };
 
-  const { data: updatedPayment, error: updateError } = await supabaseAdmin
-    .from("reservation_payments")
-    .update({
-      status: outcome,
-      asaas_status: options.asaasStatus,
-      cancelled_at: ["refunded", "partial_refunded", "chargeback", "cancelled"].includes(outcome)
-        ? checkedAtIso
-        : payment.cancelled_at,
-      last_checked_at: checkedAtIso,
-      error_details: errorDetails,
-      metadata,
-    })
-    .eq("id", payment.id)
-    .select("*")
-    .single();
-
-  if (updateError) throw new Error(updateError.message);
-
-  if (["refunded", "partial_refunded", "chargeback", "cancelled"].includes(outcome)) {
-    await supabaseAdmin
-      .from("reservations")
-      .update({ status: "payment_cancelled", updated_at: checkedAtIso })
-      .eq("id", payment.reservation_id)
-      .eq("company_id", payment.company_id)
-      .in("status", ["pending_payment", "confirmed"]);
-  }
-
-  await recordPaymentEvent(supabaseAdmin, payment, eventType, {
+  const eventPayload = {
     source: options.source,
     outcome,
     asaas_status: options.asaasStatus,
     event_type: options.eventType ?? null,
     ...(options.metadata ?? {}),
+  };
+  const { data: updatedPayment, error: updateError } = await supabaseAdmin.rpc("apply_reservation_payment_outcome", {
+    _payment_id: payment.id,
+    _company_id: payment.company_id,
+    _outcome: outcome,
+    _asaas_status: options.asaasStatus,
+    _provider_check: providerCheck,
+    _error_details: errorDetails,
+    _event_type: eventType,
+    _event_payload: eventPayload,
   });
+  if (updateError) throw new Error(updateError.message);
+  if (!updatedPayment?.id) throw new Error("Atualizacao do pagamento sem resultado");
 
   return updatedPayment as ReservationPaymentRecord;
-}
-
-async function reservationHasBlockingConflict(
-  supabaseAdmin: any,
-  reservation: ReservationRecord,
-) {
-  if (!reservation.table_id) return false;
-
-  const { data, error } = await supabaseAdmin
-    .from("reservations")
-    .select("id, status")
-    .eq("company_id", reservation.company_id)
-    .eq("date", reservation.date)
-    .eq("time", reservation.time)
-    .eq("table_id", reservation.table_id)
-    .neq("id", reservation.id)
-    .not("status", "in", '("cancelled","no-show","no_show","payment_expired","payment_cancelled")')
-    .limit(10);
-
-  if (error) throw new Error(error.message);
-
-  const candidates = data ?? [];
-  for (const candidate of candidates) {
-    if (candidate.status !== "pending_payment") {
-      return true;
-    }
-
-    const { data: candidatePayment } = await supabaseAdmin
-      .from("reservation_payments")
-      .select("id, status, expires_at")
-      .eq("reservation_id", candidate.id)
-      .in("status", ["awaiting_method", "pending"])
-      .gt("expires_at", new Date().toISOString())
-      .limit(1)
-      .maybeSingle();
-
-    if (candidatePayment) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 async function triggerReservationConfirmationEvent(reservation: ReservationRecord) {
@@ -509,63 +488,24 @@ export async function confirmReservationPayment(
     paidAtResolution,
     checkedAtIso,
   );
-  const paidAfterExpiration = new Date(payment.expires_at).getTime() <= new Date(paidAtIso).getTime();
-
-  if (paidAfterExpiration) {
-    const hasConflict = await reservationHasBlockingConflict(supabaseAdmin, typedReservation);
-    if (hasConflict) {
-      await supabaseAdmin
-        .from("reservation_payments")
-        .update({
-          status: "late_paid",
-          asaas_status: asaasStatus,
-          paid_at: paidAtIso,
-          last_checked_at: checkedAtIso,
-          error_details: "Pagamento detectado apos expiracao e mesa indisponivel",
-          metadata: confirmationMetadata,
-        })
-        .eq("id", payment.id);
-
-      await supabaseAdmin
-        .from("reservations")
-        .update({ status: "paid_after_expiration", updated_at: checkedAtIso })
-        .eq("id", payment.reservation_id)
-        .eq("company_id", payment.company_id);
-
-      await recordPaymentEvent(supabaseAdmin, payment, "payment_late_paid", {
-        source,
-        asaas_status: asaasStatus,
-        provider_paid_at: paidAtResolution.providerPaidAt,
-      });
-      return { status: "late_paid" as const };
-    }
-  }
-
-  await supabaseAdmin
-    .from("reservation_payments")
-    .update({
-      status: "paid",
-      asaas_status: asaasStatus,
-      paid_at: paidAtIso,
-      last_checked_at: checkedAtIso,
-      error_details: null,
-      metadata: confirmationMetadata,
-    })
-    .eq("id", payment.id);
-
-  await supabaseAdmin
-    .from("reservations")
-    .update({ status: "confirmed", updated_at: checkedAtIso })
-    .eq("id", payment.reservation_id)
-    .eq("company_id", payment.company_id);
-
-  await recordPaymentEvent(supabaseAdmin, payment, "payment_paid", {
-    source,
-    asaas_status: asaasStatus,
-    provider_paid_at: paidAtResolution.providerPaidAt,
+  // The database locks both rows and commits the payment, reservation and
+  // audit entry together. A concurrent refund/expiration cannot be overwritten
+  // by a stale payment object loaded before that change.
+  const { data: confirmation, error: confirmationError } = await supabaseAdmin.rpc("confirm_reservation_payment", {
+    _payment_id: payment.id,
+    _company_id: payment.company_id,
+    _asaas_status: asaasStatus,
+    _paid_at: paidAtIso,
+    _confirmation_metadata: confirmationMetadata.payment_confirmation,
+    _source: source,
   });
-  await triggerReservationConfirmationEvent(typedReservation);
-  return { status: "paid" as const };
+  if (confirmationError) throw new Error(confirmationError.message);
+  if (!confirmation?.status) throw new Error("Confirmacao do pagamento sem resultado");
+
+  if (confirmation.changed && confirmation.status === "paid") {
+    await triggerReservationConfirmationEvent(typedReservation);
+  }
+  return { status: confirmation.status as string };
 }
 
 export function toPublicPaymentSummary(
@@ -581,6 +521,11 @@ export function toPublicPaymentSummary(
   const metadata = (payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {}) as Record<string, unknown>;
   const pixQrCodeBase64 = typeof metadata.pix_qr_code_base64 === "string" ? metadata.pix_qr_code_base64 : null;
   const pixCopyPaste = typeof metadata.pix_copy_paste === "string" ? metadata.pix_copy_paste : null;
+  // A still-unselected old snapshot must no longer advertise installments.
+  // Once a provider link exists, retain its real cap for historical accuracy.
+  const cardInstallments = payment.status === "awaiting_method"
+    ? 1
+    : payment.max_installments ?? getMaxInstallments(payment);
 
   return {
     payment_token: payment.payment_token,
@@ -589,7 +534,7 @@ export function toPublicPaymentSummary(
     base_amount: payment.base_amount,
     pix_amount: pixAmount,
     credit_card_amount: cardAmount,
-    max_credit_card_installments: cardEnabled ? getMaxInstallments(payment) : null,
+    max_credit_card_installments: cardEnabled ? cardInstallments : null,
     billing_type: payment.billing_type,
     available_billing_types: getAvailableBillingTypes(payment),
     expires_at: payment.expires_at,
@@ -598,6 +543,8 @@ export function toPublicPaymentSummary(
     payment_link_external_reference: payment.payment_link_external_reference,
     pix_qr_code_base64: pixQrCodeBase64,
     pix_copy_paste: pixCopyPaste,
+    needs_manual_installment_reconciliation: metadata.needs_manual_installment_reconciliation === true,
+    asaas_installment_id: typeof metadata.asaas_installment_id === "string" ? metadata.asaas_installment_id : null,
     rule_name: snapshot.name ?? "Pagamento antecipado",
     customer_notice: snapshot.customer_notice ?? null,
     cancellation_policy: snapshot.cancellation_policy ?? null,

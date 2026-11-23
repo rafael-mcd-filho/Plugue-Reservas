@@ -1,6 +1,7 @@
 import { BarChart3, CreditCard, Globe, MessageCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { COMPANY_FEATURE_DEFINITIONS, CompanyFeatureKey } from '@/lib/companyFeatures';
 import type { CompanyFeatureState } from '@/hooks/useCompanyFeatures';
 
@@ -35,7 +36,7 @@ export default function CompanyFeatureSwitchList({
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className={`${compact ? 'text-xs' : 'text-sm'} font-medium`}>{feature.label}</p>
                   <Badge variant={enabled ? 'default' : 'secondary'}>
-                    {enabled ? 'Ativa' : 'Desativada'}
+                    {enabled ? 'Ativo' : 'Desligado'}
                   </Badge>
                 </div>
                 <p className={`${compact ? 'text-xs' : 'text-sm'} text-muted-foreground mt-1`}>
@@ -46,6 +47,7 @@ export default function CompanyFeatureSwitchList({
             <Switch
               checked={enabled}
               disabled={disabled}
+              aria-label={feature.label}
               onCheckedChange={(checked) => onToggle(feature.key, checked)}
             />
           </div>
@@ -72,6 +74,31 @@ export function CompanyFeatureBadges({ features }: { features?: CompanyFeatureSt
         </Badge>
       ))}
     </div>
+  );
+}
+
+/** Versão compacta para listas: quantidade de recursos ativos e a lista no passar do mouse. */
+export function CompanyFeatureSummary({ features }: { features?: CompanyFeatureState | null }) {
+  if (!features) return <span className="text-sm text-muted-foreground">—</span>;
+  const activeFeatures = COMPANY_FEATURE_DEFINITIONS.filter((feature) => features[feature.key]);
+  const total = COMPANY_FEATURE_DEFINITIONS.length;
+  if (activeFeatures.length === 0) return <span className="text-sm text-muted-foreground">Nenhum ativo</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => event.stopPropagation()}
+          className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground"
+          aria-label={`${activeFeatures.length} de ${total} recursos ativos: ${activeFeatures.map((feature) => feature.shortLabel).join(', ')}`}
+        >
+          {activeFeatures.length} de {total} ativos
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 text-xs">
+        {activeFeatures.map((feature) => feature.shortLabel).join(' · ')}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

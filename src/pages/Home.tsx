@@ -882,12 +882,10 @@ function Footer({ systemName, systemLogo }: { systemName: string; systemLogo: st
         <p className="text-xs text-[#786c63]">
           © {new Date().getFullYear()} {systemName}. Reservas sob controle, do pedido ao relatório.
         </p>
-        <Link
-          to="/login"
-          className="text-xs font-semibold text-[#665b53] transition-colors duration-150 hover:text-[#a9572d]"
-        >
-          Entrar no painel
-        </Link>
+        <div className="flex items-center gap-5 text-xs font-semibold text-[#665b53]">
+          <Link to="/termos-de-uso" className="transition-colors duration-150 hover:text-[#a9572d]">Termos de Uso</Link>
+          <Link to="/login" className="transition-colors duration-150 hover:text-[#a9572d]">Entrar no painel</Link>
+        </div>
       </div>
     </footer>
   );
@@ -978,7 +976,7 @@ export default function Home() {
   const { data: systemBranding } = useSystemBranding();
   const systemName = systemBranding?.system_name || DEFAULT_SYSTEM_NAME;
   const systemLogo = systemBranding?.system_logo_url || '';
-  useFaviconOverride(systemLogo);
+  useFaviconOverride(systemBranding?.system_logo_url);
   useLandingMetadata(systemName, systemLogo);
 
   return (

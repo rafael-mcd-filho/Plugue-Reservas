@@ -6,6 +6,8 @@ import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import { createClient as createRealClient } from "@supabase/supabase-js";
+import { parsePhoneNumberFromString } from "libphonenumber-js/max";
+import { createPhoneTools } from "./phone-core.ts";
 import * as rules from "./support-authorization.ts";
 
 const actorId = "00000000-0000-4000-8000-000000000001";
@@ -30,6 +32,11 @@ function evaluate(file, modules, deno = { env: { get: () => "offline-value" } })
   }, deno);
   return exports;
 }
+
+const phoneTools = evaluate("./phone.ts", {
+  "npm:libphonenumber-js@1.13.15/max": { parsePhoneNumberFromString },
+  "./phone-core.ts": { createPhoneTools },
+});
 
 function authHarness({ role = "support", context = delegation, permission = true, authError = null } = {}) {
   const auditEntries = [];
@@ -245,6 +252,7 @@ function manageHarness({ actorRole = "superadmin", targetRole = "support", imper
       company_id: impersonation?.companyId ?? (actorRole === "admin" ? companyId : null) }],
   };
   evaluate("../manage-user/index.ts", {
+    "../_shared/phone.ts": phoneTools,
     "../_shared/internal-auth.ts": { getRequestAuthContext: async () => requestContext, impersonationAuditDetails: () => ({}) },
     "../_shared/support-authorization.ts": rules,
   }, { env: { get: () => undefined }, serve: (fn) => { handler = fn; } });
@@ -348,8 +356,11 @@ test("the delegated queue worker scopes pending and provider reconciliation to t
       return builder;
     } };
     evaluate("../process-pluguechat-message-queue/index.ts", {
+      "../_shared/phone.ts": phoneTools,
       "../_shared/internal-auth.ts": { createSupabaseAdminClient: () => admin, isAuthorizedInternalJob: async () => true },
       "../_shared/post-visit.ts": {}, "../_shared/pluguechat.ts": {},
+      "../_shared/reservation-change-notifications.ts": {},
+      "../_shared/waitlist-call-eligibility.ts": {},
     }, { env: { get: () => undefined }, serve: (fn) => { handler = fn; } });
     const response = await handler(new Request("https://offline.invalid/queue", {
       method: "POST", body: JSON.stringify(requestedCompanyId ? { company_id: requestedCompanyId } : {}),
@@ -367,8 +378,10 @@ test("reservation automation rejects mixed reservation/waitlist payloads before 
   let handler;
   let reads = 0;
   evaluate("../reservation-events/index.ts", {
+    "../_shared/phone.ts": phoneTools,
     "../_shared/internal-auth.ts": { createSupabaseAdminClient: () => ({ from: () => { reads++; throw new Error("Unexpected query"); } }) },
     "../_shared/whatsapp.ts": {}, "../_shared/pluguechat.ts": {}, "../_shared/names.ts": {},
+    "../_shared/waitlist-call-eligibility.ts": {},
   }, { env: { get: () => undefined }, serve: (fn) => { handler = fn; } });
   for (const event of ["waitlist_added", "waitlist_called", "reservation_created", "reservation_cancelled", "unknown"]) {
     const response = await handler(new Request("https://offline.invalid/event", {
@@ -427,7 +440,10 @@ test("payment endpoints cannot expose or refund a reservation belonging to anoth
     evaluate(`../${endpoint}/index.ts`, {
       "../_shared/internal-auth.ts": { createSupabaseAdminClient: () => admin, assertUserCanAccessCompany: async () => ({ supabaseAdmin: admin }) },
       "../_shared/reservation-payments.ts": sharedPayments,
+      "../_shared/reservation-settlement-sync.ts": {},
       "../_shared/asaas.ts": { refundAsaasPayment: async () => { providerRefunds++; } },
+      "../_shared/reservation-asaas-config.ts": { getReservationAsaasCredentials: async () => { throw new Error("Credentials must not be read for a foreign reservation"); } },
+      "../_shared/phone.ts": { asaasCustomerPhone: () => { throw new Error("Foreign customer must not reach the provider"); } },
     }, { env: { get: () => undefined }, serve: (fn) => { handler = fn; } });
     const response = await handler(new Request(`https://offline.invalid/${endpoint}`, {
       method: "POST", body: JSON.stringify({ company_id: companyId, payment_token: "offline-payment-token", billing_type: "PIX" }),
@@ -451,7 +467,13 @@ test("provider confirmation cannot update a reservation outside the payment comp
 test("provider refund outcomes cannot cancel a reservation outside the payment company", async () => {
   const sharedPayments = evaluate("./reservation-payments.ts", {});
   const { admin, payment, foreignReservation, writes } = paymentHarness();
-  await sharedPayments.markReservationPaymentProviderOutcome(admin, payment, "refunded", { source: "offline-test", asaasStatus: "REFUNDED" });
+  admin.rpc = async (name, args) => {
+    assert.equal(name, "apply_reservation_payment_outcome");
+    assert.equal(args._payment_id, payment.id);
+    assert.equal(args._company_id, companyId);
+    return { data: null, error: { message: "Reserva nao encontrada" } };
+  };
+  await assert.rejects(sharedPayments.markReservationPaymentProviderOutcome(admin, payment, "refunded", { source: "offline-test", asaasStatus: "REFUNDED" }), /Reserva nao encontrada/);
   assert.equal(foreignReservation.status, "pending_payment");
-  assert.equal(writes.some((write) => write.table === "reservations"), false);
+  assert.equal(writes.length, 0);
 });

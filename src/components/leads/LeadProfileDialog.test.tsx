@@ -1,16 +1,48 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
+import LeadProfileDialog, { type LeadProfileDialogProps } from '@/components/leads/LeadProfileDialog';
 import type { CrmLeadPresenceVisit } from '@/hooks/useCrmLeads';
 import type { CrmLeadProfile } from '@/lib/crm-lead-profile';
+import { type ReactNode, useEffect } from 'react';
+
+// The relationship tabs have their own server-contract and behavior coverage.
+const relationshipState = vi.hoisted(() => ({ access: true as boolean | null }));
+vi.mock('@/components/leads/LeadRelationshipPanel', () => ({ default: function MockLeadRelationshipPanel({ children, onReservationAccessChange, canViewReservations }: { children: ReactNode; onReservationAccessChange: (allowed: boolean) => void; canViewReservations: boolean }) {
+  const access = relationshipState.access;
+  useEffect(() => { onReservationAccessChange(canViewReservations && access === true); }, [onReservationAccessChange, canViewReservations, access]);
+  return children;
+} }));
 
 const historyState = vi.hoisted(() => ({
   visits: [] as CrmLeadPresenceVisit[],
 }));
+
+const detailState = vi.hoisted(() => ({
+  props: [] as Array<Record<string, any>>,
+  from: vi.fn(),
+  select: vi.fn(),
+  eq: vi.fn(),
+  abortSignal: vi.fn(),
+  maybeSingle: vi.fn(),
+}));
+
+vi.mock('@/integrations/supabase/client', () => {
+  const query = {
+    select: detailState.select.mockReturnThis(),
+    eq: detailState.eq.mockReturnThis(),
+    abortSignal: detailState.abortSignal.mockReturnThis(),
+    maybeSingle: detailState.maybeSingle.mockResolvedValue({
+      data: { id: 'reservation-1', guest_name: 'João Rocha' },
+      error: null,
+    }),
+  };
+  detailState.from.mockReturnValue(query);
+  return { supabase: { from: detailState.from } };
+});
 
 vi.mock('@/hooks/useCrmLeads', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/hooks/useCrmLeads')>();
@@ -31,7 +63,10 @@ vi.mock('@/hooks/useCrmLeads', async (importOriginal) => {
 });
 
 vi.mock('@/components/ReservationDetailsDialog', () => ({
-  default: () => null,
+  default: (props: Record<string, any>) => {
+    detailState.props.push(props);
+    return null;
+  },
 }));
 
 const lead: CrmLeadProfile = {
@@ -74,12 +109,12 @@ function createVisits(total: number): CrmLeadPresenceVisit[] {
   });
 }
 
-function renderDialog() {
+function renderDialog(overrides: Partial<LeadProfileDialogProps> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
+  const content = (next: Partial<LeadProfileDialogProps>) => (
     <QueryClientProvider client={queryClient}>
       <LeadProfileDialog
         open
@@ -87,17 +122,128 @@ function renderDialog() {
         lead={lead}
         companyId="00000000-0000-4000-8000-000000000001"
         slug="empresa-teste"
+        {...next}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(content(overrides));
+  return {
+    ...view,
+    rerenderDialog: (next: Partial<LeadProfileDialogProps>) => view.rerender(content({ ...overrides, ...next })),
+  };
 }
 
 afterEach(() => {
   cleanup();
   historyState.visits = [];
+  detailState.props = [];
+  relationshipState.access = true;
+  vi.clearAllMocks();
 });
 
 describe('LeadProfileDialog', () => {
+  it('blocks presence shortcuts until server reservation access is known, and keeps them blocked after denial', () => {
+    relationshipState.access = null;
+    historyState.visits = createVisits(1);
+    const view = renderDialog();
+    expect(screen.queryByRole('button', { name: /Abrir detalhes da presença/ })).not.toBeInTheDocument();
+    expect(detailState.from).not.toHaveBeenCalled();
+    relationshipState.access = false;
+    view.rerenderDialog({});
+    expect(screen.queryByRole('button', { name: /Abrir detalhes da presença/ })).not.toBeInTheDocument();
+    expect(detailState.props.at(-1)).toMatchObject({ open: false, reservation: null });
+  });
+
+  it('closes reservation details and removes all presence shortcuts after server access is revoked', async () => {
+    historyState.visits = createVisits(1);
+    const view = renderDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir detalhes da presença de 01/01/2026' }));
+    await waitFor(() => expect(detailState.props.at(-1)?.reservation?.id).toBe('reservation-1'));
+    const requests = detailState.from.mock.calls.length;
+    relationshipState.access = false;
+    view.rerenderDialog({});
+    expect(detailState.props.at(-1)).toMatchObject({ open: false, reservation: null });
+    expect(screen.queryByRole('button', { name: /Abrir detalhes da presença/ })).not.toBeInTheDocument();
+    expect(detailState.from).toHaveBeenCalledTimes(requests);
+  });
+
+  it('does not display a late reservation response under a different customer profile', async () => {
+    historyState.visits = createVisits(1);
+    let complete!: (value: unknown) => void;
+    detailState.maybeSingle.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    const view = renderDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir detalhes da presença de 01/01/2026' }));
+    await waitFor(() => expect(detailState.from).toHaveBeenCalledOnce());
+    const previousSignal = detailState.abortSignal.mock.calls[0][0] as AbortSignal;
+    relationshipState.access = null;
+    view.rerenderDialog({ lead: { ...lead, key: 'phone:other', guest_name: 'Outro cliente' } });
+    await waitFor(() => expect(previousSignal.aborted).toBe(true));
+    complete({ data: { id: 'reservation-1', guest_name: 'João Rocha' }, error: null });
+    await waitFor(() => expect(detailState.props.at(-1)).toMatchObject({ open: false, reservation: null }));
+    detailState.maybeSingle.mockResolvedValue({ data: { id: 'reservation-1', guest_name: 'João Rocha' }, error: null });
+  });
+
+  it('mantém o histórico legível sem abrir ou consultar reservas quando o acesso está bloqueado', () => {
+    historyState.visits = createVisits(2);
+    renderDialog({ canViewReservations: false });
+
+    expect(screen.getByText('Histórico de Presenças (60)')).toBeInTheDocument();
+    expect(screen.getByText('01/01/2026 às 20:00')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Abrir detalhes da presença/ })).not.toBeInTheDocument();
+    expect(detailState.from).not.toHaveBeenCalled();
+    expect(detailState.props.at(-1)).toMatchObject({ open: false, reservation: null });
+  });
+
+  it('abre a reserva da unidade em consulta e propaga as permissões de histórico', async () => {
+    historyState.visits = createVisits(1);
+    const onEdit = vi.fn();
+    renderDialog({ readOnly: true, showEventHistory: false, showLeadHistory: true, onEdit });
+
+    expect(screen.queryByRole('button', { name: 'Editar dados do lead' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir detalhes da presença de 01/01/2026' }));
+
+    await waitFor(() => expect(detailState.props.at(-1)).toMatchObject({
+      open: true,
+      readOnly: true,
+      showEventHistory: false,
+      showLeadHistory: true,
+      reservation: { id: 'reservation-1' },
+    }));
+    expect(detailState.from).toHaveBeenCalledWith('reservations');
+    expect(detailState.eq).toHaveBeenCalledWith('company_id', '00000000-0000-4000-8000-000000000001');
+    expect(detailState.eq).toHaveBeenCalledWith('id', 'reservation-1');
+    expect(detailState.abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('fecha o detalhe e remove os atalhos quando o acesso a reservas é revogado', async () => {
+    historyState.visits = createVisits(1);
+    const view = renderDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir detalhes da presença de 01/01/2026' }));
+    await waitFor(() => expect(detailState.props.at(-1)?.reservation?.id).toBe('reservation-1'));
+    const requestsBeforeRevoke = detailState.from.mock.calls.length;
+
+    view.rerenderDialog({ canViewReservations: false });
+
+    expect(detailState.props.at(-1)).toMatchObject({ open: false, reservation: null });
+    expect(screen.queryByRole('button', { name: /Abrir detalhes da presença/ })).not.toBeInTheDocument();
+    expect(detailState.from).toHaveBeenCalledTimes(requestsBeforeRevoke);
+  });
+
+  it('preserva a edição e os padrões de detalhes nos usos existentes', async () => {
+    historyState.visits = createVisits(1);
+    const onEdit = vi.fn();
+    renderDialog({ onEdit });
+    fireEvent.click(screen.getByRole('button', { name: 'Editar dados do lead' }));
+    expect(onEdit).toHaveBeenCalledWith(lead);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir detalhes da presença de 01/01/2026' }));
+    await waitFor(() => expect(detailState.props.at(-1)).toMatchObject({
+      open: true, readOnly: false, showEventHistory: true, showLeadHistory: false,
+      reservation: { id: 'reservation-1' },
+    }));
+  });
+
   it('mantém o histórico integral, mas renderiza somente 25 presenças por página', () => {
     historyState.visits = createVisits(60);
     renderDialog();

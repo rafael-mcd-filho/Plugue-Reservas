@@ -3,12 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyCachedFavicon,
   removePublicCompanyIcons,
+  DEFAULT_SYSTEM_FAVICON,
+  syncSystemFavicon,
   syncPublicCompanyIcons,
   useFaviconOverride,
 } from './publicCompanyIcons';
 
 const COMPANY_CACHE_KEY = 'company:restaurante-teste';
-const COMPANY_STORAGE_KEY = `plugue:favicon:${COMPANY_CACHE_KEY}`;
+const COMPANY_STORAGE_KEY = `plugue:favicon:v2:${COMPANY_CACHE_KEY}`;
+const defaultFavicon = () => new URL(DEFAULT_SYSTEM_FAVICON, window.location.origin).href;
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -51,6 +54,8 @@ describe('public company favicon', () => {
   beforeEach(() => {
     document.head.innerHTML = '<link rel="icon" href="/favicon.ico" type="image/x-icon">';
     window.localStorage.clear();
+    removePublicCompanyIcons();
+    syncSystemFavicon(null);
   });
 
   afterEach(() => {
@@ -69,7 +74,7 @@ describe('public company favicon', () => {
     expect(window.localStorage.getItem(COMPANY_STORAGE_KEY)).toBe('/cached-logo.png');
   });
 
-  it('replaces the cached icon and restores the original icon on cleanup', () => {
+  it('replaces the cached icon and restores the current platform icon on cleanup', () => {
     syncPublicCompanyIcons('/company-logo.png', COMPANY_CACHE_KEY);
 
     expect(favicon()?.href).toBe('http://localhost:3000/company-logo.png');
@@ -78,8 +83,8 @@ describe('public company favicon', () => {
 
     removePublicCompanyIcons();
 
-    expect(favicon()?.href).toBe('http://localhost:3000/favicon.ico');
-    expect(favicon('apple-touch-icon')).toBeNull();
+    expect(favicon()?.href).toBe(defaultFavicon());
+    expect(favicon('apple-touch-icon')?.href).toBe(defaultFavicon());
   });
 
   it('clears a stale cached icon after a definitive empty result', () => {
@@ -88,7 +93,7 @@ describe('public company favicon', () => {
 
     syncPublicCompanyIcons(null, COMPANY_CACHE_KEY);
 
-    expect(favicon()?.href).toBe('http://localhost:3000/favicon.ico');
+    expect(favicon()?.href).toBe(defaultFavicon());
     expect(window.localStorage.getItem(COMPANY_STORAGE_KEY)).toBeNull();
   });
 
@@ -106,7 +111,7 @@ describe('public company favicon', () => {
     });
 
     expect(() => syncPublicCompanyIcons(null, COMPANY_CACHE_KEY)).not.toThrow();
-    expect(favicon()?.href).toBe('http://localhost:3000/favicon.ico');
+    expect(favicon()?.href).toBe(defaultFavicon());
   });
 
   it('ignores a blocked localStorage read', () => {
@@ -115,7 +120,7 @@ describe('public company favicon', () => {
     });
 
     expect(() => applyCachedFavicon(COMPANY_CACHE_KEY)).not.toThrow();
-    expect(favicon()?.href).toBe('http://localhost:3000/favicon.ico');
+    expect(favicon()?.href).toBe(defaultFavicon());
   });
 
   it('keeps the cached icon through a pending hook state and cleans up on unmount', () => {
@@ -135,11 +140,11 @@ describe('public company favicon', () => {
     expect(favicon()?.href).toBe('http://localhost:3000/fresh-logo.png');
 
     unmount();
-    expect(favicon()?.href).toBe('http://localhost:3000/favicon.ico');
+    expect(favicon()?.href).toBe(defaultFavicon());
   });
 
   it('does not leave the previous tenant icon when the route owner changes', () => {
-    window.localStorage.setItem('plugue:favicon:company:restaurante-b', '/restaurant-b.png');
+    window.localStorage.setItem('plugue:favicon:v2:company:restaurante-b', '/restaurant-b.png');
 
     const { rerender } = renderHook(
       ({ cacheKey, logoUrl }: { cacheKey: string; logoUrl: string | null | undefined }) => (
@@ -158,5 +163,73 @@ describe('public company favicon', () => {
     rerender({ cacheKey: 'company:restaurante-b', logoUrl: undefined });
 
     expect(favicon()?.href).toBe('http://localhost:3000/restaurant-b.png');
+  });
+
+  it('uses the configured system logo for a company without a logo', () => {
+    syncSystemFavicon('/current-platform-logo.png');
+    syncPublicCompanyIcons(null, COMPANY_CACHE_KEY);
+    for (const rel of ['icon', 'alternate icon', 'shortcut icon', 'apple-touch-icon']) {
+      expect(favicon(rel)?.href).toBe('http://localhost:3000/current-platform-logo.png');
+    }
+  });
+
+  it('updates the fallback when platform branding arrives after a logo-less company', () => {
+    syncPublicCompanyIcons(null, COMPANY_CACHE_KEY);
+    expect(favicon()?.href).toBe(defaultFavicon());
+    syncSystemFavicon('/new-platform-logo.png');
+    expect(favicon()?.href).toBe('http://localhost:3000/new-platform-logo.png');
+  });
+
+  it('keeps a company logo when platform branding updates and restores the latest system logo on exit', () => {
+    syncSystemFavicon('/platform-one.png');
+    syncPublicCompanyIcons('/own-company-logo.png', COMPANY_CACHE_KEY);
+    syncSystemFavicon('/platform-two.png');
+    expect(favicon()?.href).toBe('http://localhost:3000/own-company-logo.png');
+    removePublicCompanyIcons(COMPANY_CACHE_KEY);
+    expect(favicon()?.href).toBe('http://localhost:3000/platform-two.png');
+  });
+
+  it('replaces every duplicate icon declaration and removes obsolete MIME types and sizes', () => {
+    document.head.innerHTML = '<link rel="icon" href="/old.svg" type="image/svg+xml" sizes="32x32"><link rel="icon" href="/old.ico"><link rel="alternate icon" href="/old.ico" type="image/x-icon">';
+    syncSystemFavicon('/current.png');
+    document.head.querySelectorAll<HTMLLinkElement>('link[rel*="icon"]').forEach((element) => {
+      expect(element.href).toBe('http://localhost:3000/current.png');
+      expect(element.hasAttribute('type')).toBe(false);
+      expect(element.hasAttribute('sizes')).toBe(false);
+    });
+  });
+
+  it('uses the new system cache and ignores legacy cached icons', () => {
+    window.localStorage.setItem('plugue:favicon:system', '/obsolete-icon.png');
+    window.localStorage.setItem('plugue:favicon:company:other', '/obsolete-company.png');
+    applyCachedFavicon('company:other');
+    expect(favicon()?.href).toBe(defaultFavicon());
+    window.localStorage.setItem('plugue:favicon:v2:system', '/configured-platform.png');
+    applyCachedFavicon('system');
+    expect(favicon()?.href).toBe('http://localhost:3000/configured-platform.png');
+  });
+
+  it('does not carry a previous company icon into a company without a cached logo', () => {
+    syncSystemFavicon('/current-platform.png');
+    const { rerender, unmount } = renderHook(({ key, url }: { key: string; url: string | null | undefined }) => useFaviconOverride(url, key), { initialProps: { key: COMPANY_CACHE_KEY, url: '/company-a.png' as string | null | undefined } });
+    rerender({ key: 'company:without-logo', url: undefined });
+    expect(favicon()?.href).toBe('http://localhost:3000/current-platform.png');
+    rerender({ key: 'company:without-logo', url: null });
+    expect(favicon()?.href).toBe('http://localhost:3000/current-platform.png');
+    unmount();
+  });
+
+  it('does not let cleanup from an old company remove another company logo', () => {
+    syncPublicCompanyIcons('/company-b.png', 'company:b');
+    removePublicCompanyIcons('company:a');
+    expect(favicon()?.href).toBe('http://localhost:3000/company-b.png');
+  });
+
+  it('falls back to the system logo for blank or unsupported company URLs', () => {
+    syncSystemFavicon('/current-platform.png');
+    for (const value of ['   ', 'javascript:alert(1)', 'file:///old-icon.ico']) {
+      syncPublicCompanyIcons(value, COMPANY_CACHE_KEY);
+      expect(favicon()?.href).toBe('http://localhost:3000/current-platform.png');
+    }
   });
 });

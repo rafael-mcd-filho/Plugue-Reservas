@@ -1,3 +1,5 @@
+import { getStoredPhoneLookupVariants, matchesCanonicalPhone } from "../_shared/phone.ts";
+import { getReservationChangeMessageEligibility } from "../_shared/reservation-change-notifications.ts";
 import {
   assertUserCanAccessCompany,
   createSupabaseAdminClient,
@@ -16,6 +18,7 @@ import {
   recordWhatsAppFailure,
   recordWhatsAppSuccess,
 } from "../_shared/whatsapp-circuit.ts";
+import { getWaitlistCallEligibility, isEvolutionCallFailureRetryable } from "../_shared/waitlist-call-eligibility.ts";
 
 const DELIVERY_JITTER_MIN_MS = 40_000;
 const DELIVERY_JITTER_MAX_MS = 80_000;
@@ -96,6 +99,12 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const requestedCompanyId = typeof body.company_id === "string" ? body.company_id : null;
+    const requestedQueueId = typeof body.queue_id === "string" ? body.queue_id : null;
+    if (requestedQueueId && !requestedCompanyId) {
+      return new Response(JSON.stringify({ error: "company_id e obrigatorio para uma mensagem especifica" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const internalJob = await isAuthorizedInternalJob(req);
 
     if (!internalJob) {
@@ -127,6 +136,7 @@ Deno.serve(async (req) => {
     if (requestedCompanyId) {
       expireQuery = expireQuery.eq("company_id", requestedCompanyId);
     }
+    if (requestedQueueId) expireQuery = expireQuery.eq("id", requestedQueueId);
 
     await expireQuery;
 
@@ -206,17 +216,28 @@ Deno.serve(async (req) => {
       );
     }
 
-    await supabaseAdmin
+    // A crashed call send can have reached the provider. Never reclaim it blindly.
+    let stalledCalls = supabaseAdmin.from("whatsapp_message_queue")
+      .update({ status: "failed", error_details: serializeWhatsAppFailure({ code: "unknown_error", title: "Tentativa interrompida", message: "O resultado da tentativa anterior nao pode ser confirmado." }) })
+      .in("company_id", eligibleCompanyIds).eq("type", "waitlist_called").eq("status", "processing")
+      .lt("last_attempt_at", new Date(Date.now() - 3 * 60 * 1000).toISOString());
+    if (requestedQueueId) stalledCalls = stalledCalls.eq("id", requestedQueueId);
+    await stalledCalls;
+
+    let staleMessages = supabaseAdmin
       .from("whatsapp_message_queue")
       .update({
         status: "pending",
         error_details: null,
       })
       .in("company_id", eligibleCompanyIds)
+      .neq("type", "waitlist_called")
       .eq("status", "processing")
       .lt("last_attempt_at", new Date(Date.now() - 3 * 60 * 1000).toISOString());
+    if (requestedQueueId) staleMessages = staleMessages.eq("id", requestedQueueId);
+    await staleMessages;
 
-    const queueQuery = supabaseAdmin
+    let queueQuery = supabaseAdmin
       .from("whatsapp_message_queue")
       .select("*")
       .in("company_id", eligibleCompanyIds)
@@ -227,6 +248,7 @@ Deno.serve(async (req) => {
       .order("scheduled_for", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(CANDIDATE_LIMIT);
+    if (requestedQueueId) queueQuery = queueQuery.eq("id", requestedQueueId);
 
     const { data: pendingMessages } = await queueQuery;
 
@@ -249,6 +271,11 @@ Deno.serve(async (req) => {
       }
 
       const message = pendingMessages[index];
+      if (message.attempts >= message.max_attempts) {
+        await supabaseAdmin.from("whatsapp_message_queue").update({ status: "failed" })
+          .eq("id", message.id).eq("status", "pending");
+        continue;
+      }
       const instanceName = instanceMap.get(message.company_id);
       if (!instanceName) continue;
 
@@ -269,7 +296,7 @@ Deno.serve(async (req) => {
       }
 
       const activeMessage = claimedMessage as typeof message;
-      const phone = formatPhoneForWhatsApp(activeMessage.phone);
+      const phone = formatPhoneForWhatsApp((activeMessage.phone_e164 ?? activeMessage.phone));
 
       const runtimeCircuit = await checkWhatsAppCircuit(supabaseAdmin, activeMessage.company_id);
       if (runtimeCircuit.open) {
@@ -285,18 +312,24 @@ Deno.serve(async (req) => {
       const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const duplicateLogQuery = supabaseAdmin
         .from("whatsapp_message_logs")
-        .select("id")
+        .select("id, phone")
         .eq("company_id", activeMessage.company_id)
         .eq("type", activeMessage.type)
         .in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES])
-        .gte("created_at", fiveMinAgo)
-        .limit(1);
+        .gte("created_at", fiveMinAgo);
+      if (activeMessage.reservation_change_revision) {
+        duplicateLogQuery.eq("reservation_change_revision", activeMessage.reservation_change_revision);
+      }
 
-      const { data: alreadyAccepted } = activeMessage.reservation_id
-        ? await duplicateLogQuery.eq("reservation_id", activeMessage.reservation_id)
+      const { data: acceptedCandidates } = activeMessage.reservation_id
+        ? await duplicateLogQuery.eq("reservation_id", activeMessage.reservation_id).limit(1)
         : await duplicateLogQuery
-          .eq("phone", phone)
+          .in("phone", getStoredPhoneLookupVariants(phone))
           .eq("message", activeMessage.message);
+
+      const alreadyAccepted = activeMessage.reservation_id
+        ? acceptedCandidates
+        : acceptedCandidates?.filter((candidate) => matchesCanonicalPhone(candidate, phone));
 
       if (alreadyAccepted && alreadyAccepted.length > 0) {
         await supabaseAdmin
@@ -327,6 +360,27 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Cadence can wait for a minute: recheck the saved activation and call now.
+      const callEligibility = await getWaitlistCallEligibility(supabaseAdmin, activeMessage, 'evolution');
+      if (!callEligibility.eligible) {
+        await supabaseAdmin.from("whatsapp_message_queue").update({
+          status: callEligibility.reason === 'lookup_failed' ? 'pending' : 'expired',
+          ...(callEligibility.reason === 'lookup_failed' ? { scheduled_for: new Date(Date.now() + 30_000).toISOString() } : {}),
+        }).eq("id", activeMessage.id).eq("status", "processing");
+        deferred++;
+        continue;
+      }
+
+      const reservationEligibility = await getReservationChangeMessageEligibility(supabaseAdmin, activeMessage);
+      if (!reservationEligibility.eligible) {
+        await supabaseAdmin.from("whatsapp_message_queue").update({
+          status: reservationEligibility.reason === "lookup_failed" ? "pending" : "expired",
+          ...(reservationEligibility.reason === "lookup_failed" ? { scheduled_for: new Date(Date.now() + 30_000).toISOString() } : {}),
+        }).eq("id", activeMessage.id).eq("status", "processing");
+        deferred++;
+        continue;
+      }
+
       processed++;
 
       try {
@@ -352,7 +406,8 @@ Deno.serve(async (req) => {
           await supabaseAdmin.from("whatsapp_message_logs").insert({
             company_id: activeMessage.company_id,
             reservation_id: activeMessage.reservation_id,
-            phone: activeMessage.phone,
+            ...(activeMessage.reservation_change_revision ? { reservation_change_revision: activeMessage.reservation_change_revision } : {}),
+            phone: phone || activeMessage.phone,
             message: activeMessage.message,
             type: activeMessage.type,
             status: logStatus,
@@ -369,7 +424,7 @@ Deno.serve(async (req) => {
               attempts: nextAttempts,
               last_attempt_at: new Date().toISOString(),
               error_details: serializedError,
-              status: nextAttempts >= activeMessage.max_attempts ? "failed" : "pending",
+              status: nextAttempts >= activeMessage.max_attempts || (activeMessage.type === 'waitlist_called' && !isEvolutionCallFailureRetryable(responseData.error)) ? "failed" : "pending",
             })
             .eq("id", activeMessage.id);
           const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, activeMessage.company_id, responseData.error);
@@ -394,7 +449,7 @@ Deno.serve(async (req) => {
             attempts: nextAttempts,
             last_attempt_at: new Date().toISOString(),
             error_details: serializeWhatsAppFailure(failureDetails),
-            status: nextAttempts >= activeMessage.max_attempts ? "failed" : "pending",
+            status: activeMessage.type === 'waitlist_called' || nextAttempts >= activeMessage.max_attempts ? "failed" : "pending",
           })
           .eq("id", activeMessage.id);
         const nextCircuit = await recordWhatsAppFailure(supabaseAdmin, activeMessage.company_id, failureDetails);

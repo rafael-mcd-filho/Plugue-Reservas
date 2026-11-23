@@ -304,17 +304,17 @@ function DashboardReportOverview({
           <ReportHeadline
             accent="info"
             value={capacity.hasCapacity ? formatPercentage(capacity.occupancyRate) : '—'}
-            label={capacity.hasCapacity ? 'ocupação média' : 'capacidade não configurada'}
+            label={capacity.hasCapacity ? 'check-ins sobre oferta' : 'capacidade não configurada'}
             detail={
               capacity.hasCapacity ? (
                 <>
                   <span className="font-semibold text-foreground">
-                    {formatInteger(capacity.idleSeats)} lugares ociosos
+                    {formatInteger(capacity.idleSeats)} lugares ofertados sem check-in
                   </span>{' '}
-                  · {formatInteger(capacity.pressureDays)} dias sob pressão
+                  · {formatInteger(capacity.pressureDays)} dias com check-ins iguais ou acima da oferta
                 </>
               ) : (
-                'Defina a capacidade dos horários para medir ocupação'
+                'Defina a capacidade dos horários para comparar a oferta acumulada com os check-ins'
               )
             }
           />

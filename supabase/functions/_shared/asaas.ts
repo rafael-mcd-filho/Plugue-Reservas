@@ -1,5 +1,12 @@
 export type AsaasBillingType = "PIX" | "CREDIT_CARD";
 
+// Legacy company accounts keep their deployment-wide URL. Central reservation
+// credentials carry their own environment, so concurrent requests cannot mix it.
+export type AsaasCredentials = string | {
+  apiToken: string;
+  environment: "sandbox" | "production";
+};
+
 export type AsaasPaymentLinkChargeType = "DETACHED" | "RECURRENT" | "INSTALLMENT";
 
 export interface AsaasPaymentLinkPayload {
@@ -18,6 +25,7 @@ export interface AsaasPaymentLinkPayload {
     autoRedirect?: boolean;
   };
   isAddressRequired?: boolean;
+  limit?: number;
 }
 
 export interface AsaasAccountSite {
@@ -27,14 +35,14 @@ export interface AsaasAccountSite {
   mainSite?: boolean;
 }
 
-export async function listAsaasAccountSites(apiToken: string) {
+export async function listAsaasAccountSites(apiToken: AsaasCredentials) {
   return await asaasRequest<{ data?: AsaasAccountSite[] }>(apiToken, "/myAccount/sites", {
     method: "GET",
   });
 }
 
 export async function createAsaasAccountSite(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   payload: { name: string; url: string; mainSite?: boolean },
 ) {
   return await asaasRequest<AsaasAccountSite>(apiToken, "/myAccount/sites", {
@@ -54,7 +62,7 @@ function normalizeSiteUrl(value: string | undefined | null) {
 }
 
 export async function ensureAsaasAccountSite(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   desiredUrl: string,
   desiredName: string,
 ) {
@@ -106,18 +114,25 @@ function getAsaasBaseUrl() {
   return (Deno.env.get("ASAAS_API_BASE_URL") || "https://api.asaas.com/v3").replace(/\/+$/, "");
 }
 
-function buildUrl(path: string) {
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${getAsaasBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+function buildUrl(path: string, credentials: AsaasCredentials) {
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    throw new Error("Caminho Asaas invalido");
+  }
+  const baseUrl = typeof credentials === "string"
+    ? getAsaasBaseUrl()
+    : credentials.environment === "sandbox"
+    ? "https://api-sandbox.asaas.com/v3"
+    : "https://api.asaas.com/v3";
+  return `${baseUrl}${path}`;
 }
 
 export async function asaasRequest<T>(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   path: string,
   init: RequestInit & { json?: unknown } = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("access_token", apiToken);
+  headers.set("access_token", typeof apiToken === "string" ? apiToken : apiToken.apiToken);
   headers.set("User-Agent", Deno.env.get("ASAAS_USER_AGENT") || "PlugueReservas/1.0");
 
   let body = init.body;
@@ -126,10 +141,11 @@ export async function asaasRequest<T>(
     body = JSON.stringify(init.json);
   }
 
-  const response = await fetch(buildUrl(path), {
+  const response = await fetch(buildUrl(path, apiToken), {
     ...init,
     headers,
     body,
+    signal: init.signal ?? AbortSignal.timeout(15000),
   });
 
   const responseText = await response.text();
@@ -156,7 +172,7 @@ export function getAsaasPaymentLinkUrl(paymentLink: AsaasPaymentLinkResponse) {
   return paymentLink.url ?? paymentLink.paymentLinkUrl ?? paymentLink.link ?? null;
 }
 
-export async function createAsaasPaymentLink(apiToken: string, payload: AsaasPaymentLinkPayload) {
+export async function createAsaasPaymentLink(apiToken: AsaasCredentials, payload: AsaasPaymentLinkPayload) {
   return await asaasRequest<AsaasPaymentLinkResponse>(apiToken, "/paymentLinks", {
     method: "POST",
     json: payload,
@@ -164,7 +180,7 @@ export async function createAsaasPaymentLink(apiToken: string, payload: AsaasPay
 }
 
 export async function listAsaasPaymentLinks(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   params: {
     offset?: number;
     limit?: number;
@@ -189,7 +205,7 @@ export async function listAsaasPaymentLinks(
   );
 }
 
-export async function getAsaasPaymentLink(apiToken: string, paymentLinkId: string) {
+export async function getAsaasPaymentLink(apiToken: AsaasCredentials, paymentLinkId: string) {
   return await asaasRequest<AsaasPaymentLinkResponse>(
     apiToken,
     `/paymentLinks/${encodeURIComponent(paymentLinkId)}`,
@@ -199,13 +215,13 @@ export async function getAsaasPaymentLink(apiToken: string, paymentLinkId: strin
   );
 }
 
-export async function deleteAsaasPaymentLink(apiToken: string, paymentLinkId: string) {
+export async function deleteAsaasPaymentLink(apiToken: AsaasCredentials, paymentLinkId: string) {
   return await asaasRequest<unknown>(apiToken, `/paymentLinks/${encodeURIComponent(paymentLinkId)}`, {
     method: "DELETE",
   });
 }
 
-export async function validateAsaasPaymentLinksAccess(apiToken: string) {
+export async function validateAsaasPaymentLinksAccess(apiToken: AsaasCredentials) {
   return await asaasRequest<unknown>(apiToken, "/paymentLinks?limit=1", {
     method: "GET",
   });
@@ -228,7 +244,7 @@ export interface AsaasCustomerResponse {
   cpfCnpj?: string;
 }
 
-export async function createAsaasCustomer(apiToken: string, payload: AsaasCustomerPayload) {
+export async function createAsaasCustomer(apiToken: AsaasCredentials, payload: AsaasCustomerPayload) {
   return await asaasRequest<AsaasCustomerResponse>(apiToken, "/customers", {
     method: "POST",
     json: payload,
@@ -247,11 +263,17 @@ export interface AsaasPaymentPayload {
 
 export interface AsaasPaymentResponse {
   id: string;
+  paymentLink?: string | null;
+  externalReference?: string | null;
+  installment?: string | null;
+  installmentNumber?: number;
   status?: string;
   invoiceUrl?: string;
   confirmedDate?: string;
   clientPaymentDate?: string;
   paymentDate?: string;
+  creditDate?: string;
+  estimatedCreditDate?: string;
   dateCreated?: string;
   dueDate?: string;
   value?: number;
@@ -269,14 +291,14 @@ export interface AsaasPaymentResponse {
   }>;
 }
 
-export async function createAsaasPayment(apiToken: string, payload: AsaasPaymentPayload) {
+export async function createAsaasPayment(apiToken: AsaasCredentials, payload: AsaasPaymentPayload) {
   return await asaasRequest<AsaasPaymentResponse>(apiToken, "/payments", {
     method: "POST",
     json: payload,
   });
 }
 
-export async function getAsaasPayment(apiToken: string, paymentId: string) {
+export async function getAsaasPayment(apiToken: AsaasCredentials, paymentId: string) {
   return await asaasRequest<AsaasPaymentResponse>(
     apiToken,
     `/payments/${encodeURIComponent(paymentId)}`,
@@ -285,7 +307,7 @@ export async function getAsaasPayment(apiToken: string, paymentId: string) {
 }
 
 export async function listAsaasPayments(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   params: { externalReference?: string; limit?: number } = {},
 ) {
   const query = new URLSearchParams();
@@ -306,7 +328,7 @@ export interface AsaasPixQrCodeResponse {
   success?: boolean;
 }
 
-export async function getAsaasPixQrCode(apiToken: string, paymentId: string) {
+export async function getAsaasPixQrCode(apiToken: AsaasCredentials, paymentId: string) {
   return await asaasRequest<AsaasPixQrCodeResponse>(
     apiToken,
     `/payments/${encodeURIComponent(paymentId)}/pixQrCode`,
@@ -314,7 +336,7 @@ export async function getAsaasPixQrCode(apiToken: string, paymentId: string) {
   );
 }
 
-export async function getAsaasPaymentStatus(apiToken: string, paymentId: string) {
+export async function getAsaasPaymentStatus(apiToken: AsaasCredentials, paymentId: string) {
   const response = await asaasRequest<{ status?: string }>(
     apiToken,
     `/payments/${encodeURIComponent(paymentId)}/status`,
@@ -324,7 +346,7 @@ export async function getAsaasPaymentStatus(apiToken: string, paymentId: string)
   return typeof response.status === "string" ? response.status : null;
 }
 
-export async function deleteAsaasPayment(apiToken: string, paymentId: string) {
+export async function deleteAsaasPayment(apiToken: AsaasCredentials, paymentId: string) {
   return await asaasRequest<unknown>(apiToken, `/payments/${encodeURIComponent(paymentId)}`, {
     method: "DELETE",
   });
@@ -336,7 +358,7 @@ export interface AsaasRefundPaymentPayload {
 }
 
 export async function refundAsaasPayment(
-  apiToken: string,
+  apiToken: AsaasCredentials,
   paymentId: string,
   payload: AsaasRefundPaymentPayload = {},
 ) {
@@ -419,11 +441,12 @@ export function getAsaasActiveChargebackStatus(payment: AsaasPaymentResponse | n
 export function getAsaasRefundedValue(payment: AsaasPaymentResponse | null | undefined) {
   const refunds = Array.isArray(payment?.refunds) ? payment.refunds : [];
   const total = refunds.reduce((sum, refund) => {
+    if (String(refund?.status || "").toUpperCase() !== "DONE") return sum;
     const value = Number(refund?.value ?? 0);
     return Number.isFinite(value) && value > 0 ? sum + value : sum;
   }, 0);
 
-  return total > 0 ? total : null;
+  return total > 0 ? Math.round(total * 100) / 100 : null;
 }
 
 export type AsaasExternalPaymentOutcome =

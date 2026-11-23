@@ -87,6 +87,30 @@ export function useSystemBranding() {
   });
 }
 
+/** Salva várias chaves numa única gravação: ou todas entram, ou nenhuma. */
+export function useSaveSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (values: Record<string, string | null>) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const now = new Date().toISOString();
+      const rows = Object.entries(values).map(([key, value]) => ({
+        key,
+        value,
+        updated_at: now,
+        updated_by: session?.user?.id ?? null,
+      }));
+      const { error } = await supabase
+        .from('system_settings' as any)
+        .upsert(rows as any, { onConflict: 'key' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['system-settings'] });
+    },
+  });
+}
+
 export function useUpdateSetting() {
   const qc = useQueryClient();
   return useMutation({
@@ -166,6 +190,7 @@ export function useNotifications() {
         supabase
           .from('notifications' as any)
           .select('*')
+          .neq('type', 'reservation_change')
           .order('created_at', { ascending: false }),
         (supabase.rpc as any)('get_notification_delivery_summaries'),
       ]);
@@ -275,6 +300,43 @@ export function useDeleteNotification() {
   });
 }
 
+/** Retira do painel todas as linhas de um mesmo envio. */
+export function useDeleteNotificationBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, title, companyIds }: { ids: string[]; title: string; companyIds: string[] }) => {
+      if (ids.length === 0) return;
+      const { error } = await supabase
+        .from('notifications' as any)
+        .delete()
+        .in('id', ids);
+      if (error) throw error;
+
+      try {
+        await writeSuperadminAuditLog({
+          action: 'delete_notification',
+          entityType: 'notification',
+          entityId: ids.length === 1 ? ids[0] : null,
+          details: {
+            title,
+            company_count: companyIds.length,
+            company_ids: companyIds,
+            notification_ids: ids,
+          },
+        });
+      } catch (auditError) {
+        console.error('Failed to audit delete_notification', auditError);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+      qc.invalidateQueries({ queryKey: ['company-notifications'] });
+      toast.success('Aviso retirado do painel das empresas.');
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+}
+
 export function useCompanyNotifications(companyId: string, limit = 10) {
   return useQuery({
     queryKey: ['company-notifications', companyId, limit],
@@ -285,6 +347,30 @@ export function useCompanyNotifications(companyId: string, limit = 10) {
       });
       if (error) throw error;
       return (data ?? []) as unknown as Notification[];
+    },
+    enabled: !!companyId,
+  });
+}
+
+/** Announcements only: operational changes stay in the bell, without taking its banner slots. */
+export function useCompanyAnnouncementNotifications(companyId: string, limit = 20) {
+  return useQuery({
+    queryKey: ['company-notifications', companyId, limit, 'announcements'],
+    queryFn: async () => {
+      let result = await (supabase.rpc as any)('get_company_announcement_notifications', {
+        _company_id: companyId,
+        _limit: limit,
+      });
+      // Until this local feature's migration is installed there are no public
+      // changes. Preserve the current announcement path in that environment.
+      if (result.error?.code === 'PGRST202' || result.error?.code === '42883') {
+        result = await (supabase.rpc as any)('get_company_notifications', {
+          _company_id: companyId,
+          _limit: limit,
+        });
+      }
+      if (result.error) throw result.error;
+      return ((result.data ?? []) as Notification[]).filter((notification) => notification.type !== 'reservation_change');
     },
     enabled: !!companyId,
   });

@@ -59,6 +59,7 @@ interface ReservationTableAssignmentProps {
   time: string;
   partySize: number;
   onAssigned?: (reservationId: string, tableIds: string[]) => void;
+  readOnly?: boolean;
 }
 
 interface AssignmentMutationVariables {
@@ -94,6 +95,7 @@ export default function ReservationTableAssignment({
   time,
   partySize,
   onAssigned,
+  readOnly = false,
 }: ReservationTableAssignmentProps) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -259,6 +261,7 @@ export default function ReservationTableAssignment({
 
   const assignMutation = useMutation({
     mutationFn: async ({ tableIds, allowUnassigned, allowUnderCapacity = false }: AssignmentMutationVariables) => {
+      if (readOnly) throw new Error('A consulta do relatório não permite alterar mesas.');
       const { data, error } = await (supabase.rpc as any)('assign_reservation_tables', {
         _reservation_id: reservationId,
         _table_ids: tableIds,
@@ -375,7 +378,7 @@ export default function ReservationTableAssignment({
             </p>
           </div>
         </div>
-        <Button
+        {!readOnly && <Button
           type="button"
           variant="outline"
           size="sm"
@@ -386,7 +389,7 @@ export default function ReservationTableAssignment({
           aria-controls={`reservation-table-selector-${reservationId}`}
         >
           {open ? 'Cancelar' : assignments.length > 0 ? 'Alterar mesas' : 'Atribuir mesas'}
-        </Button>
+        </Button>}
       </div>
 
       {assignmentsQuery.isError && !open && (
@@ -398,7 +401,7 @@ export default function ReservationTableAssignment({
         </div>
       )}
 
-      {open && (
+      {open && !readOnly && (
         <div id={`reservation-table-selector-${reservationId}`} className="mt-3 min-w-0 space-y-3 border-t border-border pt-3">
           <div
             className={cn(
@@ -615,7 +618,7 @@ export default function ReservationTableAssignment({
         </div>
       )}
 
-      <AlertDialog open={confirmUnderCapacityOpen} onOpenChange={setConfirmUnderCapacityOpen}>
+      <AlertDialog open={confirmUnderCapacityOpen && !readOnly} onOpenChange={setConfirmUnderCapacityOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Salvar com lugares a menos?</AlertDialogTitle>
@@ -639,7 +642,7 @@ export default function ReservationTableAssignment({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmUnassignedOpen} onOpenChange={setConfirmUnassignedOpen}>
+      <AlertDialog open={confirmUnassignedOpen && !readOnly} onOpenChange={setConfirmUnassignedOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover as mesas atribuídas?</AlertDialogTitle>

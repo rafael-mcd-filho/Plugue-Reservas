@@ -39,3 +39,8 @@ backup_before_repair.sql
 *.njsproj
 *.sln
 *.sw?
+.vercel/
+.env.local
+
+# App nativo do operador (local, fora do git)
+app-operador/

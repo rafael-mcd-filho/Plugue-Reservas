@@ -1,6 +1,6 @@
 import { toStoredWhatsAppNumber } from '@/lib/phone';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CartesianGrid,
@@ -31,11 +31,12 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { differenceInCalendarDays, format, subDays } from 'date-fns';
+import { differenceInCalendarDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
 import PhoneWhatsAppLink, { WhatsAppIcon } from '@/components/PhoneWhatsAppLink';
 import ReportShell from '@/components/reports/ReportShell';
+import ReportFilterBar from '@/components/reports/ReportFilterBar';
 import {
   ReportKpiDelta,
   ReportKpiStrip,
@@ -68,6 +69,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMaybeCompanySlug } from '@/contexts/CompanySlugContext';
 import { useCompanyNpsActivation } from '@/hooks/useCompanyNpsActivation';
+import { useReportFilters } from '@/hooks/useReportFilters';
 import { supabase } from '@/integrations/supabase/client';
 import {
   MIN_RESPONSES_FOR_TRENDS,
@@ -85,13 +87,8 @@ import {
   type RatingField,
 } from '@/lib/nps-reviews';
 import { cn } from '@/lib/utils';
-
-const PERIOD_OPTIONS = [
-  { value: '30', label: 'Últimos 30 dias' },
-  { value: '60', label: 'Últimos 60 dias' },
-  { value: '90', label: 'Últimos 3 meses' },
-  { value: '180', label: 'Últimos 6 meses' },
-];
+import { getReportDateOnlyInTimeZone, getReportPeriodDays, getReportTimestampRange, type ReportTimestampRange } from '@/lib/report-filters';
+import { buildNpsCohortReport, loadCompleteNpsCohort, type NpsCohortRow, type NpsSubmittedReview, type NpsSummary } from '@/lib/nps-report';
 
 const RECORDS_PAGE_SIZE = 25;
 const ATTENTION_LIMIT = 4;
@@ -110,39 +107,7 @@ const formatDecimal = (value: number) => decimalFormatter.format(value);
 
 // ── tipos ────────────────────────────────────────────────────────────────────
 
-interface NpsSummary {
-  total_invited: number;
-  total_submitted: number;
-  total_pending: number;
-  total_expired: number;
-  response_rate: number;
-  nps_score: number;
-  promoters: number;
-  passives: number;
-  detractors: number;
-  avg_ambiance: number | null;
-  avg_food: number | null;
-  avg_service: number | null;
-  avg_return: number | null;
-}
-
-interface ReviewReservation {
-  guest_name: string | null;
-  guest_phone: string | null;
-  date: string | null;
-}
-
-interface SubmittedReview {
-  id: string;
-  submitted_at: string;
-  recommend_score: number | null;
-  nps_category: NpsCategory | null;
-  comment: string | null;
-  ambiance_rating: number | null;
-  food_rating: number | null;
-  service_rating: number | null;
-  reservations: ReviewReservation | null;
-}
+type SubmittedReview = NpsSubmittedReview;
 
 interface ReviewRecord extends Omit<SubmittedReview, 'submitted_at'> {
   status: string;
@@ -217,7 +182,9 @@ function formatVisitDate(date: string | null | undefined) {
   return format(new Date(`${date}T12:00:00`), 'dd/MM/yyyy');
 }
 
-function formatShortDate(value: string) {
+function formatShortDate(value: string | null, timeZone?: string) {
+  if (!value || !Number.isFinite(new Date(value).getTime())) return 'Data indisponível';
+  if (timeZone) return new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: 'short' }).format(new Date(value));
   return format(new Date(value), "dd 'de' MMM", { locale: ptBR });
 }
 
@@ -511,7 +478,7 @@ function CategoryRatingsCard({ reviews }: { reviews: SubmittedReview[] }) {
   );
 }
 
-function AttentionCard({ reviews, onSeeAll }: { reviews: SubmittedReview[]; onSeeAll: () => void }) {
+function AttentionCard({ reviews, total, onSeeAll }: { reviews: SubmittedReview[]; total: number; onSeeAll: () => void }) {
   const detractors = reviews.filter((review) => review.nps_category === 'detractor');
 
   return (
@@ -524,9 +491,9 @@ function AttentionCard({ reviews, onSeeAll }: { reviews: SubmittedReview[]; onSe
           </CardTitle>
           <CardDescription>Detratores do período (notas de 0 a 6). Um contato rápido pode reverter a experiência.</CardDescription>
         </div>
-        {detractors.length > 0 && (
+        {total > 0 && (
           <span className="shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-destructive">
-            {formatInteger(detractors.length)}
+            {formatInteger(total)}
           </span>
         )}
       </CardHeader>
@@ -561,9 +528,9 @@ function AttentionCard({ reviews, onSeeAll }: { reviews: SubmittedReview[]; onSe
                 );
               })}
             </ul>
-            {detractors.length > ATTENTION_LIMIT && (
+            {total > ATTENTION_LIMIT && (
               <Button type="button" variant="ghost" size="sm" className="mt-2 w-full text-muted-foreground" onClick={onSeeAll}>
-                Ver todos os {formatInteger(detractors.length)} detratores
+                Ver todos os {formatInteger(total)} detratores
               </Button>
             )}
           </>
@@ -573,7 +540,7 @@ function AttentionCard({ reviews, onSeeAll }: { reviews: SubmittedReview[]; onSe
   );
 }
 
-function CommentsCard({ reviews }: { reviews: SubmittedReview[] }) {
+function CommentsCard({ reviews, timeZone }: { reviews: SubmittedReview[]; timeZone: string }) {
   const [filter, setFilter] = useState<CommentFilter>('all');
   const [visible, setVisible] = useState(COMMENTS_STEP);
   const withComment = useMemo(() => reviews.filter((review) => review.comment?.trim()), [reviews]);
@@ -624,7 +591,7 @@ function CommentsCard({ reviews }: { reviews: SubmittedReview[] }) {
                   <li key={review.id} className="space-y-1.5 py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center gap-2">
                       <ScoreBadge score={review.recommend_score} category={review.nps_category} showLabel />
-                      <span className="text-xs text-muted-foreground">{formatShortDate(review.submitted_at)}</span>
+                      <span className="text-xs text-muted-foreground">{formatShortDate(review.submitted_at, timeZone)}</span>
                     </div>
                     <CommentText comment={review.comment!} clampClassName="line-clamp-3" />
                   </li>
@@ -661,7 +628,7 @@ function NpsEvolutionCard({ data }: { data: ReturnType<typeof computeWeeklyNps> 
           <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" />
           Evolução do NPS
         </CardTitle>
-        <CardDescription>NPS por semana de resposta. Semanas sem resposta ficam em branco.</CardDescription>
+        <CardDescription>NPS por semana de resposta, no fuso da unidade, entre os convites do período. Inclui respostas recebidas depois do intervalo; semanas sem resposta ficam em branco.</CardDescription>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={220}>
@@ -734,15 +701,18 @@ function VisitWeekdayCard({ data }: { data: ReturnType<typeof computeVisitWeekda
   );
 }
 
-function SummaryTab({ summary, reviews, isLoading, fromDate, toDate, onSeeDetractors }: {
+function SummaryTab({ summary, reviews, attentionReviews, attentionError, isLoading, fromDate, toDate, timeZone, onSeeRecords }: {
   summary: NpsSummary;
   reviews: SubmittedReview[];
+  attentionReviews: SubmittedReview[];
+  attentionError: boolean;
   isLoading: boolean;
   fromDate: string;
   toDate: string;
-  onSeeDetractors: () => void;
+  timeZone: string;
+  onSeeRecords: (filter: RecordFilter) => void;
 }) {
-  const weekly = useMemo(() => computeWeeklyNps(reviews, fromDate, toDate), [reviews, fromDate, toDate]);
+  const weekly = useMemo(() => computeWeeklyNps(reviews, fromDate, toDate, timeZone), [reviews, fromDate, toDate, timeZone]);
   const weekdays = useMemo(
     () => computeVisitWeekdayNps(reviews.map((review) => ({ ...review, visit_date: review.reservations?.date ?? null }))),
     [reviews],
@@ -769,17 +739,40 @@ function SummaryTab({ summary, reviews, isLoading, fromDate, toDate, onSeeDetrac
   const enoughForTrends = summary.total_submitted >= MIN_RESPONSES_FOR_TRENDS;
   const showEvolution = enoughForTrends && weekly.filter((point) => point.nps !== null).length >= 2;
   const showWeekdays = enoughForTrends && weekdays.length >= 2;
+  const datedReplies = reviews.filter(review => review.submitted_at && Number.isFinite(new Date(review.submitted_at).getTime())).length;
+  const datedVisits = reviews.filter(review => review.reservations?.date).length;
 
   return (
     <div className="space-y-4">
+      <section aria-label="Leituras do período" className="grid gap-3 rounded-xl border border-border bg-muted/20 p-4 sm:grid-cols-3">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Cobertura completa</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">{formatInteger(summary.total_submitted)} respostas de {formatInteger(summary.total_invited)} convites ({percentFormatter.format(summary.response_rate)}%). Todos os convites do recorte foram lidos.</p>
+          <Button variant="link" size="sm" className="h-auto px-0 text-foreground" onClick={() => onSeeRecords('all')}>Ver convites</Button>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">{summary.total_submitted < MIN_RESPONSES_FOR_TRENDS ? 'Amostra pequena' : 'Composição das respostas'}</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">{formatInteger(summary.promoters)} promotores, {formatInteger(summary.passives)} neutros e {formatInteger(summary.detractors)} detratores. {summary.total_submitted < MIN_RESPONSES_FOR_TRENDS ? 'Poucas respostas; evite tratar a variação como tendência.' : 'A distribuição descreve quem respondeu, não todos os visitantes.'}</p>
+          <Button variant="link" size="sm" className="h-auto px-0 text-foreground" onClick={() => onSeeRecords('detractor')}>Ver detratores</Button>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Convites sem resposta</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">{formatInteger(summary.total_pending)} aguardando e {formatInteger(summary.total_expired)} expirados, entre os convites deste período.</p>
+          <Button variant="link" size="sm" className="h-auto px-0 text-foreground" onClick={() => onSeeRecords('pending')}>Ver aguardando</Button>
+        </div>
+      </section>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Base dos gráficos: {formatInteger(reviews.length)} respostas aos convites selecionados.
+        {' '}Evolução: {formatInteger(datedReplies)} com data de resposta; dia da visita: {formatInteger(datedVisits)} com data de visita disponível.
+      </p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <NpsCompositionCard summary={summary} />
         <CategoryRatingsCard reviews={reviews} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <AttentionCard reviews={reviews} onSeeAll={onSeeDetractors} />
-        <CommentsCard reviews={reviews} />
+        {attentionError ? <Alert variant="destructive"><AlertTitle>Contatos indisponíveis</AlertTitle><AlertDescription>Os indicadores estão completos, mas não foi possível carregar os contatos dos detratores. Consulte a aba Registros.</AlertDescription></Alert> : <AttentionCard reviews={attentionReviews} total={summary.detractors} onSeeAll={() => onSeeRecords('detractor')} />}
+        <CommentsCard reviews={reviews} timeZone={timeZone} />
       </div>
 
       {(showEvolution || showWeekdays) ? (
@@ -801,7 +794,7 @@ function SummaryTab({ summary, reviews, isLoading, fromDate, toDate, onSeeDetrac
 
 const RECORDS_GRID = 'lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.8fr)_minmax(0,0.85fr)_minmax(0,1.35fr)_minmax(0,2fr)]';
 
-function RecordStatus({ record }: { record: ReviewRecord }) {
+function RecordStatus({ record, timeZone }: { record: ReviewRecord; timeZone: string }) {
   const status = getEffectiveReviewStatus(record.status, record.expires_at);
 
   if (status === 'submitted') {
@@ -815,13 +808,13 @@ function RecordStatus({ record }: { record: ReviewRecord }) {
           Expirado
         </span>
         {record.expires_at && (
-          <p className="text-[11px] text-muted-foreground">venceu em {format(new Date(record.expires_at), 'dd/MM')}</p>
+          <p className="text-[11px] text-muted-foreground">venceu em {formatShortDate(record.expires_at, timeZone)}</p>
         )}
       </div>
     );
   }
 
-  const daysLeft = record.expires_at ? differenceInCalendarDays(new Date(record.expires_at), new Date()) : null;
+  const daysLeft = record.expires_at ? differenceInCalendarDays(new Date(getReportDateOnlyInTimeZone(record.expires_at, timeZone) + 'T12:00:00'), new Date(getReportDateOnlyInTimeZone(new Date(), timeZone) + 'T12:00:00')) : null;
   return (
     <div className="space-y-0.5">
       <span className="inline-flex rounded-full border border-warning/35 bg-warning/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
@@ -836,7 +829,7 @@ function RecordStatus({ record }: { record: ReviewRecord }) {
   );
 }
 
-function RecordRow({ record }: { record: ReviewRecord }) {
+function RecordRow({ record, timeZone }: { record: ReviewRecord; timeZone: string }) {
   const name = record.reservations?.guest_name?.trim() || 'Cliente';
   const phone = record.reservations?.guest_phone ?? null;
   const visitDate = formatVisitDate(record.reservations?.date);
@@ -848,7 +841,7 @@ function RecordRow({ record }: { record: ReviewRecord }) {
       <div className="min-w-0 space-y-1">
         <div className="flex items-start justify-between gap-2 lg:block">
           <p className="truncate text-sm font-medium text-foreground">{name}</p>
-          <div className="lg:hidden"><RecordStatus record={record} /></div>
+          <div className="lg:hidden"><RecordStatus record={record} timeZone={timeZone} /></div>
         </div>
         {phone && <PhoneWhatsAppLink phone={phone} className="text-xs text-muted-foreground" />}
       </div>
@@ -858,12 +851,12 @@ function RecordRow({ record }: { record: ReviewRecord }) {
         <span className="text-foreground">{visitDate ?? '—'}</span>
         <p className="text-[11px] text-muted-foreground">
           {submitted && record.submitted_at
-            ? `respondeu em ${format(new Date(record.submitted_at), 'dd/MM')}`
-            : `convite em ${format(new Date(record.invited_at), 'dd/MM')}`}
+            ? `respondeu em ${formatShortDate(record.submitted_at, timeZone)}`
+            : `convite em ${formatShortDate(record.invited_at, timeZone)}`}
         </p>
       </div>
 
-      <div className="hidden lg:block"><RecordStatus record={record} /></div>
+      <div className="hidden lg:block"><RecordStatus record={record} timeZone={timeZone} /></div>
 
       {/* Células vazias somem no celular para não abrir buracos entre as linhas. */}
       <div className={cn('min-w-0', !hasRatings && 'hidden lg:block')}>
@@ -879,11 +872,11 @@ function RecordRow({ record }: { record: ReviewRecord }) {
   );
 }
 
-function RecordsTab({ companyId, summary, fromDate, toDate, filter, onFilterChange }: {
+function RecordsTab({ companyId, summary, timestampRange, timeZone, filter, onFilterChange }: {
   companyId: string;
   summary: NpsSummary;
-  fromDate: string;
-  toDate: string;
+  timestampRange: ReportTimestampRange;
+  timeZone: string;
   filter: RecordFilter;
   onFilterChange: (filter: RecordFilter) => void;
 }) {
@@ -901,7 +894,7 @@ function RecordsTab({ companyId, summary, fromDate, toDate, filter, onFilterChan
   const ratingKey = activeRatingFilters.map(({ field }) => `${field}:${ratingFilters[field]}`).join('|');
 
   const recordsQuery = useInfiniteQuery({
-    queryKey: ['nps-records', companyId, fromDate, toDate, filter, search, ratingKey],
+    queryKey: ['nps-records', companyId, timestampRange.from, timestampRange.toExclusive, filter, search, ratingKey],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const nowIso = new Date().toISOString();
@@ -918,8 +911,8 @@ function RecordsTab({ companyId, summary, fromDate, toDate, filter, onFilterChan
           { count: 'exact' },
         )
         .eq('company_id', companyId)
-        .gte('invited_at', `${fromDate}T00:00:00`)
-        .lte('invited_at', `${toDate}T23:59:59`);
+        .gte('invited_at', timestampRange.from)
+        .lt('invited_at', timestampRange.toExclusive);
 
       if (filter === 'submitted') {
         query = query.eq('status', 'submitted');
@@ -954,7 +947,7 @@ function RecordsTab({ companyId, summary, fromDate, toDate, filter, onFilterChan
     },
     getNextPageParam: (lastPage, pages) => {
       const loaded = pages.reduce((acc, page) => acc + page.rows.length, 0);
-      return loaded < lastPage.total ? pages.length : undefined;
+      return lastPage.rows.length > 0 && loaded < lastPage.total ? pages.length : undefined;
     },
   });
 
@@ -1097,7 +1090,7 @@ function RecordsTab({ companyId, summary, fromDate, toDate, filter, onFilterChan
               <span>Comentário</span>
             </div>
             <ul className="divide-y divide-border">
-              {records.map((record) => <RecordRow key={record.id} record={record} />)}
+              {records.map((record) => <RecordRow key={record.id} record={record} timeZone={timeZone} />)}
             </ul>
             {recordsQuery.hasNextPage && (
               <div className="pt-3">
@@ -1139,11 +1132,27 @@ export default function CompanyNpsReports() {
   const companyContext = useMaybeCompanySlug();
   const companyId = companyContext?.companyId;
   const slug = companyContext?.slug;
+  const timeZone = companyContext?.companyTimeZone ?? 'America/Fortaleza';
+  const timeZoneReady = companyContext?.companyTimeZoneResolved === true;
   const queryClient = useQueryClient();
-
-  const [period, setPeriod] = useState('30');
-  const [activeTab, setActiveTab] = useState<'resumo' | 'registros'>('resumo');
-  const [recordFilter, setRecordFilter] = useState<RecordFilter>('submitted');
+  const filters = useReportFilters({ timeZone, defaultPreset: 'last_30_days' });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('nps_view') === 'registros' ? 'registros' : 'resumo';
+  const candidateFilter = searchParams.get('nps_status');
+  const recordFilter: RecordFilter = ['submitted', 'promoter', 'passive', 'detractor', 'pending', 'expired', 'all'].includes(candidateFilter ?? '')
+    ? candidateFilter as RecordFilter : 'submitted';
+  const setActiveTab = (tab: string) => setSearchParams(current => {
+    const next = new URLSearchParams(current);
+    if (tab === 'registros') next.set('nps_view', tab);
+    else next.delete('nps_view');
+    return next;
+  }, { replace: true });
+  const setRecordFilter = (filter: RecordFilter) => setSearchParams(current => {
+    const next = new URLSearchParams(current);
+    if (filter === 'submitted') next.delete('nps_status');
+    else next.set('nps_status', filter);
+    return next;
+  }, { replace: true });
   const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
 
   const lowResponseDismissKey = `nps-low-response-alert-dismissed:${companyId ?? ''}`;
@@ -1152,12 +1161,13 @@ export default function CompanyNpsReports() {
     setLowResponseDismissed(readDismissed(lowResponseDismissKey));
   }, [lowResponseDismissKey]);
 
-  const days = Number(period);
-  const fromDate = format(subDays(new Date(), days), 'yyyy-MM-dd');
-  const toDate = format(new Date(), 'yyyy-MM-dd');
-  const prevFromDate = format(subDays(new Date(), days * 2), 'yyyy-MM-dd');
-  const prevToDate = format(subDays(new Date(), days + 1), 'yyyy-MM-dd');
-  const comparisonLabel = `${days} dias anteriores`;
+  const fromDate = filters.dateOnlyRange.from;
+  const toDate = filters.dateOnlyRange.to;
+  const timestampRange = useMemo(() => getReportTimestampRange(filters.dateOnlyRange, timeZone), [fromDate, toDate, timeZone]);
+  const comparisonTimestampRange = useMemo(() => filters.comparisonDateOnlyRange
+    ? getReportTimestampRange(filters.comparisonDateOnlyRange, timeZone) : timestampRange,
+  [filters.comparisonDateOnlyRange?.from, filters.comparisonDateOnlyRange?.to, timestampRange, timeZone]);
+  const comparisonLabel = `${getReportPeriodDays(filters.range)} dias anteriores`;
 
   const { data: npsConfig, isLoading: npsConfigLoading } = useCompanyNpsActivation(companyId);
   const npsActive = npsConfig?.enabled ?? false;
@@ -1186,47 +1196,62 @@ export default function CompanyNpsReports() {
     },
   });
 
-  function makeSummaryQuery(from: string, to: string) {
+  function makeCohortQuery(bounds: ReportTimestampRange, enabled = true) {
     return {
-      queryKey: ['nps-summary', companyId, from, to],
-      queryFn: async () => {
-        const { data, error } = await (supabase as any).rpc('get_company_nps_summary', {
-          _company_id: companyId!, _from: from, _to: to,
+      queryKey: ['nps-complete-cohort', companyId, bounds.from, bounds.toExclusive],
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        const rows = await loadCompleteNpsCohort(async (offset, size) => {
+          if (signal.aborted) throw new Error('Leitura cancelada.');
+          let query = (supabase as any).from('reservation_reviews')
+            .select('id, status, submitted_at, invited_at, expires_at, recommend_score, nps_category, ambiance_rating, food_rating, service_rating, return_score, comment, reservations!reservation_id(date)', { count: 'exact' })
+            .eq('company_id', companyId!)
+            .gte('invited_at', bounds.from)
+            .lt('invited_at', bounds.toExclusive)
+            .order('invited_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(offset, offset + size - 1);
+          if (typeof query.abortSignal === 'function') query = query.abortSignal(signal);
+          const { data, error, count } = await query;
+          if (error) throw error;
+          return { rows: (data ?? []) as NpsCohortRow[], total: count ?? null };
         });
-        if (error) throw error;
-        const rows = data as NpsSummary[];
-        return rows.length > 0 ? rows[0] : null;
+        if (signal.aborted) throw new Error('Leitura cancelada.');
+        return buildNpsCohortReport(rows);
       },
-      enabled: !!companyId,
+      enabled: enabled && !!companyId && timeZoneReady && !filters.rangeError,
+      staleTime: 60_000,
+      refetchInterval: 60_000,
+      refetchOnWindowFocus: false,
+      retry: false,
     };
   }
 
-  const summaryQuery = useQuery<NpsSummary | null>(makeSummaryQuery(fromDate, toDate));
-  const { data: prevSummary } = useQuery<NpsSummary | null>(makeSummaryQuery(prevFromDate, prevToDate));
-  const summary = summaryQuery.data ?? null;
+  const summaryQuery = useQuery(makeCohortQuery(timestampRange));
+  const comparisonQuery = useQuery(makeCohortQuery(comparisonTimestampRange, filters.comparisonEnabled));
+  const summary = summaryQuery.data?.summary ?? null;
+  const prevSummary = filters.comparisonEnabled && !comparisonQuery.isError ? comparisonQuery.data?.summary : null;
+  const submittedReviews = summaryQuery.data?.submitted ?? [];
 
-  // Mesmo recorte do resumo (convites do período), para os cartões baterem com
-  // os indicadores do topo.
-  const { data: submittedReviews = [], isLoading: reviewsLoading } = useQuery<SubmittedReview[]>({
-    queryKey: ['nps-submitted', companyId, fromDate, toDate],
+  // Personal contact fields are restricted to the small actionable list. The
+  // complete analysis query above does not read names or phone numbers.
+  const attentionQuery = useQuery<SubmittedReview[]>({
+    queryKey: ['nps-attention', companyId, timestampRange.from, timestampRange.toExclusive],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from('reservation_reviews')
-        .select(`
-          id, submitted_at, recommend_score, nps_category, comment,
-          ambiance_rating, food_rating, service_rating,
-          reservations!reservation_id (guest_name, guest_phone, date)
-        `)
+      const { data, error } = await (supabase as any).from('reservation_reviews')
+        .select('id, submitted_at, recommend_score, nps_category, comment, ambiance_rating, food_rating, service_rating, reservations!reservation_id(guest_name, guest_phone, date)')
         .eq('company_id', companyId!)
         .eq('status', 'submitted')
-        .gte('invited_at', `${fromDate}T00:00:00`)
-        .lte('invited_at', `${toDate}T23:59:59`)
+        .eq('nps_category', 'detractor')
+        .gte('invited_at', timestampRange.from)
+        .lt('invited_at', timestampRange.toExclusive)
         .order('submitted_at', { ascending: false })
-        .limit(1000);
+        .order('id', { ascending: false })
+        .limit(ATTENTION_LIMIT);
       if (error) throw error;
       return (data ?? []) as SubmittedReview[];
     },
-    enabled: !!companyId && !!summary && summary.total_submitted > 0,
+    enabled: !!companyId && timeZoneReady && !!summary && summary.detractors > 0 && !filters.rangeError,
+    refetchOnWindowFocus: false,
   });
 
   const hasPrevResponses = !!prevSummary && prevSummary.total_submitted > 0;
@@ -1251,9 +1276,13 @@ export default function CompanyNpsReports() {
     setLowResponseDismissed(true);
   };
 
-  const seeDetractors = () => {
-    setRecordFilter('detractor');
-    setActiveTab('registros');
+  const seeRecords = (filter: RecordFilter) => {
+    setSearchParams(current => {
+      const next = new URLSearchParams(current);
+      next.set('nps_view', 'registros');
+      next.set('nps_status', filter);
+      return next;
+    }, { replace: true });
   };
 
   const headerActions = (
@@ -1270,14 +1299,6 @@ export default function CompanyNpsReports() {
           Ativar avaliações
         </Button>
       )}
-      <Select value={period} onValueChange={setPeriod}>
-        <SelectTrigger className="h-9 w-[170px]" aria-label="Período">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PERIOD_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="icon" className="h-9 w-9" aria-label="Mais opções de avaliações">
@@ -1326,7 +1347,10 @@ export default function CompanyNpsReports() {
       icon={MessageSquareQuote}
       eyebrow="Pós-visita"
       actions={headerActions}
-      ariaBusy={summaryQuery.isFetching}
+      updatedAt={summaryQuery.data?.generatedAt}
+      isRefreshing={summaryQuery.isFetching && !!summary}
+      filters={<ReportFilterBar filters={filters} hideGranularity isRefreshing={summaryQuery.isFetching} onRefresh={() => { void summaryQuery.refetch(); if (filters.comparisonEnabled) void comparisonQuery.refetch(); void attentionQuery.refetch(); }} />}
+      ariaBusy={!timeZoneReady || summaryQuery.isFetching}
     >
       {!npsConfigLoading && !npsActive && (
         <Alert className="border-warning/35 bg-warning/5">
@@ -1338,7 +1362,9 @@ export default function CompanyNpsReports() {
         </Alert>
       )}
 
-      {summaryQuery.isLoading || !companyId ? (
+      {filters.rangeError ? (
+        <Alert variant="destructive"><AlertTitle>Período inválido</AlertTitle><AlertDescription>{filters.rangeError}</AlertDescription></Alert>
+      ) : summaryQuery.isPending || !companyId || !timeZoneReady ? (
         <PageSkeleton />
       ) : summaryQuery.isError ? (
         <Alert variant="destructive">
@@ -1361,6 +1387,13 @@ export default function CompanyNpsReports() {
         </div>
       ) : (
         <>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Base: convites gerados de {formatVisitDate(fromDate)} a {formatVisitDate(toDate)} no fuso {timeZone}.
+            {' '}{formatInteger(summary.total_invited)} convites lidos integralmente; respostas recebidas até a última atualização.
+          </p>
+          {filters.comparisonEnabled && comparisonQuery.isError && (
+            <Alert variant="destructive"><AlertTitle>Comparação indisponível</AlertTitle><AlertDescription>A leitura do período anterior falhou. As variações foram omitidas; atualize o relatório para tentar novamente.</AlertDescription></Alert>
+          )}
           {showLowResponseAlert && (
             <Alert className="border-warning/35 bg-warning/5">
               <AlertCircle className="h-4 w-4" aria-hidden="true" />
@@ -1385,6 +1418,7 @@ export default function CompanyNpsReports() {
           <ReportKpiStrip aria-label="Indicadores de avaliação">
             <ReportKpiTile
               label="NPS"
+              onClick={() => seeRecords('submitted')}
               icon={TrendingUp}
               value={summary.total_submitted > 0
                 ? <span className={cn(npsZone && TONE_TEXT[npsZone.tone])}>{formatNpsScore(summary.nps_score)}</span>
@@ -1409,6 +1443,7 @@ export default function CompanyNpsReports() {
             />
             <ReportKpiTile
               label="Respostas"
+              onClick={() => seeRecords('submitted')}
               icon={Users}
               value={formatInteger(summary.total_submitted)}
               comparison={prevSummary && prevSummary.total_invited > 0
@@ -1426,6 +1461,7 @@ export default function CompanyNpsReports() {
             />
             <ReportKpiTile
               label="Nota média"
+              onClick={() => seeRecords('submitted')}
               icon={Star}
               value={averageRating !== null
                 ? <>{formatDecimal(averageRating)}<span className="ml-0.5 text-base font-normal text-muted-foreground">/5</span></>
@@ -1441,10 +1477,11 @@ export default function CompanyNpsReports() {
                 )
                 : null}
               detail="Comida, atendimento e ambiente"
-              explanation="Média das notas de 1 a 5 estrelas das categorias perguntadas na avaliação."
+              explanation="Média das médias de comida, atendimento e ambiente, com o mesmo peso para cada categoria disponível. Notas ausentes ficam fora da média de sua categoria."
             />
             <ReportKpiTile
               label="Detratores"
+              onClick={() => seeRecords('detractor')}
               icon={ThumbsDown}
               value={formatInteger(summary.detractors)}
               comparison={hasPrevResponses
@@ -1462,7 +1499,7 @@ export default function CompanyNpsReports() {
             />
           </ReportKpiStrip>
 
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'resumo' | 'registros')}>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="resumo">Resumo</TabsTrigger>
               <TabsTrigger value="registros">Registros</TabsTrigger>
@@ -1472,10 +1509,13 @@ export default function CompanyNpsReports() {
               <SummaryTab
                 summary={summary}
                 reviews={submittedReviews}
-                isLoading={reviewsLoading}
+                attentionReviews={attentionQuery.data ?? []}
+                attentionError={attentionQuery.isError}
+                isLoading={summaryQuery.isPending}
                 fromDate={fromDate}
                 toDate={toDate}
-                onSeeDetractors={seeDetractors}
+                timeZone={timeZone}
+                onSeeRecords={seeRecords}
               />
             </TabsContent>
 
@@ -1483,8 +1523,8 @@ export default function CompanyNpsReports() {
               <RecordsTab
                 companyId={companyId}
                 summary={summary}
-                fromDate={fromDate}
-                toDate={toDate}
+                timestampRange={timestampRange}
+                timeZone={timeZone}
                 filter={recordFilter}
                 onFilterChange={setRecordFilter}
               />

@@ -1,4 +1,7 @@
+import { normalizePhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient } from "../_shared/internal-auth.ts";
+import { getGlobalReservationAsaasConfig } from "../_shared/reservation-asaas-config.ts";
+import { isPaymentRequirementDate, publicPaymentRequirement } from "../_shared/reservation-payment-requirement.ts";
 import {
   buildPaymentUrl,
   corsHeaders,
@@ -62,10 +65,22 @@ Deno.serve(async (req) => {
     const reservation = body.reservation ?? {};
     const dryRun = body.dry_run === true;
     const completeWithoutPayment = body.complete_without_payment === true;
+    const preview = body.action === "preview";
+    const reservationDate = preview ? body.date : reservation.date;
 
     if (!companyId) return jsonResponse({ error: "Empresa obrigatoria" }, 400);
-    if (!reservation.date || !reservation.time || !reservation.guest_name || !reservation.guest_phone) {
+    if (preview && !isPaymentRequirementDate(reservationDate)) {
+      return jsonResponse({ error: "Data da reserva inválida." }, 400);
+    }
+    if (body.action !== undefined && !preview) return jsonResponse({ error: "Ação inválida." }, 400);
+    if (!preview && (!reservation.date || !reservation.time || !reservation.guest_name || !reservation.guest_phone)) {
       return jsonResponse({ error: "Dados da reserva incompletos" }, 400);
+    }
+
+    if (!preview) {
+      const guestPhone = normalizePhoneE164(String(reservation.guest_phone_e164 ?? reservation.guest_phone ?? ""));
+      if (!guestPhone) return jsonResponse({ error: "Telefone invalido para o pais selecionado" }, 400);
+      reservation.guest_phone = guestPhone;
     }
 
     const supabaseAdmin = createSupabaseAdminClient();
@@ -76,6 +91,7 @@ Deno.serve(async (req) => {
     });
     if (featureError) throw new Error(featureError.message);
     if (featureEnabled !== true) {
+      if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, false, "feature_disabled"));
       if (!dryRun && completeWithoutPayment) {
         return await createConfirmedReservation(
           supabaseAdmin,
@@ -89,18 +105,19 @@ Deno.serve(async (req) => {
 
     const { data: rule, error: ruleError } = await supabaseAdmin
       .from("reservation_payment_rules")
-      .select("*")
+      .select(preview ? "id" : "*")
       .eq("company_id", companyId)
       .eq("enabled", true)
       .is("archived_at", null)
-      .lte("date_start", reservation.date)
-      .gte("date_end", reservation.date)
+      .lte("date_start", reservationDate)
+      .gte("date_end", reservationDate)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (ruleError) throw new Error(ruleError.message);
     if (!rule) {
+      if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, false, "no_rule"));
       if (!dryRun && completeWithoutPayment) {
         return await createConfirmedReservation(
           supabaseAdmin,
@@ -112,15 +129,46 @@ Deno.serve(async (req) => {
       return jsonResponse({ requires_payment: false, reason: "no_rule" });
     }
 
-    const { data: asaasConfig, error: asaasConfigError } = await supabaseAdmin
-      .from("company_asaas_configs")
-      .select("company_id, status")
-      .eq("company_id", companyId)
-      .maybeSingle();
+    // The preview only changes the CTA label. It neither loads credentials nor
+    // claims that a reservation/payment has been created or is ready to charge.
+    if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, true));
 
-    if (asaasConfigError) throw new Error(asaasConfigError.message);
-    if (!asaasConfig || asaasConfig.status !== "configured") {
-      return jsonResponse({ error: "Integracao Asaas nao configurada para esta empresa" }, 409);
+    const asaasConfig = await getGlobalReservationAsaasConfig(supabaseAdmin);
+    let paymentAccountMetadata: Record<string, unknown> | null = null;
+    if (asaasConfig?.status === "configured") {
+      paymentAccountMetadata = {
+        asaas_account_scope: "platform",
+        asaas_account_id: asaasConfig.provider_account_id,
+        asaas_environment: asaasConfig.api_environment,
+      };
+    } else if (!asaasConfig?.provider_account_id && !asaasConfig?.api_token_encrypted) {
+      // Keep live company accounts working until the superadmin initializes
+      // the central account. Once central is initialized, never silently fall
+      // back to another receiving account after a validation/provider failure.
+      const { data: legacyConfig, error: legacyError } = await supabaseAdmin
+        .from("company_asaas_configs").select("status").eq("company_id", companyId).maybeSingle();
+      if (legacyError) throw new Error(legacyError.message);
+      if (legacyConfig?.status === "configured") {
+        paymentAccountMetadata = { asaas_account_scope: "company" };
+      }
+    }
+    if (!paymentAccountMetadata) {
+      return jsonResponse({ error: "Integracao central de pagamentos nao configurada. Fale com o suporte." }, 409);
+    }
+
+    if (paymentAccountMetadata.asaas_account_scope === "platform"
+      && paymentAccountMetadata.asaas_environment === "production") {
+      // Never accept new central funds without a frozen commercial agreement
+      // and a payable record. The INSERT trigger rechecks this atomically too.
+      const { data: terms, error: termsError } = await supabaseAdmin.from("reservation_settlement_terms")
+        .select("id,enabled").eq("company_id", companyId).lte("effective_at", new Date().toISOString())
+        .order("effective_at", { ascending: false }).order("created_at", { ascending: false })
+        .order("id", { ascending: false }).limit(1).maybeSingle();
+      if (termsError) throw new Error(termsError.message);
+      if (!terms?.enabled) return jsonResponse({
+        error: "Pagamento antecipado temporariamente indisponivel. Fale com o estabelecimento.",
+        code: "SETTLEMENT_TERMS_REQUIRED",
+      }, 409);
     }
 
     if (dryRun) {
@@ -190,6 +238,9 @@ Deno.serve(async (req) => {
     const paymentToken = crypto.randomUUID().replaceAll("-", "");
     const ruleSnapshot = {
       ...rule,
+      // New reservation card payments are always paid in one installment,
+      // including when a legacy rule still carries an older installment cap.
+      max_credit_card_installments: rule.credit_card_enabled ? 1 : null,
       base_amount_total: baseAmount,
       pix_amount_total: rule.pix_enabled ? calculateRuleAmount(rule, reservationData.party_size, "pix_amount") : null,
       credit_card_amount_total: rule.credit_card_enabled
@@ -209,6 +260,7 @@ Deno.serve(async (req) => {
         status: "awaiting_method",
         expires_at: expiresAt,
         metadata: {
+          ...paymentAccountMetadata,
           tracking_event_sent_at: now.toISOString(),
           tracking_rule: "conversion_on_pending_payment_creation",
         },
@@ -216,7 +268,15 @@ Deno.serve(async (req) => {
       .select("*")
       .single();
 
-    if (paymentError) throw new Error(paymentError.message);
+    if (paymentError) {
+      // Do not leave capacity held forever when the payment record could not be
+      // persisted. No provider charge has been created at this stage.
+      const { error: cleanupError } = await supabaseAdmin.from("reservations")
+        .update({ status: "payment_cancelled", updated_at: new Date().toISOString() })
+        .eq("id", createdReservation.id).eq("company_id", companyId).eq("status", "pending_payment");
+      if (cleanupError) console.error("Failed to release reservation after payment persistence error", createdReservation.id);
+      throw new Error(paymentError.message);
+    }
 
     await recordPaymentEvent(supabaseAdmin, payment, "payment_created_awaiting_method", {
       reservation_id: createdReservation.id,

@@ -46,6 +46,7 @@ import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import { ReservationStatusBadge, ReservationTableBadge } from '@/components/StatusBadge';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
 import ReservationOperationalFilterControl from '@/components/ReservationOperationalFilterControl';
+import QueryFeedback from '@/components/QueryFeedback';
 import {
   downloadSpreadsheet,
   formatDateRangeLabel,
@@ -60,6 +61,12 @@ import {
 import { getReservationTableBadge, type ReservationTableRef } from '@/lib/reservation-table-badge';
 import { fetchAllSupabasePages } from '@/lib/supabase-pagination';
 import { getReservationsOverviewIntensity } from '@/lib/reservations-overview';
+import {
+  fetchReservationHistoryPage,
+  RESERVATION_HISTORY_PAGE_SIZE,
+  RESERVATION_HISTORY_SEARCH_MAX_LENGTH,
+  type ReservationHistoryFilters,
+} from '@/lib/reservation-history';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
@@ -198,130 +205,6 @@ function ReservationListLoadingBar({ className }: { className?: string }) {
   );
 }
 
-function ReservationListLoadingState() {
-  return (
-    <div className="space-y-6" aria-busy="true">
-      <p className="sr-only" role="status" aria-live="polite">
-        Carregando reservas…
-      </p>
-
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">Lista de reservas</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Pesquise, filtre e gerencie o histórico da unidade
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3" aria-hidden="true">
-          <ReservationListLoadingBar className="h-10 w-40 rounded-lg" />
-          <ReservationListLoadingBar className="h-10 w-32 rounded-lg" />
-        </div>
-      </div>
-
-      <section className="space-y-4" aria-label="Carregando lista de reservas">
-        <div
-          className="flex flex-col gap-3 xl:flex-row xl:items-center"
-          aria-hidden="true"
-        >
-          <ReservationListLoadingBar className="h-10 min-w-0 flex-1 rounded-lg" />
-          <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-64" />
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-[170px]" />
-            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-[220px]" />
-            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-40" />
-            <ReservationListLoadingBar className="h-10 w-full rounded-lg sm:w-48" />
-          </div>
-        </div>
-
-        <div
-          className="flex h-12 items-center gap-4 rounded-xl border border-border bg-card px-4 shadow-sm"
-          aria-hidden="true"
-        >
-          <ReservationListLoadingBar className="h-3.5 w-28" />
-          <ReservationListLoadingBar className="h-3.5 w-24" />
-          <ReservationListLoadingBar className="hidden h-3.5 w-32 sm:block" />
-        </div>
-
-        <Card
-          className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
-          aria-hidden="true"
-        >
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-muted/55">
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Reserva
-                  </TableHead>
-                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Criada em
-                  </TableHead>
-                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Cliente
-                  </TableHead>
-                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:table-cell">
-                    Pessoas
-                  </TableHead>
-                  <TableHead className="hidden h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:table-cell">
-                    Ocasião
-                  </TableHead>
-                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Status
-                  </TableHead>
-                  <TableHead className="h-12 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Ações
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {Array.from({ length: 8 }).map((_, index) => (
-                  <TableRow key={index} className="border-border bg-card hover:bg-card">
-                    <TableCell className="px-4 py-3">
-                      <div className="space-y-2">
-                        <ReservationListLoadingBar className="h-3.5 w-20" />
-                        <ReservationListLoadingBar className="h-2.5 w-12" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="px-4 py-3">
-                      <div className="space-y-2">
-                        <ReservationListLoadingBar className="h-3.5 w-20" />
-                        <ReservationListLoadingBar className="h-2.5 w-12" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="px-4 py-3">
-                      <div className="space-y-2">
-                        <ReservationListLoadingBar className={cn('h-3.5', index % 3 === 0 ? 'w-36' : 'w-28')} />
-                        <ReservationListLoadingBar className="h-2.5 w-24" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden px-4 py-3 sm:table-cell">
-                      <ReservationListLoadingBar className="mx-auto h-3.5 w-6" />
-                    </TableCell>
-                    <TableCell className="hidden px-4 py-3 lg:table-cell">
-                      <ReservationListLoadingBar className="h-3.5 w-20" />
-                    </TableCell>
-                    <TableCell className="px-4 py-3">
-                      <ReservationListLoadingBar className="mx-auto h-6 w-20 rounded-full" />
-                    </TableCell>
-                    <TableCell className="px-4 py-3">
-                      <div className="flex justify-center gap-1.5">
-                        <ReservationListLoadingBar className="h-8 w-20 rounded-lg" />
-                        <ReservationListLoadingBar className="h-8 w-8 rounded-lg" />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      </section>
-    </div>
-  );
-}
 
 interface ReservationsProps {
   view: ReservationsView;
@@ -369,8 +252,22 @@ export default function Reservations({ view }: ReservationsProps) {
   const [exportStatuses, setExportStatuses] = useState<ReservationStatus[]>([]);
   const [exportSearchTriggered, setExportSearchTriggered] = useState(false);
   const [exportSpreadsheetPending, setExportSpreadsheetPending] = useState(false);
-  const [listPage, setListPage] = useState(1);
-  const LIST_PAGE_SIZE = 15;
+  const [listPagination, setListPagination] = useState({ scope: '', page: 1 });
+  const [settledSearch, setSettledSearch] = useState({ companyId, value: '' });
+  const debouncedSearch = settledSearch.companyId === companyId ? settledSearch.value : search;
+  const searchIsSettling = view === 'list' && search !== debouncedSearch;
+  const LIST_PAGE_SIZE = RESERVATION_HISTORY_PAGE_SIZE;
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledSearch({ companyId, value: search }), 300);
+    return () => clearTimeout(timer);
+  }, [companyId, search]);
+  const listFilters = useMemo<ReservationHistoryFilters>(() => ({
+    search: debouncedSearch, operationalFilter, status: statusFilter, entryMethod: entryMethodFilter,
+    dateFilterMode, range: reservationListRange,
+  }), [debouncedSearch, operationalFilter, statusFilter, entryMethodFilter, dateFilterMode, reservationListRange]);
+  const listScope = JSON.stringify([companyId, listFilters]);
+  const listPage = listPagination.scope === listScope ? listPagination.page : 1;
+  const setListPage = (page: number) => setListPagination({ scope: listScope, page });
   const canDeleteReservations = hasPermission('reservations_delete');
   const overviewDateRange = getReservationsOverviewDateRange(calendarRangeMode);
 
@@ -388,7 +285,7 @@ export default function Reservations({ view }: ReservationsProps) {
     qc.invalidateQueries({ queryKey: ['reservation-event-history'] });
   };
 
-  const { data: reservations = [], isLoading } = useQuery({
+  const overviewReservationsQuery = useQuery({
     queryKey: [
       'reservations',
       companyId,
@@ -422,9 +319,31 @@ export default function Reservations({ view }: ReservationsProps) {
         status: normalizeReservationStatus(reservation.status),
       }));
     },
-    enabled: !!companyId,
+    enabled: !!companyId && view === 'overview',
     refetchInterval: 30000,
   });
+  const historyQuery = useQuery({
+    queryKey: ['reservations', companyId, 'list', listScope, listPage],
+    queryFn: ({ signal }) => fetchReservationHistoryPage(companyId!, listPage, listFilters, signal),
+    enabled: !!companyId && view === 'list',
+    refetchInterval: 30000,
+  });
+  const reservationsQuery = view === 'overview' ? overviewReservationsQuery : historyQuery;
+  const historyPage = !searchIsSettling ? historyQuery.data : undefined;
+  const hasListData = historyPage !== undefined;
+  const listPending = searchIsSettling || (!historyPage && !historyQuery.isError);
+  const listFeedbackQuery = searchIsSettling
+    ? { ...historyQuery, data: undefined, isError: false, isPending: true, isFetching: true, dataUpdatedAt: 0 }
+    : historyQuery;
+  const reservations: Reservation[] = view === 'overview' ? overviewReservationsQuery.data ?? [] : historyPage?.rows ?? [];
+  useEffect(() => {
+    if (view !== 'list' || searchIsSettling || !historyQuery.data || historyQuery.data.page === listPage) return;
+    const effectivePage = historyQuery.data.page;
+    // The server may clamp a page after deletion. Adopt it for future polls too,
+    // keeping the same response while the canonical page key becomes active.
+    qc.setQueryData(['reservations', companyId, 'list', listScope, effectivePage], historyQuery.data, { updatedAt: historyQuery.dataUpdatedAt });
+    setListPagination({ scope: listScope, page: effectivePage });
+  }, [view, searchIsSettling, historyQuery.data, historyQuery.dataUpdatedAt, listPage, listScope, companyId, qc]);
 
   const {
     data: exportSourceReservations = [],
@@ -454,7 +373,7 @@ export default function Reservations({ view }: ReservationsProps) {
     enabled: !!companyId && exportDialogOpen && exportSearchTriggered,
   });
 
-  const { data: companyTables = [] } = useQuery({
+  const tablesQuery = useQuery({
     queryKey: ['reservation-tables', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -469,6 +388,7 @@ export default function Reservations({ view }: ReservationsProps) {
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: companyTables = [] } = tablesQuery;
 
   const tableById = useMemo(
     () => new Map(companyTables.map((table) => [table.id, table] as const)),
@@ -723,6 +643,7 @@ export default function Reservations({ view }: ReservationsProps) {
   }, [reservations]);
 
   const filteredReservations = useMemo(() => {
+    if (view === 'list') return reservations;
     const result = sortedReservations
       .filter((reservation) => matchesReservationOperationalFilter(reservation.status, operationalFilter))
       .filter((reservation) => statusFilter === 'all' || reservation.status === statusFilter)
@@ -744,9 +665,13 @@ export default function Reservations({ view }: ReservationsProps) {
         );
       });
     return result;
-  }, [dateFilterMode, entryMethodFilter, operationalFilter, reservationListRange, search, sortedReservations, statusFilter]);
+  }, [view, reservations, dateFilterMode, entryMethodFilter, operationalFilter, reservationListRange, search, sortedReservations, statusFilter]);
 
   const listSummary = useMemo(() => {
+    if (view === 'list') return {
+      byStatus: RESERVATION_STATUS_OPTIONS.flatMap(({ value }) => historyPage?.by_status.filter((entry) => entry.status === value) ?? []),
+      total: { count: historyPage?.total ?? 0, people: historyPage?.total_people ?? 0 },
+    };
     // Em check-in, contamos quem realmente compareceu (checked_in_party_size); nos demais, o tamanho reservado.
     const peopleOf = (r: Reservation) =>
       r.status === 'checked_in' ? (r.checked_in_party_size ?? r.party_size) : r.party_size;
@@ -756,7 +681,7 @@ export default function Reservations({ view }: ReservationsProps) {
     }).filter((s) => s.count > 0);
     const total = { count: filteredReservations.length, people: filteredReservations.reduce((s, r) => s + peopleOf(r), 0) };
     return { byStatus, total };
-  }, [filteredReservations]);
+  }, [view, historyPage, filteredReservations]);
   const visibleStatusFilterOptions = useMemo(
     () => RESERVATION_STATUS_OPTIONS.filter((status) =>
       matchesReservationOperationalFilter(status.value, operationalFilter),
@@ -764,15 +689,13 @@ export default function Reservations({ view }: ReservationsProps) {
     [operationalFilter],
   );
 
-  const listTotalPages = Math.max(1, Math.ceil(filteredReservations.length / LIST_PAGE_SIZE));
+  const listTotal = historyPage?.total ?? 0;
+  const displayedPage = historyPage?.page ?? listPage;
+  const listTotalPages = Math.max(1, Math.ceil(listTotal / LIST_PAGE_SIZE));
   const paginatedReservations = useMemo(
-    () => filteredReservations.slice((listPage - 1) * LIST_PAGE_SIZE, listPage * LIST_PAGE_SIZE),
-    [filteredReservations, listPage],
+    () => view === 'list' ? filteredReservations : filteredReservations.slice((listPage - 1) * LIST_PAGE_SIZE, listPage * LIST_PAGE_SIZE),
+    [filteredReservations, listPage, view],
   );
-
-  useEffect(() => {
-    setListPage(1);
-  }, [search, statusFilter, operationalFilter, entryMethodFilter, reservationListRange, dateFilterMode]);
 
   const sortedExportReservations = useMemo(
     () => [...exportSourceReservations].sort((left, right) => {
@@ -1158,11 +1081,7 @@ export default function Reservations({ view }: ReservationsProps) {
     }
   };
 
-  if (isLoading) {
-    if (view === 'list') {
-      return <ReservationListLoadingState />;
-    }
-
+  if (view === 'overview' && (!companyId || (reservationsQuery.data === undefined && !reservationsQuery.isError))) {
     return (
       <div className="space-y-6" aria-busy="true">
         <p className="sr-only" role="status" aria-live="polite">
@@ -1176,6 +1095,13 @@ export default function Reservations({ view }: ReservationsProps) {
         </div>
       </div>
     );
+  }
+
+  if (view === 'overview' && reservationsQuery.data === undefined && reservationsQuery.isError) {
+    return <div className="space-y-4">
+      <h2 className="text-xl font-semibold tracking-tight text-foreground">{view === 'overview' ? 'Visão geral de reservas' : 'Lista de reservas'}</h2>
+      <QueryFeedback queries={[{ label: 'as reservas', ...reservationsQuery }]} />
+    </div>;
   }
 
   return (
@@ -1203,6 +1129,8 @@ export default function Reservations({ view }: ReservationsProps) {
           </Button>
         </div>
       </div>
+
+      <QueryFeedback queries={companyId ? [{ label: 'as reservas', ...(view === 'list' ? listFeedbackQuery : overviewReservationsQuery) }] : []} />
 
       {view === 'overview' ? (
         <section className="space-y-4" aria-label="Visão geral de reservas em 15 dias">
@@ -1314,6 +1242,7 @@ export default function Reservations({ view }: ReservationsProps) {
                 name="search_reservations"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                maxLength={RESERVATION_HISTORY_SEARCH_MAX_LENGTH}
                 placeholder="Buscar por nome ou telefone..."
                 className="h-10 rounded-lg bg-card pl-10"
                 autoComplete="off"
@@ -1392,7 +1321,7 @@ export default function Reservations({ view }: ReservationsProps) {
             </div>
           </div>
 
-          {filteredReservations.length > 0 && (
+          {hasListData && listTotal > 0 && (
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
               <span className="flex items-center gap-1.5 font-semibold text-foreground">
                 <CalendarCheck className="h-3.5 w-3.5 text-primary" />
@@ -1421,7 +1350,7 @@ export default function Reservations({ view }: ReservationsProps) {
             </div>
           )}
 
-          <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <Card className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm" aria-busy={listPending || historyQuery.isFetching}>
             <div className="overflow-x-auto">
             <Table>
               <TableHeader className="bg-muted/55">
@@ -1451,7 +1380,13 @@ export default function Reservations({ view }: ReservationsProps) {
               </TableHeader>
 
               <TableBody>
-                {paginatedReservations.length === 0 ? (
+                {listPending ? (
+                  Array.from({ length: 8 }).map((_, index) => (
+                    <TableRow key={`loading-${index}`} aria-hidden="true" className="border-border bg-card hover:bg-card">
+                      {Array.from({ length: 7 }).map((__, column) => <TableCell key={column} className={cn('px-4 py-3', column === 3 && 'hidden sm:table-cell', column === 4 && 'hidden lg:table-cell')}><ReservationListLoadingBar className="h-4 w-20" /></TableCell>)}
+                    </TableRow>
+                  ))
+                ) : !hasListData ? null : paginatedReservations.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={7} className="py-16 text-center text-sm text-muted-foreground">
                       Nenhuma reserva encontrada.
@@ -1559,31 +1494,31 @@ export default function Reservations({ view }: ReservationsProps) {
             </Table>
             </div>
 
-            {filteredReservations.length > LIST_PAGE_SIZE && (
+            {hasListData && listTotal > LIST_PAGE_SIZE && (
               <div className="flex items-center justify-between border-t border-border px-4 py-3">
                 <p className="text-xs text-muted-foreground">
-                  {(listPage - 1) * LIST_PAGE_SIZE + 1}–{Math.min(listPage * LIST_PAGE_SIZE, filteredReservations.length)} de {filteredReservations.length}
+                  {(displayedPage - 1) * LIST_PAGE_SIZE + 1}–{Math.min(displayedPage * LIST_PAGE_SIZE, listTotal)} de {listTotal}
                 </p>
                 <div className="flex items-center gap-1.5">
                   <Button
                     variant="outline"
                     size="icon"
                     className="h-8 w-8 rounded-lg"
-                    disabled={listPage <= 1}
-                    onClick={() => setListPage((p) => p - 1)}
+                    disabled={displayedPage <= 1 || historyQuery.isFetching}
+                    onClick={() => setListPage(displayedPage - 1)}
                     aria-label="Página anterior"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   <span className="min-w-[4rem] text-center text-xs font-medium text-foreground">
-                    {listPage} / {listTotalPages}
+                    {displayedPage} / {listTotalPages}
                   </span>
                   <Button
                     variant="outline"
                     size="icon"
                     className="h-8 w-8 rounded-lg"
-                    disabled={listPage >= listTotalPages}
-                    onClick={() => setListPage((p) => p + 1)}
+                    disabled={displayedPage >= listTotalPages || historyQuery.isFetching}
+                    onClick={() => setListPage(displayedPage + 1)}
                     aria-label="Próxima página"
                   >
                     <ChevronRight className="h-4 w-4" />
@@ -2208,6 +2143,7 @@ export default function Reservations({ view }: ReservationsProps) {
           </DialogHeader>
 
           <div className="pt-1">
+            <QueryFeedback className="mb-3" queries={companyId ? [{ label: 'as reservas', ...reservationsQuery }, { label: 'as mesas', ...tablesQuery }] : []} />
             <ReservationOperationalFilterControl
               value={operationalFilter}
               onChange={handleOperationalFilterChange}

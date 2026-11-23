@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { format, formatDistanceToNowStrict } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Users as UsersIcon,
@@ -10,6 +12,8 @@ import {
   Building2,
   Plus,
   MoreHorizontal,
+  ScrollText,
+  Search,
   Trash2,
   AlertTriangle,
   RefreshCw,
@@ -40,6 +44,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import UserPasswordDialog from '@/components/users/UserPasswordDialog';
 import SupportCompanyAccess from '@/components/users/SupportCompanyAccess';
 import { useAuth } from '@/contexts/AuthContext';
+import AdminPageHeader from '@/components/admin/AdminPageHeader';
+import ListPagination from '@/components/admin/ListPagination';
+import ListStateMessage from '@/components/admin/ListStateMessage';
+import { useUrlPage, useUrlParam } from '@/hooks/useUrlParam';
+import { useLastPanelAccess } from '@/hooks/useLastPanelAccess';
+import { cn } from '@/lib/utils';
 import { useUsers, useToggleBan, useUpdateUser, useSetUserPassword, useDeleteUser, ManagedUser } from '@/hooks/useUsers';
 import { useManageUserInvoker } from '@/hooks/useManageUserInvoker';
 import { useCompanies } from '@/hooks/useCompanies';
@@ -51,6 +61,11 @@ import {
   normalizeEmail,
   PASSWORD_REQUIREMENTS_TEXT,
 } from '@/lib/validation';
+
+function userInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?';
+}
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
@@ -77,8 +92,12 @@ export default function Users() {
   const qc = useQueryClient();
   const { invokeManageUser } = useManageUserInvoker();
 
-  const [filterCompany, setFilterCompany] = useState<string>('all');
-  const [filterRole, setFilterRole] = useState<string>('all');
+  const [filterCompany, setFilterCompany] = useUrlParam('empresa', 'all');
+  const [filterRole, setFilterRole] = useUrlParam('perfil', 'all');
+  const [filterStatus, setFilterStatus] = useUrlParam('situacao', 'all');
+  const [, setParams] = useSearchParams();
+  const [page, setPage] = useUrlPage();
+  const [pageSize, setPageSize] = useState(25);
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', company_id: '', role: '', support_company_ids: [] as string[] });
@@ -103,6 +122,8 @@ export default function Users() {
       ? !user.support_company_ids?.includes(filterCompany)
       : user.company_id !== filterCompany)) return false;
     if (filterRole !== 'all' && !user.roles.includes(filterRole)) return false;
+    if (filterStatus === 'active' && user.is_banned) return false;
+    if (filterStatus === 'blocked' && !user.is_banned) return false;
     if (search) {
       const query = search.toLowerCase();
       return user.full_name.toLowerCase().includes(query) || user.email.toLowerCase().includes(query);
@@ -132,6 +153,39 @@ export default function Users() {
   const editAccessUnavailable = !!editUser?.roles.includes('support') && !Array.isArray(editUser.support_company_ids);
   const editAccessBlocked = editAccessUnavailable || (editForm.role === 'support' && (companiesLoading || !!companiesError));
   const createAccessBlocked = createForm.role === 'support' && (companiesLoading || !!companiesError);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedUsers = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const lastAccessQuery = useLastPanelAccess(pagedUsers.map((user) => user.id));
+  const lastAccess = lastAccessQuery.data ?? {};
+  const roleCounters = [
+    { id: 'all', label: 'Todas as pessoas', count: users.length },
+    { id: 'admin', label: 'Com perfil Admin', count: users.filter((user) => user.roles.includes('admin')).length },
+    { id: 'operator', label: 'Com perfil Operador', count: users.filter((user) => user.roles.includes('operator')).length },
+    { id: 'support', label: 'Com perfil Suporte', count: users.filter((user) => user.roles.includes('support')).length },
+    { id: 'superadmin', label: 'Superadmin', count: users.filter((user) => user.roles.includes('superadmin')).length },
+    { id: 'bloqueados', label: 'Bloqueadas', count: users.filter((user) => user.is_banned).length },
+  ];
+  const counterSelected = (id: string) => id === 'bloqueados'
+    ? filterStatus === 'blocked' && filterRole === 'all'
+    : id === 'all'
+      ? filterRole === 'all' && filterStatus !== 'blocked'
+      : filterRole === id;
+  const selectCounter = (id: string) => {
+    setParams((previous) => {
+      const updated = new URLSearchParams(previous);
+      updated.delete('pagina');
+      if (id === 'bloqueados') { updated.delete('perfil'); updated.set('situacao', 'blocked'); }
+      else if (id === 'all') { updated.delete('perfil'); updated.delete('situacao'); }
+      else { updated.set('perfil', id); if (updated.get('situacao') === 'blocked') updated.delete('situacao'); }
+      return updated;
+    }, { replace: true });
+  };
+  const clearFilters = () => {
+    setSearch('');
+    setParams(new URLSearchParams(), { replace: true });
+  };
 
   const getCompanyName = (id: string | null) => {
     if (!id) return '-';
@@ -324,187 +378,256 @@ export default function Users() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Usuários</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Gerencie admins, operadores e acessos de Suporte</p>
+    <div className="space-y-5">
+      <AdminPageHeader
+        eyebrow="Principal"
+        title="Usuários"
+        description="Admins, operadores e equipe de suporte de todas as empresas."
+        actions={(
+          <Button className="gap-2" onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4" />
+            Novo usuário
+          </Button>
+        )}
+      />
+
+      <div className="space-y-2">
+        <div role="group" aria-label="Filtrar por perfil" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          {roleCounters.map((counter) => (
+            <button
+              key={counter.id}
+              type="button"
+              aria-pressed={counterSelected(counter.id)}
+              onClick={() => selectCounter(counter.id)}
+              className={cn(
+                'flex flex-col items-start gap-0.5 rounded-xl border px-3.5 py-2.5 text-left transition-colors',
+                counterSelected(counter.id) ? 'border-primary bg-primary-soft ring-1 ring-primary' : 'bg-card hover:bg-muted/40',
+              )}
+            >
+              <span className="text-xs text-muted-foreground">{counter.label}</span>
+              <span className={cn('text-xl font-semibold tabular-nums', counter.id === 'bloqueados' && counter.count > 0 && 'text-destructive')}>
+                {isLoading ? '—' : counter.count}
+              </span>
+            </button>
+          ))}
         </div>
-        <Button className="gap-2 rounded-lg" onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4" />
-          Novo Usuário
-        </Button>
+        <p className="text-xs text-muted-foreground">
+          Uma pessoa pode ter mais de um perfil, por isso a soma dos perfis pode passar do total de pessoas.
+        </p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        <Input
-          name="search_users"
-          placeholder="Buscar por nome ou e-mail..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          className="h-10 w-full rounded-lg sm:max-w-xs"
-          autoComplete="off"
-        />
-        <Select value={filterCompany} onValueChange={setFilterCompany}>
-          <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]" aria-label="Filtrar por empresa">
-            <SelectValue placeholder="Filtrar por empresa" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as empresas</SelectItem>
-            {companies.map((company) => (
-              <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterRole} onValueChange={setFilterRole}>
-          <SelectTrigger className="h-10 w-full rounded-lg sm:w-[180px]" aria-label="Filtrar por perfil">
-            <SelectValue placeholder="Filtrar por perfil" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os perfis</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="operator">Operador</SelectItem>
-            <SelectItem value="support">Suporte</SelectItem>
-            <SelectItem value="superadmin">Superadmin</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {isLoading ? (
-        <Card className="overflow-hidden border-none shadow-sm">
-          <CardContent className="space-y-3 p-6">
-            {[1, 2, 3].map((item) => <Skeleton key={item} className="h-14 w-full rounded-lg" />)}
-          </CardContent>
-        </Card>
-      ) : error ? (
-        <Card className="overflow-hidden border-none shadow-sm">
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
-            <p className="font-medium text-foreground">Não foi possível carregar os usuários</p>
-            <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado ao consultar usuários.'}</p>
-            <Button variant="outline" className="mt-4 gap-2 rounded-lg" onClick={() => refetch()} disabled={isFetching}>
-              {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Tentar novamente
-            </Button>
-          </CardContent>
-        </Card>
-      ) : filtered.length === 0 ? (
-        <Card className="overflow-hidden border-none shadow-sm">
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <UsersIcon className="mx-auto mb-3 h-12 w-12 opacity-30" />
-            Nenhum usuário encontrado.
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="overflow-hidden border-none shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Nome</TableHead>
-                <TableHead>E-mail</TableHead>
-                <TableHead>Empresas</TableHead>
-                <TableHead>Perfil</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.full_name || '-'}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
-                  <TableCell className="text-sm">
-                    {user.roles.includes('support') ? (
-                      <div className="max-w-xs space-y-1">
-                        <span className="inline-flex items-center gap-1 text-muted-foreground">
-                          <Building2 className="h-3 w-3 shrink-0" />
-                          {Array.isArray(user.support_company_ids)
-                            ? `${user.support_company_ids.length} ${user.support_company_ids.length === 1 ? 'empresa autorizada' : 'empresas autorizadas'}`
-                            : 'Autorizações indisponíveis'}
-                        </span>
-                        {!!user.support_company_ids?.length && (
-                          <p className="break-words text-xs text-muted-foreground">
-                            {user.support_company_ids.map(getCompanyName).join(', ')}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">
-                        <Building2 className="h-3 w-3" />
-                        {getCompanyName(user.company_id)}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      {user.roles.map((role) => (
-                        <Badge key={role} variant="secondary" className="text-xs">
-                          {roleLabels[role] || role}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {user.is_banned ? (
-                      <Badge variant="destructive" className="text-xs">Bloqueado</Badge>
-                    ) : (
-                      <Badge className="border-primary/30 bg-primary/15 text-xs text-primary hover:bg-primary/15">Ativo</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg"
-                          aria-label={`Ações para ${user.full_name || user.email}`}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="rounded-lg">
-                        <DropdownMenuItem onClick={() => openEdit(user)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setPasswordDialog(user)}>
-                          <KeyRound className="mr-2 h-4 w-4" />
-                          Alterar senha
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className={user.is_banned ? 'text-primary focus:text-primary' : 'text-destructive focus:text-destructive'}
-                          onClick={() => setBanDialog(user)}
-                        >
-                          {user.is_banned ? (
-                            <>
-                              <Shield className="mr-2 h-4 w-4" />
-                              Desbloquear
-                            </>
-                          ) : (
-                            <>
-                              <ShieldOff className="mr-2 h-4 w-4" />
-                              Bloquear
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => setDeleteDialog(user)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Excluir
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
+      <Card className="overflow-hidden shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:flex-wrap">
+          <div className="relative w-full sm:max-w-xs sm:flex-1">
+            <Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              name="search_users"
+              placeholder="Buscar por nome ou e-mail"
+              aria-label="Buscar por nome ou e-mail"
+              value={search}
+              onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+              className="pl-9"
+              autoComplete="off"
+            />
+          </div>
+          <Select value={filterCompany} onValueChange={(value) => setFilterCompany(value, { reset: ['pagina'] })}>
+            <SelectTrigger className="w-full sm:w-[220px]" aria-label="Filtrar por empresa">
+              <SelectValue placeholder="Filtrar por empresa" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as empresas</SelectItem>
+              {companies.map((company) => (
+                <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
               ))}
-            </TableBody>
-          </Table>
-        </Card>
-      )}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={(value) => setFilterStatus(value, { reset: ['pagina'] })}>
+            <SelectTrigger className="w-full sm:w-[190px]" aria-label="Filtrar por situação">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Ativas e bloqueadas</SelectItem>
+              <SelectItem value="active">Só ativas</SelectItem>
+              <SelectItem value="blocked">Só bloqueadas</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-3 p-5">
+            {[1, 2, 3].map((item) => <Skeleton key={item} className="h-14 w-full rounded-lg" />)}
+          </div>
+        ) : error ? (
+          <ListStateMessage
+            variant="error"
+            title="Não foi possível carregar os usuários"
+            description={error instanceof Error ? error.message : 'Erro inesperado ao consultar usuários.'}
+            actionLabel="Tentar novamente"
+            onAction={() => void refetch()}
+            actionDisabled={isFetching}
+          />
+        ) : filtered.length === 0 ? (
+          users.length === 0 ? (
+            <ListStateMessage variant="empty" title="Nenhum usuário cadastrado" />
+          ) : (
+            <ListStateMessage
+              variant="no-results"
+              title="Nenhuma pessoa para esses filtros"
+              actionLabel="Limpar filtros"
+              onAction={clearFilters}
+            />
+          )
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Pessoa</TableHead>
+                    <TableHead>Empresa e acessos</TableHead>
+                    <TableHead>Perfil</TableHead>
+                    <TableHead>Situação</TableHead>
+                    <TableHead>Último acesso ao painel</TableHead>
+                    <TableHead className="text-right"><span className="sr-only">Ações</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>
+                        <div className="flex min-w-[220px] items-center gap-3">
+                          <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-accent-foreground">
+                            {userInitials(user.full_name || user.email)}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{user.full_name || '-'}</p>
+                            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {user.roles.includes('support') ? (
+                          <div className="max-w-xs space-y-1">
+                            <span className="inline-flex items-center gap-1 text-muted-foreground">
+                              <Building2 className="h-3 w-3 shrink-0" />
+                              {Array.isArray(user.support_company_ids)
+                                ? `Suporte em ${user.support_company_ids.length} ${user.support_company_ids.length === 1 ? 'empresa' : 'empresas'}`
+                                : 'Autorizações indisponíveis'}
+                            </span>
+                            {!!user.support_company_ids?.length && (
+                              <p className="line-clamp-2 break-words text-xs text-muted-foreground" title={user.support_company_ids.map(getCompanyName).join(', ')}>
+                                {user.support_company_ids.map(getCompanyName).join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        ) : user.roles.includes('superadmin') && !user.company_id ? (
+                          <span className="text-muted-foreground">Acesso global</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <Building2 className="h-3 w-3" />
+                            {getCompanyName(user.company_id)}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {user.roles.map((role) => (
+                            <Badge key={role} variant="secondary" className={cn('text-xs', role === 'superadmin' && 'bg-foreground text-background hover:bg-foreground')}>
+                              {roleLabels[role] || role}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {user.is_banned ? (
+                          <Badge variant="destructive" className="text-xs">Bloqueada</Badge>
+                        ) : (
+                          <Badge className="border-success/25 bg-success-soft text-xs text-success hover:bg-success-soft">Ativa</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {lastAccessQuery.isPending ? (
+                          <Skeleton className="h-4 w-20" />
+                        ) : lastAccessQuery.isError ? (
+                          <span className="text-muted-foreground">Indisponível</span>
+                        ) : lastAccess[user.id] ? (
+                          <span title={format(new Date(lastAccess[user.id]!), "dd/MM/yyyy 'às' HH:mm")}>
+                            {formatDistanceToNowStrict(new Date(lastAccess[user.id]!), { addSuffix: true, locale: ptBR })}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Nunca acessou</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              aria-label={`Ações para ${user.full_name || user.email}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="rounded-lg">
+                            <DropdownMenuItem onClick={() => openEdit(user)}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setPasswordDialog(user)}>
+                              <KeyRound className="mr-2 h-4 w-4" />
+                              Alterar senha
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => navigate(`/logs?autor=${user.id}&periodo=todos`)}>
+                              <ScrollText className="mr-2 h-4 w-4" />
+                              Ver ações na auditoria
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className={user.is_banned ? 'text-primary focus:text-primary' : 'text-destructive focus:text-destructive'}
+                              onClick={() => setBanDialog(user)}
+                            >
+                              {user.is_banned ? (
+                                <>
+                                  <Shield className="mr-2 h-4 w-4" />
+                                  Desbloquear
+                                </>
+                              ) : (
+                                <>
+                                  <ShieldOff className="mr-2 h-4 w-4" />
+                                  Bloquear
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => setDeleteDialog(user)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <ListPagination
+              page={currentPage}
+              pageSize={pageSize}
+              total={filtered.length}
+              onPageChange={setPage}
+              itemLabel={['pessoa', 'pessoas']}
+              pageSizeOptions={[25, 50, 100]}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+              className="border-t border-border"
+            />
+          </>
+        )}
+      </Card>
 
       <AlertDialog open={!!banDialog} onOpenChange={(open) => !open && setBanDialog(null)}>
         <AlertDialogContent>

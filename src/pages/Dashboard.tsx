@@ -36,6 +36,9 @@ import LiveFunnelPanel from '@/components/LiveFunnelPanel';
 import InfoTooltip from '@/components/dashboard/InfoTooltip';
 import DashboardReportOverview from '@/components/dashboard/DashboardReportOverview';
 import CompanyReservationChart from '@/components/dashboard/CompanyReservationChart';
+import ReservationOutcomeCard from '@/components/dashboard/ReservationOutcomeCard';
+import PopularTimeSlotsCard from '@/components/dashboard/PopularTimeSlotsCard';
+import { buildPopularTimeSlots } from '@/lib/popular-time-slots';
 import { useCustomerRecurrenceVisitSeries } from '@/hooks/useCustomerRecurrenceVisitSeries';
 import { useCompanyFeatureFlags } from '@/hooks/useCompanyFeatures';
 import { useCompanyPermissions } from '@/hooks/useCompanyPermissions';
@@ -475,6 +478,7 @@ export default function Dashboard() {
     totals,
     prevTotals,
     waitlistTotals,
+    heatmapData,
     isLoading: dashLoading,
     isFetching: dashFetching,
     lastUpdatedAt: dashboardUpdatedAt,
@@ -608,6 +612,8 @@ export default function Dashboard() {
       peakDay: peakDay && peakDay.value > 0 ? peakDay : null,
     };
   }, [reservationVolumeChartData]);
+  const heatmapCounts = heatmapData?.counts;
+  const popularTimeSlots = useMemo(() => buildPopularTimeSlots(heatmapCounts ?? {}, 8), [heatmapCounts]);
   const reservationVolumeAverageLabel = reservationVolumeSummary.averagePerDay.toLocaleString('pt-BR', {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -908,6 +914,52 @@ export default function Dashboard() {
           </Card>
           )}
 
+          {isCompanyContext && (
+            <ReservationOutcomeCard
+              total={totals.reservations}
+              periodLabel={currentPeriodRangeLabel}
+              segments={[
+                {
+                  key: 'completed',
+                  label: 'Compareceram',
+                  value: totals.completed,
+                  people: totals.checkedInGuests,
+                  className: 'bg-success',
+                  explanation: 'Reservas com check-in feito pela equipe. As pessoas são as que chegaram de fato, pelo número informado no check-in.',
+                },
+                {
+                  key: 'no-show',
+                  label: 'Não vieram',
+                  value: totals.noShows,
+                  people: totals.noShowGuests,
+                  className: 'bg-warning',
+                  explanation: 'Reservas marcadas como falta. A equipe pode marcar na hora; se a reserva continua só confirmada depois do dia da visita, o sistema marca a falta sozinho em até 1 hora. Por isso, cliente que veio mas não recebeu check-in também entra aqui.',
+                },
+                {
+                  key: 'cancelled',
+                  label: 'Cancelaram',
+                  value: totals.cancellations,
+                  people: totals.cancelledGuests,
+                  className: 'bg-destructive',
+                  explanation: 'Reservas canceladas antes da visita, pelo cliente ou pela equipe.',
+                },
+                {
+                  key: 'pending',
+                  label: 'Ainda sem desfecho',
+                  value: attendanceOverviewPending,
+                  className: 'bg-muted-foreground/25',
+                  hideWhenEmpty: true,
+                  explanation: 'Reservas que ainda não tiveram check-in, falta nem cancelamento. As de dias que já passaram viram falta sozinhas em até 1 hora; as de pagamento ficam aqui até o pagamento se resolver.',
+                  breakdown: [
+                    { label: 'De hoje ou dos próximos dias (ainda podem chegar)', value: totals.pendingBreakdown?.upcoming ?? 0 },
+                    { label: 'De dias anteriores, aguardando a marcação automática de falta', value: totals.pendingBreakdown?.past ?? 0 },
+                    { label: 'Com pagamento pendente, expirado ou cancelado', value: totals.pendingBreakdown?.payment ?? 0 },
+                  ],
+                },
+              ]}
+            />
+          )}
+
           {/* Conversion Funnel */}
           {(
             <Card className="border border-border shadow-sm">
@@ -916,10 +968,10 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <TrendingUp className="h-4 w-4 text-primary" />
-                      <p className="text-sm font-medium text-foreground">Funil de Conversão</p>
+                      <p className="text-sm font-medium text-foreground">Resultados dos atendimentos</p>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Reservas e pessoas agrupadas pela data em que a visita estava agendada.
+                      Reservas e pessoas pela data da visita agendada. Comparecimento, faltas e cancelamentos; a conversão do site está em Demanda e conversão.
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground sm:pt-0.5">Comparativo vs. {periodLabel}</p>
@@ -1108,7 +1160,8 @@ export default function Dashboard() {
 
 
           {advancedReportsEnabled && isCompanyContext && (
-            <Card className="border border-border shadow-sm">
+            <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <Card className="min-w-0 border border-border shadow-sm">
               <CardHeader className="pb-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
@@ -1194,7 +1247,7 @@ export default function Dashboard() {
                         ))}
                       </tbody>
                     </table>
-                    <div className="h-[260px]">
+                    <div className="h-[200px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           accessibilityLayer
@@ -1277,6 +1330,8 @@ export default function Dashboard() {
                 )}
               </CardContent>
             </Card>
+            <PopularTimeSlotsCard slots={popularTimeSlots} className="h-full" />
+            </div>
           )}
 
           {!isCompanyContext && (

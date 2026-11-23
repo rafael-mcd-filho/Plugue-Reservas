@@ -46,6 +46,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -393,12 +394,20 @@ function isNowWithinCalendarSlot(slot: CalendarCapacitySlot, selectedDate: Date 
   return currentMinutes >= slotStart && currentMinutes < slotStart + slot.durationMinutes;
 }
 
+function getReservationEndTime(reservation: Reservation) {
+  const duration = reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES;
+  return minutesToTime(timeToMinutes(reservation.time) + duration);
+}
+
+function getReservationTimeRange(reservation: Reservation) {
+  return `${toTimeKey(reservation.time)}–${getReservationEndTime(reservation)}`;
+}
+
 function getSlotReservationTimeRanges(slot: CalendarCapacitySlot) {
-  return Object.fromEntries(slot.reservations.map(({ reservation }) => {
-    const start = toTimeKey(reservation.time);
-    const duration = reservation.duration_minutes ?? DEFAULT_RESERVATION_DURATION_MINUTES;
-    return [reservation.id, `${start}–${minutesToTime(timeToMinutes(start) + duration)}`];
-  }));
+  return Object.fromEntries(slot.reservations.map(({ reservation }) => [
+    reservation.id,
+    getReservationTimeRange(reservation),
+  ]));
 }
 
 function isEditableStatus(status: ReservationStatus) {
@@ -1371,6 +1380,8 @@ export default function CalendarView() {
 
                   {visibleDaySlots.map((slot) => {
                     const isExpanded = expandedSlotTimes.has(slot.time);
+                    const arrivalReservations = slot.reservations.filter(({ isArrival }) => isArrival);
+                    const continuingReservations = slot.reservations.filter(({ isArrival, isOccupying }) => !isArrival && isOccupying);
                     const modeLabel = slot.availabilityMode === 'capacity' ? 'Por capacidade' : 'Por mesas';
                     const progressValue = Math.min(slot.fillPercent, 100);
                     const slotIsCurrent = isNowWithinCalendarSlot(slot, selectedDate);
@@ -1522,7 +1533,7 @@ export default function CalendarView() {
                                   )}
                                 >
                                   {tab === 'reservations'
-                                    ? `Reservas (${slot.reservations.length})`
+                                    ? `Reservas (${slot.arrivalReservationCount})`
                                     : slot.availabilityMode === 'capacity'
                                       ? `Disponibilidade · ${formatCapacity(slot.remainingCapacity)} vagas`
                                       : `Disponibilidade · ${slot.availableTableCount} livres`}
@@ -1559,11 +1570,50 @@ export default function CalendarView() {
                                   )}
                                 </div>
 
-                                {slot.reservations.length === 0 ? (
-                                  <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma reserva nesta faixa.</p>
+                                {continuingReservations.length > 0 && (
+                                  <Collapsible key={`${selectedDateStr}-${slot.time}`} className="mt-3 overflow-hidden rounded-md border border-border/60 bg-muted/20">
+                                    <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-xs font-medium text-muted-foreground hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                                      <span>
+                                        {continuingReservations.length === 1
+                                          ? '1 reserva iniciada antes ocupa parte desta faixa'
+                                          : `${continuingReservations.length} reservas iniciadas antes ocupam parte desta faixa`}
+                                      </span>
+                                      <ChevronDown className="h-4 w-4 shrink-0 group-data-[state=open]:rotate-180" aria-hidden="true" />
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                      <div className="divide-y divide-border/60 border-t border-border/60">
+                                        {continuingReservations.map(({ reservation, table }) => (
+                                          <div key={reservation.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                                            <div className="min-w-0">
+                                              <p className="break-words text-sm font-medium text-foreground">{reservation.guest_name}</p>
+                                              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                                <span>{reservation.created_in_mode === 'capacity' ? 'Por capacidade' : getTableLabel(table)}</span>
+                                                <span className="font-medium tabular-nums">até {getReservationEndTime(reservation)}</span>
+                                              </div>
+                                            </div>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="shrink-0"
+                                              aria-label={`Ver detalhes da reserva de ${reservation.guest_name}`}
+                                              onClick={() => openDetails(reservation)}
+                                            >
+                                              <Eye className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                              Detalhes
+                                            </Button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </CollapsibleContent>
+                                  </Collapsible>
+                                )}
+
+                                {arrivalReservations.length === 0 ? (
+                                  <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma reserva começa nesta faixa.</p>
                                 ) : (
                                   <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
-                                    {slot.reservations.map((slotReservation, index) => {
+                                    {arrivalReservations.map((slotReservation, index) => {
                                       const reservation = slotReservation.reservation;
                                       const detail = reservation.occasion || reservation.notes;
                                       const paidPayment = getPaidReservationPayment(reservation);
@@ -1573,14 +1623,14 @@ export default function CalendarView() {
                                           key={reservation.id}
                                           className={cn(
                                             'px-3 py-2.5',
-                                            index !== slot.reservations.length - 1 && 'border-b border-border/70',
+                                            index !== arrivalReservations.length - 1 && 'border-b border-border/70',
                                           )}
                                         >
                                           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                                             <div className="min-w-0 flex-1">
                                               <div className="flex flex-wrap items-center gap-2">
                                                 <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-semibold tabular-nums text-primary">
-                                                  {reservation.time.slice(0, 5)}
+                                                  {getReservationTimeRange(reservation)}
                                                 </span>
                                                 <span className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</span>
                                                 <ReservationStatusBadge status={reservation.status} />

@@ -1,3 +1,5 @@
+import { normalizeStoredPhoneE164, toStoredWhatsAppNumber } from './phone.ts';
+
 export type WhatsAppDiagnosticCode =
   | "evolution_not_configured"
   | "instance_not_configured"
@@ -66,7 +68,7 @@ function buildFailure(
   title: string,
   message: string,
   extra: Partial<WhatsAppFailureDetails> = {},
-): WhatsAppSendResult {
+): Extract<WhatsAppSendResult, { ok: false }> {
   return {
     ok: false,
     error: {
@@ -81,11 +83,9 @@ function buildFailure(
 }
 
 export function formatPhoneForWhatsApp(phone: string): string {
-  let digits = phone.replace(/\D/g, "");
-  if (!digits.startsWith("55") && digits.length <= 11) {
-    digits = `55${digits}`;
-  }
-  return digits;
+  // Keep the '+' while the number moves through queues. Removing it here
+  // makes an 11-digit +1 destination indistinguishable from legacy BR input.
+  return normalizeStoredPhoneE164(phone);
 }
 
 export function buildReservationDispatchKey(type: string, reservationId: string): string {
@@ -97,11 +97,11 @@ export function buildWaitlistDispatchKey(type: string, waitlistId: string): stri
 }
 
 export function buildBirthdayDispatchKey(companyId: string, targetDateKey: string, phone: string): string {
-  return `birthday:${companyId}:${targetDateKey}:${formatPhoneForWhatsApp(phone)}`;
+  return `birthday:${companyId}:${targetDateKey}:${toStoredWhatsAppNumber(phone)}`;
 }
 
 export async function claimWhatsAppDispatch(
-  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: boolean | null; error: { message: string } | null }> },
+  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<{ data: boolean | null; error: { message: string } | null }> },
   {
     deliveryKey,
     companyId,
@@ -135,7 +135,7 @@ export async function claimWhatsAppDispatch(
 }
 
 export async function finalizeWhatsAppDispatch(
-  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message: string } | null }> },
+  supabase: { rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }> },
   {
     deliveryKey,
     status,
@@ -160,12 +160,15 @@ export async function finalizeWhatsAppDispatch(
 export async function enqueueWhatsAppMessageOnce(
   supabase: {
     from: (table: string) => {
-      insert: (payload: Record<string, unknown>) => Promise<{ error: { code?: string; message: string } | null }>;
+      insert: (payload: Record<string, unknown>) => PromiseLike<{ error: { code?: string; message: string } | null }>;
     };
   },
   payload: {
     company_id: string;
     reservation_id?: string | null;
+    waitlist_id?: string | null;
+    waitlist_called_at?: string | null;
+    reservation_change_revision?: string | null;
     phone: string;
     message: string;
     type: string;
@@ -179,7 +182,9 @@ export async function enqueueWhatsAppMessageOnce(
     last_attempt_at?: string | null;
   },
 ): Promise<"inserted" | "duplicate"> {
-  const { error } = await supabase.from("whatsapp_message_queue").insert(payload);
+  const phone = normalizeStoredPhoneE164(payload.phone);
+  if (!phone) throw new Error('Telefone invalido para enfileirar mensagem.');
+  const { error } = await supabase.from("whatsapp_message_queue").insert({ ...payload, phone });
 
   if (!error) {
     return "inserted";
@@ -210,6 +215,8 @@ export async function sendWhatsAppPresence(
   presence: "composing" | "recording" | "paused" = "composing",
   delayMs = 2000,
 ): Promise<void> {
+  const number = toStoredWhatsAppNumber(phone);
+  if (!number) return;
   try {
     await fetch(`${evolutionUrl}/chat/sendPresence/${instanceName}`, {
       method: "POST",
@@ -217,7 +224,7 @@ export async function sendWhatsAppPresence(
         "Content-Type": "application/json",
         apikey: evolutionToken,
       },
-      body: JSON.stringify({ number: phone, presence, delay: delayMs }),
+      body: JSON.stringify({ number, presence, delay: delayMs }),
     });
   } catch {
     // Best-effort: falhas de presenca nao devem bloquear o envio real.
@@ -235,7 +242,7 @@ export function serializeWhatsAppFailure(error: WhatsAppFailureDetails): string 
   });
 }
 
-export function buildEvolutionNotConfiguredFailure(): WhatsAppSendResult {
+export function buildEvolutionNotConfiguredFailure(): Extract<WhatsAppSendResult, { ok: false }> {
   return buildFailure(
     "evolution_not_configured",
     "Evolution API nao configurada",
@@ -243,7 +250,7 @@ export function buildEvolutionNotConfiguredFailure(): WhatsAppSendResult {
   );
 }
 
-export function buildInstanceNotConfiguredFailure(): WhatsAppSendResult {
+export function buildInstanceNotConfiguredFailure(): Extract<WhatsAppSendResult, { ok: false }> {
   return buildFailure(
     "instance_not_configured",
     "Instancia nao configurada",
@@ -251,7 +258,7 @@ export function buildInstanceNotConfiguredFailure(): WhatsAppSendResult {
   );
 }
 
-export function buildInstanceDisconnectedFailure(): WhatsAppSendResult {
+export function buildInstanceDisconnectedFailure(): Extract<WhatsAppSendResult, { ok: false }> {
   return buildFailure(
     "instance_disconnected",
     "Instancia desconectada",
@@ -285,7 +292,8 @@ export async function sendWhatsAppText(
   message: string,
   options: SendWhatsAppTextOptions = {},
 ): Promise<WhatsAppSendResult> {
-  if (!phone || !message) {
+  const number = toStoredWhatsAppNumber(phone);
+  if (!number || !message) {
     return buildFailure(
       "invalid_payload",
       "Dados invalidos para envio",
@@ -308,7 +316,7 @@ export async function sendWhatsAppText(
         "Content-Type": "application/json",
         apikey: evolutionToken,
       },
-      body: JSON.stringify({ number: phone, text: message }),
+      body: JSON.stringify({ number, text: message }),
     });
   } catch (error) {
     return buildFailure(
@@ -398,7 +406,8 @@ export async function sendWhatsAppMedia(
   caption: string,
   options: SendWhatsAppMediaOptions = {},
 ): Promise<WhatsAppSendResult> {
-  if (!phone || !mediaUrl) {
+  const number = toStoredWhatsAppNumber(phone);
+  if (!number || !mediaUrl) {
     return buildFailure(
       "invalid_payload",
       "Dados invalidos para envio",
@@ -438,7 +447,7 @@ export async function sendWhatsAppMedia(
         apikey: evolutionToken,
       },
       body: JSON.stringify({
-        number: phone,
+        number,
         mediatype: mediaType,
         mimetype: mimeType,
         caption: caption || "",

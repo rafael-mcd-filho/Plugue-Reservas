@@ -81,6 +81,12 @@ import {
   normalizeCompanyTimeZone,
 } from '@/lib/company-time-zones';
 import { ReservationScheduleRulesCard } from '@/components/company/ReservationScheduleRulesCard';
+import { PublicReservationChangesSettings } from '@/components/settings/PublicReservationChangesSettings';
+import OpeningHoursCard from '@/components/settings/OpeningHoursCard';
+import {
+  DEFAULT_PUBLIC_RESERVATION_CHANGE_MIN_NOTICE_MINUTES,
+  parsePublicReservationChangeMinNoticeMinutes,
+} from '@/lib/public-reservation-change-settings';
 import {
   COMPANY_SETTINGS_SECTION_DESCRIPTIONS,
   COMPANY_SETTINGS_SECTION_LABELS,
@@ -541,6 +547,11 @@ function buildCompanyFormValues(company: Company) {
     reservationLateToleranceMinutes: normalizeReservationLateToleranceMinutes(
       (company as any).reservation_late_tolerance_minutes,
     ),
+    publicReservationChangesEnabled: company.public_reservation_changes_enabled === true,
+    publicReservationChangeMinNoticeMinutes: String(
+      parsePublicReservationChangeMinNoticeMinutes(String(company.public_reservation_change_min_notice_minutes ?? ''))
+      ?? DEFAULT_PUBLIC_RESERVATION_CHANGE_MIN_NOTICE_MINUTES,
+    ),
   };
 }
 
@@ -602,6 +613,14 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     queryKey: ['company-settings', companyId],
     queryFn: async () => {
       const selectAttempts = [
+        {
+          select: `${COMPANY_SETTINGS_SELECT}, phone_e164, whatsapp_e164, public_reservation_changes_enabled, public_reservation_change_min_notice_minutes`,
+          missingColumns: ['phone_e164', 'whatsapp_e164', ...OPTIONAL_COMPANY_COLUMNS, 'public_reservation_changes_enabled', 'public_reservation_change_min_notice_minutes'],
+        },
+        {
+          select: `${COMPANY_SETTINGS_SELECT}, public_reservation_changes_enabled, public_reservation_change_min_notice_minutes`,
+          missingColumns: [...OPTIONAL_COMPANY_COLUMNS, 'public_reservation_changes_enabled', 'public_reservation_change_min_notice_minutes'],
+        },
         {
           select: `${COMPANY_SETTINGS_SELECT}, phone_e164, whatsapp_e164`,
           missingColumns: ['phone_e164', 'whatsapp_e164', ...OPTIONAL_COMPANY_COLUMNS],
@@ -753,6 +772,8 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
   const [maxGuestsPerSlot, setMaxGuestsPerSlot] = useState(0);
   const [largePartyThreshold, setLargePartyThreshold] = useState(10);
   const [reservationLateToleranceMinutes, setReservationLateToleranceMinutes] = useState(10);
+  const [publicReservationChangesEnabled, setPublicReservationChangesEnabled] = useState(false);
+  const [publicReservationChangeMinNoticeMinutes, setPublicReservationChangeMinNoticeMinutes] = useState(String(DEFAULT_PUBLIC_RESERVATION_CHANGE_MIN_NOTICE_MINUTES));
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [heroMediaUrls, setHeroMediaUrls] = useState<string[]>([]);
   const [heroMediaType, setHeroMediaType] = useState<HeroMediaType | ''>('');
@@ -871,6 +892,8 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     setMaxGuestsPerSlot(values.maxGuestsPerSlot);
     setLargePartyThreshold(values.largePartyThreshold);
     setReservationLateToleranceMinutes(values.reservationLateToleranceMinutes);
+    setPublicReservationChangesEnabled(values.publicReservationChangesEnabled);
+    setPublicReservationChangeMinNoticeMinutes(values.publicReservationChangeMinNoticeMinutes);
     // A linha de base é registrada junto com o seed para nunca ficar defasada dele.
     savedFormRef.current.company = values;
     setInitialized(true);
@@ -897,6 +920,8 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
   const publicCustomizationLocked = featureFlags
     ? !featureFlags.features.custom_public_page
     : false;
+  const publicReservationChangesAvailable = typeof company?.public_reservation_changes_enabled === 'boolean'
+    && parsePublicReservationChangeMinNoticeMinutes(String(company.public_reservation_change_min_notice_minutes ?? '')) !== null;
 
   const currentCompanyFormValues: CompanyFormValues = {
     hours,
@@ -926,6 +951,8 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     maxGuestsPerSlot,
     largePartyThreshold,
     reservationLateToleranceMinutes,
+    publicReservationChangesEnabled,
+    publicReservationChangeMinNoticeMinutes,
   };
   const currentNoticeFormValues: NoticeFormValues = {
     noticeText,
@@ -1009,6 +1036,14 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
         companyUpdate.max_guests_per_slot = maxGuestsPerSlot;
         companyUpdate.large_party_whatsapp_threshold = normalizeLargePartyThreshold(largePartyThreshold);
         companyUpdate.reservation_late_tolerance_minutes = normalizeReservationLateToleranceMinutes(reservationLateToleranceMinutes);
+        if (publicReservationChangesAvailable) {
+          const minNoticeMinutes = parsePublicReservationChangeMinNoticeMinutes(publicReservationChangeMinNoticeMinutes);
+          if (minNoticeMinutes === null) {
+            throw new Error('Informe a antecedência mínima para alterar em minutos inteiros, entre 0 e 10080.');
+          }
+          companyUpdate.public_reservation_changes_enabled = publicReservationChangesEnabled;
+          companyUpdate.public_reservation_change_min_notice_minutes = minNoticeMinutes;
+        }
       }
 
       const originalHeroMediaUrls = getStoredHeroMediaUrls(company);
@@ -1138,6 +1173,9 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
       qc.invalidateQueries({ queryKey: ['company-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public', slug] });
       qc.invalidateQueries({ queryKey: ['reservation-settings', companyId] });
+      if (section === 'reservas') {
+        qc.invalidateQueries({ queryKey: ['public-reservation-change-options'] });
+      }
       qc.invalidateQueries({ queryKey: ['company-public-notice', companyId] });
       qc.invalidateQueries({ queryKey: ['company-public-notice-settings', companyId] });
       qc.invalidateQueries({ queryKey: ['company-nps-config', companyId] });
@@ -1168,6 +1206,15 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
     setHours((current) => current.map((hour, currentIndex) => (
       currentIndex === index ? { ...hour, [field]: value } : hour
     )));
+  };
+
+  // Copia o horário de um dia para todos os dias que estão abertos.
+  const applyHourToOpenDays = (index: number) => {
+    setHours((current) => {
+      const source = current[index];
+      if (!source) return current;
+      return current.map((hour) => (hour.closed ? hour : { ...hour, open: source.open, close: source.close }));
+    });
   };
 
   const publicWaitlistUrl = typeof window === 'undefined'
@@ -1677,56 +1724,7 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
 
       {section === 'agenda' && (
         <div className="space-y-4">
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <Clock className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Horário de funcionamento</CardTitle>
-                  <CardDescription>Defina os horários de abertura e fechamento para cada dia.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div>
-                {hours.map((hour, index) => (
-                  <div
-                    key={hour.day}
-                    className={cn(
-                      'flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:gap-5',
-                      index < hours.length - 1 && 'border-b border-[rgba(0,0,0,0.08)]',
-                    )}
-                  >
-                    <span className="w-12 shrink-0 text-sm font-semibold">{hour.day}</span>
-                    <div className="flex flex-1 flex-wrap items-center gap-3">
-                      <Switch checked={!hour.closed} onCheckedChange={(checked) => updateHour(index, 'closed', !checked)} />
-                      {!hour.closed ? (
-                        <>
-                          <Input
-                            type="time"
-                            value={hour.open}
-                            onChange={(event) => updateHour(index, 'open', event.target.value)}
-                            className={cn('w-full max-w-[132px]', settingsFieldClassName)}
-                          />
-                          <span className="text-sm text-muted-foreground">às</span>
-                          <Input
-                            type="time"
-                            value={hour.close}
-                            onChange={(event) => updateHour(index, 'close', event.target.value)}
-                            className={cn('w-full max-w-[132px]', settingsFieldClassName)}
-                          />
-                        </>
-                      ) : (
-                        <span className="text-sm italic text-muted-foreground">Fechado</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <OpeningHoursCard hours={hours} onChange={updateHour} onApplyToOpenDays={applyHourToOpenDays} />
 
           <BlockedDatesTab companyId={companyId} />
 
@@ -1735,132 +1733,124 @@ function CompanySettingsSectionPage({ section }: { section: CompanySettingsSecti
 
       {section === 'reservas' && (
         <div className="space-y-4">
-          <Card className={settingsCardClassName}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-start gap-3">
-                <div className={settingsBadgeClassName}>
-                  <CalendarCheck className="h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                  <CardTitle className="text-lg">Configurações de reservas</CardTitle>
-                  <CardDescription>Defina como o fluxo público cria reservas e quando ele direciona o cliente para o WhatsApp.</CardDescription>
-                </div>
+          <section
+            aria-labelledby="general-rules-heading"
+            className="overflow-hidden rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-[rgba(0,0,0,0.06)] px-5 py-4">
+              <h2 id="general-rules-heading" className="text-base font-semibold text-foreground">Regras gerais</h2>
+              <p className="text-xs text-muted-foreground">Valem quando uma regra de disponibilidade não diz outra coisa.</p>
+            </div>
+            <div className="grid gap-x-6 gap-y-5 px-5 py-5 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-foreground">Quanto tempo a mesa fica ocupada</Label>
+                <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
+                  <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 min</SelectItem>
+                    <SelectItem value="30">30 min</SelectItem>
+                    <SelectItem value="45">45 min</SelectItem>
+                    <SelectItem value="60">1 hora</SelectItem>
+                    <SelectItem value="90">1h30</SelectItem>
+                    <SelectItem value="120">2 horas</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-snug text-muted-foreground">Ocupa a mesa e os lugares do horário durante esse tempo.</p>
               </div>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="grid gap-3 md:grid-cols-2 min-[920px]:grid-cols-3">
-                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
-                  <div className="space-y-1">
-                    <Label className="text-sm font-semibold text-foreground">Duração padrão da reserva</Label>
-                    <p className="text-xs leading-snug text-muted-foreground">Tempo que mesa/capacidade fica ocupada sem regra específica.</p>
-                  </div>
-                  <div className="mt-auto">
-                    <Select value={String(reservationDuration)} onValueChange={(value) => setReservationDuration(Number(value))}>
-                      <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar duração da reserva">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="15">15 min</SelectItem>
-                        <SelectItem value="30">30 min</SelectItem>
-                        <SelectItem value="45">45 min</SelectItem>
-                        <SelectItem value="60">1 hora</SelectItem>
-                        <SelectItem value="90">1h30</SelectItem>
-                        <SelectItem value="120">2 horas</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
 
-                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
-                  <div className="space-y-1">
-                    <Label className="text-sm font-semibold text-foreground">Intervalo da grade pública</Label>
-                    <p className="text-xs leading-snug text-muted-foreground">Gera horários públicos quando não houver regra ativa.</p>
-                  </div>
-                  <div className="mt-auto">
-                    <Select value={String(reservationSlotIntervalMinutes)} onValueChange={(value) => setReservationSlotIntervalMinutes(Number(value))}>
-                      <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar intervalo da grade pública">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="15">15 min</SelectItem>
-                        <SelectItem value="30">30 min</SelectItem>
-                        <SelectItem value="45">45 min</SelectItem>
-                        <SelectItem value="60">1 hora</SelectItem>
-                        <SelectItem value="90">1h30</SelectItem>
-                        <SelectItem value="120">2 horas</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="company-settings-max-guests" className="text-sm font-semibold text-foreground">Capacidade máxima / horário</Label>
-                    <p className="text-xs leading-snug text-muted-foreground">Teto de pessoas no horário. Use 0 para sem limite.</p>
-                  </div>
-                  <div className="mt-auto">
-                    <Input
-                      id="company-settings-max-guests"
-                      name="max_guests_per_slot"
-                      type="number"
-                      min={0}
-                      value={maxGuestsPerSlot}
-                      onChange={(event) => setMaxGuestsPerSlot(Math.max(0, Number(event.target.value) || 0))}
-                      className={settingsFieldClassName}
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="company-settings-large-party-threshold" className="text-sm font-semibold text-foreground">Limite de pessoas por reserva</Label>
-                    <p className="text-xs leading-snug text-muted-foreground">A partir deste tamanho, o cliente vai para o WhatsApp.</p>
-                  </div>
-                  <div className="mt-auto space-y-1.5">
-                    <Input
-                      id="company-settings-large-party-threshold"
-                      name="large_party_whatsapp_threshold"
-                      type="number"
-                      min={2}
-                      max={20}
-                      value={largePartyThreshold}
-                      onChange={(event) => setLargePartyThreshold(normalizeLargePartyThreshold(Number(event.target.value)))}
-                      className={settingsFieldClassName}
-                      placeholder="10"
-                    />
-                    <p className="text-[11px] leading-snug text-muted-foreground">
-                      Ex.: 20 manda grupos de 20+ para o WhatsApp.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/15 p-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="company-settings-late-tolerance" className="text-sm font-semibold text-foreground">Tolerância de atraso</Label>
-                    <p className="text-xs leading-snug text-muted-foreground">Aviso exibido no acompanhamento. Use 0 para ocultar.</p>
-                  </div>
-                  <div className="mt-auto space-y-1.5">
-                    <Input
-                      id="company-settings-late-tolerance"
-                      name="reservation_late_tolerance_minutes"
-                      type="number"
-                      min={0}
-                      max={120}
-                      value={reservationLateToleranceMinutes}
-                      onChange={(event) => setReservationLateToleranceMinutes(normalizeReservationLateToleranceMinutes(Number(event.target.value)))}
-                      className={settingsFieldClassName}
-                      placeholder="10"
-                    />
-                    <p className="text-[11px] leading-snug text-muted-foreground">
-                      Ex.: 10 mostra tolerância de até 10 min.
-                    </p>
-                  </div>
-                </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-foreground">Intervalo entre horários</Label>
+                <Select value={String(reservationSlotIntervalMinutes)} onValueChange={(value) => setReservationSlotIntervalMinutes(Number(value))}>
+                  <SelectTrigger className={settingsFieldClassName} aria-label="Selecionar intervalo da grade pública">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 min</SelectItem>
+                    <SelectItem value="30">30 min</SelectItem>
+                    <SelectItem value="45">45 min</SelectItem>
+                    <SelectItem value="60">1 hora</SelectItem>
+                    <SelectItem value="90">1h30</SelectItem>
+                    <SelectItem value="120">2 horas</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-snug text-muted-foreground">Monta os horários da página pública quando não há regra de disponibilidade.</p>
               </div>
-            </CardContent>
-          </Card>
 
+              <div className="space-y-1.5">
+                <Label htmlFor="company-settings-max-guests" className="text-sm font-medium text-foreground">Lugares por horário</Label>
+                <div className="flex h-10 overflow-hidden rounded-lg border border-[rgba(0,0,0,0.14)] bg-white focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1">
+                  <input
+                    id="company-settings-max-guests"
+                    name="max_guests_per_slot"
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={maxGuestsPerSlot > 0 ? maxGuestsPerSlot : ''}
+                    onChange={(event) => setMaxGuestsPerSlot(Math.max(0, Number(event.target.value) || 0))}
+                    placeholder="Sem limite"
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <span className="flex items-center border-l border-[rgba(0,0,0,0.08)] bg-muted/40 px-3 text-sm text-muted-foreground">pessoas</span>
+                </div>
+                <p className="text-xs leading-snug text-muted-foreground">Máximo de pessoas por horário. Deixe vazio para não ter limite.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="company-settings-large-party-threshold" className="text-sm font-medium text-foreground">Grupos grandes vão para o WhatsApp a partir de</Label>
+                <div className="flex h-10 overflow-hidden rounded-lg border border-[rgba(0,0,0,0.14)] bg-white focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1">
+                  <input
+                    id="company-settings-large-party-threshold"
+                    name="large_party_whatsapp_threshold"
+                    type="number"
+                    min={2}
+                    max={20}
+                    inputMode="numeric"
+                    value={largePartyThreshold}
+                    onChange={(event) => setLargePartyThreshold(normalizeLargePartyThreshold(Number(event.target.value)))}
+                    placeholder="10"
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <span className="flex items-center border-l border-[rgba(0,0,0,0.08)] bg-muted/40 px-3 text-sm text-muted-foreground">pessoas</span>
+                </div>
+                <p className="text-xs leading-snug text-muted-foreground">Ex.: 20 manda grupos de 20 pessoas ou mais para o WhatsApp.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="company-settings-late-tolerance" className="text-sm font-medium text-foreground">Tolerância de atraso</Label>
+                <div className="flex h-10 overflow-hidden rounded-lg border border-[rgba(0,0,0,0.14)] bg-white focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1">
+                  <input
+                    id="company-settings-late-tolerance"
+                    name="reservation_late_tolerance_minutes"
+                    type="number"
+                    min={0}
+                    max={120}
+                    inputMode="numeric"
+                    value={reservationLateToleranceMinutes}
+                    onChange={(event) => setReservationLateToleranceMinutes(normalizeReservationLateToleranceMinutes(Number(event.target.value)))}
+                    placeholder="10"
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <span className="flex items-center border-l border-[rgba(0,0,0,0.08)] bg-muted/40 px-3 text-sm text-muted-foreground">min</span>
+                </div>
+                <p className="text-xs leading-snug text-muted-foreground">Aparece para o cliente no acompanhamento da reserva. Use 0 para não mostrar.</p>
+              </div>
+
+              <PublicReservationChangesSettings
+                available={publicReservationChangesAvailable}
+                enabled={publicReservationChangesAvailable && publicReservationChangesEnabled}
+                minNoticeMinutes={publicReservationChangeMinNoticeMinutes}
+                onEnabledChange={(enabled) => {
+                  setPublicReservationChangesEnabled(enabled);
+                  if (!enabled && parsePublicReservationChangeMinNoticeMinutes(publicReservationChangeMinNoticeMinutes) === null) {
+                    setPublicReservationChangeMinNoticeMinutes(buildCompanyFormValues(company!).publicReservationChangeMinNoticeMinutes);
+                  }
+                }}
+                onMinNoticeMinutesChange={setPublicReservationChangeMinNoticeMinutes}
+              />
+            </div>
+          </section>
         </div>
       )}
 

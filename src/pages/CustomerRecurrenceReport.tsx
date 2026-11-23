@@ -52,6 +52,8 @@ import LeadProfileDialog from '@/components/leads/LeadProfileDialog';
 import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
 import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
+import ReportAnalysisPanel from '@/components/reports/ReportAnalysisPanel';
+import { getCustomerReportReadings } from '@/lib/customer-report-readings';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   CUSTOMER_RECURRENCE_MIN_VISITS_MAX,
@@ -601,6 +603,7 @@ export default function CustomerRecurrenceReport() {
                 </ReportKpiStrip>
               </section>
 
+              <ReportAnalysisPanel insights={getCustomerReportReadings(report)}>
               <Card className="min-w-0 border-border shadow-sm">
                 <CardHeader className="gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -1146,6 +1149,7 @@ export default function CustomerRecurrenceReport() {
                   </CardContent>
                 </Card>
               </section>
+              </ReportAnalysisPanel>
             </>
           )}
         </>

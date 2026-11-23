@@ -2,12 +2,17 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarOff, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { CalendarOff, ChevronDown, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,10 +38,21 @@ interface BlockedDate {
 
 const settingsCardClassName = 'rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.03)]';
 const settingsFieldClassName = 'h-10 rounded-lg border-[rgba(0,0,0,0.14)] bg-white shadow-none';
-const settingsBadgeClassName = 'flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary';
 
 function formatBlockedDate(date: string, pattern = 'dd/MM/yyyy (EEE)') {
   return format(new Date(`${date}T12:00:00`), pattern, { locale: ptBR });
+}
+
+// "24/12 · quinta": o ano só aparece quando não é o ano corrente.
+function formatBlockedDay(date: string) {
+  const sameYear = date.slice(0, 4) === String(new Date().getFullYear());
+  const day = formatBlockedDate(date, sameYear ? 'dd/MM' : 'dd/MM/yyyy');
+  const weekday = formatBlockedDate(date, 'EEEE').replace('-feira', '');
+  return `${day} · ${weekday}`;
+}
+
+function toDateKey(date: Date) {
+  return format(date, 'yyyy-MM-dd');
 }
 
 function BlockedDateItem({
@@ -48,43 +64,57 @@ function BlockedDateItem({
   muted?: boolean;
   onDelete: (id: string) => void;
 }) {
+  const dayLabel = formatBlockedDay(blockedDate.date);
+
   return (
-    <div
+    <li
       className={cn(
-        'flex flex-col gap-4 rounded-xl border px-4 py-4 md:flex-row md:items-center md:justify-between',
-        muted
-          ? 'border-[rgba(0,0,0,0.06)] bg-muted/10'
-          : 'border-[rgba(0,0,0,0.08)] bg-background',
+        'flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[rgba(0,0,0,0.06)] px-5 py-3 last:border-b-0 sm:grid sm:grid-cols-[150px_minmax(0,1fr)_auto_auto]',
+        muted && 'bg-muted/10',
       )}
     >
-      <div className="space-y-2">
-        <div className="text-sm font-semibold">
-          {formatBlockedDate(blockedDate.date)}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {blockedDate.all_day ? (
-            <Badge variant={muted ? 'outline' : 'secondary'} className="rounded-full px-3 py-1 text-xs">
-              Dia inteiro
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
-              {blockedDate.start_time?.substring(0, 5)} às {blockedDate.end_time?.substring(0, 5)}
-            </Badge>
-          )}
-          {blockedDate.reason && <span className="text-sm text-muted-foreground">{blockedDate.reason}</span>}
-        </div>
-      </div>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-10 w-10 rounded-lg text-destructive hover:bg-destructive-soft hover:text-destructive"
-        aria-label={`Remover bloqueio de ${formatBlockedDate(blockedDate.date, 'dd/MM/yyyy')}`}
-        onClick={() => onDelete(blockedDate.id)}
+      <span className={cn('text-sm font-semibold tabular-nums', muted ? 'text-muted-foreground' : 'text-foreground')}>
+        {dayLabel}
+      </span>
+      <span className="order-last w-full min-w-0 truncate text-sm text-muted-foreground sm:order-none sm:w-auto sm:text-foreground">
+        {blockedDate.reason || <span className="text-muted-foreground">Sem motivo informado</span>}
+      </span>
+      <span
+        className={cn(
+          'ml-auto rounded-full px-2.5 py-1 text-xs font-semibold sm:ml-0 sm:justify-self-start',
+          muted
+            ? 'bg-muted text-muted-foreground'
+            : blockedDate.all_day
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-warning-soft text-foreground',
+        )}
       >
-        <Trash2 className="h-4 w-4" />
-      </Button>
-    </div>
+        {blockedDate.all_day
+          ? 'Dia inteiro'
+          : `${blockedDate.start_time?.substring(0, 5)} às ${blockedDate.end_time?.substring(0, 5)}`}
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 rounded-lg border-[rgba(0,0,0,0.14)] bg-white"
+            aria-label={`Mais ações do bloqueio de ${formatBlockedDate(blockedDate.date, 'dd/MM/yyyy')}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() => onDelete(blockedDate.id)}
+            className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Remover bloqueio
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </li>
   );
 }
 
@@ -150,114 +180,107 @@ export default function BlockedDatesTab({ companyId }: Props) {
     onError: (err: any) => toast.error(err.message),
   });
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = toDateKey(new Date());
   const futureDates = blockedDates.filter((blockedDate) => blockedDate.date >= today);
   const pastDates = blockedDates
     .filter((blockedDate) => blockedDate.date < today)
     .sort((left, right) => right.date.localeCompare(left.date));
+
+  const openAddDialog = () => {
+    setForm({ date: '', all_day: true, start_time: '', end_time: '', reason: '' });
+    setShowAdd(true);
+  };
 
   if (isLoading) {
     return <Skeleton className="h-48 w-full" />;
   }
 
   return (
-    <Card className={settingsCardClassName}>
-      <CardHeader className="space-y-0">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="flex items-start gap-3">
-            <div className={settingsBadgeClassName}>
-              <CalendarOff className="h-5 w-5" />
+    <>
+      <div>
+        <section aria-labelledby="blocked-dates-heading" className={cn(settingsCardClassName, 'overflow-hidden')}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(0,0,0,0.06)] px-5 py-4">
+            <div className="min-w-0">
+              <h2 id="blocked-dates-heading" className="text-base font-semibold text-foreground">Datas bloqueadas e especiais</h2>
+              <p className="text-xs text-muted-foreground">Feriados, eventos privados ou horários em que a casa não recebe reservas.</p>
             </div>
-            <div className="space-y-1">
-              <CardTitle className="text-lg">Datas bloqueadas</CardTitle>
-              <CardDescription>Bloqueie datas ou horários específicos (feriados, eventos privados).</CardDescription>
-            </div>
+            <Button size="sm" className="h-9 gap-1.5 rounded-lg px-4" onClick={() => openAddDialog()}>
+              <Plus className="h-4 w-4" />
+              Bloquear data
+            </Button>
           </div>
 
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-10 rounded-lg border-[rgba(0,0,0,0.14)] bg-white px-4"
-            onClick={() => setShowAdd(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Bloquear data
-          </Button>
-        </div>
-      </CardHeader>
-
-      <CardContent className="pt-2">
-        {futureDates.length === 0 && pastDates.length === 0 ? (
-          <div className="flex min-h-[250px] flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[rgba(0,0,0,0.12)] bg-muted/10 px-6 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <CalendarOff className="h-5 w-5" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-lg font-medium text-foreground">Nenhuma data bloqueada</p>
-              <p className="text-sm text-muted-foreground">Clique em "Bloquear data" para adicionar.</p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {futureDates.length > 0 ? (
-              <div className="space-y-3">
-                {futureDates.map((blockedDate) => (
-                  <BlockedDateItem
-                    key={blockedDate.id}
-                    blockedDate={blockedDate}
-                    onDelete={(id) => deleteMutation.mutate(id)}
-                  />
-                ))}
+          {futureDates.length === 0 && pastDates.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <CalendarOff className="h-5 w-5" />
               </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-[rgba(0,0,0,0.12)] bg-muted/10 px-4 py-5 text-sm text-muted-foreground">
-                Nenhuma data futura bloqueada.
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Nenhuma data bloqueada</p>
+                <p className="text-xs text-muted-foreground">Clique em Bloquear data para adicionar.</p>
               </div>
-            )}
+            </div>
+          ) : (
+            <>
+              {futureDates.length > 0 ? (
+                <ul aria-label="Próximas datas bloqueadas">
+                  {futureDates.map((blockedDate) => (
+                    <BlockedDateItem
+                      key={blockedDate.id}
+                      blockedDate={blockedDate}
+                      onDelete={(id) => deleteMutation.mutate(id)}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-5 py-5 text-sm text-muted-foreground">Nenhuma data futura bloqueada.</p>
+              )}
 
-            {pastDates.length > 0 && (
-              <Collapsible
-                open={showPastDates}
-                onOpenChange={setShowPastDates}
-                className="overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-muted/10"
-              >
-                <CollapsibleTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="flex h-auto w-full items-center justify-between gap-3 rounded-none px-4 py-3 text-left hover:bg-muted/20"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-foreground">Datas passadas</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Histórico de bloqueios que não afetam novas reservas.
+              {pastDates.length > 0 && (
+                <Collapsible
+                  open={showPastDates}
+                  onOpenChange={setShowPastDates}
+                  className="border-t border-[rgba(0,0,0,0.08)]"
+                >
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex h-auto w-full items-center justify-between gap-3 rounded-none px-5 py-3 text-left hover:bg-muted/20"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-foreground">Datas passadas</span>
+                        <span className="block text-xs text-muted-foreground">
+                          Histórico de bloqueios que não afetam novas reservas.
+                        </span>
                       </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-xs">
-                        {pastDates.length}
-                      </Badge>
-                      <ChevronDown className={cn('h-4 w-4 transition-transform', showPastDates && 'rotate-180')} />
-                    </span>
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="space-y-2 border-t border-[rgba(0,0,0,0.08)] p-3">
-                    {pastDates.map((blockedDate) => (
-                      <BlockedDateItem
-                        key={blockedDate.id}
-                        blockedDate={blockedDate}
-                        muted
-                        onDelete={(id) => deleteMutation.mutate(id)}
-                      />
-                    ))}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-          </div>
-        )}
-      </CardContent>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-xs">
+                          {pastDates.length}
+                        </Badge>
+                        <ChevronDown className={cn('h-4 w-4 transition-transform', showPastDates && 'rotate-180')} />
+                      </span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <ul aria-label="Datas bloqueadas que já passaram" className="border-t border-[rgba(0,0,0,0.08)]">
+                      {pastDates.map((blockedDate) => (
+                        <BlockedDateItem
+                          key={blockedDate.id}
+                          blockedDate={blockedDate}
+                          muted
+                          onDelete={(id) => deleteMutation.mutate(id)}
+                        />
+                      ))}
+                    </ul>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </>
+          )}
+        </section>
+
+      </div>
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-w-sm rounded-2xl border-[rgba(0,0,0,0.08)]">
@@ -355,6 +378,6 @@ export default function BlockedDatesTab({ companyId }: Props) {
           </form>
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
 }

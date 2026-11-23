@@ -129,7 +129,7 @@ afterEach(() => {
 describe('Suporte na gestão de usuários', () => {
   it('starts with no grants and submits only selected companies, without a tenant membership', async () => {
     renderUsers();
-    fireEvent.click(screen.getByRole('button', { name: 'Novo Usuário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }));
     fireEvent.change(screen.getByLabelText('Perfil do novo usuario'), { target: { value: 'support' } });
     expect(screen.queryByLabelText('Empresa do novo usuario')).not.toBeInTheDocument();
     expect(screen.getByText('0 selecionadas')).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe('Suporte na gestão de usuários', () => {
 
   it('allows creating support with an explicit empty company list', async () => {
     renderUsers();
-    fireEvent.click(screen.getByRole('button', { name: 'Novo Usuário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }));
     fireEvent.change(screen.getByLabelText('Perfil do novo usuario'), { target: { value: 'support' } });
     fillCreateForm();
     fireEvent.click(screen.getByRole('button', { name: 'Criar Usuário' }));
@@ -164,7 +164,7 @@ describe('Suporte na gestão de usuários', () => {
 
   it('omits grants when the selected profile is changed back to a company role', async () => {
     renderUsers();
-    fireEvent.click(screen.getByRole('button', { name: 'Novo Usuário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }));
     fireEvent.change(screen.getByLabelText('Perfil do novo usuario'), { target: { value: 'support' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Empresa B' }));
     fireEvent.change(screen.getByLabelText('Perfil do novo usuario'), { target: { value: 'operator' } });
@@ -186,7 +186,7 @@ describe('Suporte na gestão de usuários', () => {
     expect(screen.queryByText('João Suporte')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Filtrar por empresa'), { target: { value: 'company-a' } });
     expect(screen.getByText('João Suporte')).toBeInTheDocument();
-    expect(screen.getByText('1 empresa autorizada')).toBeInTheDocument();
+    expect(screen.getByText('Suporte em 1 empresa')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Editar' }));
     expect(screen.getByRole('checkbox', { name: 'Empresa Á' })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Empresa B' }));
@@ -214,7 +214,7 @@ describe('Suporte na gestão de usuários', () => {
   it('blocks creating support while the company catalog could not be loaded', () => {
     mocks.companiesError = new Error('Sem conexão');
     renderUsers();
-    fireEvent.click(screen.getByRole('button', { name: 'Novo Usuário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }));
     fireEvent.change(screen.getByLabelText('Perfil do novo usuario'), { target: { value: 'support' } });
     expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível carregar as empresas');
     expect(screen.getByRole('button', { name: 'Criar Usuário' })).toBeDisabled();

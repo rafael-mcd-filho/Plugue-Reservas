@@ -536,9 +536,9 @@ export default function CompanyUsers() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">Usuários</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Equipe</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gerencie os usuários de {companyName}
+            Gerencie os acessos da equipe de {companyName}
           </p>
         </div>
 
@@ -585,7 +585,7 @@ export default function CompanyUsers() {
         <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
           <CardContent className="py-14 text-center text-muted-foreground">
             <AlertTriangle className="mx-auto mb-3 h-12 w-12 text-destructive/70" />
-            <p className="font-medium text-foreground">Não foi possível carregar os usuários.</p>
+            <p className="font-medium text-foreground">Não foi possível carregar a equipe.</p>
             <p className="mt-2 text-sm">{error instanceof Error ? error.message : 'Erro inesperado.'}</p>
             <Button variant="outline" className="mt-4 gap-2 rounded-lg" onClick={() => refetch()} disabled={isFetching}>
               {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

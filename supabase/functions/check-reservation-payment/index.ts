@@ -1,4 +1,6 @@
+import { synchronizeReservationSettlement } from "../_shared/reservation-settlement-sync.ts";
 import { createSupabaseAdminClient } from "../_shared/internal-auth.ts";
+import { getReservationAsaasCredentials } from "../_shared/reservation-asaas-config.ts";
 import {
   deleteAsaasPayment,
   deleteAsaasPaymentLink,
@@ -10,6 +12,7 @@ import {
   getAsaasPaymentStatus,
   isAsaasPaidStatus,
   listAsaasPayments,
+  type AsaasCredentials,
 } from "../_shared/asaas.ts";
 import {
   buildPaymentLinkExternalReference,
@@ -20,6 +23,7 @@ import {
   paymentIsExpired,
   readJson,
   recordPaymentEvent,
+  recordReservationPaymentInstallment,
   toPublicPaymentSummary,
 } from "../_shared/reservation-payments.ts";
 
@@ -45,27 +49,9 @@ async function loadContext(supabaseAdmin: any, paymentToken: string) {
   return { payment, reservation, company };
 }
 
-async function getApiToken(supabaseAdmin: any, companyId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("company_asaas_configs")
-    .select("api_token, status")
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "configured") throw new Error("Integracao Asaas nao configurada");
-  return data.api_token as string;
-}
-
-async function getAsaasPaymentSnapshot(apiToken: string, paymentId: string) {
-  const asaasStatus = await getAsaasPaymentStatus(apiToken, paymentId);
-  let asaasPayment = null;
-
-  try {
-    asaasPayment = await getAsaasPayment(apiToken, paymentId);
-  } catch (error) {
-    console.warn("Failed to retrieve full Asaas payment during manual check", error);
-  }
+async function getAsaasPaymentSnapshot(apiToken: AsaasCredentials, paymentId: string) {
+  const asaasPayment = await getAsaasPayment(apiToken, paymentId);
+  const asaasStatus = asaasPayment.status ?? await getAsaasPaymentStatus(apiToken, paymentId);
 
   return {
     asaasStatus: asaasPayment?.status ?? asaasStatus,
@@ -74,7 +60,7 @@ async function getAsaasPaymentSnapshot(apiToken: string, paymentId: string) {
   };
 }
 
-async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: string) {
+async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: AsaasCredentials) {
   if (payment.asaas_payment_id) return payment;
 
   const externalReference = payment.payment_link_external_reference
@@ -108,7 +94,7 @@ async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, pay
 async function refreshProviderPaymentState(
   supabaseAdmin: any,
   payment: any,
-  apiToken: string,
+  apiToken: AsaasCredentials,
 ) {
   payment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
 
@@ -120,6 +106,8 @@ async function refreshProviderPaymentState(
     apiToken,
     payment.asaas_payment_id,
   );
+  await synchronizeReservationSettlement(supabaseAdmin, payment, "manual_check");
+  payment = await recordReservationPaymentInstallment(supabaseAdmin,payment,asaasPayment,"manual_check");
   const outcome = getAsaasExternalPaymentOutcome(null, asaasStatus, asaasPayment);
 
   if (outcome) {
@@ -240,7 +228,7 @@ Deno.serve(async (req) => {
     }
 
     if (payment.status !== "pending") {
-      const apiToken = await getApiToken(supabaseAdmin, payment.company_id);
+      const apiToken = await getReservationAsaasCredentials(supabaseAdmin, payment);
       await refreshProviderPaymentState(supabaseAdmin, payment, apiToken);
       const { payment: refreshedPayment, reservation: refreshedReservation, company: refreshedCompany } =
         await loadContext(supabaseAdmin, paymentToken);
@@ -248,14 +236,16 @@ Deno.serve(async (req) => {
       return jsonResponse(toPublicPaymentSummary(refreshedPayment, refreshedReservation, refreshedCompany));
     }
 
-    const apiToken = await getApiToken(supabaseAdmin, payment.company_id);
-    const providerLinkedPayment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
+    const apiToken = await getReservationAsaasCredentials(supabaseAdmin, payment);
+    let providerLinkedPayment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
 
     if (paymentIsExpired(providerLinkedPayment)) {
       let asaasStatus: string | null = null;
       if (providerLinkedPayment.asaas_payment_id) {
         const snapshot = await getAsaasPaymentSnapshot(apiToken, providerLinkedPayment.asaas_payment_id);
+        await synchronizeReservationSettlement(supabaseAdmin, providerLinkedPayment, "manual_check");
         asaasStatus = snapshot.asaasStatus;
+        providerLinkedPayment = await recordReservationPaymentInstallment(supabaseAdmin,providerLinkedPayment,snapshot.asaasPayment,"manual_check");
         const providerOutcome = getAsaasExternalPaymentOutcome(null, asaasStatus, snapshot.asaasPayment);
 
         if (providerOutcome) {
@@ -282,6 +272,11 @@ Deno.serve(async (req) => {
             confirmation,
           });
         }
+      }
+
+      if (providerLinkedPayment.metadata?.asaas_installment_id) {
+        return jsonResponse({ ...toPublicPaymentSummary(providerLinkedPayment,reservation,company),
+          message:"Parcelamento requer conferencia no Asaas; nenhuma parcela foi cancelada automaticamente" });
       }
 
       const deletedAt = new Date().toISOString();
@@ -362,6 +357,8 @@ Deno.serve(async (req) => {
       apiToken,
       providerLinkedPayment.asaas_payment_id,
     );
+    await synchronizeReservationSettlement(supabaseAdmin, providerLinkedPayment, "manual_check");
+    providerLinkedPayment = await recordReservationPaymentInstallment(supabaseAdmin,providerLinkedPayment,asaasPayment,"manual_check");
     const providerOutcome = getAsaasExternalPaymentOutcome(null, asaasStatus, asaasPayment);
 
     if (providerOutcome) {

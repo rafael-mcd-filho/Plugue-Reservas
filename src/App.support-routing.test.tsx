@@ -1,7 +1,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import type { AppRole } from '@/lib/companyPermissions';
+import type { AppRole, CompanyPanelPermission } from '@/lib/companyPermissions';
 import App from '@/App';
 
 const mocks = vi.hoisted(() => ({
@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   effectiveRoles: ['support'] as AppRole[],
   impersonating: false,
   company: null as null | { companyId: string; companyName: string; companySlug: string },
-  hasPermission: vi.fn(() => true),
+  hasPermission: vi.fn((_permission: CompanyPanelPermission) => true),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -71,6 +71,10 @@ vi.mock('@/pages/SupportCompanies', () => ({ default: () => <h2>Empresas permiti
 vi.mock('@/pages/Companies', () => ({ default: () => <h2>Cadastro global de empresas</h2> }));
 vi.mock('@/pages/Dashboard', () => ({ default: () => <h2>Conteúdo do dashboard</h2> }));
 vi.mock('@/pages/AccessDenied', () => ({ default: () => <h2>Acesso negado</h2> }));
+vi.mock('@/pages/TableMap', () => ({ default: () => <h2>Configuração de mesas e seções</h2> }));
+vi.mock('@/pages/ServiceToday', () => ({ default: () => <h2>Serviço consolidado</h2> }));
+vi.mock('@/pages/CompanyWaitlist', () => ({ default: () => <h2>Lista de espera antiga</h2> }));
+vi.mock('@/pages/PublicWaitlistPage', () => ({ default: () => <h2>Entrada pública da fila</h2> }));
 
 beforeEach(() => {
   mocks.roles = ['support'];
@@ -98,6 +102,57 @@ function renderAt(path: string) {
 }
 
 describe('support companies-only platform navigation', () => {
+  it.each(['admin', 'operator', 'superadmin'] as AppRole[])('redirects the former queue to Services today for %s without mounting the legacy screen', async role => {
+    mocks.roles = [role]; mocks.effectiveRoles = role === 'superadmin' ? ['admin'] : [role];
+    mocks.impersonating = role === 'superadmin';
+    mocks.company = { companyId: 'company-one', companyName: 'Empresa A', companySlug: 'empresa-a' };
+    vi.stubEnv('DEV', false); vi.stubEnv('VITE_SERVICE_TODAY_ENABLED', 'false');
+    try {
+      renderAt('/empresa-a/admin/fila?origem=favorito');
+      expect(await screen.findByRole('heading', { name: 'Serviço consolidado' })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Lista de espera antiga' })).not.toBeInTheDocument();
+      expect(window.location.pathname).toBe('/empresa-a/admin/servico');
+      expect(new URLSearchParams(window.location.search).get('tab')).toBe('fila');
+      expect(new URLSearchParams(window.location.search).get('origem')).toBe('favorito');
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it('lets an operator with only the queue permission open the consolidated route directly', async () => {
+    mocks.roles = ['operator']; mocks.effectiveRoles = ['operator'];
+    mocks.company = { companyId: 'company-one', companyName: 'Empresa A', companySlug: 'empresa-a' };
+    mocks.hasPermission.mockImplementation(permission => permission === 'waitlist_view');
+    renderAt('/empresa-a/admin/servico?tab=fila');
+    expect(await screen.findByRole('heading', { name: 'Serviço consolidado' })).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation')).getByRole('link', { name: 'Serviços de Hoje' })).toBeInTheDocument();
+  });
+  it('does not use the old queue redirect to bypass the queue permission', async () => {
+    mocks.roles = ['operator']; mocks.effectiveRoles = ['operator'];
+    mocks.company = { companyId: 'company-one', companyName: 'Empresa A', companySlug: 'empresa-a' };
+    mocks.hasPermission.mockImplementation(permission => permission !== 'waitlist_view');
+    renderAt('/empresa-a/admin/fila');
+    expect(await screen.findByRole('heading', { name: 'Acesso negado' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Serviço consolidado' })).not.toBeInTheDocument();
+    expect(window.location.pathname).toBe('/acesso-negado');
+  });
+  it('preserves the public queue entrance independently of the retired administrative screen', async () => {
+    renderAt('/empresa-a/fila');
+    expect(await screen.findByRole('heading', { name: 'Entrada pública da fila' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/empresa-a/fila');
+  });
+  it.each([false, true])('denies table and section configuration to an operator, including delegated access (%s)', async (delegated) => {
+    mocks.roles = delegated ? ['support'] : ['operator'];
+    mocks.effectiveRoles = ['operator']; mocks.impersonating = delegated;
+    mocks.company = { companyId: 'company-one', companyName: 'Empresa A', companySlug: 'empresa-a' };
+    renderAt('/empresa-a/admin/mesas');
+    expect(await screen.findByRole('heading', { name: 'Acesso negado' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Configuração de mesas e seções' })).not.toBeInTheDocument();
+    expect(window.location.pathname).toBe('/acesso-negado');
+  });
+  it('preserves table configuration for the administrator', async () => {
+    mocks.roles = ['admin']; mocks.effectiveRoles = ['admin'];
+    mocks.company = { companyId: 'company-one', companyName: 'Empresa A', companySlug: 'empresa-a' };
+    renderAt('/empresa-a/admin/mesas');
+    expect(await screen.findByRole('heading', { name: 'Configuração de mesas e seções' })).toBeInTheDocument();
+  });
   it.each(['/', '/dashboard', '/empresas'])('takes support at %s to allowed companies with only Empresas in the menu', async (path) => {
     renderAt(path);
     expect(await screen.findByRole('heading', { name: 'Empresas permitidas do suporte' })).toBeInTheDocument();

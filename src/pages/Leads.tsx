@@ -254,7 +254,7 @@ async function findImportedLeadMatches(companyId: string, rows: ParsedLeadImport
 
           if (error) throw error;
           if (count === null) {
-            throw new Error('Não foi possível confirmar o total de leads existentes.');
+            throw new Error('Não foi possível confirmar o total de clientes existentes.');
           }
 
           return {
@@ -400,7 +400,7 @@ export default function Leads() {
   const editLeadMutation = useMutation({
     mutationFn: async ({ lead, values }: { lead: Lead; values: CrmLeadEditValues }) => {
       if (!companyId) {
-        throw new Error('Sessão expirada. Entre novamente para editar o lead.');
+        throw new Error('Sessão expirada. Entre novamente para editar o cliente.');
       }
 
       const { error } = await (supabase as any).rpc('upsert_crm_lead_profile', {
@@ -414,7 +414,7 @@ export default function Leads() {
 
       if (error) {
         if (error.code === '23505') {
-          throw new Error('Este telefone ou e-mail já está vinculado a outro lead.');
+          throw new Error('Este telefone ou e-mail já está vinculado a outro cliente.');
         }
 
         throw error;
@@ -428,11 +428,11 @@ export default function Leads() {
         qc.invalidateQueries({ queryKey: ['customer-recurrence-report', companyId] }),
       ]);
 
-      toast.success('Dados do lead atualizados.');
+      toast.success('Dados do cliente atualizados.');
       setEditingLead(null);
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : 'Não foi possível atualizar o lead.';
+      const message = error instanceof Error ? error.message : 'Não foi possível atualizar o cliente.';
       toast.error(message);
     },
   });
@@ -453,11 +453,11 @@ export default function Leads() {
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!companyId || !user) {
-        throw new Error('Sessão expirada. Entre novamente para importar leads.');
+        throw new Error('Sessão expirada. Entre novamente para importar clientes.');
       }
 
       if (importRows.length === 0) {
-        throw new Error('Carregue um CSV com pelo menos um lead válido antes de importar.');
+        throw new Error('Carregue um CSV com pelo menos um cliente válido antes de importar.');
       }
 
       const existingLeads = await findImportedLeadMatches(companyId, importRows);
@@ -535,14 +535,14 @@ export default function Leads() {
       toast.success(
         pieces.length > 0
           ? `Importação concluída: ${pieces.join(' • ')}.`
-          : 'Nenhum lead precisou ser importado.',
+          : 'Nenhum cliente precisou ser importado.',
       );
 
       setImportDialogOpen(false);
       resetImportState();
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : 'Não foi possível importar os leads.';
+      const message = error instanceof Error ? error.message : 'Não foi possível importar os clientes.';
       toast.error(message);
     },
   });
@@ -567,11 +567,11 @@ export default function Leads() {
       setImportDuplicateCount(result.duplicateCount + consolidated.duplicateCount);
 
       if (consolidated.rows.length === 0) {
-        toast.error('Nenhum lead válido foi encontrado no arquivo.');
+        toast.error('Nenhum cliente válido foi encontrado no arquivo.');
       } else if (result.errors.length > 0) {
-        toast.success(`Arquivo carregado com ${consolidated.rows.length} leads válidos e ${result.errors.length} linhas ignoradas.`);
+        toast.success(`Arquivo carregado com ${consolidated.rows.length} clientes válidos e ${result.errors.length} linhas ignoradas.`);
       } else {
-        toast.success(`${consolidated.rows.length} leads prontos para importar.`);
+        toast.success(`${consolidated.rows.length} clientes prontos para importar.`);
       }
     } catch {
       toast.error('Não foi possível ler o arquivo CSV.');
@@ -583,7 +583,7 @@ export default function Leads() {
 
   const downloadImportTemplate = () => {
     downloadCsv(
-      'modelo-importacao-leads.csv',
+      'modelo-importacao-clientes.csv',
       ['nome', 'telefone', 'pais', 'email', 'nascimento', 'observações'],
       [
         ['Maria Eduarda Nunes', '83981297758', 'BR', 'maria@example.com', '1994-05-18', 'Veio de uma base antiga'],
@@ -633,14 +633,14 @@ export default function Leads() {
 
   const pageSummary = useMemo(() => {
     if (filteredLeadsCount === 0) {
-      return 'Exibindo 0 de 0 leads';
+      return 'Exibindo 0 de 0 clientes';
     }
 
     const size = listMeta?.page_size ?? Number(pageSize);
     const start = (displayedPage - 1) * size + 1;
     const end = Math.min(displayedPage * size, filteredLeadsCount);
 
-    return `Exibindo ${start}-${end} de ${filteredLeadsCount} leads`;
+    return `Exibindo ${start}-${end} de ${filteredLeadsCount} clientes`;
   }, [displayedPage, filteredLeadsCount, listMeta?.page_size, pageSize]);
 
   const visiblePages = useMemo(() => getVisiblePages(displayedPage, totalPages), [displayedPage, totalPages]);
@@ -747,7 +747,7 @@ export default function Leads() {
       { header: 'Email', width: 34 },
       { header: 'Estado', width: 27 },
       { header: 'Nascimento', width: 15, align: 'center', format: 'dd/mm/yyyy' },
-      { header: 'Lead criado em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
+      { header: 'Cliente criado em', width: 20, align: 'center', format: 'dd/mm/yyyy hh:mm' },
       { header: 'Papel filtrado', width: 20 },
       { header: 'Presenças filtradas', width: 18, align: 'center', format: '0' },
       { header: 'Visitas totais', width: 14, align: 'center', format: '0' },
@@ -759,8 +759,8 @@ export default function Leads() {
 
     try {
       await downloadSpreadsheet({
-        filename: `leads_${format(new Date(), 'yyyy-MM-dd')}.xlsx`,
-        sheetName: 'Leads',
+        filename: `clientes_${format(new Date(), 'yyyy-MM-dd')}.xlsx`,
+        sheetName: 'Clientes',
         columns,
         rows,
         getRowHeight: (row) => {
@@ -770,10 +770,10 @@ export default function Leads() {
         },
       });
 
-      toast.success(`${exportedLeads.length} leads exportados em Excel.`);
+      toast.success(`${exportedLeads.length} clientes exportados em Excel.`);
     } catch (error) {
       console.error('Lead spreadsheet export error:', error);
-      toast.error('Não foi possível gerar a planilha de leads.');
+      toast.error('Não foi possível gerar a planilha de clientes.');
     } finally {
       setExportSpreadsheetPending(false);
     }
@@ -788,7 +788,7 @@ export default function Leads() {
       <div className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Leads</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Clientes</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Base consolidada de clientes, reservas, fila de espera e importações.
             </p>
@@ -865,12 +865,12 @@ export default function Leads() {
                 maxLength={200}
                 onChange={(event) => setSearch(event.target.value)}
                 className="h-10 rounded-md bg-background pl-10"
-                aria-label="Buscar leads por nome, telefone ou email"
+                aria-label="Buscar clientes por nome, telefone ou email"
               />
             </div>
 
             <Select value={stateFilter} onValueChange={setStateFilter}>
-              <SelectTrigger className="h-10 rounded-md bg-background" aria-label="Filtrar leads por estado">
+              <SelectTrigger className="h-10 rounded-md bg-background" aria-label="Filtrar clientes por estado">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
@@ -944,7 +944,7 @@ export default function Leads() {
         <Card className="border-destructive/25 bg-destructive/5 shadow-none">
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center" role="alert">
             <div>
-              <p className="font-medium text-foreground">Não foi possível carregar a base de leads</p>
+              <p className="font-medium text-foreground">Não foi possível carregar a base de clientes</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Nenhuma contagem parcial será exibida. Tente carregar os dados novamente.
               </p>
@@ -958,7 +958,7 @@ export default function Leads() {
         <p className="py-12 text-center text-muted-foreground">Carregando…</p>
       ) : filteredLeadsCount === 0 ? (
         <p className="py-12 text-center text-muted-foreground">
-          {hasActiveFilters ? 'Nenhum lead encontrado com os filtros atuais' : 'Nenhum lead encontrado'}
+          {hasActiveFilters ? 'Nenhum cliente encontrado com os filtros atuais' : 'Nenhum cliente encontrado'}
         </p>
       ) : (
         <div className="space-y-4">
@@ -1083,7 +1083,7 @@ export default function Leads() {
           </Card>
 
           {totalPages > 1 && (
-            <Pagination aria-label="Paginação dos leads">
+            <Pagination aria-label="Paginação dos clientes">
               <PaginationContent>
                 <PaginationItem>
                   <Button
@@ -1151,13 +1151,13 @@ export default function Leads() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Importar leads</DialogTitle>
+            <DialogTitle>Importar clientes</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6 pt-2">
             <div className="rounded-3xl border border-border bg-muted/20 p-5">
               <p className="text-sm text-muted-foreground">
-                Importe leads sem criar reservas. O arquivo pode ter as colunas
+                Importe clientes sem criar reservas. O arquivo pode ter as colunas
                 <span className="font-medium text-foreground"> nome</span>,
                 <span className="font-medium text-foreground"> telefone</span>,
                 <span className="font-medium text-foreground"> pais</span> (opcional),
@@ -1231,7 +1231,7 @@ export default function Leads() {
 
                 <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
                   <div className="space-y-2">
-                    <Label>Como atualizar leads já importados</Label>
+                    <Label>Como atualizar clientes já importados</Label>
                     <Select value={importMode} onValueChange={(value) => setImportMode(value as LeadImportMode)}>
                       <SelectTrigger className="h-11 rounded-xl bg-card">
                         <SelectValue />
@@ -1242,7 +1242,7 @@ export default function Leads() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      O sistema usa telefone e email normalizados para tentar localizar leads já importados.
+                      O sistema usa telefone e email normalizados para tentar localizar clientes já importados.
                     </p>
                   </div>
 
@@ -1266,7 +1266,7 @@ export default function Leads() {
                     </div>
                     {importRows.length > 8 && (
                       <p className="mt-3 text-xs text-muted-foreground">
-                        Mostrando 8 de {importRows.length} leads prontos para importar.
+                        Mostrando 8 de {importRows.length} clientes prontos para importar.
                       </p>
                     )}
                   </div>
@@ -1290,7 +1290,7 @@ export default function Leads() {
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
-                    Leads importados aparecem mesmo sem reservas e se juntam ao histórico pelo telefone; quando não houver telefone, pelo email.
+                    Clientes importados aparecem mesmo sem reservas e se juntam ao histórico pelo telefone; quando não houver telefone, pelo email.
                   </p>
                   <Button
                     type="button"
@@ -1299,7 +1299,7 @@ export default function Leads() {
                     disabled={importRows.length === 0 || importReading || importMutation.isPending}
                   >
                     {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                    {importMutation.isPending ? 'Importando…' : `Importar ${importRows.length} leads`}
+                    {importMutation.isPending ? 'Importando…' : `Importar ${importRows.length} clientes`}
                   </Button>
                 </div>
               </>
@@ -1323,13 +1323,13 @@ export default function Leads() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Exportar leads</DialogTitle>
+            <DialogTitle>Exportar clientes</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6 pt-2">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <Label>Criação do lead</Label>
+                <Label>Criação do cliente</Label>
                 <DateRangePicker
                   value={exportLeadCreatedRange}
                   onChange={setExportLeadCreatedRange}
@@ -1382,7 +1382,7 @@ export default function Leads() {
                   />
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">Somente aniversariantes de {currentMonthLabel}</p>
-                    <p className="text-xs text-muted-foreground">Leads sem data de nascimento não serão incluídos.</p>
+                    <p className="text-xs text-muted-foreground">Clientes sem data de nascimento não serão incluídos.</p>
                   </div>
                 </label>
               </div>
@@ -1420,15 +1420,15 @@ export default function Leads() {
             ) : exportRequest && exportQuery.data ? (
               <div className="space-y-4 rounded-3xl border border-border bg-muted/20 p-5">
                 <div className="rounded-2xl border border-border bg-card p-4">
-                  <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Leads encontrados</p>
+                  <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Clientes encontrados</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">{exportedLeadsSummary.totalLeads}</p>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
                     {exportedLeads.length === 0
-                      ? 'Nenhum lead encontrado com os filtros informados.'
-                      : 'A planilha terá os dados do lead e somente as presenças registradas (check-in, atendimento concluído ou fila sentada) no recorte escolhido.'}
+                      ? 'Nenhum cliente encontrado com os filtros informados.'
+                      : 'A planilha terá os dados do cliente e somente as presenças registradas (check-in, atendimento concluído ou fila sentada) no recorte escolhido.'}
                   </p>
                   <Button
                     className="gap-2"

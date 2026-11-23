@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format, isValid, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -36,6 +36,8 @@ import ReservationFunnelChart from '@/components/ReservationFunnelChart';
 import ReportFilterBar, { REPORT_FILTER_TOGGLE_CLASS } from '@/components/reports/ReportFilterBar';
 import { ReportKpiDelta, ReportKpiStrip, ReportKpiStripSkeleton, ReportKpiTile } from '@/components/reports/ReportKpiStrip';
 import ReportShell from '@/components/reports/ReportShell';
+import ReportAnalysisPanel from '@/components/reports/ReportAnalysisPanel';
+import ReportRecordsSheet from '@/components/reports/ReportRecordsSheet';
 import { useCompanySlug } from '@/contexts/CompanySlugContext';
 import {
   getDemandConversionErrorMessage,
@@ -50,10 +52,9 @@ import { useReportFilters } from '@/hooks/useReportFilters';
 import type { ReportGranularity } from '@/lib/report-filters';
 import { type ReservationOriginKey } from '@/lib/reservation-origin';
 import { cn } from '@/lib/utils';
+import { getDemandReadings, loadDemandInvestigation, type DemandInvestigation } from '@/lib/report-investigation';
 
-// The report no longer lists individual reservations, but the RPC contract still
-// requires a valid page window. Asking for the smallest page keeps the response
-// free of personal data we do not render.
+// Individual records are requested only when an investigation is opened.
 const DETAILS_PAGE_SIZE = 1;
 const numberFormatter = new Intl.NumberFormat('pt-BR');
 const decimalFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -143,7 +144,8 @@ function ReportSkeleton() {
 }
 
 export default function DemandConversionReport() {
-  const { companyId, companyName, companyTimeZone, companyTimeZoneResolved } = useCompanySlug();
+  const { companyId, companyName, companyTimeZone, companyTimeZoneResolved, slug } = useCompanySlug();
+  const [investigation, setInvestigation] = useState<DemandInvestigation | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useReportFilters({
     defaultPreset: 'last_30_days',
@@ -157,6 +159,13 @@ export default function DemandConversionReport() {
   const evolutionMetric: DemandEvolutionMetric = isDemandMetric(searchParams.get('metric'))
     ? searchParams.get('metric') as DemandEvolutionMetric
     : 'reservations';
+  useEffect(() => { setInvestigation(null); }, [companyId, filters.dateOnlyRange.from, filters.dateOnlyRange.to, uniqueOnly]);
+  const loadInvestigation = useCallback((signal?: AbortSignal) => investigation
+    ? loadDemandInvestigation({
+      companyId, periodStart: filters.dateOnlyRange.from, periodEnd: filters.dateOnlyRange.to,
+      uniqueOnly, granularity: filters.granularity,
+    }, investigation, signal)
+    : Promise.resolve([]), [companyId, filters.dateOnlyRange.from, filters.dateOnlyRange.to, uniqueOnly, filters.granularity, investigation]);
 
   const updateParams = useCallback((updates: Record<string, string | null>) => {
     setSearchParams((current) => {
@@ -301,6 +310,8 @@ export default function DemandConversionReport() {
           <ReportKpiStrip aria-label="Resumo do período">
             <ReportKpiTile
               label={uniqueOnly ? 'Visitantes no funil' : 'Sessões no funil'}
+              onClick={() => updateParams({ report_view: 'explore', analysis: null })}
+              actionLabel="Explorar jornadas do funil web"
               value={formatInteger(report.summary.sessions)}
               detail="Funil web total; não muda com a forma de entrada"
               explanation={uniqueOnly
@@ -312,10 +323,12 @@ export default function DemandConversionReport() {
               icon={MousePointerClick}
             />
             <ReportKpiTile
-              label="Reservas finalizadas"
+              label="Conclusões no funil web"
+              onClick={() => updateParams({ report_view: 'explore', analysis: null })}
+              actionLabel="Explorar conclusões do funil web"
               value={formatInteger(report.summary.completed)}
               detail={`${formatPercent(report.summary.overall_conversion_rate)} de conversão no funil web total`}
-              explanation="Sessões que chegaram ao fim do funil e confirmaram a reserva. A taxa divide as finalizadas pelo total de sessões."
+              explanation={uniqueOnly ? 'Visitantes distintos com conclusão registrada no funil web. Conversão web: visitantes com conclusão ÷ visitantes que abriram a página.' : 'Sessões com conclusão registrada no funil web. Conversão web: sessões com conclusão ÷ sessões que abriram a página. Esta base difere das reservas por todas as formas de entrada.'}
               comparison={report.comparison
                 ? (
                   <ReportKpiDelta
@@ -329,6 +342,7 @@ export default function DemandConversionReport() {
             />
             <ReportKpiTile
               label="Reservas criadas"
+              onClick={() => setInvestigation({ title: 'Reservas pela data de criação', basis: 'created' })}
               value={formatInteger(report.summary.created_reservations)}
               detail="Por qualquer forma de entrada no período"
               explanation="Reservas registradas no período por qualquer caminho — site, painel, fila de espera ou filiado. Não se limita ao funil web."
@@ -344,6 +358,7 @@ export default function DemandConversionReport() {
             />
             <ReportKpiTile
               label="Pessoas reservadas"
+              onClick={() => setInvestigation({ title: 'Reservas que compõem as pessoas reservadas', basis: 'created' })}
               value={formatInteger(report.summary.created_people)}
               detail={`Antecedência média de ${decimalFormatter.format(report.summary.average_lead_days)} dias`}
               explanation="Soma das pessoas de todas as reservas criadas no período. A antecedência média é a distância entre a criação e a data marcada."
@@ -354,11 +369,16 @@ export default function DemandConversionReport() {
             />
           </ReportKpiStrip>
 
+          <ReportAnalysisPanel insights={getDemandReadings(report, uniqueOnly)}>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Período de {formatDate(filters.dateOnlyRange.from)} a {formatDate(filters.dateOnlyRange.to)} · fuso {companyTimeZone}.
+            {' '}Conversão web usa a navegação registrada; reservas criadas usam a data de criação. A leitura “Reservas realizadas” e a entrada por visita usam a data marcada para atendimento.
+          </p>
           <section className="space-y-4" aria-label="Funil e evolução da demanda">
             <div className="[&>*]:min-w-0">
               <ReservationFunnelChart
+                title="Conversão web"
                 data={report.funnel.map((stage) => ({ step: stage.step, count: stage.count }))}
-                title="Funil de Reservas"
                 description={`${uniqueOnly ? 'Visitantes' : 'Sessões'} que acessaram a página pública no período e avançaram no processo. O percentual ao fim de cada barra é sobre a base inicial.`}
                 measurementLabel={uniqueOnly ? 'Visitantes únicos' : 'Sessões'}
                 state={reportQuery.isFetching
@@ -468,10 +488,16 @@ export default function DemandConversionReport() {
                               {formatInteger(origin.people)} pessoas
                             </span>
                           </div>
+                          <Button type="button" variant="ghost" size="sm" className="mt-1 h-8 px-0 text-xs text-foreground" onClick={() => setInvestigation({ title: `${origin.label}: ${evolutionLens === 'entry_visit' ? 'reservas pela visita' : 'reservas pela criação'}`, basis: evolutionLens === 'entry_visit' ? 'visit' : 'created', entryMode: origin.key })}>
+                            Ver reservas de {origin.label}
+                          </Button>
                         </article>
                       ))}
                     </div>
                   </section>
+                )}
+                {evolutionLens === 'created' && selectedEvolutionHasData && (
+                  <Button type="button" variant="outline" size="sm" className="mb-3" onClick={() => setInvestigation({ title: 'Reservas com comparecimento pela data da visita', basis: 'visit', outcome: 'attended' })}>Ver reservas com comparecimento</Button>
                 )}
                 {evolutionLens === 'created' && attendanceQuery.isPending ? (
                   <Skeleton className="h-[310px] w-full" aria-label="Carregando reservas realizadas" />
@@ -621,6 +647,13 @@ export default function DemandConversionReport() {
                 <p className="sr-only">
                   {report.lead_time_bands.map((band) => `${band.label}: ${formatInteger(band.reservations)} reservas`).join('; ')}.
                 </p>
+                <div className="mt-3 flex flex-wrap gap-2" aria-label="Investigar faixas de antecedência">
+                  {report.lead_time_bands.filter(band => band.reservations > 0).map(band => (
+                    <Button key={band.key} type="button" variant="outline" size="sm" onClick={() => setInvestigation({ title: `Reservas criadas: ${band.label}`, leadTimeBand: band.key })}>
+                      {band.label} · {formatInteger(band.reservations)} reservas
+                    </Button>
+                  ))}
+                </div>
                 </> : (
                   <p className="py-10 text-center text-sm text-muted-foreground">Nenhuma reserva criada neste recorte.</p>
                 )}
@@ -662,6 +695,7 @@ export default function DemandConversionReport() {
                         {formatPointComparison(band.percentage, previous.percentage)}
                       </p>
                     )}
+                    <Button type="button" variant="ghost" size="sm" className="mt-1 h-8 px-0 text-xs text-foreground" onClick={() => setInvestigation({ title: `Reservas criadas: ${band.label}`, partySizeBand: band.key })}>Ver reservas de {band.label}</Button>
                   </article>
                 );
               }) : (
@@ -669,11 +703,20 @@ export default function DemandConversionReport() {
               )}
             </CardContent>
           </Card>
-
-
+          </ReportAnalysisPanel>
         </>
       )}
 
+      {companyId && investigation && (
+        <ReportRecordsSheet
+          open onOpenChange={open => { if (!open) setInvestigation(null); }}
+          title={investigation.title}
+          description={`${investigation.basis === 'visit' ? 'Data da visita' : 'Data de criação'} de ${formatDate(filters.dateOnlyRange.from)} a ${formatDate(filters.dateOnlyRange.to)} · ${companyTimeZone}. A lista mostra reservas autorizadas; sessões do funil web têm outra base.`}
+          companyId={companyId} slug={slug}
+          scopeKey={['demand', filters.dateOnlyRange.from, filters.dateOnlyRange.to, uniqueOnly, report?.meta.generated_at, investigation]}
+          loadRecords={loadInvestigation}
+        />
+      )}
     </ReportShell>
   );
 }

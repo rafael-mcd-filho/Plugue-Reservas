@@ -84,6 +84,8 @@ interface ReportKpiTileProps {
   explanation?: string;
   icon: LucideIcon;
   className?: string;
+  onClick?: () => void;
+  actionLabel?: string;
 }
 
 export function ReportKpiTile({
@@ -94,7 +96,16 @@ export function ReportKpiTile({
   explanation,
   icon: Icon,
   className,
+  onClick,
+  actionLabel,
 }: ReportKpiTileProps) {
+  const content = <>
+    <span className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="break-words text-2xl font-semibold tracking-tight text-foreground">{value}</span>
+      {comparison}
+    </span>
+    {detail && <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">{detail}</span>}
+  </>;
   return (
     <div className={cn('min-w-0 bg-card px-3.5 py-3 transition-colors hover:bg-muted/20', className)}>
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -109,12 +120,7 @@ export function ReportKpiTile({
           />
         )}
       </div>
-      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        {/* Figuras proporcionais: tabular-nums deixa o número grande espaçado demais. */}
-        <p className="break-words text-2xl font-semibold tracking-tight text-foreground">{value}</p>
-        {comparison}
-      </div>
-      {detail && <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{detail}</p>}
+      {onClick ? <button type="button" onClick={onClick} aria-label={actionLabel ?? 'Abrir registros de ' + label} className="block min-h-11 w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{content}</button> : content}
     </div>
   );
 }

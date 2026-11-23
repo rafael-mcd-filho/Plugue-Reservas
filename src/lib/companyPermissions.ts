@@ -75,8 +75,8 @@ export const COMPANY_PANEL_PERMISSION_METADATA: Record<
     operatorAssignable: true,
   },
   tables_view: {
-    label: 'Mesas',
-    description: 'Mapa de mesas, capacidade e ocupação.',
+    label: 'Salão',
+    description: 'Consulta operacional do Salão. Configurar mapas de mesas e seções é exclusivo do administrador.',
     operatorAssignable: true,
   },
   waitlist_view: {
@@ -85,7 +85,7 @@ export const COMPANY_PANEL_PERMISSION_METADATA: Record<
     operatorAssignable: true,
   },
   automations_view: {
-    label: 'Automações',
+    label: 'Mensagens',
     description: 'Configuração de lembretes, campanhas e fluxos.',
     operatorAssignable: false,
   },
@@ -95,22 +95,22 @@ export const COMPANY_PANEL_PERMISSION_METADATA: Record<
     operatorAssignable: false,
   },
   users_view: {
-    label: 'Usuários',
+    label: 'Equipe',
     description: 'Gestão de acessos e equipe da unidade.',
     operatorAssignable: false,
   },
   leads_view: {
-    label: 'Leads',
+    label: 'Clientes',
     description: 'CRM, histórico de contatos e conversões.',
     operatorAssignable: false,
   },
   affiliates_view: {
-    label: 'Filiados',
+    label: 'Parceiros',
     description: 'Links de afiliados, parceiros e acompanhamento.',
     operatorAssignable: false,
   },
   events_view: {
-    label: 'Eventos',
+    label: 'Rastreamento',
     description: 'Rastreamento, integrações e fila Meta.',
     operatorAssignable: false,
   },

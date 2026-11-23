@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Activity, Database, MessageSquare, Wifi, WifiOff, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Clock, Server, Send, Copy, KeyRound } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import AdminPageHeader from '@/components/admin/AdminPageHeader';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -149,19 +150,17 @@ export default function SystemHealth() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-            <Activity className="h-5 w-5 text-primary" />
-            Saúde do Sistema
-          </h1>
-          <p className="text-muted-foreground mt-1">Monitoramento em tempo real dos serviços</p>
-        </div>
-        <Button variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
-      </div>
+      <AdminPageHeader
+        eyebrow="Plataforma"
+        title="Saúde"
+        description="Conexões, filas e erros recentes dos serviços."
+        actions={(
+          <Button variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        )}
+      />
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -275,10 +274,10 @@ export default function SystemHealth() {
           <Card className="border-none shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-primary" /> Webhook Asaas compartilhado
+                <KeyRound className="h-4 w-4 text-primary" /> Webhooks Asaas antigos
               </CardTitle>
               <CardDescription>
-                Use apenas quando uma mesma conta Asaas atende várias empresas. A empresa será resolvida pelo ID da cobrança salvo no banco.
+                Compatibilidade com cobranças criadas antes da conta central. Configure o token e o webhook das novas reservas em Integrações → Asaas — pagamentos das reservas; o cadastro é automático nessa seção.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">

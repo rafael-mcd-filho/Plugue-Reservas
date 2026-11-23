@@ -57,10 +57,10 @@ export default function Login() {
     [location.state],
   );
   const helperMessage = useMemo(() => getRedirectMessage(redirectTo), [redirectTo]);
-  const { data: systemBranding, isLoading: systemBrandingLoading } = useSystemBranding();
+  const { data: systemBranding } = useSystemBranding();
   const systemLogo = systemBranding?.system_logo_url || '';
   const systemName = normalizeSystemName(systemBranding?.system_name);
-  useFaviconOverride(systemBrandingLoading ? undefined : systemLogo || null);
+  useFaviconOverride(systemBranding?.system_logo_url);
 
   useEffect(() => {
     if (authLoading || !user) return;

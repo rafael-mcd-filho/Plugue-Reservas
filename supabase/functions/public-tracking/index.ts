@@ -1,3 +1,4 @@
+import { normalizePhoneE164 } from "../_shared/phone.ts";
 import {
   createSupabaseAdminClient,
   getClientIpAddress,
@@ -108,7 +109,7 @@ function buildUserDataSnapshot(body: TrackingBody, anonymousId: string) {
 
   return {
     email: nullableText(userData.email),
-    phone: nullableText(userData.phone)?.replace(/\D/g, "") || null,
+    phone: normalizePhoneE164(nullableText(userData.phone)) || null,
     first_name: nullableText(userData.first_name),
     last_name: nullableText(userData.last_name),
     zip: nullableText(userData.zip),
@@ -235,7 +236,7 @@ function belongsToTrackingVisitor(
   session: Record<string, unknown> | null,
   companyId: string,
   anonymousId: string,
-) {
+): session is Record<string, unknown> {
   return !!session
     && session.company_id === companyId
     && session.anonymous_id === anonymousId;
@@ -737,6 +738,8 @@ export async function handlePublicTrackingRequest(req: Request) {
         .select(TRACKING_EVENT_CONTEXT_COLUMNS)
         .single();
 
+      const insertedCreatedAt = (insertedEvent as unknown as Record<string, unknown> | null)?.created_at;
+
       if (eventInsertError) {
         const isDuplicate = eventInsertError.code === "23505"
           || eventInsertError.message.includes("duplicate key");
@@ -754,8 +757,8 @@ export async function handlePublicTrackingRequest(req: Request) {
         effectiveReservationId = existingEvent.reservation_id;
         adsJourneyActivityAt = existingEvent.created_at;
         adsJourneyInput = buildStoredAdsReplayInput(existingEvent);
-      } else if (insertedEvent?.created_at) {
-        adsJourneyActivityAt = insertedEvent.created_at as string;
+      } else if (typeof insertedCreatedAt === "string") {
+        adsJourneyActivityAt = insertedCreatedAt;
       }
 
       // If the V2 write fails, the browser keeps this event in its existing

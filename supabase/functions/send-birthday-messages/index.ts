@@ -1,3 +1,4 @@
+import { toStoredWhatsAppNumber, normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
 import {
   buildBirthdayDispatchKey,
@@ -11,7 +12,6 @@ import {
   buildBirthdayParameters,
   enqueuePlugueChatMessage,
   getCompanyChannels,
-  normalizePhone,
 } from "../_shared/pluguechat.ts";
 import { getFirstName } from "../_shared/names.ts";
 import { formatDateKeyInTimeZone, formatMonthDayInTimeZone } from "../_shared/timezone.ts";
@@ -69,23 +69,23 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       supabaseAdmin
         .from("reservations")
-        .select("guest_name, guest_phone, guest_birthdate, company_id")
+        .select("guest_name, guest_phone, guest_phone_e164, guest_birthdate, company_id")
         .not("guest_birthdate", "is", null)
         .not("guest_phone", "is", null),
       supabaseAdmin
         .from("reservation_companions")
-        .select("name, phone, birthdate, company_id")
+        .select("name, phone, phone_e164, birthdate, company_id")
         .not("birthdate", "is", null)
         .not("phone", "is", null),
       supabaseAdmin
         .from("waitlist")
-        .select("guest_name, guest_phone, guest_birthdate, company_id")
+        .select("guest_name, guest_phone, guest_phone_e164, guest_birthdate, company_id")
         .eq("status", "seated")
         .not("guest_birthdate", "is", null)
         .not("guest_phone", "is", null),
       supabaseAdmin
         .from("waitlist_companions")
-        .select("name, phone, birthdate, company_id")
+        .select("name, phone, phone_e164, birthdate, company_id")
         .not("birthdate", "is", null)
         .not("phone", "is", null),
     ]);
@@ -93,25 +93,25 @@ Deno.serve(async (req) => {
     const birthdayContacts = [
       ...((birthdayReservations || []).map((reservation: any) => ({
         guest_name: reservation.guest_name,
-        guest_phone: reservation.guest_phone,
+        guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
         guest_birthdate: reservation.guest_birthdate,
         company_id: reservation.company_id,
       }))),
       ...((birthdayCompanions || []).map((companion: any) => ({
         guest_name: companion.name,
-        guest_phone: companion.phone,
+        guest_phone: companion.phone_e164 ?? companion.phone,
         guest_birthdate: companion.birthdate,
         company_id: companion.company_id,
       }))),
       ...((birthdayWaitlistHolders || []).map((entry: any) => ({
         guest_name: entry.guest_name,
-        guest_phone: entry.guest_phone,
+        guest_phone: entry.guest_phone_e164 ?? entry.guest_phone,
         guest_birthdate: entry.guest_birthdate,
         company_id: entry.company_id,
       }))),
       ...((birthdayWaitlistCompanions || []).map((companion: any) => ({
         guest_name: companion.name,
-        guest_phone: companion.phone,
+        guest_phone: companion.phone_e164 ?? companion.phone,
         guest_birthdate: companion.birthdate,
         company_id: companion.company_id,
       }))),
@@ -139,6 +139,7 @@ Deno.serve(async (req) => {
     const uniqueMap = new Map<string, any>();
     for (const contact of upcomingBirthdays) {
       const phone = formatPhoneForWhatsApp(contact.guest_phone);
+      if (!phone) continue;
       const key = `${phone}:${contact.company_id}`;
       const existing = uniqueMap.get(key);
 
@@ -167,19 +168,19 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       supabaseAdmin.from("automation_settings").select("*").in("company_id", companyIds).eq("type", "birthday_message").eq("enabled", true),
       supabaseAdmin.from("whatsapp_message_logs").select("phone, company_id").eq("type", "birthday").gte("created_at", `${todayStr}T00:00:00`).in("status", [...WHATSAPP_ACCEPTED_LOG_STATUSES]),
-      supabaseAdmin.from("whatsapp_message_queue").select("phone, company_id").eq("type", "birthday").gte("created_at", `${todayStr}T00:00:00`),
+      supabaseAdmin.from("whatsapp_message_queue").select("phone, phone_e164, company_id").eq("type", "birthday").gte("created_at", `${todayStr}T00:00:00`),
       supabaseAdmin.from("pluguechat_automation_templates").select("company_id, template_id, template_name").in("company_id", companyIds).eq("type", "birthday_message").eq("enabled", true),
       supabaseAdmin.from("pluguechat_message_logs").select("phone, company_id").eq("type", "birthday_message").gte("created_at", `${todayStr}T00:00:00`),
-      supabaseAdmin.from("pluguechat_message_queue").select("phone, company_id").eq("type", "birthday_message").gte("created_at", `${todayStr}T00:00:00`).neq("status", "cancelled"),
+      supabaseAdmin.from("pluguechat_message_queue").select("phone, phone_e164, company_id").eq("type", "birthday_message").gte("created_at", `${todayStr}T00:00:00`).neq("status", "cancelled"),
     ]);
 
     const processedSet = new Set([
-      ...(alreadySent || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
-      ...(alreadyQueued || []).map((item: any) => `${formatPhoneForWhatsApp(item.phone)}:${item.company_id}`),
+      ...(alreadySent || []).map((item: any) => `${formatPhoneForWhatsApp((item.phone_e164 ?? item.phone))}:${item.company_id}`),
+      ...(alreadyQueued || []).map((item: any) => `${formatPhoneForWhatsApp((item.phone_e164 ?? item.phone))}:${item.company_id}`),
     ]);
     const pcProcessedSet = new Set([
-      ...(pcAlreadySent || []).map((item: any) => `${normalizePhone(item.phone)}:${item.company_id}`),
-      ...(pcAlreadyQueued || []).map((item: any) => `${normalizePhone(item.phone)}:${item.company_id}`),
+      ...(pcAlreadySent || []).map((item: any) => `${normalizeStoredPhoneE164((item.phone_e164 ?? item.phone))}:${item.company_id}`),
+      ...(pcAlreadyQueued || []).map((item: any) => `${normalizeStoredPhoneE164((item.phone_e164 ?? item.phone))}:${item.company_id}`),
     ]);
 
     let queued = 0;
@@ -189,7 +190,7 @@ Deno.serve(async (req) => {
       const channel = channelMap.get(contact.company_id) ?? "evolution";
 
       if (channel === "pluguechat_official") {
-        const phone = normalizePhone(contact.guest_phone);
+        const phone = normalizeStoredPhoneE164(contact.guest_phone);
         const sentKey = `${phone}:${contact.company_id}`;
         if (pcProcessedSet.has(sentKey)) { skipped++; continue; }
 
@@ -205,7 +206,7 @@ Deno.serve(async (req) => {
           parameters: buildBirthdayParameters(contact.guest_name || ""),
           scheduled_for: scheduledFor.toISOString(),
           expires_at: expiresAt.toISOString(),
-          idempotency_key: `pluguechat:birthday:${contact.company_id}:${targetDateKey}:${phone}`,
+          idempotency_key: `pluguechat:birthday:${contact.company_id}:${targetDateKey}:${toStoredWhatsAppNumber(phone)}`,
         });
 
         pcProcessedSet.add(sentKey);

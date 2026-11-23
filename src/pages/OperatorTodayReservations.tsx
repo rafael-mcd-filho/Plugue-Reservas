@@ -7,6 +7,7 @@ import { AlertTriangle, Ban, CalendarCheck, CheckCircle2, ChevronDown, ChevronsD
 import { toast } from 'sonner';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
+import QueryFeedback from '@/components/QueryFeedback';
 import { ReservationStatusBadge, ReservationTableBadge } from '@/components/StatusBadge';
 import {
   AlertDialog,
@@ -797,7 +798,7 @@ export default function OperatorTodayReservations() {
     setCheckInReservation((current) => (current?.id === updated.id ? updated : current));
   };
 
-  const { data: reservations = [], isLoading } = useQuery({
+  const reservationsQuery = useQuery({
     queryKey: ['today-reservations', companyId, todayKey],
     queryFn: async () => {
       try {
@@ -810,8 +811,9 @@ export default function OperatorTodayReservations() {
     enabled: !!companyId,
     refetchInterval: 30000,
   });
+  const { data: reservations = [] } = reservationsQuery;
 
-  const { data: reservationSettings = null } = useQuery({
+  const settingsQuery = useQuery({
     queryKey: ['operator-reservation-settings', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -826,8 +828,9 @@ export default function OperatorTodayReservations() {
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: reservationSettings = null } = settingsQuery;
 
-  const { data: publicSchedule } = useQuery({
+  const scheduleQuery = useQuery({
     queryKey: ['operator-public-schedule', companyId, todayKey],
     queryFn: async () => {
       if (!companyId) throw new Error('Empresa nao selecionada.');
@@ -836,18 +839,21 @@ export default function OperatorTodayReservations() {
     enabled: !!companyId,
     staleTime: 30 * 1000,
   });
+  const { data: publicSchedule } = scheduleQuery;
+  const availabilityEnabled = !!companyId && !!publicSchedule && publicSchedule.source !== 'blocked' && publicSchedule.slots.length > 0;
 
-  const { data: slotAvailability = {} } = useQuery({
+  const availabilityQuery = useQuery({
     queryKey: ['operator-public-availability', companyId, todayKey],
     queryFn: async () => {
       if (!companyId) throw new Error('Empresa nao selecionada.');
       return getSlotAvailability(companyId, todayKey);
     },
-    enabled: !!companyId && !!publicSchedule && publicSchedule.source !== 'blocked' && publicSchedule.slots.length > 0,
+    enabled: availabilityEnabled,
     staleTime: 15 * 1000,
   });
+  const { data: slotAvailability = {} } = availabilityQuery;
 
-  const { data: tableMaps = [] } = useQuery({
+  const tableMapsQuery = useQuery({
     queryKey: ['operator-table-maps', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -863,8 +869,9 @@ export default function OperatorTodayReservations() {
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: tableMaps = [] } = tableMapsQuery;
 
-  const { data: tables = [] } = useQuery({
+  const tablesQuery = useQuery({
     queryKey: ['operator-restaurant-tables', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -880,6 +887,15 @@ export default function OperatorTodayReservations() {
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: tables = [] } = tablesQuery;
+  const capacityQueries = companyId ? [
+    { label: 'as configurações de capacidade', ...settingsQuery },
+    { label: 'os horários', ...scheduleQuery },
+    { label: 'os mapas de mesas', ...tableMapsQuery },
+    { label: 'as mesas', ...tablesQuery },
+    ...(availabilityEnabled ? [{ label: 'a disponibilidade', ...availabilityQuery }] : []),
+  ] : [];
+  const capacityReady = capacityQueries.length > 0 && capacityQueries.every((query) => query.data !== undefined);
 
   const reservationTableById = useMemo(
     () => new Map(tables.map((table) => [table.id, table] as const)),
@@ -1054,7 +1070,7 @@ export default function OperatorTodayReservations() {
   const now = new Date();
   const slotDuration = Math.max(reservationSettings?.reservation_duration ?? 30, 5);
   const capacitySlots = useMemo(
-    () => buildOperatorCapacitySlots({
+    () => capacityReady ? buildOperatorCapacitySlots({
       selectedDate: todayDate,
       dayReservations: reservations,
       schedule: publicSchedule,
@@ -1062,8 +1078,8 @@ export default function OperatorTodayReservations() {
       settings: reservationSettings,
       tables,
       tableMaps,
-    }),
-    [publicSchedule, reservationSettings, reservations, slotAvailability, tableMaps, tables, todayDate],
+    }) : [],
+    [capacityReady, publicSchedule, reservationSettings, reservations, slotAvailability, tableMaps, tables, todayDate],
   );
   const pendingReservationGroups = useMemo(
     () => groupReservationsByCapacitySlots(
@@ -1556,7 +1572,7 @@ export default function OperatorTodayReservations() {
     );
   };
 
-  if (isLoading) {
+  if (!companyId || (reservationsQuery.data === undefined && !reservationsQuery.isError)) {
     return (
       <div className="space-y-3">
         <div>
@@ -1572,6 +1588,13 @@ export default function OperatorTodayReservations() {
     );
   }
 
+  if (reservationsQuery.data === undefined && reservationsQuery.isError) {
+    return <div className="space-y-4">
+      <h1 className="text-lg font-semibold tracking-tight text-foreground">Check-ins de hoje</h1>
+      <QueryFeedback queries={[{ label: 'as reservas de hoje', ...reservationsQuery }]} />
+    </div>;
+  }
+
   return (
     <>
       <div className="space-y-4">
@@ -1584,6 +1607,9 @@ export default function OperatorTodayReservations() {
           </div>
           <p className="text-xs text-muted-foreground">Atualiza automaticamente a cada 30s</p>
         </div>
+
+        <QueryFeedback queries={companyId ? [{ label: 'as reservas de hoje', ...reservationsQuery }] : []} />
+        {(!capacityReady || capacityQueries.some((query) => query.isError || query.isFetching)) && <QueryFeedback queries={capacityQueries} />}
 
         <div className="rounded-md bg-card/80 p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ring-1 ring-black/[0.04]">
           <div className="flex gap-1 overflow-x-auto pb-0.5 md:grid md:grid-cols-5 md:overflow-visible md:pb-0">

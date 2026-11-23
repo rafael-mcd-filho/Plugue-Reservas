@@ -1,3 +1,4 @@
+import { toStoredWhatsAppNumber } from "../_shared/phone.ts";
 import {
   assertUserCanAccessCompany,
   createSupabaseAdminClient,
@@ -29,9 +30,7 @@ function normalizeHashInput(value: string | null | undefined) {
 }
 
 function normalizePhone(value: string | null | undefined) {
-  if (!value) return null;
-  const digits = value.replace(/\D/g, "");
-  return digits.length > 0 ? digits : null;
+  return toStoredWhatsAppNumber(value) || null;
 }
 
 function normalizeLocation(value: string | null | undefined) {
@@ -149,7 +148,7 @@ function isEventTypeEnabled(metaEventName: string, settings: Record<string, any>
   return true;
 }
 
-async function buildUserDataPayload(params: {
+export async function buildUserDataPayload(params: {
   email?: string | null;
   phone?: string | null;
   firstName?: string | null;
@@ -407,7 +406,7 @@ Deno.serve(async (req) => {
                   ?? null,
                 user_data: await buildUserDataPayload({
                   email: trackingUserData.email ?? reservation?.guest_email ?? null,
-                  phone: trackingUserData.phone ?? reservation?.guest_phone ?? null,
+                  phone: trackingUserData.phone ?? reservation?.guest_phone_e164 ?? reservation?.guest_phone ?? null,
                   firstName: trackingUserData.first_name
                     ?? reservationUserData.first_name
                     ?? reservationGuestNameParts[0]
@@ -470,7 +469,7 @@ Deno.serve(async (req) => {
                   ?? null,
                 user_data: await buildUserDataPayload({
                   email: reservation.guest_email,
-                  phone: reservation.guest_phone,
+                  phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
                   firstName: userDataSnapshot.first_name ?? guestNameParts[0] ?? null,
                   lastName: userDataSnapshot.last_name
                     ?? (guestNameParts.length > 1 ? guestNameParts.slice(1).join(" ") : null),

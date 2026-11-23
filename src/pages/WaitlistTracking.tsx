@@ -253,18 +253,26 @@ export default function WaitlistTracking() {
                     <div className="text-center">
                       <p className="text-2xl font-bold text-foreground">{entry.ahead_count}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {entry.ahead_count === 1 ? 'pessoa na frente' : 'pessoas na frente'}
+                        {entry.ahead_count === 1 ? 'grupo à sua frente' : 'grupos à sua frente'}
                       </p>
                     </div>
 
                     <div className="text-center">
                       <p className="text-2xl font-bold text-foreground">
-                        ~{estimatedWait}
-                        <span className="text-lg">min</span>
+                        {entry.ahead_count === 0 ? 'Aguarde' : <>
+                          ~{estimatedWait}
+                          <span className="text-lg">min</span>
+                        </>}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">tempo estimado</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {entry.ahead_count === 0 ? 'chamada da recepção' : 'espera estimada'}
+                      </p>
                     </div>
                   </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Cada posição representa um grupo, independentemente do número de pessoas. A estimativa pode variar
+                    conforme a disponibilidade de mesas para o seu grupo.
+                  </p>
                 </div>
               )}
 

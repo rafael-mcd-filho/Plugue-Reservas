@@ -1,4 +1,6 @@
+import { synchronizeReservationSettlement } from "../_shared/reservation-settlement-sync.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
+import { getReservationAsaasCredentials } from "../_shared/reservation-asaas-config.ts";
 import {
   AsaasApiError,
   getAsaasActiveChargebackStatus,
@@ -17,6 +19,7 @@ import {
   markReservationPaymentProviderOutcome,
   providerTimestampHasExplicitTime,
   readJson,
+  recordReservationPaymentInstallment,
 } from "../_shared/reservation-payments.ts";
 
 const RECONCILE_STATUSES = [
@@ -78,44 +81,9 @@ function getAsaasPaidAt(payment: any) {
   return candidates.find(providerTimestampHasExplicitTime) ?? candidates[0] ?? null;
 }
 
-async function getActivePrepaymentCompanyIds(supabaseAdmin: any, companyId: string | null) {
-  let query = supabaseAdmin
-    .from("reservation_payment_rules")
-    .select("company_id")
-    .eq("enabled", true)
-    .is("archived_at", null);
+type ReservationAsaasCredentials = NonNullable<Awaited<ReturnType<typeof getReservationAsaasCredentials>>>;
 
-  if (companyId) {
-    query = query.eq("company_id", companyId);
-  }
-
-  const { data, error } = await query.limit(1000);
-  if (error) throw new Error(error.message);
-
-  return [...new Set((data ?? []).map((row: any) => row.company_id).filter(Boolean))] as string[];
-}
-
-async function getApiToken(
-  supabaseAdmin: any,
-  companyId: string,
-  cache: Map<string, string | null>,
-) {
-  if (cache.has(companyId)) return cache.get(companyId) ?? null;
-
-  const { data, error } = await supabaseAdmin
-    .from("company_asaas_configs")
-    .select("api_token, status")
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-
-  const apiToken = data?.status === "configured" ? data.api_token as string : null;
-  cache.set(companyId, apiToken);
-  return apiToken;
-}
-
-async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: string) {
+async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, payment: any, apiToken: ReservationAsaasCredentials) {
   if (payment.asaas_payment_id) return payment;
 
   const externalReference = payment.payment_link_external_reference
@@ -141,15 +109,9 @@ async function attachAsaasPaymentIdFromExternalReference(supabaseAdmin: any, pay
   return updatedPayment;
 }
 
-async function getAsaasPaymentSnapshot(apiToken: string, paymentId: string) {
-  const asaasStatus = await getAsaasPaymentStatus(apiToken, paymentId);
-  let asaasPayment = null;
-
-  try {
-    asaasPayment = await getAsaasPayment(apiToken, paymentId);
-  } catch (error) {
-    console.warn("Failed to retrieve full Asaas payment during scheduled reconciliation", error);
-  }
+async function getAsaasPaymentSnapshot(apiToken: ReservationAsaasCredentials, paymentId: string) {
+  const asaasPayment = await getAsaasPayment(apiToken, paymentId);
+  const asaasStatus = asaasPayment.status ?? await getAsaasPaymentStatus(apiToken, paymentId);
 
   return {
     asaasStatus: asaasPayment?.status ?? asaasStatus,
@@ -216,7 +178,7 @@ async function recordReconciliationFailure(supabaseAdmin: any, payment: any, mes
   }
 }
 
-async function refreshProviderPaymentState(supabaseAdmin: any, payment: any, apiToken: string) {
+async function refreshProviderPaymentState(supabaseAdmin: any, payment: any, apiToken: ReservationAsaasCredentials) {
   const previousStatus = payment.status;
   payment = await attachAsaasPaymentIdFromExternalReference(supabaseAdmin, payment, apiToken);
 
@@ -249,14 +211,19 @@ async function refreshProviderPaymentState(supabaseAdmin: any, payment: any, api
     throw error;
   }
 
+  await synchronizeReservationSettlement(supabaseAdmin, payment, "scheduled_reconcile");
   const providerMetadata = {
     provider_payment_status: snapshot.asaasPayment?.status ?? null,
     chargeback_status: snapshot.chargebackStatus,
     refunded_value: getAsaasRefundedValue(snapshot.asaasPayment),
   };
+  payment = await recordReservationPaymentInstallment(supabaseAdmin,payment,snapshot.asaasPayment,"scheduled_reconcile");
   const outcome = getAsaasExternalPaymentOutcome(null, snapshot.asaasStatus, snapshot.asaasPayment);
 
   if (outcome) {
+    if (getPaymentMetadata(payment).asaas_installment_id) {
+      return { previousStatus,currentStatus:payment.status,changed:false,result:"installment_manual_reconciliation" };
+    }
     if (payment.status === "expired" && outcome === "cancelled") {
       await updateProviderSnapshot(supabaseAdmin, payment, {
         source: "scheduled_reconcile",
@@ -348,21 +315,6 @@ Deno.serve(async (req) => {
     const lookbackDays = clampNumber(body.lookback_days, 120, 1, 365);
 
     const supabaseAdmin = createSupabaseAdminClient();
-    const activeCompanyIds = await getActivePrepaymentCompanyIds(supabaseAdmin, companyId);
-
-    if (activeCompanyIds.length === 0) {
-      return jsonResponse({
-        ok: true,
-        skipped: true,
-        reason: "Nenhuma regra de pre pagamento ativa",
-        summary: {
-          checked: 0,
-          changed: 0,
-          failed: 0,
-        },
-      });
-    }
-
     const now = new Date();
     const staleIso = new Date(now.getTime() - staleMinutes * 60_000).toISOString();
     const lookbackIso = new Date(now.getTime() - lookbackDays * 24 * 60 * 60_000).toISOString();
@@ -370,13 +322,14 @@ Deno.serve(async (req) => {
     let query = supabaseAdmin
       .from("reservation_payments")
       .select("*")
-      .in("company_id", activeCompanyIds)
       .in("status", RECONCILE_STATUSES)
       .or("asaas_payment_id.not.is.null,payment_link_external_reference.not.is.null,asaas_payment_link_id.not.is.null")
       .or(`created_at.gte.${lookbackIso},paid_at.gte.${lookbackIso},cancelled_at.gte.${lookbackIso},expires_at.gte.${lookbackIso}`)
       .order("last_checked_at", { ascending: true, nullsFirst: true })
       .order("created_at", { ascending: false })
       .limit(limit);
+
+    if (companyId) query = query.eq("company_id", companyId);
 
     if (!force) {
       query = query.or(`last_checked_at.is.null,last_checked_at.lt.${staleIso}`);
@@ -386,7 +339,7 @@ Deno.serve(async (req) => {
     if (error) throw new Error(error.message);
 
     const summary = {
-      eligible_companies: activeCompanyIds.length,
+      eligible_companies: new Set((payments ?? []).map((payment: any) => payment.company_id)).size,
       selected: payments?.length ?? 0,
       checked: 0,
       changed: 0,
@@ -403,11 +356,18 @@ Deno.serve(async (req) => {
         error?: string;
       }>,
     };
-    const apiTokenCache = new Map<string, string | null>();
+    const apiTokenCache = new Map<string, Awaited<ReturnType<typeof getReservationAsaasCredentials>>>();
 
     for (const [index, payment] of (payments ?? []).entries()) {
       try {
-        const apiToken = await getApiToken(supabaseAdmin, payment.company_id, apiTokenCache);
+        const metadata = getPaymentMetadata(payment);
+        const scope = metadata.asaas_account_scope === "platform"
+          ? `platform:${metadata.asaas_account_id}:${metadata.asaas_environment}`
+          : payment.company_id;
+        if (!apiTokenCache.has(scope)) {
+          apiTokenCache.set(scope, await getReservationAsaasCredentials(supabaseAdmin, payment));
+        }
+        const apiToken = apiTokenCache.get(scope);
         if (!apiToken) {
           summary.skipped_without_config += 1;
           await recordReconciliationFailure(supabaseAdmin, payment, "Integracao Asaas nao configurada para conciliacao");

@@ -1,4 +1,5 @@
 import { assertUserCanAccessCompany } from "../_shared/internal-auth.ts";
+import { normalizePhoneE164, normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import {
   buildEvolutionNotConfiguredFailure,
   getWhatsAppAcceptedLogStatus,
@@ -133,9 +134,7 @@ Deno.serve(async (req) => {
         }
 
         return new Response(JSON.stringify(
-          failure.ok
-            ? { ok: true, data: failure.data }
-            : {
+          {
                 ok: false,
                 error_code: failure.error.code,
                 error_title: failure.error.title,
@@ -416,6 +415,40 @@ Deno.serve(async (req) => {
 
       case 'send_message':
       case 'resend_message': {
+        let destination = normalizePhoneE164(typeof phone === 'string' ? phone : '');
+        let messageText = typeof message === 'string' ? message : '';
+        if (action === 'resend_message') {
+          if (typeof log_id !== 'string' || !log_id.trim()) {
+            return new Response(JSON.stringify({ error: 'log_id e obrigatorio para reenviar.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          // A resend must use the persisted, company-scoped destination. The
+          // legacy fallback must never validate an arbitrary request phone.
+          const { data: originalLog, error: logError } = await supabaseAdmin
+            .from('whatsapp_message_logs')
+            .select('phone, message')
+            .eq('id', log_id)
+            .eq('company_id', company_id)
+            .maybeSingle();
+          if (logError) throw logError;
+          if (!originalLog) {
+            return new Response(JSON.stringify({ error: 'Mensagem nao encontrada para esta empresa.' }), {
+              status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          destination = normalizeStoredPhoneE164(originalLog.phone);
+          messageText = originalLog.message ?? '';
+        }
+        if (!destination || !messageText.trim()) {
+          result = {
+            ok: false,
+            error_code: 'invalid_payload',
+            error_title: 'Dados invalidos para envio',
+            error_message: 'Telefone internacional valido e mensagem sao obrigatorios.',
+          };
+          break;
+        }
         const { data: instance } = await supabaseAdmin
           .from('company_whatsapp_instances')
           .select('instance_name, status')
@@ -430,7 +463,7 @@ Deno.serve(async (req) => {
               .eq('id', log_id)
             .eq('company_id', company_id);
           }
-          result = failure.ok ? { ok: true, data: failure.data } : {
+          result = {
             ok: false,
             error_code: failure.error.code,
             error_title: failure.error.title,
@@ -447,7 +480,7 @@ Deno.serve(async (req) => {
               .eq('id', log_id)
             .eq('company_id', company_id);
           }
-          result = failure.ok ? { ok: true, data: failure.data } : {
+          result = {
             ok: false,
             error_code: failure.error.code,
             error_title: failure.error.title,
@@ -460,8 +493,8 @@ Deno.serve(async (req) => {
           evolutionUrl,
           evolutionToken,
           instance.instance_name,
-          phone,
-          message,
+          destination,
+          messageText,
         );
 
         if (action === 'resend_message' && log_id) {

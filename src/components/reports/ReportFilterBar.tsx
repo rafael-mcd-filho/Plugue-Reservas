@@ -28,6 +28,7 @@ interface ReportFilterBarProps {
   children?: ReactNode;
   isRefreshing?: boolean;
   onRefresh?: () => void;
+  hideGranularity?: boolean;
 }
 
 export default function ReportFilterBar({
@@ -35,6 +36,7 @@ export default function ReportFilterBar({
   children,
   isRefreshing = false,
   onRefresh,
+  hideGranularity = false,
 }: ReportFilterBarProps) {
   return (
     <Card className="border-border shadow-sm">
@@ -69,7 +71,7 @@ export default function ReportFilterBar({
             />
           </div>
 
-          <div className="min-w-0 flex-1 space-y-1 sm:w-36 sm:flex-none">
+          {!hideGranularity && <div className="min-w-0 flex-1 space-y-1 sm:w-36 sm:flex-none">
             <Label htmlFor="report-granularity" className="text-xs">Granularidade</Label>
             <Select
               value={filters.granularity}
@@ -86,7 +88,7 @@ export default function ReportFilterBar({
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </div>}
 
           <div className={REPORT_FILTER_TOGGLE_CLASS}>
             <Label htmlFor="report-comparison" className="cursor-pointer whitespace-nowrap text-xs">

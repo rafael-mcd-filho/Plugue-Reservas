@@ -99,7 +99,7 @@ try {
   }
   await db.query(`INSERT INTO user_roles(user_id,role,company_id) VALUES($1,'admin',$2)`, [admin, companyB]);
   await db.query(`INSERT INTO user_roles(user_id,role,company_id) VALUES($1,'operator',$2)`, [operator, companyB]);
-  await db.query(`INSERT INTO reservations(company_id,guest_name,guest_phone,date,time,status,party_size,guest_birthdate) VALUES($1,'Visitante A','11999999999','2026-10-06','18:00','confirmed',2,'1990-01-01'),($2,'Visitante B','11888888888','2026-10-06','18:00','confirmed',100,'1990-01-01')`, [companyA, companyB]);
+  await db.query(`INSERT INTO reservations(company_id,guest_name,guest_phone,date,time,status,party_size,guest_birthdate) VALUES($1,'Visitante A','11999999999','2026-10-06','18:00','confirmed',2,'1990-01-01'),($2,'Visitante B','11988888888','2026-10-06','18:00','confirmed',100,'1990-01-01')`, [companyA, companyB]);
   const reservationA = (await db.query('SELECT id FROM reservations WHERE company_id=$1', [companyA])).rows[0].id;
   const reservationB = (await db.query('SELECT id FROM reservations WHERE company_id=$1', [companyB])).rows[0].id;
   const paymentA = await scalar(`INSERT INTO reservation_payments(company_id,reservation_id,base_amount,expires_at) VALUES($1,$2,10,now()+interval '1 hour') RETURNING id value`, [companyA,reservationA]);
@@ -128,13 +128,15 @@ try {
   assert.equal(await scalar('SELECT mark_notifications_read($1) value',[[notificationA]]),1);
   await assert.rejects(db.query('UPDATE reservation_payments SET reservation_id=$1 WHERE id=$2', [reservationB,paymentA]), error => error.code==='42501');
   await assert.rejects(db.query('UPDATE reservation_payments SET asaas_payment_id=$1 WHERE id=$2', ['foreign-asaas-payment',paymentA]), error => error.code==='42501');
-  // Verify the reference policy itself, independently of the defense-in-depth
-  // provider identity trigger. This is only the isolated in-memory database.
+  // Direct authenticated writes remain denied independently of the provider
+  // identity trigger. New payment hardening may reject at the table ACL before
+  // the older reference RLS policy; both must retain the authorization error.
+  // This is only the isolated in-memory database.
   await db.exec('RESET ROLE');
   assert.equal(await scalar('SELECT read_at value FROM notification_recipients WHERE user_id=$1 AND notification_id=$2',[admin,notificationB]),null);
   await db.exec('ALTER TABLE reservation_payments DISABLE TRIGGER protect_support_payment_identity');
   await actor(support,context.id);
-  await assert.rejects(db.query('UPDATE reservation_payments SET reservation_id=$1 WHERE id=$2', [reservationB,paymentA]), error => error.code==='42501' && /row-level security/i.test(error.message));
+  await assert.rejects(db.query('UPDATE reservation_payments SET reservation_id=$1 WHERE id=$2', [reservationB,paymentA]), error => error.code==='42501' && /row-level security|permission denied/i.test(error.message));
   await db.exec('RESET ROLE');
   await db.exec('ALTER TABLE reservation_payments ENABLE TRIGGER protect_support_payment_identity');
   await actor(support,context.id);
@@ -148,8 +150,14 @@ try {
   assert.equal(supportMutation.details.company_id, companyA);
   assert.equal(supportMutation.details.session_id, context.id);
   assert.deepEqual(supportMutation.details.changed_fields.includes('notes'), true);
-  const scopeMissing = (await db.query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relrowsecurity AND c.relname NOT LIKE 'support_%' AND c.relname NOT IN ('profiles','user_roles') AND EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid=c.oid AND attname='company_id' AND NOT attisdropped) AND NOT EXISTS(SELECT 1 FROM pg_policy WHERE polrelid=c.oid AND polname='support_tenant_scope')`)).rows;
+  // Service-only ledgers/receipts and global-admin column projections do not
+  // grant ordinary authenticated table access. Require the tenant restriction
+  // on the company tables that authenticated callers can directly operate on.
+  const scopeMissing = (await db.query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relrowsecurity AND c.relname NOT LIKE 'support_%' AND c.relname NOT IN ('profiles','user_roles') AND (has_table_privilege('authenticated',c.oid,'SELECT') OR has_table_privilege('authenticated',c.oid,'INSERT') OR has_table_privilege('authenticated',c.oid,'UPDATE') OR has_table_privilege('authenticated',c.oid,'DELETE')) AND EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid=c.oid AND attname='company_id' AND NOT attisdropped) AND NOT EXISTS(SELECT 1 FROM pg_policy WHERE polrelid=c.oid AND polname='support_tenant_scope')`)).rows;
   assert.deepEqual(scopeMissing, []);
+  for (const operation of ['SELECT','INSERT','UPDATE','DELETE']) {
+    assert.equal(await scalar("SELECT has_table_privilege('authenticated','public.reservation_public_change_requests',$1) value", [operation]), false);
+  }
   await db.query(`SELECT set_config('request.jwt.claims','{"role":"anon"}',false),set_config('request.headers','{}',false)`);
   await db.exec('SET ROLE anon');
   assert.equal((await db.query('SELECT * FROM get_public_company_by_slug($1)', ['empresa-a'])).rows.length, 1);
@@ -325,7 +333,7 @@ try {
   console.log(`Support live-funnel regression passed (same 1,004 sessions; invoker ${previousLiveMs.toFixed(1)} ms -> guarded RPC ${fixedLiveMs.toFixed(1)} ms locally; tenant/permission/login/expiry/revocation/anonymous boundaries).`);
   console.log(`Support full-schema migration replay passed (${files.length} actual migrations, inert cron/net; real RLS and company RPCs).`);
 } catch (error) {
-  console.error(error.message);
+  console.error(error.stack ?? error.message);
   if (error.cause) console.error(error.cause.message);
   process.exitCode = 1;
 } finally {

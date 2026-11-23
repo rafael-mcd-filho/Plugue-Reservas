@@ -1,5 +1,6 @@
+import { toStoredWhatsAppNumber, normalizeStoredPhoneE164 } from "../_shared/phone.ts";
 import { createSupabaseAdminClient, isAuthorizedInternalJob } from "../_shared/internal-auth.ts";
-import { enqueuePlugueChatMessage, getCompanyChannel, normalizePhone } from "../_shared/pluguechat.ts";
+import { enqueuePlugueChatMessage, getCompanyChannel } from "../_shared/pluguechat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,7 +46,7 @@ async function materializeLegacyRecipientsIfNeeded(supabaseAdmin: SupabaseAdmin,
 
   const { data: customers, error } = await supabaseAdmin
     .from("reservations")
-    .select("guest_phone")
+    .select("guest_phone, guest_phone_e164")
     .eq("company_id", broadcast.company_id)
     .not("guest_phone", "is", null)
     .limit(LEGACY_RECIPIENT_LIMIT);
@@ -54,7 +55,7 @@ async function materializeLegacyRecipientsIfNeeded(supabaseAdmin: SupabaseAdmin,
 
   const uniquePhones = new Map<string, { phone: string }>();
   for (const customer of customers ?? []) {
-    const phone = normalizePhone(String(customer.guest_phone ?? ""));
+    const phone = normalizeStoredPhoneE164(String(customer.guest_phone_e164 ?? customer.guest_phone ?? ""));
     if (!phone || uniquePhones.has(phone)) continue;
     uniquePhones.set(phone, { phone });
   }
@@ -167,7 +168,7 @@ Deno.serve(async (req) => {
       }
 
       for (const recipient of recipients) {
-        const phone = normalizePhone(String(recipient.phone ?? ""));
+        const phone = normalizeStoredPhoneE164(String(recipient.phone_e164 ?? recipient.phone ?? ""));
         if (!phone) {
           await supabaseAdmin
             .from("pluguechat_broadcast_recipients")
@@ -184,7 +185,7 @@ Deno.serve(async (req) => {
             template_id: broadcast.template_id,
             template_name: broadcast.template_name ?? null,
             parameters: recipient.parameters ?? getRecipientParameters(),
-            idempotency_key: `pluguechat:broadcast:${broadcast.id}:${phone}`,
+            idempotency_key: `pluguechat:broadcast:${broadcast.id}:${toStoredWhatsAppNumber(phone)}`,
           });
 
           await supabaseAdmin

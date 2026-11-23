@@ -1,6 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyNpsReports from './CompanyNpsReports';
@@ -8,6 +7,8 @@ import CompanyNpsReports from './CompanyNpsReports';
 const mock = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
+  analysisRows: null as unknown[] | null,
+  failOffset: null as number | null,
   calls: [] as { table: string; method: string; args: unknown[] }[],
 }));
 
@@ -16,28 +17,12 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 
 vi.mock('@/contexts/CompanySlugContext', () => ({
-  useMaybeCompanySlug: () => ({ companyId: 'company-1', slug: 'casa', companyName: 'Casa' }),
+  useMaybeCompanySlug: () => ({ companyId: 'company-1', slug: 'casa', companyName: 'Casa', companyTimeZone: 'America/Fortaleza', companyTimeZoneResolved: true }),
 }));
 
 vi.mock('@/hooks/useCompanyNpsActivation', () => ({
   useCompanyNpsActivation: () => ({ data: { company_id: 'company-1', enabled: true }, isLoading: false }),
 }));
-
-const summary = {
-  total_invited: 476,
-  total_submitted: 3,
-  total_pending: 470,
-  total_expired: 3,
-  response_rate: 0.6,
-  nps_score: 33,
-  promoters: 2,
-  passives: 0,
-  detractors: 1,
-  avg_ambiance: 4.3,
-  avg_food: 4.7,
-  avg_service: 4.3,
-  avg_return: null,
-};
 
 const submittedReviews = [
   {
@@ -91,43 +76,51 @@ const pendingRecord = {
 };
 
 function createBuilder(table: string) {
-  let countRequested = false;
+  let columns = '';
+  let offset = 0;
+  let end = 499;
   const filters: Record<string, unknown> = {};
   const builder: Record<string, unknown> = {};
   const chain = (method: string) => (...args: unknown[]) => {
     mock.calls.push({ table, method, args });
-    if (method === 'select' && (args[1] as { count?: string } | undefined)?.count) countRequested = true;
+    if (method === 'select') columns = String(args[0]);
     if (method === 'eq') filters[args[0] as string] = args[1];
+    if (method === 'gte' || method === 'lt') filters[method + ':' + args[0]] = args[1];
+    if (method === 'range') { offset = Number(args[0]); end = Number(args[1]); }
     return builder;
   };
-  ['select', 'eq', 'gte', 'lte', 'order', 'limit', 'or', 'ilike', 'range', 'upsert'].forEach((method) => {
+  ['select', 'eq', 'gte', 'lt', 'order', 'limit', 'or', 'ilike', 'range', 'upsert'].forEach((method) => {
     builder[method] = chain(method);
   });
   builder.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => {
-    const result = countRequested
-      ? (filters.status === 'pending'
-        ? { data: [pendingRecord], error: null, count: 1 }
-        : {
-          data: submittedReviews.map((review) => ({
-            ...review,
-            status: 'submitted',
-            invited_at: '2026-09-18T12:00:00Z',
-            expires_at: '2026-10-18T12:00:00Z',
-          })),
-          error: null,
-          count: 3,
-        })
-      : { data: submittedReviews, error: null };
+    const analysis = columns.includes('return_score');
+    const isPrevious = String(filters['lt:invited_at']) < '2026-09-01';
+    const answered = submittedReviews.map((review) => ({
+      ...review, status: 'submitted', invited_at: '2026-09-18T12:00:00Z',
+      expires_at: '2026-10-18T12:00:00Z', return_score: null,
+    }));
+    const cohort = [
+      ...answered,
+      ...Array.from({ length: 470 }, (_, index) => ({ ...pendingRecord, id: 'pending-' + index, return_score: null })),
+      ...Array.from({ length: 3 }, (_, index) => ({ ...pendingRecord, id: 'expired-' + index, status: 'expired', return_score: null })),
+    ];
+    const rows = isPrevious ? [] : analysis ? mock.analysisRows ?? cohort
+      : filters.status === 'pending' ? [pendingRecord]
+      : filters.nps_category ? answered.filter(row => row.nps_category === filters.nps_category)
+      : answered;
+    const result = analysis && !isPrevious && mock.failOffset !== null && offset >= mock.failOffset
+      ? { data: null, error: { message: 'Página indisponível' }, count: null }
+      : { data: rows.slice(offset, end + 1), error: null, count: rows.length };
     return Promise.resolve(result).then(resolve, reject);
   };
   return builder;
 }
 
-function renderPage() {
+function renderPage(initialEntry = '/') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <CompanyNpsReports />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -138,14 +131,15 @@ describe('CompanyNpsReports', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mock.calls.length = 0;
+    mock.analysisRows = null;
+    mock.failOffset = null;
     mock.from.mockImplementation((table: string) => createBuilder(table));
-    // Só o período atual tem dados: sem base anterior, nenhum indicador mostra variação.
-    mock.rpc.mockImplementation((_name: string, args: { _to: string }) => (
-      Promise.resolve({ data: args._to === format(new Date(), 'yyyy-MM-dd') ? [summary] : [], error: null })
-    ));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-26T12:00:00Z'));
+
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
 
   it('mostra os indicadores, o detrator a contatar e o aviso de poucas respostas', async () => {
     renderPage();
@@ -182,5 +176,53 @@ describe('CompanyNpsReports', () => {
     await waitFor(() => {
       expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'eq', args: ['status', 'pending'] });
     });
+  });
+
+  it('uses exact company-day boundaries and the same previous window without the legacy summary RPC', async () => {
+    renderPage();
+    await screen.findByRole('region', { name: 'Indicadores de avaliação' });
+    expect(mock.rpc).not.toHaveBeenCalled();
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'gte', args: ['invited_at', '2026-08-28T03:00:00.000Z'] });
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'lt', args: ['invited_at', '2026-09-27T03:00:00.000Z'] });
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'gte', args: ['invited_at', '2026-07-29T03:00:00.000Z'] });
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'lt', args: ['invited_at', '2026-08-28T03:00:00.000Z'] });
+    const analysisFields = mock.calls.filter(call => call.method === 'select' && String(call.args[0]).includes('return_score'));
+    expect(analysisFields.every(call => !String(call.args[0]).includes('guest_name') && !String(call.args[0]).includes('guest_phone'))).toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Selecionar granularidade do relatório' })).not.toBeInTheDocument();
+  });
+
+  it('loads every analysis page beyond 1,000 and keeps summary and coverage complete', async () => {
+    mock.analysisRows = Array.from({ length: 1501 }, (_, index) => ({
+      ...submittedReviews[1], id: 'large-' + index, status: 'submitted',
+      invited_at: '2026-09-18T12:00:00Z', expires_at: '2026-10-18T12:00:00Z', return_score: null,
+    }));
+    renderPage();
+    const kpis = await screen.findByRole('region', { name: 'Indicadores de avaliação' });
+    expect(within(kpis).getByText('1.501')).toBeInTheDocument();
+    expect(within(kpis).getByText('+100')).toBeInTheDocument();
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'range', args: [1000, 1499] });
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'range', args: [1500, 1999] });
+    expect(screen.getByText(/1.501 respostas de 1.501 convites/)).toBeInTheDocument();
+  });
+
+  it('does not show a partial population when a later analysis page fails', async () => {
+    mock.analysisRows = Array.from({ length: 1001 }, (_, index) => ({ ...pendingRecord, id: 'large-' + index }));
+    mock.failOffset = 500;
+    renderPage();
+    expect(await screen.findByText('Não foi possível carregar as avaliações')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Indicadores de avaliação' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Cobertura completa')).not.toBeInTheDocument();
+  });
+
+  it('opens the detractor records from its indicator and preserves the custom period', async () => {
+    renderPage('/?period=custom&from=2026-09-01&to=2026-09-26&compare=0');
+    const trigger = await screen.findByRole('button', { name: 'Abrir registros de Detratores' });
+    fireEvent.click(trigger);
+    expect(await screen.findByRole('button', { name: /^Detratores/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tab', { name: 'Registros' })).toHaveAttribute('aria-selected', 'true');
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'gte', args: ['invited_at', '2026-09-01T03:00:00.000Z'] });
+    expect(mock.calls).toContainEqual({ table: 'reservation_reviews', method: 'eq', args: ['nps_category', 'detractor'] });
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Resumo' }), { button: 0 });
+    expect(await screen.findByRole('region', { name: 'Leituras do período' })).toBeInTheDocument();
   });
 });

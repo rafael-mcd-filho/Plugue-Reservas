@@ -99,7 +99,7 @@ describe('DashboardReportOverview', () => {
 
     const capacityCard = screen.getByRole('link', { name: 'Abrir relatório Ocupação & capacidade' });
     expect(within(capacityCard).getByText('74,2%')).toBeVisible();
-    expect(within(capacityCard).getByText('1.320 lugares ociosos')).toBeVisible();
+    expect(within(capacityCard).getByText('1.320 lugares ofertados sem check-in')).toBeVisible();
     expect(within(capacityCard).getByText('87')).toBeVisible();
     expect(within(capacityCard).getByText('78,2%')).toBeVisible();
     expect(within(capacityCard).getByText('9 min')).toBeVisible();
@@ -116,7 +116,7 @@ describe('DashboardReportOverview', () => {
       '143 perdas, e 69,2% delas viraram no-show',
     );
     expect(screen.getByRole('link', { name: 'Abrir relatório Ocupação & capacidade' })).toHaveTextContent(
-      '1.320 lugares ociosos · 5 dias sob pressão',
+      '1.320 lugares ofertados sem check-in · 5 dias com check-ins iguais ou acima da oferta',
     );
   });
 
@@ -183,6 +183,7 @@ describe('DashboardReportOverview', () => {
         hasCapacity: false,
         occupancyRate: 0,
         pressureDays: 0,
+        idleSeats: 0,
       },
     });
 

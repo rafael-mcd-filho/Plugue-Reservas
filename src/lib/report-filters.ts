@@ -34,6 +34,59 @@ export interface ReportDateOnlyRange {
   to: string;
 }
 
+export interface ReportTimestampRange {
+  from: string;
+  toExclusive: string;
+}
+
+/** Calendar date at an instant, independent of the browser's time zone. */
+export function getReportDateOnlyInTimeZone(value: Date | string, timeZone: string): string {
+  const instant = typeof value === 'string' ? new Date(value) : value;
+  if (!Number.isFinite(instant.getTime())) throw new Error('Data inválida para o relatório.');
+  const parts = new Intl.DateTimeFormat('en-US-u-ca-iso8601-nu-latn', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(instant);
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${fields.year.padStart(4, '0')}-${fields.month}-${fields.day}`;
+}
+
+/**
+ * First instant at or after a calendar date in the unit's time zone. Searching
+ * the calendar boundary also handles DST changes at midnight and skipped dates.
+ */
+function getReportDateStartUtc(date: string, timeZone: string): number {
+  if (!parseReportDateOnly(date)) throw new Error('Data inválida para o relatório.');
+  const center = Date.parse(`${date}T12:00:00Z`);
+  let before = center - 48 * 60 * 60 * 1000;
+  let after = center + 48 * 60 * 60 * 1000;
+  const formatter = new Intl.DateTimeFormat('en-US-u-ca-iso8601-nu-latn', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const calendarAt = (instant: number) => {
+    const fields = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value]));
+    return `${fields.year.padStart(4, '0')}-${fields.month}-${fields.day}`;
+  };
+  while (before + 1 < after) {
+    const middle = Math.floor((before + after) / 2);
+    if (calendarAt(middle) < date) before = middle;
+    else after = middle;
+  }
+  return after;
+}
+
+/** Inclusive date filters become a UTC [from, next-day) timestamp interval. */
+export function getReportTimestampRange(range: ReportDateOnlyRange, timeZone: string): ReportTimestampRange {
+  if (!parseReportDateOnly(range.from) || !parseReportDateOnly(range.to) || range.from > range.to) {
+    throw new Error('Selecione um intervalo válido para o relatório.');
+  }
+  const nextDay = new Date(`${range.to}T12:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  return {
+    from: new Date(getReportDateStartUtc(range.from, timeZone)).toISOString(),
+    toExclusive: new Date(getReportDateStartUtc(nextDay.toISOString().slice(0, 10), timeZone)).toISOString(),
+  };
+}
+
 export const REPORT_PERIOD_LABELS: Record<ReportPeriodPreset, string> = {
   today: 'Hoje',
   yesterday: 'Ontem',

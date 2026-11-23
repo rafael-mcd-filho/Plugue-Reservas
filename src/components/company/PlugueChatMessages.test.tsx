@@ -4,15 +4,16 @@ import PlugueChatMessages from './PlugueChatMessages';
 import type { PlugueChatTemplate } from '@/hooks/usePlugueChatConfig';
 import { PLUGUECHAT_AUTOMATIONS } from '@/lib/pluguechat-automations';
 
-const { templatesMock, mutateMock, npsActivationMock } = vi.hoisted(() => ({
+const { templatesMock, mutateMock, npsActivationMock, mutationState } = vi.hoisted(() => ({
   templatesMock: vi.fn(),
   mutateMock: vi.fn(),
   npsActivationMock: vi.fn(),
+  mutationState: { isPending: false },
 }));
 
 vi.mock('@/hooks/usePlugueChatConfig', () => ({
   usePlugueChatTemplates: (...args: unknown[]) => templatesMock(...args),
-  useUpsertPlugueChatTemplate: () => ({ mutate: mutateMock, isPending: false }),
+  useUpsertPlugueChatTemplate: () => ({ mutate: mutateMock, ...mutationState }),
 }));
 
 vi.mock('@/hooks/useCompanyNpsActivation', () => ({
@@ -53,11 +54,21 @@ function getReviewRadios() {
   };
 }
 
+function editReference(label = 'Pós-visita') {
+  const input = getCard(label).getByLabelText('Nome do template (referência)');
+  fireEvent.change(input, { target: { value: `${(input as HTMLInputElement).value} revisado` } });
+}
+
+function expectSavedPayload(payload: unknown) {
+  expect(mutateMock.mock.lastCall?.[0]).toEqual(payload);
+}
+
 describe('PlugueChatMessages post-visit review contract', () => {
   beforeEach(() => {
     templatesMock.mockReset();
     mutateMock.mockReset();
     npsActivationMock.mockReset();
+    mutationState.isPending = false;
     npsActivationMock.mockReturnValue({ data: { enabled: true }, isPending: false, isError: false });
   });
 
@@ -75,8 +86,9 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
     expect(mutateMock).not.toHaveBeenCalled();
 
+    editReference();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({
+    expectSavedPayload(expect.objectContaining({
       type: 'post_visit',
       post_visit_include_review_link: null,
     }));
@@ -94,7 +106,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
 
     fireEvent.change(getCard().getByLabelText('Template ID'), { target: { value: 'post_visit_name_date' } });
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith({
+    expectSavedPayload({
       company_id: companyId,
       type: 'post_visit',
       enabled: false,
@@ -109,8 +121,9 @@ describe('PlugueChatMessages post-visit review contract', () => {
 
     expect(getReviewRadios().withoutReview).toHaveAttribute('aria-checked', 'true');
     expect(getCard().getByText('avaliacao', { exact: true })).toBeInTheDocument();
+    editReference();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({
+    expectSavedPayload(expect.objectContaining({
       template_id: 'post_visit_existing',
       post_visit_include_review_link: false,
     }));
@@ -132,7 +145,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     }
 
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith({
+    expectSavedPayload({
       company_id: companyId,
       type: 'post_visit',
       enabled: false,
@@ -148,27 +161,37 @@ describe('PlugueChatMessages post-visit review contract', () => {
     const toggle = screen.getByRole('switch', { name: 'Ativar Pós-visita' });
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(mutateMock).toHaveBeenCalledWith({
+    expect(mutateMock).not.toHaveBeenCalled();
+    fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
+    expectSavedPayload({
       company_id: companyId,
       type: 'post_visit',
       enabled: true,
       template_id: 'post_visit_existing',
       template_name: 'Existing post-visit',
       post_visit_include_review_link: mode,
-    }, expect.objectContaining({ onError: expect.any(Function) }));
+    });
   });
 
-  it('restores activation after a failed save without changing the selected review contract', () => {
+  it('keeps activation and template drafts after a failed save, allowing retry or discard', () => {
     renderWithTemplates([makeTemplate(true)]);
     const toggle = screen.getByRole('switch', { name: 'Ativar Pós-visita' });
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
 
     const callbacks = mutateMock.mock.calls[0][1] as { onError: () => void };
     act(() => callbacks.onError());
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(getReviewRadios().withReview).toHaveAttribute('aria-checked', 'true');
     expect(getCard().getByLabelText('Template ID')).toHaveValue('post_visit_existing');
+    expect(getCard().getByRole('alert')).toHaveTextContent('Suas alterações foram mantidas');
+    fireEvent.click(getCard().getByRole('button', { name: 'Tentar salvar novamente' }));
+    expect(mutateMock).toHaveBeenCalledTimes(2);
+    fireEvent.click(getCard().getByRole('button', { name: 'Descartar' }));
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
   });
 
   it.each(PLUGUECHAT_AUTOMATIONS.filter((automation) => automation.type !== 'post_visit'))(
@@ -179,6 +202,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
       fireEvent.change(card.getByLabelText('Template ID'), { target: { value: 'another_template' } });
       fireEvent.click(card.getByRole('button', { name: 'Salvar' }));
       fireEvent.click(screen.getByRole('switch', { name: `Ativar ${automation.label}` }));
+      fireEvent.click(card.getByRole('button', { name: 'Salvar' }));
 
       expect(mutateMock).toHaveBeenCalledTimes(2);
       for (const [payload] of mutateMock.mock.calls) {
@@ -209,10 +233,11 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
     expect(getCard().queryByText('Este template utiliza a variável de avaliação?')).not.toBeInTheDocument();
     expect(getCard().queryByText(/No PlugueChat|Na API não oficial/)).not.toBeInTheDocument();
-    expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'Ativar Pós-visita' })).not.toBeDisabled();
+    editReference();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({
+    expectSavedPayload(expect.objectContaining({
       template_id: 'post_visit_existing',
       post_visit_include_review_link: false,
     }));
@@ -230,8 +255,9 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().getByLabelText('Template ID')).toHaveValue('post_visit_existing');
     expect(mutateMock).not.toHaveBeenCalled();
 
+    editReference();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({
+    expectSavedPayload(expect.objectContaining({
       template_id: 'post_visit_existing',
       post_visit_include_review_link: mode,
     }));
@@ -248,7 +274,7 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getCard().queryByRole('status')).not.toBeInTheDocument();
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
-    expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
     expect(mutateMock).not.toHaveBeenCalled();
   });
 
@@ -258,8 +284,9 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
     expect(getCard().queryByRole('status')).not.toBeInTheDocument();
     expect(getCard().queryByRole('radio')).not.toBeInTheDocument();
+    editReference();
     fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
-    expect(mutateMock).toHaveBeenCalledWith(expect.objectContaining({ post_visit_include_review_link: null }));
+    expectSavedPayload(expect.objectContaining({ post_visit_include_review_link: null }));
   });
 
   it('updates availability across activation changes without saving, replacing IDs, or resetting a draft', () => {
@@ -285,6 +312,179 @@ describe('PlugueChatMessages post-visit review contract', () => {
     expect(getReviewRadios().withReview).not.toBeDisabled();
     expect(getCard().getByLabelText('Template ID')).toHaveValue('unsaved_review_template');
     expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Unsaved draft');
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('saves activation, IDs, reference and review format in a single operation, then clears dirty state', () => {
+    const onUnsavedChange = vi.fn();
+    templatesMock.mockReturnValue({ data: [makeTemplate(false)], isLoading: false });
+    render(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" onUnsavedChange={onUnsavedChange} />);
+    const card = getCard();
+    expect(card.getByRole('button', { name: 'Salvar' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Ativar Pós-visita' }));
+    fireEvent.change(card.getByLabelText('Template ID'), { target: { value: 'review_approved' } });
+    fireEvent.change(card.getByLabelText('Nome do template (referência)'), { target: { value: 'Reviewed' } });
+    fireEvent.click(getReviewRadios().withReview);
+    expect(mutateMock).not.toHaveBeenCalled();
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(card.getByRole('button', { name: 'Salvar' }));
+
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+    expectSavedPayload({ company_id: companyId, type: 'post_visit', enabled: true, template_id: 'review_approved', template_name: 'Reviewed', post_visit_include_review_link: true });
+    act(() => mutateMock.mock.lastCall?.[1].onSuccess());
+    expect(card.queryByText('Alterações não salvas')).not.toBeInTheDocument();
+    expect(card.getByRole('button', { name: 'Salvar' })).toBeDisabled();
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('discards only the chosen card and never persists draft edits', () => {
+    renderWithTemplates([makeTemplate(false)]);
+    editReference();
+    const otherCard = getCard('Confirmação de Reserva');
+    fireEvent.change(otherCard.getByLabelText('Template ID'), { target: { value: 'confirmation_draft' } });
+    fireEvent.click(getCard().getByRole('button', { name: 'Descartar' }));
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Existing post-visit');
+    expect(otherCard.getByLabelText('Template ID')).toHaveValue('confirmation_draft');
+    expect(otherCard.getByText('Alterações não salvas')).toBeInTheDocument();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('merges untouched server fields during refresh while preserving local edits', () => {
+    const { rerender } = renderWithTemplates([makeTemplate(false)]);
+    editReference();
+    templatesMock.mockReturnValue({ data: [{ ...makeTemplate(false), enabled: true, template_id: 'new_server_id', template_name: 'Updated on server' }], isLoading: false });
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Existing post-visit revisado');
+    expect(getCard().getByLabelText('Template ID')).toHaveValue('new_server_id');
+    expect(screen.getByRole('switch', { name: 'Ativar Pós-visita' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(getCard().getByRole('button', { name: 'Descartar' }));
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Updated on server');
+  });
+
+  it('isolates drafts and old mutation callbacks when the selected company changes', () => {
+    const { rerender } = renderWithTemplates([makeTemplate(false)]);
+    editReference();
+    fireEvent.click(getCard().getByRole('button', { name: 'Salvar' }));
+    const oldCallbacks = mutateMock.mock.lastCall?.[1];
+    templatesMock.mockReturnValue({ data: [{ ...makeTemplate(true), company_id: 'company-2', template_id: 'second_company_id' }], isLoading: false });
+    rerender(<PlugueChatMessages companyId="company-2" activeChannel="pluguechat_official" />);
+    act(() => oldCallbacks.onError());
+    act(() => oldCallbacks.onSuccess());
+    expect(getCard().getByLabelText('Template ID')).toHaveValue('second_company_id');
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Existing post-visit');
+    expect(getCard().queryByRole('alert')).not.toBeInTheDocument();
+    expect(getCard().queryByText('Alterações não salvas')).not.toBeInTheDocument();
+  });
+
+  it('shows query failures instead of an empty editable configuration and supports retry', () => {
+    const refetch = vi.fn();
+    templatesMock.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch });
+    render(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível carregar os templates');
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not initialize editable drafts from cached templates after a failed initial read', () => {
+    templatesMock.mockReturnValue({ data: [makeTemplate(false)], isLoading: false, isError: true, refetch: vi.fn() });
+    const { rerender } = render(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Tente novamente para editar com segurança');
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Template ID')).not.toBeInTheDocument();
+    templatesMock.mockReturnValue({ data: [makeTemplate(false)], isLoading: false, isError: false });
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(getCard().getByLabelText('Template ID')).toHaveValue('post_visit_existing');
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves drafts and prevents writes until a failed refresh is retried', () => {
+    const templates = [makeTemplate(false)];
+    const { rerender } = renderWithTemplates(templates);
+    editReference();
+    templatesMock.mockReturnValue({ data: templates, isLoading: false, isError: true, refetch: vi.fn() });
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Suas alterações foram mantidas');
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Existing post-visit revisado');
+    expect(getCard().getByLabelText('Template ID')).toBeDisabled();
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
+    templatesMock.mockReturnValue({ data: templates, isLoading: false, isError: false });
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
+  });
+
+  it('blocks editing while a save is pending', () => {
+    const { rerender } = renderWithTemplates([makeTemplate(false)]);
+    editReference();
+    mutationState.isPending = true;
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(getCard().getByLabelText('Template ID')).toBeDisabled();
+    expect(getCard().getByLabelText('Nome do template (referência)')).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Ativar Pós-visita' })).toBeDisabled();
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
+    expect(getCard().getByRole('button', { name: 'Descartar' })).toBeDisabled();
+  });
+
+  it('retains drafts but prevents saving when the active channel cannot be verified', () => {
+    const { rerender } = renderWithTemplates([makeTemplate(false)]);
+    editReference();
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" saveBlocked />);
+    expect(getCard().getByRole('button', { name: 'Salvar' })).toBeDisabled();
+    expect(getCard().getByLabelText('Nome do template (referência)')).toHaveValue('Existing post-visit revisado');
+    expect(getCard().getByRole('button', { name: 'Descartar' })).not.toBeDisabled();
+    expect(mutateMock).not.toHaveBeenCalled();
+    rerender(<PlugueChatMessages companyId={companyId} activeChannel="pluguechat_official" />);
+    expect(getCard().getByRole('button', { name: 'Salvar' })).not.toBeDisabled();
+  });
+
+  it('previews only fictitious parameters for the selected official template format', () => {
+    renderWithTemplates([makeTemplate(false)]);
+    const details = getCard().getByText('Prévia dos parâmetros').closest('details');
+    expect(details).not.toHaveAttribute('open');
+    if (!(details instanceof HTMLElement)) throw new Error('Missing preview');
+    const preview = within(details);
+    expect(preview.getByText(/O texto final é o template aprovado na Meta/)).toBeInTheDocument();
+    expect(preview.getByText('Maria')).toBeInTheDocument();
+    expect(preview.queryByText('avaliacao:')).not.toBeInTheDocument();
+    fireEvent.click(getReviewRadios().withReview);
+    expect(preview.getByText('avaliacao:')).toBeInTheDocument();
+    expect(preview.getByText('DEMONSTRACAO')).toBeInTheDocument();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { mode: null, available: true, value: 'https://exemplo.invalid/avaliacao/DEMONSTRACAO' },
+    { mode: null, available: false, value: '"" (vazio)' },
+    { mode: true, available: true, value: 'DEMONSTRACAO' },
+    { mode: true, available: false, value: '"" (vazio)' },
+  ])('previews the actual review parameter contract: mode=$mode available=$available', ({ mode, available, value }) => {
+    npsActivationMock.mockReturnValue({ data: { enabled: available }, isPending: false, isError: false });
+    renderWithTemplates([makeTemplate(mode)]);
+    const details = getCard().getByText('Prévia dos parâmetros').closest('details');
+    if (!(details instanceof HTMLElement)) throw new Error('Missing preview');
+    const preview = within(details);
+    expect(preview.getByText('avaliacao:').nextElementSibling).toHaveTextContent(value);
+    if (mode === null) expect(preview.getByText(/Formato antigo preservado/)).toBeInTheDocument();
+    if (mode === true && !available) expect(preview.getByText(/não tem envio elegível/)).toBeInTheDocument();
+    expect(getCard().getByLabelText('Template ID')).toHaveValue('post_visit_existing');
+    expect(getCard().queryByText('Alterações não salvas')).not.toBeInTheDocument();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { isPending: true, isError: false },
+    { isPending: false, isError: true },
+  ])('does not preview a token as available when review availability is unknown: %s', ({ isPending, isError }) => {
+    npsActivationMock.mockReturnValue({ data: { enabled: true }, isPending, isError });
+    renderWithTemplates([makeTemplate(true)]);
+    const details = getCard().getByText('Prévia dos parâmetros').closest('details');
+    if (!(details instanceof HTMLElement)) throw new Error('Missing preview');
+    const preview = within(details);
+    expect(preview.getByText(/não tem envio elegível/)).toBeInTheDocument();
+    expect(preview.getByText('avaliacao:').nextElementSibling).toHaveTextContent('"" (vazio)');
+    expect(preview.queryByText('DEMONSTRACAO')).not.toBeInTheDocument();
     expect(mutateMock).not.toHaveBeenCalled();
   });
 });

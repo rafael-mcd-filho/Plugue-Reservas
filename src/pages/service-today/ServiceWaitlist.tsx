@@ -1,0 +1,2130 @@
+import { formatPhone, getPhoneLookupVariants, normalizePhoneE164, isValidPhone } from '@/lib/phone';
+import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Bell,
+  AlertCircle,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Copy,
+  Eye,
+  Link2,
+  Loader2,
+  Mail,
+  Phone,
+  Plus,
+  RotateCcw,
+  Save,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  Users,
+} from 'lucide-react';
+import { endOfDay, format, formatDistanceToNow, startOfDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import ReservationDetailsDialog, { type ReservationDetails } from '@/components/ReservationDetailsDialog';
+import { ReservationStatusBadge } from '@/components/StatusBadge';
+import QueryFeedback from '@/components/QueryFeedback';
+import ServiceQueryFeedback from '@/components/service-today/ServiceQueryFeedback';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { supabase } from '@/integrations/supabase/client';
+import { useCompanySlug } from '@/contexts/CompanySlugContext';
+import { normalizeReservationStatus } from '@/lib/reservation-status';
+import { cn } from '@/lib/utils';
+import {
+  getEmailValidationMessage,
+  getPhoneValidationMessage,
+  MAX_WAITLIST_NAME_LENGTH,
+  MAX_WAITLIST_NOTES_LENGTH,
+  normalizeEmail,
+} from '@/lib/validation';
+import {
+  formatWaitlistCountdown,
+  getWaitlistCallRemainingMs,
+  hasWaitlistCallExpired,
+  WAITLIST_CALL_TIMEOUT_MINUTES,
+} from '@/lib/waitlist';
+import { useCrmLeadPrefill } from '@/hooks/useCrmLeadPrefill';
+import { getWaitlistCallNotifications, retryWaitlistCallNotification, type WaitlistCallFailure } from '@/lib/waitlist-call-notifications';
+import { toast } from 'sonner';
+import { getReportTimestampRange } from '@/lib/report-filters';
+import { getServiceTodayClock, isServiceTimeInPeriod, type ServiceTodayContext } from '@/lib/service-today';
+
+interface WaitlistEntry {
+  id: string;
+  company_id: string;
+  guest_name: string;
+  guest_phone: string;
+  guest_phone_e164?: string | null;
+  guest_email: string | null;
+  guest_birthdate: string | null;
+  party_size: number;
+  seated_party_size: number | null;
+  tracking_code: string;
+  status: string;
+  position: number;
+  notes: string | null;
+  called_at: string | null;
+  seated_at: string | null;
+  expired_at: string | null;
+  created_at: string;
+}
+
+interface WaitlistCompanionForm {
+  key: string;
+  name: string;
+  phone: string;
+  email: string;
+  birthdate: string;
+}
+
+interface WaitlistDetailsForm {
+  guest_name: string;
+  guest_phone: string;
+  guest_email: string;
+  guest_birthdate: string;
+  party_size: string;
+  notes: string;
+}
+
+function getReservationDateTime(reservation: Pick<ReservationDetails, 'date' | 'time'>) {
+  const dateTime = new Date(`${reservation.date}T${reservation.time}`);
+  if (!Number.isNaN(dateTime.getTime())) {
+    return dateTime;
+  }
+
+  return new Date(`${reservation.date}T12:00:00`);
+}
+
+function formatReservationSource(source: string | null) {
+  if (source === 'waitlist') return 'Fila de Espera';
+  if (source === 'reservation' || !source) return 'Agendada';
+  return source;
+}
+
+function validateWaitlistGuestInput(input: {
+  guest_name: string;
+  guest_phone: string;
+  guest_email?: string;
+  notes: string;
+}) {
+  const guestName = input.guest_name.trim();
+  const guestPhone = normalizePhoneE164(input.guest_phone);
+  const guestEmail = normalizeEmail(input.guest_email);
+  const notes = input.notes.trim();
+
+  if (!guestName) {
+    throw new Error('Informe o nome do cliente.');
+  }
+
+  if (guestName.length > MAX_WAITLIST_NAME_LENGTH) {
+    throw new Error(`O nome deve ter no máximo ${MAX_WAITLIST_NAME_LENGTH} caracteres.`);
+  }
+
+  if (!isValidPhone(guestPhone)) {
+    throw new Error('Informe um WhatsApp válido para o país selecionado.');
+  }
+
+  if (notes.length > MAX_WAITLIST_NOTES_LENGTH) {
+    throw new Error(`As observações devem ter no máximo ${MAX_WAITLIST_NOTES_LENGTH} caracteres.`);
+  }
+
+  const emailError = getEmailValidationMessage(guestEmail, 'um e-mail');
+  if (emailError) {
+    throw new Error(emailError);
+  }
+
+  return {
+    guestName,
+    guestPhone,
+    guestEmail,
+    notes,
+  };
+}
+
+function createCompanionForm(values?: Partial<WaitlistCompanionForm>): WaitlistCompanionForm {
+  return {
+    key: values?.key ?? crypto.randomUUID(),
+    name: values?.name ?? '',
+    phone: normalizePhoneE164(values?.phone),
+    email: values?.email ?? '',
+    birthdate: values?.birthdate ?? '',
+  };
+}
+
+function createWaitlistDetailsForm(entry: WaitlistEntry | null): WaitlistDetailsForm {
+  return {
+    guest_name: entry?.guest_name ?? '',
+    guest_phone: normalizePhoneE164(entry?.guest_phone_e164 ?? entry?.guest_phone),
+    guest_email: entry?.guest_email ?? '',
+    guest_birthdate: entry?.guest_birthdate ?? '',
+    party_size: entry ? String(entry.party_size) : '2',
+    notes: entry?.notes ?? '',
+  };
+}
+
+const statusConfig: Record<string, { label: string; className: string }> = {
+  waiting: { label: 'Aguardando', className: 'border-primary/20 bg-primary-soft text-primary' },
+  called: { label: 'Chamado', className: 'border-info/20 bg-info-soft text-info' },
+  seated: { label: 'Sentado', className: 'border-success/20 bg-success-soft text-success' },
+  expired: { label: 'Expirado', className: 'border-border bg-muted text-muted-foreground' },
+  removed: { label: 'Removido', className: 'border-destructive/20 bg-destructive-soft text-destructive' },
+};
+
+export default function ServiceWaitlist({ serviceContext }: { serviceContext?: ServiceTodayContext } = {}) {
+  const { companyId, companyName, slug } = useCompanySlug();
+  const qc = useQueryClient();
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({
+    guest_name: '',
+    guest_phone: '',
+    guest_email: '',
+    guest_birthdate: '',
+    party_size: 2,
+    notes: '',
+  });
+  const [selectedEntry, setSelectedEntry] = useState<WaitlistEntry | null>(null);
+  const [contactHistoryEntry, setContactHistoryEntry] = useState<WaitlistEntry | null>(null);
+  const [historyReservationDetails, setHistoryReservationDetails] = useState<ReservationDetails | null>(null);
+  const [detailsForm, setDetailsForm] = useState<WaitlistDetailsForm>(createWaitlistDetailsForm(null));
+  const [seatEntry, setSeatEntry] = useState<WaitlistEntry | null>(null);
+  const [showSeatedToday, setShowSeatedToday] = useState(false);
+  const [seatedPartySize, setSeatedPartySize] = useState('2');
+  const [seatGuestEmail, setSeatGuestEmail] = useState('');
+  const [seatGuestBirthdate, setSeatGuestBirthdate] = useState('');
+  const [seatCompanionForms, setSeatCompanionForms] = useState<WaitlistCompanionForm[]>([]);
+  const [removeEntry, setRemoveEntry] = useState<WaitlistEntry | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const canViewReservations = !serviceContext || serviceContext.canViewReservations === true;
+  const serviceTimeZone = serviceContext?.timeZone || 'America/Sao_Paulo';
+  const serviceDate = serviceContext?.date;
+  const serviceRange = useMemo(() => serviceDate
+    ? getReportTimestampRange({ from: serviceDate, to: serviceDate }, serviceTimeZone)
+    : null, [serviceDate, serviceTimeZone]);
+  const serviceScope = serviceContext
+    ? `${companyId}:${serviceContext.date}:${serviceContext.period}:${serviceContext.search}:${serviceContext.section}:${serviceTimeZone}:${canViewReservations}`
+    : `${companyId}:standalone`;
+  const serviceToday = serviceContext
+    ? getServiceTodayClock(serviceTimeZone, new Date(nowMs)).date
+    : null;
+  const matchesServiceTimestamp = (timestamp: string | null) => {
+    if (!serviceContext || !serviceRange) return true;
+    if (!timestamp || !Number.isFinite(Date.parse(timestamp))) return false;
+    const instant = Date.parse(timestamp);
+    if (instant < Date.parse(serviceRange.from) || instant >= Date.parse(serviceRange.toExclusive)) return false;
+    return isServiceTimeInPeriod(getServiceTodayClock(serviceTimeZone, new Date(timestamp)).time, serviceContext.period);
+  };
+  const matchesServiceSearch = (entry: WaitlistEntry) => {
+    const term = serviceContext?.search.trim();
+    if (!term) return true;
+    const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+    return normalize(`${entry.guest_name} ${entry.guest_phone} ${entry.tracking_code}`).includes(normalize(term))
+      || (/^[+()\d\s.-]+$/.test(term) && /\d/.test(term)
+        && entry.guest_phone.replace(/\D/g, '').includes(term.replace(/\D/g, '')));
+  };
+  const canAddToSelectedService = !serviceContext || matchesServiceTimestamp(new Date(nowMs).toISOString());
+  const matchesActiveServiceTimestamp = (timestamp: string) => {
+    if (!serviceContext || !serviceRange) return true;
+    if (serviceContext.date !== serviceToday) return matchesServiceTimestamp(timestamp);
+    if (!Number.isFinite(Date.parse(timestamp)) || Date.parse(timestamp) >= Date.parse(serviceRange.toExclusive)) return false;
+    // The live queue survives midnight: a guest still waiting must not disappear
+    // merely because their entry was created on the previous unit calendar day.
+    return isServiceTimeInPeriod(getServiceTodayClock(serviceTimeZone, new Date(timestamp)).time, serviceContext.period);
+  };
+
+  // Changing the unit or shared analysis context must not leave an actionable
+  // dialog pointing to a record from the previous scope.
+  useEffect(() => {
+    setShowAdd(false);
+    setSelectedEntry(null);
+    setContactHistoryEntry(null);
+    setHistoryReservationDetails(null);
+    setSeatEntry(null);
+    setShowSeatedToday(false);
+    setRemoveEntry(null);
+  }, [serviceScope]);
+  const addFormPhoneDigits = useMemo(
+    () => normalizePhoneE164(addForm.guest_phone),
+    [addForm.guest_phone],
+  );
+  const {
+    data: addFormLead,
+    isFetching: addFormLeadLoading,
+  } = useCrmLeadPrefill(companyId, addFormPhoneDigits, showAdd);
+  const showAddFormLeadLookup = showAdd
+    && isValidPhone(addForm.guest_phone);
+
+  useEffect(() => {
+    if (!showAdd || !addFormLead) return;
+
+    setAddForm((current) => ({
+      ...current,
+      guest_name: addFormLead.full_name || current.guest_name,
+      guest_email: addFormLead.email || current.guest_email,
+      guest_birthdate: addFormLead.birthdate || current.guest_birthdate,
+    }));
+  }, [showAdd, addFormLead]);
+  const automationFailureMessages: Record<string, string> = {
+    evolution_not_configured: 'A automação do WhatsApp não foi enviada porque a Evolution API não está configurada.',
+    instance_not_configured: 'A automação do WhatsApp não foi enviada porque a instância desta unidade não está configurada.',
+    instance_disconnected: 'A automação do WhatsApp não foi enviada porque a instância do WhatsApp está desconectada.',
+    provider_request_failed: 'A automação do WhatsApp falhou no provedor.',
+    provider_invalid_response: 'A automação do WhatsApp recebeu uma resposta inválida do provedor.',
+    unknown_error: 'A automação do WhatsApp falhou ao processar o envio.',
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) return;
+
+    const invalidateWaitlistQueries = () => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['waitlist-seated-today', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
+    };
+
+    const channel = supabase
+      .channel(`company-waitlist:${companyId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'waitlist',
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          invalidateWaitlistQueries();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [companyId, qc]);
+
+  const contactHistoryPhone = useMemo(
+    () => normalizePhoneE164(contactHistoryEntry?.guest_phone_e164 ?? contactHistoryEntry?.guest_phone),
+    [contactHistoryEntry?.guest_phone_e164, contactHistoryEntry?.guest_phone],
+  );
+  const contactHistoryEmail = useMemo(
+    () => normalizeEmail(contactHistoryEntry?.guest_email ?? ''),
+    [contactHistoryEntry?.guest_email],
+  );
+
+  const entriesQuery = useQuery({
+    queryKey: serviceContext
+      ? ['waitlist', companyId, 'service-today', serviceContext.date, serviceContext.period, serviceTimeZone]
+      : ['waitlist', companyId],
+    queryFn: async ({ signal }) => {
+      let query = supabase
+        .from('waitlist' as any)
+        .select('*')
+        .eq('company_id', companyId)
+        .in('status', ['waiting', 'called'])
+        .order('position', { ascending: true });
+      if (serviceContext) query = query.abortSignal(signal);
+      const { data, error } = await query;
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as WaitlistEntry[]).map((entry) => ({ ...entry, guest_phone: entry.guest_phone_e164 ?? entry.guest_phone }));
+    },
+    enabled: !!companyId,
+    refetchInterval: 10000,
+  });
+  const { data: entries = [], isLoading } = entriesQuery;
+  const visibleEntries = serviceContext
+    ? entries.filter((entry) => matchesActiveServiceTimestamp(entry.created_at) && matchesServiceSearch(entry))
+    : entries;
+  const hiddenActiveCount = entries.length - visibleEntries.length;
+  const hasEntriesData = entriesQuery.data !== undefined;
+  const noticeActionLocks = useRef(new Set<string>());
+  const currentCompanyId = useRef(companyId);
+  currentCompanyId.current = companyId;
+  const callNotificationsQuery = useQuery({
+    queryKey: ['waitlist-call-notifications', companyId],
+    queryFn: ({ signal }) => getWaitlistCallNotifications(companyId!, signal),
+    enabled: !!companyId && entries.some((entry) => entry.status === 'called'),
+    refetchInterval: 10000,
+    retry: false,
+  });
+  const callFailureById = useMemo(() => {
+    const snapshot = callNotificationsQuery.data;
+    if (callNotificationsQuery.isError || !snapshot?.automation_enabled || snapshot.company_id !== companyId) return new Map<string, WaitlistCallFailure>();
+    return new Map(snapshot.failures.map((failure) => [failure.waitlist_id, failure]));
+  }, [callNotificationsQuery.data, callNotificationsQuery.isError, companyId]);
+  const retryCallNoticeMutation = useMutation({
+    mutationFn: ({ scopeCompanyId, waitlistId, calledAt }: { scopeCompanyId: string; waitlistId: string; calledAt: string }) => (
+      retryWaitlistCallNotification(scopeCompanyId, waitlistId, calledAt)
+    ),
+    onSuccess: (snapshot, variables) => {
+      qc.setQueryData(['waitlist-call-notifications', variables.scopeCompanyId], snapshot);
+    },
+    onError: (_error, variables) => {
+      if (currentCompanyId.current === variables.scopeCompanyId) toast.error('Não foi possível tentar o aviso novamente. Atualize a fila e tente outra vez.');
+    },
+    onSettled: (_snapshot, _error, variables) => {
+      void qc.invalidateQueries({ queryKey: ['waitlist-call-notifications', variables.scopeCompanyId], exact: true });
+    },
+  });
+  const retryCallNotice = async (entry: WaitlistEntry) => {
+    const failure = callFailureById.get(entry.id);
+    const key = `${companyId}:${entry.id}`;
+    if (!companyId || !entry.called_at || entry.status !== 'called' || !failure?.can_retry
+      || Date.parse(failure.called_at) !== Date.parse(entry.called_at) || hasWaitlistCallExpired(entry.called_at)
+      || noticeActionLocks.current.has(key)) return;
+    noticeActionLocks.current.add(key);
+    try {
+      await retryCallNoticeMutation.mutateAsync({ scopeCompanyId: companyId, waitlistId: entry.id, calledAt: entry.called_at });
+    } catch { /* The original failure stays visible; the mutation reports the request error. */ }
+    finally { noticeActionLocks.current.delete(key); }
+  };
+
+  const contactHistoryQuery = useQuery({
+    queryKey: ['service-waitlist-contact-history', companyId, contactHistoryPhone, contactHistoryEmail, canViewReservations],
+    queryFn: async ({ signal }) => {
+      if (!canViewReservations) throw new Error('Sem permissão para consultar reservas.');
+      if (!companyId) {
+        return [] as ReservationDetails[];
+      }
+
+      let query = supabase
+        .from('reservations' as any)
+        .select(`
+          id,
+          guest_name,
+          guest_phone,
+          guest_phone_e164,
+          guest_email,
+          source,
+          origin_affiliate_code,
+          origin_affiliate_name,
+          date,
+          time,
+          party_size,
+          status,
+          occasion,
+          notes,
+          checked_in_at,
+          checked_in_party_size,
+          created_at,
+          updated_at,
+          public_tracking_code
+        `)
+        .eq('company_id', companyId);
+
+      const contactFilters = contactHistoryPhone ? [
+        `guest_phone_e164.eq.${contactHistoryPhone}`,
+        ...getPhoneLookupVariants(contactHistoryPhone).map((phone) => `guest_phone.eq.${JSON.stringify(phone)}`),
+      ] : [];
+      if (contactHistoryEmail) {
+        // PostgREST quoted values protect commas and other filter punctuation in email addresses.
+        contactFilters.push(`guest_email.eq.${JSON.stringify(contactHistoryEmail)}`);
+      }
+      if (!contactFilters.length) return [] as ReservationDetails[];
+      query = query.or(contactFilters.join(','));
+      if (serviceContext) query = query.abortSignal(signal);
+
+      const { data, error } = await query
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+
+      if (error) throw error;
+
+      return ((data as any[]) ?? [])
+        .map((reservation) => ({
+          ...reservation,
+          guest_phone: reservation.guest_phone_e164 ?? reservation.guest_phone,
+          status: normalizeReservationStatus(reservation.status),
+        }))
+        .filter((reservation) => (
+          (contactHistoryPhone && normalizePhoneE164(reservation.guest_phone) === contactHistoryPhone)
+          || (contactHistoryEmail && normalizeEmail(reservation.guest_email) === contactHistoryEmail)
+        )) as ReservationDetails[];
+    },
+    enabled: canViewReservations && !!companyId && !!contactHistoryEntry && (!!contactHistoryPhone || !!contactHistoryEmail),
+    gcTime: serviceContext ? 0 : undefined,
+  });
+  const { data: contactHistoryReservations = [], isLoading: contactHistoryLoading } = contactHistoryQuery;
+
+  const todayKey = serviceContext?.date ?? format(new Date(), 'yyyy-MM-dd');
+  const seatedDateLabel = serviceContext ? format(new Date(`${serviceContext.date}T12:00:00`), 'dd/MM') : format(new Date(), 'dd/MM');
+  const selectedDayLabel = serviceContext ? 'no período' : 'hoje';
+
+  const seatedTodayQuery = useQuery({
+    queryKey: serviceContext
+      ? ['waitlist-seated-today', companyId, todayKey, serviceTimeZone]
+      : ['waitlist-seated-today', companyId, todayKey],
+    queryFn: async ({ signal }) => {
+      const now = new Date();
+      const start = startOfDay(now).toISOString();
+      const end = endOfDay(now).toISOString();
+      let query = supabase
+        .from('waitlist' as any)
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('status', 'seated');
+      query = serviceRange
+        ? query.gte('seated_at', serviceRange.from).lt('seated_at', serviceRange.toExclusive).abortSignal(signal)
+        : query.gte('seated_at', start).lte('seated_at', end);
+      const { data, error } = await query.order('seated_at', { ascending: false });
+
+      if (error) throw error;
+      return ((data ?? []) as unknown as WaitlistEntry[]).map((entry) => ({ ...entry, guest_phone: entry.guest_phone_e164 ?? entry.guest_phone }));
+    },
+    enabled: !!companyId,
+    refetchInterval: 30000,
+  });
+  const { data: allSeatedTodayEntries = [] } = seatedTodayQuery;
+  const seatedTodayEntries = serviceContext
+    ? allSeatedTodayEntries.filter((entry) => matchesServiceTimestamp(entry.seated_at) && matchesServiceSearch(entry))
+    : allSeatedTodayEntries;
+  const hasSeatedTodayData = seatedTodayQuery.data !== undefined;
+
+  useEffect(() => {
+    if (!seatEntry) return;
+
+    const parsedPartySize = Number.parseInt(seatedPartySize, 10);
+    const targetCompanionCount = Math.max((Number.isNaN(parsedPartySize) ? 1 : parsedPartySize) - 1, 0);
+
+    setSeatCompanionForms((current) => {
+      if (current.length >= targetCompanionCount) {
+        return current;
+      }
+
+      return [
+        ...current,
+        ...Array.from({ length: targetCompanionCount - current.length }, () => createCompanionForm()),
+      ];
+    });
+  }, [seatEntry, seatedPartySize]);
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      if (!canAddToSelectedService) throw new Error('Novas entradas são registradas no dia e horário atuais.');
+      const { guestName, guestPhone, guestEmail, notes } = validateWaitlistGuestInput(addForm);
+      const nextPosition = entries.length > 0 ? Math.max(...entries.map((entry) => entry.position)) + 1 : 1;
+      const { data, error } = await supabase
+        .from('waitlist' as any)
+        .insert({
+          company_id: companyId,
+          guest_name: guestName,
+          guest_phone: guestPhone,
+          guest_email: guestEmail || null,
+          guest_birthdate: addForm.guest_birthdate || null,
+          party_size: addForm.party_size,
+          notes: notes || null,
+          position: nextPosition,
+          status: 'waiting',
+        } as any)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
+
+      toast.success('Cliente adicionado à fila.');
+
+      void triggerWaitlistAutomation('waitlist_added', data.id).catch((error) => {
+        console.warn('Waitlist notification error:', error);
+        toast.error('O cliente entrou na fila, mas a mensagem do WhatsApp não foi disparada.');
+      });
+
+      setShowAdd(false);
+      setAddForm({
+        guest_name: '',
+        guest_phone: '',
+        guest_email: '',
+        guest_birthdate: '',
+        party_size: 2,
+        notes: '',
+      });
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const updateEntryDetails = useMutation({
+    mutationFn: async ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: WaitlistDetailsForm;
+    }) => {
+      const { guestName, guestPhone, guestEmail, notes } = validateWaitlistGuestInput(payload);
+      const parsedPartySize = Number.parseInt(payload.party_size, 10);
+
+      if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) {
+        throw new Error('Informe uma quantidade valida de pessoas.');
+      }
+
+      const { data, error } = await supabase
+        .from('waitlist' as any)
+        .update({
+          guest_name: guestName,
+          guest_phone: guestPhone,
+          guest_email: guestEmail || null,
+          guest_birthdate: payload.guest_birthdate || null,
+          party_size: parsedPartySize,
+          notes: notes || null,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq('id', id)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      return data as unknown as WaitlistEntry;
+    },
+    onSuccess: (updatedEntry) => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['waitlist-seated-today', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      setSelectedEntry(updatedEntry);
+      setDetailsForm(createWaitlistDetailsForm(updatedEntry));
+      toast.success('Dados da fila atualizados.');
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const updateStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const updates: any = { status, updated_at: new Date().toISOString() };
+      if (status === 'called') updates.called_at = new Date().toISOString();
+      if (status === 'seated') updates.seated_at = new Date().toISOString();
+      if (status === 'expired') updates.expired_at = new Date().toISOString();
+      if (status === 'removed') updates.removed_at = new Date().toISOString();
+
+      const { error } = await supabase
+        .from('waitlist' as any)
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['waitlist-seated-today', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
+
+      const labels: Record<string, string> = {
+        called: 'Cliente chamado.',
+        seated: 'Cliente marcado como sentado.',
+        removed: 'Cliente removido.',
+        expired: 'Entrada expirada.',
+      };
+
+      toast.success(labels[variables.status] || 'Atualizado.');
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const triggerWaitlistAutomation = async (event: 'waitlist_added' | 'waitlist_called', waitlistId: string) => {
+    const { data, error } = await supabase.functions.invoke('reservation-events', {
+      body: {
+        event,
+        waitlist: { id: waitlistId },
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const whatsappResult = data?.results?.whatsapp;
+    if (!whatsappResult || whatsappResult === 'sent' || whatsappResult === 'pluguechat_queued'
+      || whatsappResult === 'automation_disabled' || whatsappResult === 'skipped_automation_disabled') {
+      return;
+    }
+
+    if (whatsappResult === 'skipped_duplicate') {
+      if (event !== 'waitlist_called') toast.message('A automação foi ignorada porque já houve um envio recente para esse WhatsApp.');
+      return;
+    }
+
+    toast.error(automationFailureMessages[whatsappResult] || 'A automação do WhatsApp não foi enviada.');
+  };
+
+  const handleCallEntry = async (entry: WaitlistEntry) => {
+    const scopeCompanyId = companyId;
+    const key = `${scopeCompanyId}:${entry.id}`;
+    if (!scopeCompanyId || entry.status !== 'waiting' || noticeActionLocks.current.has(key)) return;
+    noticeActionLocks.current.add(key);
+    try {
+      await updateStatus.mutateAsync({ id: entry.id, status: 'called' });
+      try {
+        await triggerWaitlistAutomation('waitlist_called', entry.id);
+      } catch {
+        if (currentCompanyId.current === scopeCompanyId) toast.error('Não foi possível consultar o resultado do aviso. A chamada foi mantida.');
+      } finally {
+        void qc.invalidateQueries({ queryKey: ['waitlist-call-notifications', scopeCompanyId], exact: true });
+      }
+    } catch { /* updateStatus already reports a failed call registration. */ }
+    finally { noticeActionLocks.current.delete(key); }
+  };
+
+  const seatEntryMutation = useMutation({
+    mutationFn: async ({
+      id,
+      actualPartySize,
+      guestEmail,
+      guestBirthdate,
+      companions,
+    }: {
+      id: string;
+      actualPartySize: number;
+      guestEmail: string;
+      guestBirthdate: string;
+      companions: Array<Omit<WaitlistCompanionForm, 'key'>>;
+    }) => {
+      const seatedAt = new Date();
+      const unitClock = serviceContext ? getServiceTodayClock(serviceTimeZone, seatedAt) : null;
+      const { data, error } = await (supabase as any).rpc('seat_waitlist_entry', {
+        _waitlist_id: id,
+        _seated_party_size: actualPartySize,
+        _guest_email: guestEmail,
+        _guest_birthdate: guestBirthdate,
+        _companions: companions,
+        _reservation_date: unitClock?.date ?? format(seatedAt, 'yyyy-MM-dd'),
+        _reservation_time: unitClock?.time ?? format(seatedAt, 'HH:mm:ss'),
+      });
+
+      if (error) throw error;
+      return (Array.isArray(data) ? data[0] : data) as WaitlistEntry;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['waitlist-seated-today', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-seated'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-waitlist-dropped'] });
+      qc.invalidateQueries({ queryKey: ['reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['calendar-month-metrics', companyId] });
+      qc.invalidateQueries({ queryKey: ['today-reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['service-today-salon', companyId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-reservations'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-reservations-created'] });
+      qc.invalidateQueries({ queryKey: ['leads-reservations', companyId] });
+      qc.invalidateQueries({ queryKey: ['leads-companions', companyId] });
+      qc.invalidateQueries({ queryKey: ['leads-waitlist', companyId] });
+      qc.invalidateQueries({ queryKey: ['leads-waitlist-companions', companyId] });
+      toast.success('Entrada da fila registrada.');
+      closeSeatDialog();
+    },
+    onError: (err: any) => toast.error(`Erro: ${err.message}`),
+  });
+
+  const waitingCount = visibleEntries.filter((entry) => entry.status === 'waiting').length;
+  const calledCount = visibleEntries.filter((entry) => entry.status === 'called').length;
+  const nextRealEntry = entries.find((entry) => entry.status === 'waiting');
+  const nextRealEntryVisible = !!nextRealEntry && visibleEntries.some((entry) => entry.id === nextRealEntry.id);
+  const seatedTodayStats = useMemo(() => {
+    if (seatedTodayEntries.length === 0) {
+      return { seated: 0, avgWaitMin: 0, totalPeople: 0 };
+    }
+
+    const totalWaitMs = seatedTodayEntries.reduce((sum, entry) => {
+      const seatedAt = entry.seated_at ? new Date(entry.seated_at).getTime() : new Date(entry.created_at).getTime();
+      return sum + Math.max(seatedAt - new Date(entry.created_at).getTime(), 0);
+    }, 0);
+
+    return {
+      seated: seatedTodayEntries.length,
+      avgWaitMin: Math.round(totalWaitMs / seatedTodayEntries.length / 60000),
+      totalPeople: seatedTodayEntries.reduce((sum, entry) => sum + (entry.seated_party_size ?? entry.party_size), 0),
+    };
+  }, [seatedTodayEntries]);
+
+  const callNext = () => {
+    const nextEntry = nextRealEntry;
+    if (serviceContext && nextEntry && !nextRealEntryVisible) {
+      toast.info('O próximo grupo da fila está fora dos filtros atuais. Remova os filtros para chamá-lo.');
+      return;
+    }
+    if (!nextEntry) {
+      toast.info('Fila vazia.');
+      return;
+    }
+
+    void handleCallEntry(nextEntry);
+  };
+
+  const copyTrackingLink = async (code: string) => {
+    const url = `${window.location.origin}/${slug}/fila/${code}`;
+    await navigator.clipboard.writeText(url);
+    toast.success('Link copiado.');
+  };
+
+  const openContactHistory = (entry: WaitlistEntry) => {
+    setContactHistoryEntry(entry);
+    setHistoryReservationDetails(null);
+  };
+
+  const closeContactHistory = () => {
+    setContactHistoryEntry(null);
+    setHistoryReservationDetails(null);
+  };
+
+  const openDetailsDialog = (entry: WaitlistEntry) => {
+    setSelectedEntry(entry);
+    setDetailsForm(createWaitlistDetailsForm(entry));
+  };
+
+  const closeDetailsDialog = () => {
+    setSelectedEntry(null);
+    setDetailsForm(createWaitlistDetailsForm(null));
+  };
+
+  const handleSaveDetails = () => {
+    if (!selectedEntry) return;
+
+    updateEntryDetails.mutate({
+      id: selectedEntry.id,
+      payload: detailsForm,
+    });
+  };
+
+  const stopRowAction = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
+
+  const handleWaitlistRowKeyDown = (event: KeyboardEvent<HTMLDivElement>, entry: WaitlistEntry) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openDetailsDialog(entry);
+    }
+  };
+
+  const openSeatDialog = (entry: WaitlistEntry) => {
+    setSeatEntry(entry);
+    setSeatedPartySize(String(entry.seated_party_size ?? entry.party_size));
+    setSeatGuestEmail(entry.guest_email ?? '');
+    setSeatGuestBirthdate(entry.guest_birthdate ?? '');
+    setSeatCompanionForms([]);
+  };
+
+  const closeSeatDialog = () => {
+    setSeatEntry(null);
+    setSeatGuestEmail('');
+    setSeatGuestBirthdate('');
+    setSeatedPartySize('2');
+    setSeatCompanionForms([]);
+  };
+
+  const updateSeatCompanionForm = (
+    key: string,
+    field: keyof Omit<WaitlistCompanionForm, 'key'>,
+    value: string,
+  ) => {
+    setSeatCompanionForms((current) =>
+      current.map((companion) =>
+        companion.key === key
+          ? { ...companion, [field]: value }
+          : companion,
+      ),
+    );
+  };
+
+  const removeSeatCompanionForm = (key: string) => {
+    setSeatCompanionForms((current) => current.filter((companion) => companion.key !== key));
+  };
+
+  const handleSeatEntry = () => {
+    if (!seatEntry) return;
+
+    const parsedPartySize = Number.parseInt(seatedPartySize, 10);
+    if (Number.isNaN(parsedPartySize) || parsedPartySize < 1 || parsedPartySize > 50) {
+      toast.error('Informe uma quantidade presente válida.');
+      return;
+    }
+
+    const companions = seatCompanionForms
+      .map((companion) => ({
+        name: companion.name.trim(),
+        phone: companion.phone.trim(),
+        email: companion.email.trim(),
+        birthdate: companion.birthdate.trim(),
+      }))
+      .filter((companion) => companion.name || companion.phone || companion.email || companion.birthdate);
+
+    if (companions.some((companion) => !companion.name)) {
+      toast.error('Cada acompanhante precisa de um nome.');
+      return;
+    }
+
+    const guestEmailError = getEmailValidationMessage(seatGuestEmail, 'o e-mail do titular');
+    if (guestEmailError) {
+      toast.error(guestEmailError);
+      return;
+    }
+
+    for (const [index, companion] of companions.entries()) {
+      const phoneError = getPhoneValidationMessage(companion.phone, `o telefone do acompanhante ${index + 1}`);
+      if (phoneError) {
+        toast.error(phoneError);
+        return;
+      }
+
+      const emailError = getEmailValidationMessage(companion.email, `o e-mail do acompanhante ${index + 1}`);
+      if (emailError) {
+        toast.error(emailError);
+        return;
+      }
+    }
+
+    if (companions.length > Math.max(parsedPartySize - 1, 0)) {
+      toast.error('A quantidade de acompanhantes excede o total presente informado.');
+      return;
+    }
+
+    seatEntryMutation.mutate({
+      id: seatEntry.id,
+      actualPartySize: parsedPartySize,
+      guestEmail: normalizeEmail(seatGuestEmail),
+      guestBirthdate: seatGuestBirthdate.trim(),
+      companions: companions.map((companion) => ({
+        ...companion,
+        phone: normalizePhoneE164(companion.phone),
+        email: normalizeEmail(companion.email),
+      })),
+    });
+  };
+
+  const selectedEntryStatus = selectedEntry ? (statusConfig[selectedEntry.status] || statusConfig.waiting) : null;
+  const selectedEntryCalledRemainingMs = selectedEntry?.status === 'called'
+    ? getWaitlistCallRemainingMs(selectedEntry.called_at, nowMs)
+    : null;
+  const selectedEntryCalledExpired = selectedEntry?.status === 'called'
+    ? hasWaitlistCallExpired(selectedEntry.called_at, nowMs)
+    : false;
+  const contactHistoryStats = useMemo(() => {
+    const now = Date.now();
+    const checkedInCount = contactHistoryReservations.filter((reservation) => reservation.status === 'checked_in').length;
+    const missedCount = contactHistoryReservations.filter((reservation) => ['cancelled', 'no-show'].includes(reservation.status)).length;
+    const lastVisit = [...contactHistoryReservations]
+      .filter((reservation) => reservation.status === 'checked_in' || getReservationDateTime(reservation).getTime() <= now)
+      .sort((left, right) => {
+        const leftTime = left.checked_in_at ? new Date(left.checked_in_at).getTime() : getReservationDateTime(left).getTime();
+        const rightTime = right.checked_in_at ? new Date(right.checked_in_at).getTime() : getReservationDateTime(right).getTime();
+        return rightTime - leftTime;
+      })[0] ?? null;
+    const nextReservation = [...contactHistoryReservations]
+      .filter((reservation) => reservation.status === 'confirmed' && getReservationDateTime(reservation).getTime() >= now)
+      .sort((left, right) => getReservationDateTime(left).getTime() - getReservationDateTime(right).getTime())[0] ?? null;
+
+    return {
+      total: contactHistoryReservations.length,
+      checkedInCount,
+      missedCount,
+      lastVisit,
+      nextReservation,
+    };
+  }, [contactHistoryReservations]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-start lg:justify-between">
+        {!serviceContext && <div>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Lista de Espera</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Gerencie a fila de {companyName}
+          </p>
+        </div>}
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 rounded-md bg-card px-3"
+            onClick={callNext}
+            disabled={!hasEntriesData || entriesQuery.isError || waitingCount === 0 || (!!serviceContext && !nextRealEntryVisible)}
+            title={serviceContext && nextRealEntry && !nextRealEntryVisible ? 'O próximo grupo está fora dos filtros atuais.' : undefined}
+          >
+            <Bell className="h-4 w-4" />
+            Chamar próximo
+          </Button>
+          <Button size="sm" className="gap-2 rounded-md px-3" onClick={() => setShowAdd(true)} disabled={!canAddToSelectedService}>
+            <Plus className="h-4 w-4" />
+            Adicionar
+          </Button>
+        </div>
+      </div>
+
+      {serviceContext && (serviceContext.section !== 'all' || !canAddToSelectedService || (hasEntriesData && hiddenActiveCount > 0)) && <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+        {serviceContext.section !== 'all' && <p>O ambiente selecionado recorta Chegadas e Salão. A fila é única e não possui vínculo com um ambiente.</p>}
+        {!canAddToSelectedService && <p>Novas entradas são registradas no dia e horário atuais. Selecione o horário atual para adicionar um grupo.</p>}
+        {hasEntriesData && hiddenActiveCount > 0 && <p>{hiddenActiveCount} {hiddenActiveCount === 1 ? 'grupo ativo está fora' : 'grupos ativos estão fora'} dos filtros atuais. A ordem original da fila foi preservada.</p>}
+      </div>}
+
+      {companyId && <ServiceQueryFeedback queries={[{ label: 'a fila', ...entriesQuery }, { label: 'os atendimentos de hoje', ...seatedTodayQuery }]} onFreshnessChange={serviceContext?.onFreshnessChange} />}
+
+      <Card className="overflow-hidden rounded-lg border-0 bg-card shadow-sm ring-1 ring-black/[0.05]">
+        <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-foreground">Fila atual</h3>
+              <span className="inline-flex h-6 items-center rounded-md bg-primary-soft px-2 text-xs font-semibold text-primary">
+                {hasEntriesData ? waitingCount : '—'} aguardando
+              </span>
+              {calledCount > 0 && (
+                <span className="inline-flex h-6 items-center rounded-md bg-info-soft px-2 text-xs font-semibold text-info">
+                  {calledCount} chamado{calledCount === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Espera média {serviceContext ? 'do período' : 'de hoje'}: {hasSeatedTodayData ? `${seatedTodayStats.avgWaitMin}min` : '—'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-background px-2.5 text-xs font-medium text-muted-foreground ring-1 ring-black/[0.05] transition hover:bg-muted/50 hover:text-foreground focus:outline-none focus-visible:ring-primary/30"
+              aria-label={serviceContext ? 'Abrir lista de clientes sentados no período' : 'Abrir lista de clientes sentados hoje'}
+              onClick={() => setShowSeatedToday(true)}
+            >
+              <UserCheck className="h-3.5 w-3.5 text-success" />
+              Sentados {selectedDayLabel}: <span className="font-semibold text-foreground">{hasSeatedTodayData ? seatedTodayStats.seated : '—'}</span>
+            </button>
+          </div>
+        </div>
+
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="space-y-2 p-4">
+              {[1, 2, 3].map((item) => (
+                <Skeleton key={item} className="h-14 w-full rounded-md" />
+              ))}
+            </div>
+          ) : !hasEntriesData ? null : visibleEntries.length === 0 ? (
+            <div className="flex min-h-[240px] flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Users className="h-6 w-6 opacity-60" />
+              </div>
+              <p className="text-lg font-medium text-foreground">{serviceContext ? 'Nenhum grupo neste recorte' : 'Nenhum cliente na fila'}</p>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                {serviceContext ? 'Revise a busca ou os horários selecionados. A fila mantém sua ordem original.' : 'Clique em "Adicionar" para incluir alguém na fila de espera.'}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {visibleEntries.map((entry, index) => {
+                const status = statusConfig[entry.status] || statusConfig.waiting;
+                const queueNumber = entry.status === 'waiting'
+                  ? (serviceContext ? entries.findIndex((item) => item.id === entry.id) + 1 : index + 1)
+                  : null;
+                const calledRemainingMs = entry.status === 'called'
+                  ? getWaitlistCallRemainingMs(entry.called_at, nowMs)
+                  : null;
+                const calledExpired = entry.status === 'called'
+                  ? hasWaitlistCallExpired(entry.called_at, nowMs)
+                  : false;
+                const callFailure = entry.status === 'called' && entry.called_at
+                  && Date.parse(callFailureById.get(entry.id)?.called_at ?? '') === Date.parse(entry.called_at)
+                  ? callFailureById.get(entry.id)
+                  : undefined;
+                const retryingNotice = retryCallNoticeMutation.isPending
+                  && retryCallNoticeMutation.variables?.scopeCompanyId === companyId
+                  && retryCallNoticeMutation.variables?.waitlistId === entry.id;
+                const rowAccent = entry.status === 'called'
+                  ? (calledExpired ? 'border-l-destructive' : 'border-l-info')
+                  : entry.status === 'waiting'
+                    ? 'border-l-primary'
+                    : 'border-l-border';
+                const avatarClass = entry.status === 'called'
+                  ? (calledExpired ? 'bg-destructive-soft text-destructive' : 'bg-info-soft text-info')
+                  : entry.status === 'waiting'
+                    ? 'bg-primary-soft text-primary'
+                    : 'bg-muted text-muted-foreground';
+
+                return (
+                  <div
+                    key={entry.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Abrir resumo da fila de ${entry.guest_name}`}
+                    className={cn(
+                      'group flex cursor-pointer flex-col gap-3 border-l-2 px-4 py-3 transition-colors hover:bg-primary-soft/20 focus:outline-none focus-visible:bg-primary-soft/20 xl:flex-row xl:items-center',
+                      rowAccent,
+                    )}
+                    onClick={() => openDetailsDialog(entry)}
+                    onKeyDown={(event) => handleWaitlistRowKeyDown(event, entry)}
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold ring-1 ring-black/[0.03]', avatarClass)}>
+                        {queueNumber ?? '-'}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-base font-semibold text-foreground">
+                            {entry.guest_name}
+                          </p>
+                          <span
+                            className={cn('inline-flex h-5 items-center rounded-md border px-2 text-[11px] font-medium', status.className)}
+                          >
+                            {status.label}
+                          </span>
+                        </div>
+
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                            <Phone className="h-3.5 w-3.5" />
+                            {formatPhone(entry.guest_phone)}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                            <Users className="h-3.5 w-3.5" />
+                            {entry.party_size} pessoas
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                            <Clock3 className="h-3.5 w-3.5" />
+                            Na fila há {formatDistanceToNow(new Date(entry.created_at), { locale: ptBR })}
+                          </span>
+                          {serviceContext && getServiceTodayClock(serviceTimeZone, new Date(entry.created_at)).date < serviceContext.date && (
+                            <span className="inline-flex items-center gap-1.5">
+                              <CalendarDays className="h-3.5 w-3.5" />
+                              Entrada em {new Intl.DateTimeFormat('pt-BR', { timeZone: serviceTimeZone, day: '2-digit', month: '2-digit' }).format(new Date(entry.created_at))}
+                            </span>
+                          )}
+                        </div>
+
+                        {entry.status === 'called' && (
+                          <div
+                            className={cn(
+                              'mt-2 inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-xs font-medium tabular-nums',
+                              calledExpired
+                                ? 'border-destructive/30 bg-destructive-soft text-destructive'
+                                : 'border-info/30 bg-info-soft text-info',
+                            )}
+                          >
+                            <Clock3 className="h-3.5 w-3.5" />
+                            {calledExpired
+                              ? `Tempo esgotado · ${formatWaitlistCountdown(calledRemainingMs)}`
+                              : `Tempo restante ${formatWaitlistCountdown(calledRemainingMs)} de ${WAITLIST_CALL_TIMEOUT_MINUTES}:00`}
+                          </div>
+                        )}
+
+                        {callFailure && (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs" role="alert">
+                            <span className="inline-flex items-center gap-1.5 font-medium text-destructive">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              Falha ao enviar o WhatsApp
+                            </span>
+                            <button
+                              type="button"
+                              disabled={!callFailure.can_retry || calledExpired || retryingNotice || callNotificationsQuery.isFetching}
+                              aria-label={`Tentar envio novamente para ${entry.guest_name}`}
+                              title={calledExpired ? 'O prazo da chamada terminou.' : !callFailure.can_retry ? 'Uma nova tentativa ainda não está disponível.' : 'Repetir somente o aviso, sem reiniciar a chamada ou o prazo.'}
+                              className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={(event) => {
+                                stopRowAction(event);
+                                void retryCallNotice(entry);
+                              }}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {retryingNotice ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                              {retryingNotice ? 'Tentando...' : 'Tentar novamente'}
+                            </button>
+                          </div>
+                        )}
+
+                        {entry.notes && (
+                          <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">{entry.notes}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex w-full items-center gap-2 xl:w-auto xl:justify-end">
+                      {entry.status === 'waiting' && (
+                        <Button
+                          size="sm"
+                          className="h-8 flex-1 gap-2 rounded-md px-3 sm:flex-none"
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            void handleCallEntry(entry);
+                          }}
+                        >
+                          <Bell className="h-4 w-4" />
+                          Chamar
+                        </Button>
+                      )}
+
+                      {entry.status === 'called' && (
+                        <Button
+                          size="sm"
+                          className="h-8 flex-1 gap-2 rounded-md px-3 sm:flex-none"
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            openSeatDialog(entry);
+                          }}
+                        >
+                          <UserCheck className="h-4 w-4" />
+                          Sentar
+                        </Button>
+                      )}
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          title="Histórico do cliente"
+                          aria-label={`Histórico de ${entry.guest_name}`}
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            openContactHistory(entry);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          title="Copiar link de acompanhamento"
+                          aria-label={`Copiar link de ${entry.guest_name}`}
+                          onClick={(event) => {
+                            stopRowAction(event);
+                            copyTrackingLink(entry.tracking_code);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+
+                        {entry.status === 'waiting' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-md text-destructive hover:bg-destructive-soft hover:text-destructive"
+                            title="Remover da fila"
+                            aria-label={`Remover ${entry.guest_name} da fila`}
+                            onClick={(event) => {
+                              stopRowAction(event);
+                              setRemoveEntry(entry);
+                            }}
+                          >
+                            <UserMinus className="h-4 w-4" />
+                          </Button>
+                        )}
+
+                        {entry.status === 'called' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-md text-destructive hover:bg-destructive-soft hover:text-destructive"
+                            title={calledExpired ? 'Expirar agora' : 'Expirar'}
+                            aria-label={`Expirar ${entry.guest_name}`}
+                            onClick={(event) => {
+                              stopRowAction(event);
+                              updateStatus.mutate({ id: entry.id, status: 'expired' });
+                            }}
+                          >
+                            <Clock3 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={showSeatedToday} onOpenChange={setShowSeatedToday}>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{serviceContext ? 'Sentados no período' : 'Sentados hoje'}</DialogTitle>
+            <DialogDescription>
+              {!hasSeatedTodayData
+                ? `Consulte os atendimentos de ${seatedDateLabel}.`
+                : seatedTodayStats.seated > 0
+                ? `${seatedTodayStats.seated} ${seatedTodayStats.seated === 1 ? 'cliente sentado' : 'clientes sentados'} em ${seatedDateLabel} · ${seatedTodayStats.totalPeople} ${seatedTodayStats.totalPeople === 1 ? 'pessoa' : 'pessoas'}`
+                : `Nenhum cliente sentado em ${seatedDateLabel}`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <QueryFeedback queries={[{ label: 'os atendimentos de hoje', ...seatedTodayQuery }]} />
+            {hasSeatedTodayData && <>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="rounded-xl border border-success/20 bg-success-soft/50 p-3">
+                <div className="flex items-center gap-1.5 text-success">
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Clientes</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">{seatedTodayStats.seated}</p>
+              </div>
+              <div className="rounded-xl border border-info/20 bg-info-soft/40 p-3">
+                <div className="flex items-center gap-1.5 text-info">
+                  <Users className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Pessoas</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">{seatedTodayStats.totalPeople}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em]">Espera média</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-bold leading-none text-foreground">
+                  {seatedTodayStats.avgWaitMin}<span className="text-sm font-semibold text-muted-foreground">min</span>
+                </p>
+              </div>
+            </div>
+
+            {seatedTodayEntries.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border bg-muted/10 px-5 py-10 text-center">
+                <p className="text-sm font-medium text-foreground">{serviceContext ? 'Ninguém foi sentado neste período.' : 'Ninguém foi sentado hoje ainda.'}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Assim que uma entrada da fila for concluída, ela aparece aqui.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {seatedTodayEntries.map((entry) => {
+                  const seatedAt = entry.seated_at ? new Date(entry.seated_at) : new Date(entry.created_at);
+                  const waitMinutes = Math.max(
+                    Math.round((seatedAt.getTime() - new Date(entry.created_at).getTime()) / 60000),
+                    0,
+                  );
+                  const initial = entry.guest_name.trim().charAt(0).toUpperCase() || '?';
+
+                  return (
+                    <div
+                      key={entry.id}
+                      className="group flex items-start gap-3 rounded-2xl border border-border bg-card p-3.5 transition-colors hover:border-success/30 hover:bg-success-soft/20"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success-soft text-sm font-bold text-success">
+                        {initial}
+                      </div>
+
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="truncate text-base font-semibold text-foreground">{entry.guest_name}</p>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                            {serviceContext ? getServiceTodayClock(serviceTimeZone, seatedAt).time.slice(0, 5) : format(seatedAt, 'HH:mm')}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5" />
+                            {formatPhone(entry.guest_phone)}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5" />
+                            {entry.seated_party_size ?? entry.party_size} pessoas
+                          </span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                              waitMinutes === 0
+                                ? 'bg-success-soft text-success'
+                                : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            <Clock3 className="h-3 w-3" />
+                            {waitMinutes === 0 ? 'Na hora' : `Esperou ${waitMinutes}min`}
+                          </span>
+                        </div>
+                        {entry.notes && (
+                          <p className="text-sm text-muted-foreground">{entry.notes}</p>
+                        )}
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground opacity-60 transition-opacity hover:text-foreground group-hover:opacity-100"
+                        title="Copiar link de acompanhamento"
+                        aria-label={`Copiar link de ${entry.guest_name}`}
+                        onClick={() => copyTrackingLink(entry.tracking_code)}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            </>}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md overflow-x-hidden">
+          <DialogHeader>
+            <DialogTitle>Adicionar a fila</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            addMutation.mutate();
+          }} className="mt-4 space-y-4">
+            <div>
+              <Label htmlFor="waitlist-add-name">Nome *</Label>
+              <Input
+                id="waitlist-add-name"
+                name="guest_name"
+                value={addForm.guest_name}
+                onChange={(event) => setAddForm({ ...addForm, guest_name: event.target.value })}
+                placeholder="Nome do cliente"
+                autoComplete="name"
+                maxLength={MAX_WAITLIST_NAME_LENGTH}
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="waitlist-add-phone">WhatsApp *</Label>
+              <PhoneInput
+                id="waitlist-add-phone"
+                name="guest_phone"
+                value={addForm.guest_phone}
+                onChange={(value) => setAddForm({ ...addForm, guest_phone: value })}
+                placeholder="(11) 99999-9999"
+                autoComplete="tel"
+                inputMode="tel"
+                required
+              />
+              {showAddFormLeadLookup && (addFormLeadLoading || addFormLead) && (
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                  {addFormLeadLoading ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Buscando lead pelo WhatsApp...</span>
+                    </>
+                  ) : addFormLead ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                      <span>
+                        Lead encontrado{addFormLead.full_name ? `: ${addFormLead.full_name}` : ''}. Dados preenchidos.
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor="waitlist-add-email">Email</Label>
+              <Input
+                id="waitlist-add-email"
+                name="guest_email"
+                type="email"
+                value={addForm.guest_email}
+                onChange={(event) => setAddForm({ ...addForm, guest_email: event.target.value })}
+                placeholder="cliente@email.com"
+                autoComplete="email"
+                inputMode="email"
+                spellCheck={false}
+              />
+            </div>
+            <div>
+              <Label htmlFor="waitlist-add-birthdate">Data de nascimento</Label>
+              <Input
+                id="waitlist-add-birthdate"
+                name="guest_birthdate"
+                type="date"
+                value={addForm.guest_birthdate}
+                onChange={(event) => setAddForm({ ...addForm, guest_birthdate: event.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="waitlist-add-party-size">Pessoas</Label>
+              <div className="mt-1 flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  aria-label="Diminuir quantidade de pessoas"
+                  onClick={() => setAddForm((current) => ({ ...current, party_size: Math.max(1, current.party_size - 1) }))}
+                >
+                  -
+                </Button>
+                <span id="waitlist-add-party-size" aria-live="polite" className="w-8 text-center font-semibold">{addForm.party_size}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  aria-label="Aumentar quantidade de pessoas"
+                  onClick={() => setAddForm((current) => ({ ...current, party_size: Math.min(20, current.party_size + 1) }))}
+                >
+                  +
+                </Button>
+              </div>
+            </div>
+            <div>
+              <Label>Observações</Label>
+              <Textarea id="waitlist-add-notes" name="notes"
+                value={addForm.notes}
+                onChange={(event) => setAddForm({ ...addForm, notes: event.target.value })}
+                placeholder="Ex: cadeira de bebê, aniversário..."
+                rows={3}
+                maxLength={MAX_WAITLIST_NOTES_LENGTH}
+              />
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setShowAdd(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="w-full sm:w-auto" disabled={addMutation.isPending}>
+                {addMutation.isPending ? 'Adicionando...' : 'Adicionar'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedEntry} onOpenChange={(open) => !open && closeDetailsDialog()}>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Resumo da fila</DialogTitle>
+            <DialogDescription className="sr-only">Dados e situação atual desta entrada na lista de espera.</DialogDescription>
+          </DialogHeader>
+
+          {selectedEntry && selectedEntryStatus && (
+            <div className="space-y-5 pt-2">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Status</p>
+                  <div className="mt-2">
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium',
+                        selectedEntryStatus.className,
+                      )}
+                    >
+                      {selectedEntryStatus.label}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Pessoas</p>
+                  <p className="mt-2 text-lg font-semibold text-foreground">{selectedEntry.party_size}</p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Entrada</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">
+                    {serviceContext
+                      ? new Intl.DateTimeFormat('pt-BR', { timeZone: serviceTimeZone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(selectedEntry.created_at))
+                      : format(new Date(selectedEntry.created_at), 'dd/MM/yyyy HH:mm')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Há {formatDistanceToNow(new Date(selectedEntry.created_at), { locale: ptBR })}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Acompanhamento</p>
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-primary transition-colors hover:text-primary/80"
+                    onClick={() => copyTrackingLink(selectedEntry.tracking_code)}
+                  >
+                    <Link2 className="h-4 w-4" />
+                    Copiar link
+                  </button>
+                </div>
+              </div>
+
+              {selectedEntry.status === 'called' && (
+                <div
+                  className={cn(
+                    'inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs font-medium tabular-nums',
+                    selectedEntryCalledExpired
+                      ? 'border-destructive/30 bg-destructive-soft text-destructive'
+                      : 'border-info/30 bg-info-soft text-info',
+                  )}
+                >
+                  <Clock3 className="h-3.5 w-3.5" />
+                  {selectedEntryCalledExpired
+                    ? `Tempo esgotado · ${formatWaitlistCountdown(selectedEntryCalledRemainingMs)}`
+                    : `Tempo restante ${formatWaitlistCountdown(selectedEntryCalledRemainingMs)} de ${WAITLIST_CALL_TIMEOUT_MINUTES}:00`}
+                </div>
+              )}
+
+              <div className="space-y-4 rounded-2xl border border-border bg-card p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Conferir ou editar dados</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Atualize os dados antes de chamar, sentar ou remover o cliente.
+                    </p>
+                  </div>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full gap-2 self-start rounded-lg sm:w-auto"
+                      onClick={() => {
+                        const entry = selectedEntry;
+                        closeDetailsDialog();
+                        openContactHistory(entry);
+                      }}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Ver histórico
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full gap-2 self-start rounded-lg sm:w-auto"
+                      onClick={() => copyTrackingLink(selectedEntry.tracking_code)}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar link
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="waitlist-details-name">Nome</Label>
+                    <Input
+                      id="waitlist-details-name"
+                      name="guest_name"
+                      value={detailsForm.guest_name}
+                      onChange={(event) => setDetailsForm((current) => ({ ...current, guest_name: event.target.value }))}
+                      placeholder="Nome do cliente"
+                      autoComplete="name"
+                      maxLength={MAX_WAITLIST_NAME_LENGTH}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="waitlist-details-phone">WhatsApp</Label>
+                    <PhoneInput
+                      id="waitlist-details-phone"
+                      name="guest_phone"
+                      value={detailsForm.guest_phone}
+                      onChange={(value) => setDetailsForm((current) => ({ ...current, guest_phone: value }))}
+                      placeholder="(11) 99999-9999"
+                      autoComplete="tel"
+                      inputMode="tel"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="waitlist-details-party-size">Pessoas</Label>
+                    <Input
+                      id="waitlist-details-party-size"
+                      name="party_size"
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={detailsForm.party_size}
+                      onChange={(event) => setDetailsForm((current) => ({ ...current, party_size: event.target.value }))}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="waitlist-details-email">Email</Label>
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="waitlist-details-email"
+                        name="guest_email"
+                        type="email"
+                        value={detailsForm.guest_email}
+                        onChange={(event) => setDetailsForm((current) => ({ ...current, guest_email: event.target.value }))}
+                        placeholder="cliente@email.com"
+                        className="pl-9"
+                        autoComplete="email"
+                        inputMode="email"
+                        spellCheck={false}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="waitlist-details-birthdate">Nascimento</Label>
+                    <div className="relative">
+                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="waitlist-details-birthdate"
+                        name="guest_birthdate"
+                        type="date"
+                        value={detailsForm.guest_birthdate}
+                        onChange={(event) => setDetailsForm((current) => ({ ...current, guest_birthdate: event.target.value }))}
+                        className="pl-9"
+                        autoComplete="bday"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="waitlist-details-notes">Observações</Label>
+                    <Textarea
+                      id="waitlist-details-notes"
+                      name="notes"
+                      value={detailsForm.notes}
+                      onChange={(event) => setDetailsForm((current) => ({ ...current, notes: event.target.value }))}
+                      placeholder="Informações importantes, preferências ou contexto do atendimento"
+                      rows={4}
+                      maxLength={MAX_WAITLIST_NOTES_LENGTH}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-dashed border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">Código de acompanhamento</p>
+                  <p className="mt-1 break-all font-mono text-xs">{selectedEntry.tracking_code}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={closeDetailsDialog}>
+                  Fechar
+                </Button>
+                <Button type="button" className="w-full gap-2 sm:w-auto" onClick={handleSaveDetails} disabled={updateEntryDetails.isPending}>
+                  <Save className="h-4 w-4" />
+                  {updateEntryDetails.isPending ? 'Salvando...' : 'Salvar alterações'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!contactHistoryEntry && !historyReservationDetails} onOpenChange={(open) => !open && closeContactHistory()}>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-3xl overflow-x-hidden overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Histórico do contato</DialogTitle>
+            <DialogDescription className="sr-only">{canViewReservations ? 'Reservas deste contato nesta unidade.' : 'Dados do contato no atendimento da fila.'}</DialogDescription>
+          </DialogHeader>
+
+          {contactHistoryEntry && (
+            <div className="space-y-5 pt-2">
+              <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                <p className="text-lg font-semibold text-foreground">{contactHistoryEntry.guest_name}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" />
+                    {formatPhone(contactHistoryEntry.guest_phone)}
+                  </span>
+                  {contactHistoryEntry.guest_email && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5" />
+                      {contactHistoryEntry.guest_email}
+                    </span>
+                  )}
+                </div>
+                {canViewReservations && <p className="mt-3 text-xs text-muted-foreground">
+                  Busca feita nas reservas desta unidade usando telefone e, quando houver, e-mail do contato.
+                </p>}
+              </div>
+
+              {!canViewReservations ? (
+                <p className="rounded-lg border border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Seu acesso permite atender este grupo na fila. Para consultar o histórico de reservas, é necessária a permissão de visualizar reservas.
+                </p>
+              ) : <>
+              {(contactHistoryPhone || contactHistoryEmail) && (
+                <QueryFeedback queries={[{ label: 'o histórico deste contato', ...contactHistoryQuery }]} />
+              )}
+              {contactHistoryLoading ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {[1, 2, 3, 4].map((item) => (
+                      <Skeleton key={item} className="h-24 w-full rounded-2xl" />
+                    ))}
+                  </div>
+                  {[1, 2, 3].map((item) => (
+                    <Skeleton key={item} className="h-28 w-full rounded-2xl" />
+                  ))}
+                </div>
+              ) : contactHistoryQuery.data === undefined && (contactHistoryPhone || contactHistoryEmail) ? (
+                null
+              ) : contactHistoryReservations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/10 p-8 text-center">
+                  <p className="text-base font-semibold text-foreground">Nenhuma reserva encontrada</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Ainda nao encontramos reservas anteriores deste contato nesta unidade.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total de reservas</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{contactHistoryStats.total}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Compareceram</p>
+                      <p className="mt-2 text-2xl font-semibold text-foreground">{contactHistoryStats.checkedInCount}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {contactHistoryStats.missedCount} canceladas ou no-show
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Última visita</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">
+                        {contactHistoryStats.lastVisit
+                          ? format(
+                            contactHistoryStats.lastVisit.checked_in_at
+                              ? new Date(contactHistoryStats.lastVisit.checked_in_at)
+                              : getReservationDateTime(contactHistoryStats.lastVisit),
+                            "dd/MM/yyyy 'as' HH:mm",
+                            { locale: ptBR },
+                          )
+                          : 'Nenhuma'}
+                      </p>
+                      {contactHistoryStats.lastVisit && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {formatDistanceToNow(
+                            contactHistoryStats.lastVisit.checked_in_at
+                              ? new Date(contactHistoryStats.lastVisit.checked_in_at)
+                              : getReservationDateTime(contactHistoryStats.lastVisit),
+                            { addSuffix: true, locale: ptBR },
+                          )}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Proxima reserva</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">
+                        {contactHistoryStats.nextReservation
+                          ? format(getReservationDateTime(contactHistoryStats.nextReservation), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })
+                          : 'Nenhuma'}
+                      </p>
+                      {contactHistoryStats.nextReservation && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {contactHistoryStats.nextReservation.party_size} pessoas
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 rounded-2xl border border-border bg-card p-5">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Reservas deste contato</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Lista mais recente primeiro para consulta rapida da operacao.
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {contactHistoryReservations.length} {contactHistoryReservations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {contactHistoryReservations.map((reservation) => (
+                        <div key={reservation.id} className="rounded-xl border border-border bg-muted/15 p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-semibold text-foreground">{reservation.guest_name}</p>
+                                <ReservationStatusBadge status={reservation.status} />
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <CalendarDays className="h-3.5 w-3.5" />
+                                  {format(getReservationDateTime(reservation), "dd/MM/yyyy 'as' HH:mm", { locale: ptBR })}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Users className="h-3.5 w-3.5" />
+                                  {reservation.party_size} pessoas
+                                </span>
+                                <span>{formatReservationSource(reservation.source)}</span>
+                              </div>
+
+                              {(reservation.origin_affiliate_name || reservation.occasion) && (
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  {reservation.origin_affiliate_name && (
+                                    <span>Afiliado: {reservation.origin_affiliate_name}</span>
+                                  )}
+                                  {reservation.occasion && (
+                                    <span>Ocasião: {reservation.occasion}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full gap-2 rounded-lg sm:w-auto"
+                              onClick={() => canViewReservations && setHistoryReservationDetails(reservation)}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Abrir reserva
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              </>}
+
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" onClick={closeContactHistory}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ReservationDetailsDialog
+        open={canViewReservations && !!historyReservationDetails}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeContactHistory();
+          }
+        }}
+        reservation={canViewReservations ? historyReservationDetails : null}
+        slug={slug}
+        companyId={companyId}
+        onBackToList={() => setHistoryReservationDetails(null)}
+        backLabel="Voltar para o histórico do contato"
+        showEventHistory={!serviceContext || serviceContext.canViewEvents === true}
+        showLeadHistory={serviceContext?.canViewLeads === true}
+      />
+
+      <Dialog open={!!seatEntry} onOpenChange={(open) => !open && closeSeatDialog()}>
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-1rem)] max-w-2xl overflow-x-hidden overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Sentar cliente da fila</DialogTitle>
+          </DialogHeader>
+
+          {seatEntry && (
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{seatEntry.guest_name}</p>
+                <p className="text-sm text-muted-foreground">{formatPhone(seatEntry.guest_phone)}</p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="waitlist-seat-email">Email do titular</Label>
+                  <Input
+                    id="waitlist-seat-email"
+                    name="guest_email"
+                    type="email"
+                    value={seatGuestEmail}
+                    onChange={(event) => setSeatGuestEmail(event.target.value)}
+                    placeholder="cliente@email.com"
+                    autoComplete="email"
+                    inputMode="email"
+                    spellCheck={false}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="waitlist-seat-birthdate">Nascimento do titular</Label>
+                  <Input
+                    id="waitlist-seat-birthdate"
+                    name="guest_birthdate"
+                    type="date"
+                    value={seatGuestBirthdate}
+                    onChange={(event) => setSeatGuestBirthdate(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-2xl border border-border bg-muted/20 p-4">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Entrada</p>
+                  <p className="text-xs text-muted-foreground">
+                    O titular conta como 1 pessoa. Cadastre aqui quem realmente entrou para gerar os leads da fila.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="waitlist-seat-party-size"
+                      className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
+                    >
+                      Total presente
+                    </Label>
+                    <Input
+                      id="waitlist-seat-party-size"
+                      name="seated_party_size"
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={seatedPartySize}
+                      onChange={(event) => setSeatedPartySize(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-dashed border-border bg-background/70 p-3 text-xs text-muted-foreground">
+                    Entrada original na fila para <span className="font-medium text-foreground">{seatEntry.party_size}</span> pessoas.
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Acompanhantes</p>
+                    <p className="text-xs text-muted-foreground">
+                      Nome e WhatsApp são os dados mais importantes. Email e aniversário podem ser opcionais.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2 sm:w-auto"
+                    onClick={() => setSeatCompanionForms((current) => [...current, createCompanionForm()])}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar
+                  </Button>
+                </div>
+
+                {seatCompanionForms.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
+                    Nenhum acompanhante cadastrado ainda.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {seatCompanionForms.map((companion, index) => (
+                      <div key={companion.key} className="space-y-3 rounded-2xl border border-border bg-background p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-foreground">Acompanhante {index + 1}</p>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg text-muted-foreground"
+                            aria-label={`Remover acompanhante ${index + 1}`}
+                            onClick={() => removeSeatCompanionForm(companion.key)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <Input
+                            id={`waitlist-seat-companion-name-${companion.key}`}
+                            name={`companions[${index}].name`}
+                            value={companion.name}
+                            onChange={(event) => updateSeatCompanionForm(companion.key, 'name', event.target.value)}
+                            placeholder="Nome do acompanhante"
+                            autoComplete="name"
+                          />
+                          <PhoneInput
+                            id={`waitlist-seat-companion-phone-${companion.key}`}
+                            name={`companions[${index}].phone`}
+                            value={companion.phone}
+                            onChange={(value) => updateSeatCompanionForm(companion.key, 'phone', value)}
+                            placeholder="WhatsApp"
+                            autoComplete="tel"
+                            inputMode="tel"
+                          />
+                          <Input
+                            id={`waitlist-seat-companion-email-${companion.key}`}
+                            name={`companions[${index}].email`}
+                            type="email"
+                            value={companion.email}
+                            onChange={(event) => updateSeatCompanionForm(companion.key, 'email', event.target.value)}
+                            placeholder="Email"
+                            autoComplete="email"
+                            inputMode="email"
+                            spellCheck={false}
+                          />
+                          <Input
+                            id={`waitlist-seat-companion-birthdate-${companion.key}`}
+                            name={`companions[${index}].birthdate`}
+                            type="date"
+                            value={companion.birthdate}
+                            onChange={(event) => updateSeatCompanionForm(companion.key, 'birthdate', event.target.value)}
+                            autoComplete="bday"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={closeSeatDialog}>
+                  Cancelar
+                </Button>
+                <Button className="w-full sm:w-auto" onClick={handleSeatEntry} disabled={seatEntryMutation.isPending}>
+                  {seatEntryMutation.isPending ? 'Salvando...' : 'Confirmar entrada'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!removeEntry} onOpenChange={(open) => !open && setRemoveEntry(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover da fila?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeEntry?.guest_name} será removido(a) da lista de espera.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (removeEntry) {
+                  updateStatus.mutate({ id: removeEntry.id, status: 'removed' });
+                }
+                setRemoveEntry(null);
+              }}
+            >
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
