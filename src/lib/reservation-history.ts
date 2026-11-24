@@ -24,6 +24,8 @@ export interface ReservationHistoryRow {
   table_id: string | null;
   table_map_id: string | null;
   created_in_mode?: string | null;
+  selected_section_id?: string | null;
+  selected_section_name?: string | null;
   source: string | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;

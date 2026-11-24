@@ -87,6 +87,8 @@ import PrepaymentBalanceDashboard from '@/components/billing/PrepaymentBalanceDa
 
 interface RuleFormState {
   name: string;
+  pricing_mode: 'single' | 'by_section';
+  sections: RuleSectionForm[];
   date_start: string;
   date_end: string;
   amount_type: ReservationPrepaymentAmountType;
@@ -98,6 +100,21 @@ interface RuleFormState {
   payment_deadline_minutes: string;
   customer_notice: string;
   cancellation_policy: string;
+}
+
+interface RuleSectionForm {
+  section_id: string;
+  public_name: string;
+  description: string;
+  amount: string;
+  pix_amount: string;
+  credit_card_amount: string;
+  enabled: boolean;
+}
+
+interface TableSectionOption {
+  id: string;
+  name: string;
 }
 
 type RuleTab = 'active' | 'inactive' | 'archived';
@@ -134,6 +151,7 @@ interface ReservationPaymentRow {
   reservation_time: string;
   party_size: number;
   rule_name: string;
+  section_name: string | null;
   amount: number;
   refunded_amount: number;
   billing_type: ReservationPrepaymentBillingType | null;
@@ -223,6 +241,7 @@ function mapPaymentRowFromDb(row: any): ReservationPaymentRow {
     reservation_time: typeof reservation?.time === 'string' ? reservation.time.slice(0, 5) : '',
     party_size: Number(reservation?.party_size ?? 0),
     rule_name: typeof snapshot?.name === 'string' && snapshot.name ? snapshot.name : 'Pagamento antecipado',
+    section_name: snapshot?.selected_section_name ?? reservation?.selected_section_name ?? null,
     amount,
     refunded_amount: refundedAmount,
     billing_type: (row?.billing_type ?? null) as ReservationPrepaymentBillingType | null,
@@ -335,6 +354,8 @@ function createRuleForm(): RuleFormState {
 
   return {
     name: '',
+    pricing_mode: 'single',
+    sections: [],
     date_start: date,
     date_end: date,
     amount_type: 'per_person',
@@ -496,6 +517,10 @@ function getSummaryPresetRange(preset: SummaryPeriodPreset): DateRange {
 }
 
 function getRuleImpact(rule: ReservationPaymentRuleDraft) {
+  if (rule.pricing_mode === 'by_section') {
+    const count = rule.sections?.filter((section) => section.enabled).length ?? 0;
+    return `${count} ambiente${count === 1 ? '' : 's'} com valores próprios. A reserva fica vinculada ao ambiente escolhido.`;
+  }
   const samplePartySize = 2;
   const amount = calculateReservationPaymentAmount(rule, samplePartySize);
   const pixAmount = rule.pix_enabled && rule.pix_amount
@@ -522,6 +547,15 @@ function findActiveRuleConflict(rule: ReservationPaymentRuleDraft, rules: Reserv
     && item.enabled
     && !item.archived_at
     && rangesOverlap(rule.date_start, rule.date_end, item.date_start, item.date_end));
+}
+
+function isMissingSectionPricingSchema(error: { code?: string; message?: string; details?: string } | null) {
+  return Boolean(error && ['PGRST200', 'PGRST205'].includes(error.code ?? '')
+    && `${error.message ?? ''} ${error.details ?? ''}`.includes('reservation_payment_rule_sections'));
+}
+
+function isMissingPricingSectionsRpc(error: { code?: string; message?: string } | null) {
+  return error?.code === 'PGRST202' && (error.message ?? '').includes('list_reservation_pricing_sections');
 }
 
 function getPaymentStatusClass(status: ReservationPaymentStatus) {
@@ -596,6 +630,14 @@ function mapReservationPaymentRule(row: any, usageCount = 0): ReservationPayment
   const rule = {
     id: row.id,
     name: row.name,
+    pricing_mode: row.pricing_mode === 'by_section' ? 'by_section' : 'single',
+    sections: (row.sections ?? []).map((section: any) => ({
+      ...section,
+      base_amount: Number(section.base_amount),
+      pix_amount: section.pix_amount == null ? null : Number(section.pix_amount),
+      credit_card_amount: section.credit_card_amount == null ? null : Number(section.credit_card_amount),
+      section_name: section.section?.name ?? section.section_name,
+    })).sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order),
     enabled: Boolean(row.enabled),
     date_start: row.date_start,
     date_end: row.date_end,
@@ -653,15 +695,23 @@ export default function CompanyPrepayments() {
     queryFn: async () => {
       if (!companyId) throw new Error('Empresa não identificada.');
 
-      const { data, error } = await supabase
+      let result = await supabase
         .from('reservation_payment_rules' as any)
-        .select('*')
+        .select('*, sections:reservation_payment_rule_sections(*, section:table_sections(name))')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      const sectionPricingAvailable = !isMissingSectionPricingSchema(result.error);
+      if (!sectionPricingAvailable) {
+        result = await supabase
+          .from('reservation_payment_rules' as any)
+          .select('*')
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false });
+      }
+      if (result.error) throw result.error;
 
-      const rows = (data ?? []) as any[];
+      const rows = (result.data ?? []) as any[];
       const ruleIds = rows.map((row) => row.id).filter(Boolean);
       const usageCounts = new Map<string, number>();
 
@@ -673,11 +723,51 @@ export default function CompanyPrepayments() {
         });
       }
 
-      return rows.map((row) => mapReservationPaymentRule(row, usageCounts.get(row.id) ?? 0));
+      return { rules: rows.map((row) => mapReservationPaymentRule(row, usageCounts.get(row.id) ?? 0)), sectionPricingAvailable };
     },
     enabled: Boolean(companyId),
   });
-  const rules = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
+  const rules = useMemo(() => rulesQuery.data?.rules ?? [], [rulesQuery.data]);
+  const legacyPaymentSchema = rulesQuery.data?.sectionPricingAvailable === false;
+
+  const tableSectionsQuery = useQuery({
+    queryKey: ['reservation-pricing-sections', companyId, ruleForm.date_start, ruleForm.date_end],
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as any)('list_reservation_pricing_sections', {
+        _company_id: companyId,
+        _date_start: ruleForm.date_start,
+        _date_end: ruleForm.date_end,
+      });
+      if (error) throw error;
+      return (data ?? []) as unknown as TableSectionOption[];
+    },
+    enabled: Boolean(companyId) && ruleDialogOpen && ruleForm.pricing_mode === 'by_section'
+      && !legacyPaymentSchema && Boolean(ruleForm.date_start) && Boolean(ruleForm.date_end)
+      && ruleForm.date_start <= ruleForm.date_end,
+  });
+  const unavailableConfiguredSections = tableSectionsQuery.isSuccess
+    ? ruleForm.sections.filter((section) => section.enabled && !tableSectionsQuery.data.some((item) => item.id === section.section_id))
+    : [];
+
+  const updateRuleSection = (section: TableSectionOption, patch: Partial<RuleSectionForm>) => {
+    setRuleForm((current) => {
+      const existing = current.sections.find((item) => item.section_id === section.id);
+      const updated = {
+        section_id: section.id,
+        public_name: section.name,
+        description: '',
+        amount: current.amount,
+        pix_amount: current.pix_amount,
+        credit_card_amount: current.credit_card_amount,
+        enabled: false,
+        ...existing,
+        ...patch,
+      };
+      return { ...current, sections: existing
+        ? current.sections.map((item) => item.section_id === section.id ? updated : item)
+        : [...current.sections, updated] };
+    });
+  };
 
   const invalidateRules = () => {
     if (!companyId) return;
@@ -685,10 +775,17 @@ export default function CompanyPrepayments() {
   };
 
   const createRuleMutation = useMutation({
-    mutationFn: async (payload: Record<string, unknown>) => {
+    mutationFn: async ({ rule: payload, sections }: { rule: Record<string, unknown>; sections: Record<string, unknown>[] }) => {
+      if (payload.pricing_mode === 'by_section') {
+        const { error } = await (supabase.rpc as any)('create_reservation_payment_rule', { _rule: payload, _sections: sections });
+        if (error) throw error;
+        return;
+      }
+      const legacyPayload = { ...payload };
+      delete legacyPayload.pricing_mode;
       const { error } = await supabase
         .from('reservation_payment_rules' as any)
-        .insert(payload);
+        .insert(legacyPayload);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -1162,9 +1259,21 @@ export default function CompanyPrepayments() {
 
   const handleRuleSave = () => {
     const name = ruleForm.name.trim();
-    const amount = parseCurrencyInput(ruleForm.amount);
-    const pixAmount = parseCurrencyInput(ruleForm.pix_amount);
-    const creditCardAmount = parseCurrencyInput(ruleForm.credit_card_amount);
+    const selectedSections = ruleForm.sections.filter((section) => section.enabled);
+    const sectionPrices = selectedSections.map((section, index) => ({
+      section_id: section.section_id,
+      public_name: section.public_name.trim(),
+      description: section.description.trim(),
+      base_amount: parseCurrencyInput(section.amount),
+      pix_amount: ruleForm.pix_enabled ? parseCurrencyInput(section.pix_amount) : null,
+      credit_card_amount: ruleForm.credit_card_enabled ? parseCurrencyInput(section.credit_card_amount) : null,
+      enabled: true,
+      sort_order: index,
+    }));
+    const bySection = ruleForm.pricing_mode === 'by_section';
+    const amount = bySection ? sectionPrices[0]?.base_amount ?? 0 : parseCurrencyInput(ruleForm.amount);
+    const pixAmount = bySection ? sectionPrices[0]?.pix_amount ?? 0 : parseCurrencyInput(ruleForm.pix_amount);
+    const creditCardAmount = bySection ? sectionPrices[0]?.credit_card_amount ?? 0 : parseCurrencyInput(ruleForm.credit_card_amount);
     const deadline = Number.parseInt(ruleForm.payment_deadline_minutes, 10);
 
     if (!companyId) {
@@ -1177,6 +1286,32 @@ export default function CompanyPrepayments() {
     }
     if (!ruleForm.date_start || !ruleForm.date_end || ruleForm.date_start > ruleForm.date_end) {
       toast.error('Informe um período válido.');
+      return;
+    }
+    if (bySection && legacyPaymentSchema) {
+      toast.error('Os valores por ambiente precisam da atualização local do banco antes de serem configurados.');
+      return;
+    }
+    if (bySection && (tableSectionsQuery.isError || tableSectionsQuery.isPending)) {
+      toast.error('Aguarde o carregamento dos ambientes antes de salvar.');
+      return;
+    }
+    if (bySection && unavailableConfiguredSections.length > 0) {
+      toast.error('Remova os ambientes que não estão habilitados na disponibilidade deste período.');
+      return;
+    }
+    if (bySection && sectionPrices.length === 0) {
+      toast.error('Selecione pelo menos um ambiente para oferecer ao cliente.');
+      return;
+    }
+    if (bySection && sectionPrices.some((section) => !section.public_name)) {
+      toast.error('Informe o nome exibido ao cliente em cada ambiente.');
+      return;
+    }
+    if (bySection && sectionPrices.some((section) => section.base_amount <= 0
+      || (ruleForm.pix_enabled && (section.pix_amount ?? 0) <= 0)
+      || (ruleForm.credit_card_enabled && (section.credit_card_amount ?? 0) <= 0))) {
+      toast.error('Informe valores maiores que zero em todos os ambientes e formas de pagamento habilitadas.');
       return;
     }
     if (amount <= 0) {
@@ -1200,10 +1335,11 @@ export default function CompanyPrepayments() {
       return;
     }
 
-    createRuleMutation.mutate({
+    createRuleMutation.mutate({ rule: {
       company_id: companyId,
       name,
       enabled: false,
+      pricing_mode: ruleForm.pricing_mode,
       date_start: ruleForm.date_start,
       date_end: ruleForm.date_end,
       amount_type: ruleForm.amount_type,
@@ -1216,7 +1352,7 @@ export default function CompanyPrepayments() {
       payment_deadline_minutes: deadline,
       customer_notice: ruleForm.customer_notice.trim(),
       cancellation_policy: ruleForm.cancellation_policy.trim(),
-    });
+    }, sections: bySection ? sectionPrices : [] });
   };
 
   const toggleRule = (ruleId: string, enabled: boolean) => {
@@ -1260,6 +1396,16 @@ export default function CompanyPrepayments() {
 
     setRuleForm({
       name: `${selectedRule.name} cópia`,
+      pricing_mode: selectedRule.pricing_mode ?? 'single',
+      sections: (selectedRule.sections ?? []).map((section) => ({
+        section_id: section.section_id,
+        public_name: section.public_name,
+        description: section.description ?? '',
+        amount: section.base_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+        pix_amount: section.pix_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) ?? '',
+        credit_card_amount: section.credit_card_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) ?? '',
+        enabled: section.enabled,
+      })),
       date_start: selectedRule.date_start,
       date_end: selectedRule.date_end,
       amount_type: selectedRule.amount_type,
@@ -1412,7 +1558,30 @@ export default function CompanyPrepayments() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Como definir os valores?</legend>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {([
+                      ['single', 'Valor único', 'Mesmo valor para todas as reservas; o cliente não escolhe o ambiente.'],
+                      ['by_section', 'Por ambiente', 'O cliente escolhe onde ficar e vê o valor de cada ambiente.'],
+                    ] as const).map(([value, title, description]) => (
+                      <label key={value} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 ${ruleForm.pricing_mode === value ? 'border-primary bg-primary/5' : 'border-border bg-background'}`}>
+                        <input
+                          type="radio"
+                          name="pricing-mode"
+                          value={value}
+                          checked={ruleForm.pricing_mode === value}
+                          onChange={() => setRuleForm((current) => ({ ...current, pricing_mode: value }))}
+                          aria-label={title}
+                          className="mt-1 accent-primary"
+                        />
+                        <span><span className="block text-sm font-semibold">{title}</span><span className="mt-1 block text-sm leading-relaxed text-muted-foreground">{description}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <div className={ruleForm.pricing_mode === 'single' ? 'grid gap-3 sm:grid-cols-[1fr_120px]' : 'space-y-2'}>
                   <div className="space-y-2">
                     <Label>Tipo de valor</Label>
                     <Select
@@ -1428,7 +1597,7 @@ export default function CompanyPrepayments() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
+                  {ruleForm.pricing_mode === 'single' && <div className="space-y-2">
                     <Label htmlFor="amount">Valor do sinal</Label>
                     <Input
                       id="amount"
@@ -1436,7 +1605,7 @@ export default function CompanyPrepayments() {
                       value={ruleForm.amount}
                       onChange={(event) => setRuleForm((current) => ({ ...current, amount: event.target.value }))}
                     />
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="rounded-lg border border-border bg-background p-4">
@@ -1448,12 +1617,13 @@ export default function CompanyPrepayments() {
                           <p className="text-xs text-muted-foreground">Gera o QR Code Pix e o código copia e cola da reserva.</p>
                         </div>
                         <Switch
+                          aria-label="Aceitar Pix"
                           className="mt-0.5 shrink-0"
                           checked={ruleForm.pix_enabled}
                           onCheckedChange={(checked) => setRuleForm((current) => ({ ...current, pix_enabled: checked }))}
                         />
                       </div>
-                      <div className="space-y-2">
+                      {ruleForm.pricing_mode === 'single' && <div className="space-y-2">
                         <Label htmlFor="pix-amount">Valor no Pix</Label>
                         <Input
                           id="pix-amount"
@@ -1462,7 +1632,7 @@ export default function CompanyPrepayments() {
                           disabled={!ruleForm.pix_enabled}
                           onChange={(event) => setRuleForm((current) => ({ ...current, pix_amount: event.target.value }))}
                         />
-                      </div>
+                      </div>}
                     </div>
 
                     <div className="flex flex-col gap-3">
@@ -1472,12 +1642,13 @@ export default function CompanyPrepayments() {
                           <p className="text-xs text-muted-foreground">Pagamento em parcela única.</p>
                         </div>
                         <Switch
+                          aria-label="Aceitar cartão de crédito"
                           className="mt-0.5 shrink-0"
                           checked={ruleForm.credit_card_enabled}
                           onCheckedChange={(checked) => setRuleForm((current) => ({ ...current, credit_card_enabled: checked }))}
                         />
                       </div>
-                      <div className="space-y-2">
+                      {ruleForm.pricing_mode === 'single' && <div className="space-y-2">
                         <Label htmlFor="card-amount">Valor no cartão</Label>
                         <Input
                           id="card-amount"
@@ -1486,10 +1657,71 @@ export default function CompanyPrepayments() {
                           disabled={!ruleForm.credit_card_enabled}
                           onChange={(event) => setRuleForm((current) => ({ ...current, credit_card_amount: event.target.value }))}
                         />
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 </div>
+
+                {ruleForm.pricing_mode === 'by_section' && (
+                  <section aria-label="Ambientes oferecidos" className="space-y-3">
+                    <div>
+                      <h3 className="text-base font-semibold">Ambientes oferecidos</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Os ambientes vêm da configuração de disponibilidade deste período. Os valores abaixo são {ruleForm.amount_type === 'per_person' ? 'por pessoa' : 'por reserva'}; a reserva fica vinculada ao ambiente escolhido.</p>
+                    </div>
+                    {legacyPaymentSchema || isMissingPricingSectionsRpc(tableSectionsQuery.error) ? (
+                      <Alert className="border-warning/30 bg-warning-soft/50"><AlertTriangle className="h-4 w-4" /><AlertTitle>Valores por ambiente ainda não disponíveis</AlertTitle><AlertDescription>A atualização local do banco precisa ser aplicada para configurar valores por ambiente. As regras de valor único continuam disponíveis.</AlertDescription></Alert>
+                    ) : tableSectionsQuery.isError ? (
+                      <QueryErrorNotice message="Não foi possível carregar os ambientes deste período." onRetry={() => tableSectionsQuery.refetch()} />
+                    ) : tableSectionsQuery.isPending ? (
+                      <p role="status" className="flex items-center gap-2 py-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando ambientes…</p>
+                    ) : tableSectionsQuery.data?.length === 0 ? (
+                      <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">Nenhum ambiente está habilitado para escolha neste período. Ative a escolha de ambiente nos horários da disponibilidade antes de definir os valores.</p>
+                    ) : tableSectionsQuery.data?.map((section) => {
+                      const sectionForm = ruleForm.sections.find((item) => item.section_id === section.id);
+                      const isEnabled = sectionForm?.enabled === true;
+                      return (
+                        <div key={section.id} className={`rounded-xl border p-4 ${isEnabled ? 'border-primary/35 bg-primary/[0.025]' : 'border-border bg-background'}`}>
+                          <div className="flex items-center justify-between gap-3">
+                            <Label htmlFor={`offer-section-${section.id}`} className="text-sm font-semibold">{section.name}</Label>
+                            <Switch id={`offer-section-${section.id}`} aria-label={`Oferecer ${section.name}`} checked={isEnabled} onCheckedChange={(enabled) => updateRuleSection(section, { enabled })} />
+                          </div>
+                          {isEnabled && sectionForm && (
+                            <div className="mt-4 space-y-3">
+                              <div className="space-y-2">
+                                <Label htmlFor={`section-${section.id}-name`}>Nome exibido para {section.name}</Label>
+                                <Input id={`section-${section.id}-name`} value={sectionForm.public_name} maxLength={120} onChange={(event) => updateRuleSection(section, { public_name: event.target.value })} />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`section-${section.id}-description`}>Descrição de {section.name} (opcional)</Label>
+                                <Textarea id={`section-${section.id}-description`} value={sectionForm.description} rows={2} maxLength={500} onChange={(event) => updateRuleSection(section, { description: event.target.value })} />
+                              </div>
+                              <div className="grid items-end gap-3 sm:grid-cols-3">
+                                <div className="space-y-2">
+                                  <Label htmlFor={`section-${section.id}-amount`}>Sinal em {section.name}</Label>
+                                  <Input id={`section-${section.id}-amount`} inputMode="decimal" value={sectionForm.amount} onChange={(event) => updateRuleSection(section, { amount: event.target.value })} />
+                                </div>
+                                {ruleForm.pix_enabled && <div className="space-y-2">
+                                  <Label htmlFor={`section-${section.id}-pix`}>Pix em {section.name}</Label>
+                                  <Input id={`section-${section.id}-pix`} inputMode="decimal" value={sectionForm.pix_amount} onChange={(event) => updateRuleSection(section, { pix_amount: event.target.value })} />
+                                </div>}
+                                {ruleForm.credit_card_enabled && <div className="space-y-2">
+                                  <Label htmlFor={`section-${section.id}-card`}>Cartão em {section.name}</Label>
+                                  <Input id={`section-${section.id}-card`} inputMode="decimal" value={sectionForm.credit_card_amount} onChange={(event) => updateRuleSection(section, { credit_card_amount: event.target.value })} />
+                                </div>}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {unavailableConfiguredSections.length > 0 && (
+                      <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft/50 p-3 text-sm">
+                        <p>Alguns ambientes da regra copiada não estão habilitados na disponibilidade deste período.</p>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setRuleForm((current) => ({ ...current, sections: current.sections.filter((section) => !unavailableConfiguredSections.some((item) => item.section_id === section.section_id)) }))}>Remover ambientes indisponíveis</Button>
+                      </div>
+                    )}
+                  </section>
+                )}
 
                 <div className="max-w-xs space-y-2">
                   <Label htmlFor="deadline">Prazo para pagamento (minutos)</Label>
@@ -2189,14 +2421,29 @@ function RuleListItem({
               {isArchived ? 'Arquivada' : rule.enabled ? 'Ativa' : 'Desativada'}
             </Badge>
             <Badge variant="outline">{getAmountTypeLabel(rule.amount_type)}</Badge>
+            {rule.pricing_mode === 'by_section' && <Badge variant="outline" className="border-primary/25 bg-primary/5 text-primary">Por ambiente</Badge>}
             {rule.billing_types.map((billingType) => (
               <Badge key={billingType} variant="outline">{getBillingTypeLabel(billingType)}</Badge>
             ))}
           </div>
           <p className="text-sm text-muted-foreground">
-            {formatDateRange(rule.date_start, rule.date_end)} - sinal {formatPrepaymentAmount(rule.amount)} - {rule.payment_deadline_minutes} min para pagar
+            {formatDateRange(rule.date_start, rule.date_end)} - {rule.pricing_mode === 'by_section' ? 'valores por ambiente' : `sinal ${formatPrepaymentAmount(rule.amount)}`} - {rule.payment_deadline_minutes} min para pagar
           </p>
           <p className="text-xs text-muted-foreground">{getRuleImpact(rule)}</p>
+          {rule.pricing_mode === 'by_section' && (
+            <ul className="grid gap-2 pt-1 sm:grid-cols-2" aria-label={`Ambientes de ${rule.name}`}>
+              {rule.sections?.filter((section) => section.enabled).map((section) => (
+                <li key={section.id} className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+                  <p className="font-medium">{section.public_name}</p>
+                  {section.section_name && section.section_name !== section.public_name && <p className="mt-0.5 text-xs text-muted-foreground">{section.section_name}</p>}
+                  <p className="mt-1 text-xs text-muted-foreground">{[
+                    rule.pix_enabled && section.pix_amount != null ? `Pix ${formatPrepaymentAmount(section.pix_amount)}` : null,
+                    rule.credit_card_enabled && section.credit_card_amount != null ? `Cartão ${formatPrepaymentAmount(section.credit_card_amount)}` : null,
+                  ].filter(Boolean).join(' · ')} {rule.amount_type === 'per_person' ? 'por pessoa' : 'por reserva'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => onCloneRule(rule.id)}>
@@ -2281,6 +2528,7 @@ function PaymentListItem({
             {payment.reservation_date ? ` · ${formatShortDate(payment.reservation_date)}` : ''}
             {payment.reservation_time ? ` às ${payment.reservation_time}` : ''}
           </p>
+          {payment.section_name && <p className="mt-1 text-sm font-medium text-foreground">{payment.section_name}</p>}
         </div>
 
         <div className="text-sm text-muted-foreground">

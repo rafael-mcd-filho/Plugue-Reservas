@@ -8,6 +8,7 @@ import {
   jsonResponse,
   readJson,
   recordPaymentEvent,
+  resolveReservationSectionPricing,
   toMoney,
 } from "../_shared/reservation-payments.ts";
 
@@ -29,9 +30,13 @@ async function createConfirmedReservation(
   reservation: Record<string, unknown>,
   reason: "feature_disabled" | "no_rule",
 ) {
+  // The database validates the scheduled choice and resolves its canonical name,
+  // independently of whether this reservation requires payment.
+  const { selected_section_name: _sectionName, ...reservationWithoutSectionName } = reservation;
   const { data, error } = await supabaseAdmin.rpc("create_public_reservation", {
     _reservation: {
-      ...reservation,
+      ...reservationWithoutSectionName,
+      ...(reservation.selected_section_id ? { table_id: null, table_map_id: null } : {}),
       company_id: companyId,
       status: "confirmed",
     },
@@ -67,6 +72,10 @@ Deno.serve(async (req) => {
     const completeWithoutPayment = body.complete_without_payment === true;
     const preview = body.action === "preview";
     const reservationDate = preview ? body.date : reservation.date;
+    const sectionOptionId = typeof reservation.section_option_id === "string"
+      ? reservation.section_option_id.trim() || null : null;
+    const selectedSectionId = typeof reservation.selected_section_id === "string"
+      ? reservation.selected_section_id.trim() || null : null;
 
     if (!companyId) return jsonResponse({ error: "Empresa obrigatoria" }, 400);
     if (preview && !isPaymentRequirementDate(reservationDate)) {
@@ -92,6 +101,7 @@ Deno.serve(async (req) => {
     if (featureError) throw new Error(featureError.message);
     if (featureEnabled !== true) {
       if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, false, "feature_disabled"));
+      if (sectionOptionId) return jsonResponse({ error: "Os ambientes desta reserva foram alterados. Revise sua escolha." }, 409);
       if (!dryRun && completeWithoutPayment) {
         return await createConfirmedReservation(
           supabaseAdmin,
@@ -103,7 +113,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ requires_payment: false, reason: "feature_disabled" });
     }
 
-    const { data: rule, error: ruleError } = await supabaseAdmin
+    const { data: currentRule, error: ruleError } = await supabaseAdmin
       .from("reservation_payment_rules")
       .select(preview ? "id" : "*")
       .eq("company_id", companyId)
@@ -116,8 +126,9 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (ruleError) throw new Error(ruleError.message);
-    if (!rule) {
+    if (!currentRule) {
       if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, false, "no_rule"));
+      if (sectionOptionId) return jsonResponse({ error: "Os ambientes desta reserva foram alterados. Revise sua escolha." }, 409);
       if (!dryRun && completeWithoutPayment) {
         return await createConfirmedReservation(
           supabaseAdmin,
@@ -132,6 +143,53 @@ Deno.serve(async (req) => {
     // The preview only changes the CTA label. It neither loads credentials nor
     // claims that a reservation/payment has been created or is ready to charge.
     if (preview) return jsonResponse(publicPaymentRequirement(companyId, reservationDate, true));
+
+    if (currentRule.pricing_mode !== "by_section" && (selectedSectionId || sectionOptionId)) {
+      return jsonResponse({ error: "Os ambientes desta reserva foram alterados. Revise sua escolha." }, 409);
+    }
+
+    let sectionOption: Record<string, any> | null = null;
+    let sectionName: string | undefined;
+    if (currentRule.pricing_mode === "by_section" && !selectedSectionId) {
+      return jsonResponse({ error: "Escolha um ambiente para continuar." }, 400);
+    }
+    let availableOption: Record<string, any> | undefined;
+    if (selectedSectionId) {
+      const { data: offered, error: offeredError } = await supabaseAdmin.rpc("get_public_reservation_section_options", {
+        _company_id: companyId, _date: reservation.date, _time: reservation.time,
+        _party_size: Number(reservation.party_size || 1),
+      });
+      if (offeredError) throw new Error(offeredError.message);
+      availableOption = offered?.enabled === true && offered.rule_id === currentRule.id
+        && Array.isArray(offered.options) ? offered.options.find((candidate: any) =>
+          candidate.id === selectedSectionId && candidate.section_id === selectedSectionId && candidate.available === true) : undefined;
+      if (!availableOption) return jsonResponse({ error: "Este ambiente não está disponível para o horário e grupo escolhidos." }, 409);
+      sectionName = availableOption.public_name || availableOption.section_name;
+    }
+    if (currentRule.pricing_mode === "by_section") {
+      const { data: option, error: optionError } = await supabaseAdmin
+        .from("reservation_payment_rule_sections")
+        .select("*")
+        .eq("section_id", selectedSectionId)
+        .eq("company_id", companyId)
+        .eq("rule_id", currentRule.id)
+        .eq("enabled", true)
+        .maybeSingle();
+      if (optionError) throw new Error(optionError.message);
+      if (!option) return jsonResponse({ error: "Este ambiente não está mais disponível. Revise sua escolha." }, 409);
+      if (availableOption?.payment_rule_section_id !== option.id) {
+        return jsonResponse({ error: "Os preços deste ambiente foram alterados. Revise sua escolha." }, 409);
+      }
+      sectionOption = option;
+    }
+    let rule: Record<string, any>;
+    try {
+      rule = resolveReservationSectionPricing(currentRule, sectionOption, {
+        companyId, sectionId: selectedSectionId, optionId: sectionOptionId, sectionName,
+      });
+    } catch (error: any) {
+      return jsonResponse({ error: error.message }, 409);
+    }
 
     const asaasConfig = await getGlobalReservationAsaasConfig(supabaseAdmin);
     let paymentAccountMetadata: Record<string, unknown> | null = null;
@@ -194,8 +252,13 @@ Deno.serve(async (req) => {
         ? reservation.public_tracking_code
         : crypto.randomUUID().replaceAll("-", ""),
       company_id: companyId,
-      table_id: reservation.table_id ?? null,
-      table_map_id: reservation.table_map_id ?? null,
+      table_id: selectedSectionId ? null : reservation.table_id ?? null,
+      table_map_id: selectedSectionId ? null : reservation.table_map_id ?? null,
+      ...(selectedSectionId ? {
+        section_option_id: sectionOption?.id ?? null,
+        selected_section_id: rule.selected_section_id,
+        selected_section_name: rule.selected_section_name,
+      } : {}),
       guest_name: String(reservation.guest_name),
       guest_phone: String(reservation.guest_phone),
       guest_email: reservation.guest_email ?? null,
@@ -238,6 +301,12 @@ Deno.serve(async (req) => {
     const paymentToken = crypto.randomUUID().replaceAll("-", "");
     const ruleSnapshot = {
       ...rule,
+      // A single-price reservation may be seated automatically by the database
+      // within the scheduled environments, without asking the guest to choose.
+      ...(createdReservation.selected_section_id ? {
+        selected_section_id: createdReservation.selected_section_id,
+        selected_section_name: createdReservation.selected_section_name,
+      } : {}),
       // New reservation card payments are always paid in one installment,
       // including when a legacy rule still carries an older installment cap.
       max_credit_card_installments: rule.credit_card_enabled ? 1 : null,

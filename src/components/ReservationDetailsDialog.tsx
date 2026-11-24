@@ -32,6 +32,8 @@ export interface ReservationDetails {
   company_id?: string | null;
   table_id?: string | null;
   created_in_mode?: string | null;
+  selected_section_id?: string | null;
+  selected_section_name?: string | null;
   guest_name: string;
   guest_phone: string;
   guest_phone_e164?: string | null;
@@ -316,6 +318,10 @@ export default function ReservationDetailsDialog({
       { label: 'Horário', value: reservation.time.slice(0, 5), icon: Clock3 },
       { label: 'Pessoas reservadas', value: String(reservation.party_size), icon: Users },
     ];
+
+    if (reservation.selected_section_name) {
+      fields.push({ label: 'Ambiente contratado', value: reservation.selected_section_name, icon: CheckCircle2 });
+    }
 
     if (reservation.checked_in_party_size) {
       fields.push({ label: 'Pessoas presentes', value: String(reservation.checked_in_party_size), icon: UserCheck });

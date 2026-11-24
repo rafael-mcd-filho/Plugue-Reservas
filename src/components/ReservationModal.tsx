@@ -48,7 +48,8 @@ import {
   normalizePublicReservationSchedule,
   type PublicReservationSchedule,
 } from '@/lib/public-reservation-schedule';
-import { createReservationPayment, getReservationPaymentRequirement } from '@/lib/asaas-prepayment-api';
+import { createReservationPayment, getReservationPaymentRequirement, getReservationSectionOptions } from '@/lib/asaas-prepayment-api';
+import ReservationSectionPicker, { getSectionPriceLabel } from '@/components/reservations/ReservationSectionPicker';
 import {
   getEmailValidationMessage,
   getPhoneValidationMessage,
@@ -354,6 +355,7 @@ interface ConfirmedReservation {
   tableName: string;
   guestName: string;
   companyName: string;
+  sectionName?: string;
 }
 
 const DATE_WINDOW_SIZE = 6;
@@ -414,6 +416,7 @@ export default function ReservationModal({
   const [showPartySizeConfirmation, setShowPartySizeConfirmation] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState('');
   const [selectedTableMapId, setSelectedTableMapId] = useState('');
+  const [sectionSelection, setSectionSelection] = useState<{ contextKey: string; optionId: string } | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
   // Marcam que a pessoa escolheu e o fluxo deve seguir sozinho assim que a
   // disponibilidade daquela escolha estiver confirmada.
@@ -610,6 +613,24 @@ export default function ReservationModal({
   const requiresPayment = paymentRequirementQuery.data?.company_id === companyId
     && paymentRequirementQuery.data?.date === selectedDateKey
     && paymentRequirementQuery.data.requires_payment === true;
+  const sectionContextKey = [companyId, selectedDateKey, selectedTime, selectedPartySize].join('|');
+  const sectionOptionsQuery = useQuery({
+    queryKey: ['public-reservation-section-options', companyId, selectedDateKey, selectedTime, selectedPartySize],
+    queryFn: ({ signal }) => getReservationSectionOptions(companyId, selectedDateKey, selectedTime, selectedPartySize, signal),
+    enabled: open && !!companyId && !!selectedDateKey && !!selectedTime && step !== 4,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const sectionSelectionEnabled = sectionOptionsQuery.data?.enabled === true;
+  const hasSectionConfigurationError = !!sectionOptionsQuery.data?.configuration_error;
+  const isAutomaticSectionFull = sectionOptionsQuery.data?.automatic_allocation_available === false;
+  const selectedSectionOption = sectionSelection?.contextKey === sectionContextKey
+    ? sectionOptionsQuery.data?.options.find((option) => option.id === sectionSelection.optionId && option.available)
+    : undefined;
+  const isCheckingSections = !!selectedTime && sectionOptionsQuery.isPending;
   const {
     data: bookingContext,
     error: bookingContextError,
@@ -889,6 +910,7 @@ export default function ReservationModal({
     setPendingTimeAdvance(false);
     setSelectedTableId('');
     setSelectedTableMapId('');
+    setSectionSelection(null);
     setShowCalendar(false);
     setAvailableTables([]);
     setLoadingTables(false);
@@ -910,6 +932,7 @@ export default function ReservationModal({
     setSelectedTime('');
     setSelectedTableId('');
     setSelectedTableMapId('');
+    setSectionSelection(null);
     setAvailableTables([]);
     setResolvedTableLookupKey('');
     setTableAvailabilityError(null);
@@ -986,6 +1009,7 @@ export default function ReservationModal({
     }
 
     setSelectedTime(time);
+    setSectionSelection(null);
     setSelectedTableId('');
     setSelectedTableMapId('');
     setAvailableTables([]);
@@ -1150,6 +1174,11 @@ export default function ReservationModal({
     }
 
     if (!selectedDate || !selectedTime) return;
+    if (sectionOptionsQuery.isPending || sectionOptionsQuery.isError || hasSectionConfigurationError || isAutomaticSectionFull || (sectionSelectionEnabled && !selectedSectionOption)) {
+      toast.error('Confira a disponibilidade e escolha seu ambiente para continuar.');
+      setStep(2);
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -1232,8 +1261,12 @@ export default function ReservationModal({
         id: reservationId,
         public_tracking_code: trackingCode,
         company_id: companyId,
-        table_id: submittingAvailabilityMode === 'capacity' ? null : (selectedTableId || null),
-        table_map_id: submittingAvailabilityMode === 'capacity' ? null : (selectedTableMapId || null),
+        table_id: submittingAvailabilityMode === 'capacity' || sectionSelectionEnabled ? null : (selectedTableId || null),
+        table_map_id: submittingAvailabilityMode === 'capacity' || sectionSelectionEnabled ? null : (selectedTableMapId || null),
+        ...(selectedSectionOption ? {
+          selected_section_id: selectedSectionOption.section_id,
+          ...(selectedSectionOption.payment_rule_section_id ? { section_option_id: selectedSectionOption.payment_rule_section_id } : {}),
+        } : {}),
         guest_name: form.name,
         guest_phone: normalizedPhone,
         guest_email: normalizedEmail || null,
@@ -1297,7 +1330,7 @@ export default function ReservationModal({
         },
       }).catch(err => console.warn('Reservation events error:', err));
 
-      const tableName = availableTables.find(t => t.id === selectedTableId)?.number?.toString() || '';
+      const tableName = sectionSelectionEnabled ? '' : availableTables.find(t => t.id === selectedTableId)?.number?.toString() || '';
 
       setConfirmedReservation({
         id: reservationId,
@@ -1309,6 +1342,7 @@ export default function ReservationModal({
         tableName: tableName ? `Mesa ${tableName}` : '',
         guestName: form.name,
         companyName,
+        sectionName: selectedSectionOption?.public_name || selectedSectionOption?.section_name,
       });
 
       clearTrackingJourney?.();
@@ -1381,7 +1415,7 @@ export default function ReservationModal({
     startDate.setHours(h, m, 0);
     const endDate = new Date(startDate.getTime() + reservationDuration * 60000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Reserva - ${companyName}`)}&dates=${fmt(startDate)}/${fmt(endDate)}&details=${encodeURIComponent(`Reserva para ${confirmedReservation.partySize} pessoas${confirmedReservation.tableName ? ` · ${confirmedReservation.tableName}` : ''}`)}`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Reserva - ${companyName}`)}&dates=${fmt(startDate)}/${fmt(endDate)}&details=${encodeURIComponent(`Reserva para ${confirmedReservation.partySize} pessoas${confirmedReservation.sectionName ? ` · ${confirmedReservation.sectionName}` : confirmedReservation.tableName ? ` · ${confirmedReservation.tableName}` : ''}`)}`;
   };
 
   const getSlotRemainingCapacity = useCallback((slot: SlotAvailability) => {
@@ -1483,10 +1517,14 @@ export default function ReservationModal({
     && !tableAvailabilityError
     && availableTables.length === 0;
   const canContinueToForm = !!selectedTime
-    && (selectedSlotMode === 'capacity' || !!selectedTableId)
+    && (sectionSelectionEnabled ? !!selectedSectionOption : selectedSlotMode === 'capacity' || !!selectedTableId)
     && selectedSlotAvailability?.isAvailable === true
     && !isCheckingSelectedTable
-    && !tableAvailabilityError;
+    && !tableAvailabilityError
+    && !isCheckingSections
+    && !hasSectionConfigurationError
+    && !isAutomaticSectionFull
+    && !sectionOptionsQuery.isError;
 
   // A primeira escolha de data exige confirmar o total de pessoas. Depois,
   // trocar só a data mantém o avanço automático para a quantidade confirmada.
@@ -1505,6 +1543,13 @@ export default function ReservationModal({
   useEffect(() => {
     if (!pendingTimeAdvance) return;
     if (step !== 2 || !selectedTime) {
+      setPendingTimeAdvance(false);
+      return;
+    }
+    if (isCheckingSections) return;
+    // A priced environment needs an explicit choice and confirmation. Arrow
+    // navigation within the radio group must not move the customer to the form.
+    if (sectionSelectionEnabled || sectionOptionsQuery.isError || hasSectionConfigurationError || isAutomaticSectionFull) {
       setPendingTimeAdvance(false);
       return;
     }
@@ -1528,6 +1573,11 @@ export default function ReservationModal({
     showNoTableAvailability,
     step,
     tableAvailabilityError,
+    isCheckingSections,
+    sectionSelectionEnabled,
+    sectionOptionsQuery.isError,
+    hasSectionConfigurationError,
+    isAutomaticSectionFull,
   ]);
 
   const isConfirmingPartySize = showPartySizeConfirmation && !showExitRecoveryPrompt;
@@ -1593,7 +1643,8 @@ export default function ReservationModal({
                 aria-valuemax={3}
                 aria-label={`Passo ${step} de 3`}
               >
-                {RESERVATION_STEP_LABELS.map((label, index) => {
+                {RESERVATION_STEP_LABELS.map((baseLabel, index) => {
+                  const label = index === 1 && sectionSelectionEnabled ? 'Horário e ambiente' : baseLabel;
                   const stepNumber = index + 1;
                   return (
                     <div key={label} className={isConfirmingPartySize ? 'relative' : 'space-y-1'}>
@@ -2098,9 +2149,40 @@ export default function ReservationModal({
               </div>
             )}
 
+            {selectedTime && isCheckingSections && (
+              <p role="status" className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Consultando ambientes...
+              </p>
+            )}
+            {selectedTime && sectionOptionsQuery.isError && (
+              <div role="alert" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                <p>Não foi possível consultar os ambientes para este horário.</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => void sectionOptionsQuery.refetch()}>Tentar novamente</Button>
+              </div>
+            )}
+            {selectedTime && hasSectionConfigurationError && (
+              <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Este horário está temporariamente indisponível. Escolha outro horário ou fale com o estabelecimento.</p>
+            )}
+            {selectedTime && isAutomaticSectionFull && (
+              <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Não há vagas nos ambientes disponíveis para este horário e grupo. Escolha outro horário.</p>
+            )}
+            {selectedTime && sectionSelectionEnabled && !sectionOptionsQuery.isError && (
+              <>
+                <ReservationSectionPicker
+                  options={sectionOptionsQuery.data.options}
+                  value={selectedSectionOption?.id ?? ''}
+                  partySize={selectedPartySize}
+                  onChange={(optionId) => setSectionSelection({ contextKey: sectionContextKey, optionId })}
+                />
+                <Button type="button" className="min-h-11 w-full" disabled={!canContinueToForm} onClick={() => setStep(3)}>
+                  Continuar com este ambiente
+                </Button>
+              </>
+            )}
+
             {/* Sem botão: tocar no horário avança quando a mesa é confirmada.
                 O rodapé assume o aviso que o botão dava enquanto verificava. */}
-            <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
+            {!sectionSelectionEnabled && <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
               {isCheckingSelectedTable ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2109,7 +2191,7 @@ export default function ReservationModal({
               ) : (
                 'Selecione um horário para continuar'
               )}
-            </p>
+            </p>}
           </div>
         )}
 
@@ -2131,6 +2213,10 @@ export default function ReservationModal({
                   <p className="text-xs text-muted-foreground">
                     {selectedPartySize} {selectedPartySize === 1 ? 'pessoa' : 'pessoas'}
                   </p>
+                  {selectedSectionOption && <div className="mt-2 space-y-1 border-t border-primary/15 pt-2">
+                    <p className="text-sm font-semibold text-primary">{selectedSectionOption.public_name || selectedSectionOption.section_name}</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">{getSectionPriceLabel(selectedSectionOption, selectedPartySize)}</p>
+                  </div>}
                 </div>
                 <Button
                   type="button"
@@ -2415,6 +2501,10 @@ export default function ReservationModal({
                   <span className="text-muted-foreground">Pessoas (adultos e crianças)</span>
                   <span className="font-medium text-foreground">{confirmedReservation.partySize}</span>
                 </div>
+                {confirmedReservation.sectionName && <div className="flex justify-between gap-4 text-sm">
+                  <span className="text-muted-foreground">Ambiente</span>
+                  <span className="text-right font-medium text-foreground">{confirmedReservation.sectionName}</span>
+                </div>}
               </CardContent>
             </Card>
 

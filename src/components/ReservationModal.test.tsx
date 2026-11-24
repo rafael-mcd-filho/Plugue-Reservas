@@ -31,6 +31,7 @@ function queryResult(data: unknown) {
     eq: vi.fn(() => builder),
     gte: vi.fn(() => builder),
     order: vi.fn(() => builder),
+    abortSignal: vi.fn(() => builder),
     then: (resolve: (value: typeof result) => unknown, reject: (reason?: unknown) => unknown) => (
       Promise.resolve(result).then(resolve, reject)
     ),
@@ -151,6 +152,9 @@ describe('ReservationModal', () => {
     });
 
     supabaseMocks.rpc.mockImplementation((name: string, params: Record<string, string | number> = {}) => {
+      if (name === 'get_public_reservation_section_options') {
+        return queryResult({ enabled: false, options: [] });
+      }
       if (name === 'get_public_reservation_schedule_range') {
         return Promise.resolve({
           data: eachDayOfInterval({
@@ -235,6 +239,166 @@ describe('ReservationModal', () => {
         return Promise.resolve({ data: [], error: null });
       }
       return Promise.resolve({ data: null, error: null });
+    });
+  });
+
+  describe('escolha de ambiente', () => {
+    const options = [
+      { id: 'section-salao', section_id: 'section-salao', payment_rule_section_id: 'option-normal', section_name: 'Salão', public_name: 'Reserva normal', description: 'Ambiente interno', amount_type: 'per_person', base_amount: 50, pix_amount: 50, credit_card_amount: 55, available: true },
+      { id: 'section-sacada', section_id: 'section-sacada', payment_rule_section_id: 'option-premium', section_name: 'Sacada', public_name: 'Sacada Premium', description: 'Vista para o jardim', amount_type: 'per_person', base_amount: 100, pix_amount: 100, credit_card_amount: 110, available: true },
+    ];
+
+    function mockOptions(value: unknown = options) {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? queryResult({ enabled: true, rule_id: 'rule-sections', options: value })
+        : defaultRpc(name, ...args));
+    }
+
+    async function goToEnvironments() {
+      await selectTomorrow();
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await screen.findByRole('radiogroup', { name: 'Escolha seu ambiente' });
+    }
+
+    it('exige escolha explícita, mostra total do grupo e envia somente o identificador comercial', async () => {
+      mockOptions();
+      mockKnownCustomerPrefill();
+      renderModal(null);
+      await goToEnvironments();
+
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continuar com este ambiente' })).toBeDisabled();
+      expect(screen.getByText(/200,00 no Pix/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('radio', { name: /Sacada Premium/ }));
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Continuar com este ambiente' }));
+      await fillKnownCustomer();
+      expect(screen.getByText('Sacada Premium')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      const reservation = reservationCreationCalls()[0][1].body.reservation;
+      expect(reservation).toEqual(expect.objectContaining({ section_option_id: 'option-premium', selected_section_id: 'section-sacada', table_id: null, table_map_id: null }));
+      expect(reservation).not.toHaveProperty('base_amount');
+      expect(reservation).not.toHaveProperty('selected_section_name');
+    });
+
+    it('exibe o preço uma única vez quando Pix e cartão têm o mesmo valor', async () => {
+      mockOptions(options.map((option) => ({ ...option, credit_card_amount: option.pix_amount })));
+      renderModal(null);
+      await goToEnvironments();
+      const choices = screen.getByRole('radiogroup', { name: 'Escolha seu ambiente' });
+      expect(within(choices).getByText(/R\$\s*200,00 no Pix ou cartão/)).toBeInTheDocument();
+      expect(within(choices).getByText(/R\$\s*100,00 no Pix ou cartão/)).toBeInTheDocument();
+      expect(within(choices).queryByText(/no Pix ·/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('radio', { name: /Sacada Premium/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Continuar com este ambiente' }));
+      await screen.findByLabelText('WhatsApp');
+      expect(screen.getByText(/R\$\s*200,00 no Pix ou cartão/)).toBeInTheDocument();
+    });
+
+    it('bloqueia ambiente esgotado e permite escolher outro', async () => {
+      mockOptions(options.map((option) => ({ ...option, available: option.id !== 'section-sacada' })));
+      renderModal(null);
+      await goToEnvironments();
+      expect(screen.getByRole('radio', { name: /Sacada Premium/ })).toBeDisabled();
+      expect(screen.getByText('Esgotado para este horário e grupo')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('radio', { name: /Reserva normal/ }));
+      expect(screen.getByRole('button', { name: 'Continuar com este ambiente' })).toBeEnabled();
+    });
+
+    it('permite escolher o ambiente e reservar quando não há pagamento ativo', async () => {
+      mockOptions(options.map((option) => ({ ...option, payment_rule_section_id: null, amount_type: null, base_amount: null, pix_amount: null, credit_card_amount: null })));
+      mockKnownCustomerPrefill();
+      renderModal(null);
+      await goToEnvironments();
+      expect(screen.getAllByText('Sem pagamento antecipado')).toHaveLength(2);
+      fireEvent.click(screen.getByRole('radio', { name: /Sacada Premium/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Continuar com este ambiente' }));
+      await fillKnownCustomer();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      expect(reservationCreationCalls()[0][1].body.reservation).toEqual(expect.objectContaining({ selected_section_id: 'section-sacada', table_id: null }));
+      expect(reservationCreationCalls()[0][1].body.reservation).not.toHaveProperty('section_option_id');
+      const calendar = await screen.findByRole('link', { name: 'Adicionar ao Google Calendar' });
+      expect(decodeURIComponent(calendar.getAttribute('href')!)).toContain('Sacada Premium');
+      expect(decodeURIComponent(calendar.getAttribute('href')!)).not.toContain('Mesa 1');
+    });
+
+    it('segue direto aos dados quando o pagamento tem valor único', async () => {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? queryResult({ enabled: false, rule_id: 'rule-single', options: [] }) : defaultRpc(name, ...args));
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? Promise.resolve({ data: paymentRequirement(String(options.body.date), true), error: null }) : defaultInvoke(name, options));
+      renderModal(null);
+      await goToReservationForm();
+      expect(screen.queryByRole('radiogroup', { name: 'Escolha seu ambiente' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Continuar com este ambiente' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continuar para pagamento' })).toBeEnabled();
+    });
+
+    it('bloqueia valor único quando os ambientes permitidos estão cheios, apesar de vagas gerais', async () => {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? queryResult({ enabled: false, rule_id: 'rule-single', automatic_allocation_available: false, options: [] }) : defaultRpc(name, ...args));
+      renderModal(null);
+      await selectTomorrow();
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await screen.findByText('Não há vagas nos ambientes disponíveis para este horário e grupo. Escolha outro horário.');
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      expect(reservationCreationCalls()).toHaveLength(0);
+    });
+
+    it('impede avançar quando a agenda ficou incompatível com o preço por ambiente', async () => {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? queryResult({ enabled: false, rule_id: 'rule-sections', configuration_error: 'A regra exige escolha de ambiente.', options: [] })
+        : defaultRpc(name, ...args));
+      renderModal(null);
+      await selectTomorrow();
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await screen.findByText('Este horário está temporariamente indisponível. Escolha outro horário ou fale com o estabelecimento.');
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      expect(reservationCreationCalls()).toHaveLength(0);
+    });
+
+    it('descarta a escolha quando muda a quantidade de pessoas', async () => {
+      mockOptions();
+      renderModal(null);
+      await goToEnvironments();
+      fireEvent.click(screen.getByRole('radio', { name: /Sacada Premium/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Continuar com este ambiente' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Alterar pessoas' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Aumentar número de pessoas' }));
+      await confirmPartySize(3);
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await screen.findByRole('radiogroup', { name: 'Escolha seu ambiente' });
+      expect(screen.getByRole('radio', { name: /Sacada Premium/ })).not.toBeChecked();
+      expect(screen.getByRole('button', { name: 'Continuar com este ambiente' })).toBeDisabled();
+      expect(screen.getByText(/300,00 no Pix/)).toBeInTheDocument();
+    });
+
+    it('mantém o cliente no horário e permite tentar novamente se a consulta de ambientes falhar', async () => {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      let failing = true;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? { ...queryResult(null), abortSignal: () => failing ? Promise.resolve({ data: null, error: { message: 'Offline' } }) : queryResult({ enabled: true, rule_id: 'rule-sections', options }) }
+        : defaultRpc(name, ...args));
+      renderModal(null);
+      await selectTomorrow();
+      await confirmPartySize();
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await screen.findByText('Não foi possível consultar os ambientes para este horário.');
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      failing = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+      await screen.findByRole('radiogroup', { name: 'Escolha seu ambiente' });
     });
   });
 

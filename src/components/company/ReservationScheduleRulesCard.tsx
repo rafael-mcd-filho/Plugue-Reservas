@@ -54,6 +54,7 @@ import {
   useReservationScheduleRules,
   useRestoreReservationScheduleRule,
   useSaveReservationScheduleRule,
+  useReservationTableSections,
   type ArchivedReservationScheduleRule,
   type ReservationAvailabilityMode,
   type ReservationScheduleRule,
@@ -125,6 +126,8 @@ const DURATION_OPTIONS = [
 interface SlotFormValue {
   time: string;
   is_full: boolean;
+  allow_section_selection: boolean;
+  sections: Array<{ section_id: string; capacity_guests: string }>;
   duration_minutes: string;
   max_party_size_per_reservation: string;
   max_reservations_per_slot: string;
@@ -172,6 +175,8 @@ function createSlotFormValue(time: string): SlotFormValue {
   return {
     time,
     is_full: false,
+    allow_section_selection: false,
+    sections: [],
     duration_minutes: '',
     max_party_size_per_reservation: '',
     max_reservations_per_slot: '',
@@ -395,6 +400,8 @@ function getSlotsFromBlock(block: ReservationScheduleRuleBlock, rule: Reservatio
   return sortReservationScheduleSlotSettings((block.reservation_schedule_rule_slots ?? []).map((slot) => ({
     time: slot.time,
     is_full: slot.is_full === true,
+    allow_section_selection: slot.allow_section_selection === true,
+    sections: (slot.reservation_schedule_rule_slot_sections ?? []).filter((section) => section.enabled).map((section) => ({ section_id: section.section_id, capacity_guests: formatOptionalNumberInput(section.capacity_guests) })),
     duration_minutes: formatOptionalNumberInput(slot.duration_minutes),
     max_party_size_per_reservation: formatOptionalNumberInput(
       slot.max_party_size_per_reservation ?? rule.max_party_size_per_reservation,
@@ -422,6 +429,8 @@ function getInitialBlocks(rule: ReservationScheduleRule): BlockFormValue[] {
     slots: sortReservationScheduleSlotSettings((rule.reservation_schedule_rule_slots ?? []).map((slot) => ({
       time: slot.time,
       is_full: slot.is_full === true,
+      allow_section_selection: slot.allow_section_selection === true,
+      sections: (slot.reservation_schedule_rule_slot_sections ?? []).filter((section) => section.enabled).map((section) => ({ section_id: section.section_id, capacity_guests: formatOptionalNumberInput(section.capacity_guests) })),
       duration_minutes: formatOptionalNumberInput(slot.duration_minutes),
       max_party_size_per_reservation: formatOptionalNumberInput(
         slot.max_party_size_per_reservation ?? rule.max_party_size_per_reservation,
@@ -520,6 +529,13 @@ function buildRuleDraft(form: FormState, companyId: string, ruleId?: string) {
       slots: block.slots.map((slot) => ({
         time: slot.time,
         is_full: slot.is_full,
+        allow_section_selection: slot.allow_section_selection,
+        sections: slot.allow_section_selection ? slot.sections.map((section, index) => ({
+          section_id: section.section_id,
+          capacity_guests: toNumberOrNull(section.capacity_guests),
+          enabled: true,
+          sort_order: index * 10,
+        })) : [],
         duration_minutes: toNumberOrNull(slot.duration_minutes),
         max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),
         max_reservations_per_slot: toNumberOrNull(slot.max_reservations_per_slot),
@@ -588,6 +604,17 @@ function validateForm(form: FormState) {
     if (block.availability_mode === 'capacity' && block.slots.some((slot) => !slot.max_guests_per_slot)) {
       return `Informe a capacidade total de todos os horários em "${block.name}".`;
     }
+    for (const slot of block.slots.filter((entry) => entry.allow_section_selection)) {
+      if (!slot.sections.length) return `Selecione pelo menos um ambiente para ${slot.time}.`;
+      if (slot.sections.some((section) => section.capacity_guests
+        ? !Number.isInteger(Number(section.capacity_guests)) || Number(section.capacity_guests) < 1 || Number(section.capacity_guests) > 10000
+        : block.availability_mode === 'capacity')) {
+        return `Informe uma capacidade de 1 a 10000 pessoas por ambiente às ${slot.time}.`;
+      }
+      if (block.availability_mode === 'capacity' && slot.sections.reduce((total, section) => total + Number(section.capacity_guests), 0) > Number(slot.max_guests_per_slot)) {
+        return `A soma das capacidades dos ambientes supera a capacidade total às ${slot.time}.`;
+      }
+    }
   }
 
   return null;
@@ -605,6 +632,8 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const saveMutation = useSaveReservationScheduleRule();
+  const sectionsQuery = useReservationTableSections(companyId, open);
+  const tableSections = sectionsQuery.data ?? [];
   const activeBlock = form.blocks.find((block) => block.clientId === activeBlockId) ?? form.blocks[0] ?? null;
   const activeBlockIndex = activeBlock
     ? form.blocks.findIndex((block) => block.clientId === activeBlock.clientId)
@@ -662,7 +691,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
       name: `Cópia de ${source.name}`,
       weekdays: [],
       availability_mode: source.availability_mode,
-      slots: source.slots.map((slot) => ({ ...slot })),
+      slots: source.slots.map((slot) => ({ ...slot, sections: slot.sections.map((section) => ({ ...section })) })),
     });
     setForm((current) => ({
       ...current,
@@ -731,6 +760,8 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
           : {
               ...slot,
               is_full: source.is_full,
+              allow_section_selection: source.allow_section_selection,
+              sections: source.sections.map((section) => ({ ...section })),
               duration_minutes: source.duration_minutes,
               max_party_size_per_reservation: source.max_party_size_per_reservation,
               max_reservations_per_slot: source.max_reservations_per_slot,
@@ -1075,12 +1106,13 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      <div className="hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4rem_3rem]">
+                      <div className="hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_5rem_4rem_3rem]">
                         <span>Horário</span>
                         <span>Duração</span>
                         <span>Máx. pessoas por reserva</span>
                         <span>Máx. reservas</span>
                         <span>Capacidade total</span>
+                        <span className="text-center">Escolher ambiente</span>
                         <span className="text-center">Lotado</span>
                         <span>Ações</span>
                       </div>
@@ -1088,7 +1120,7 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                         <div
                           key={slot.time}
                           className={cn(
-                            'grid gap-2 border-t border-[rgba(0,0,0,0.08)] py-2 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_4rem_3rem] sm:items-center',
+                            'grid gap-2 border-t border-[rgba(0,0,0,0.08)] py-2 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_5rem_4rem_3rem] sm:items-center',
                             slot.is_full && 'bg-muted/20',
                           )}
                         >
@@ -1149,6 +1181,14 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                             aria-label={`Capacidade total às ${slot.time}`}
                           />
                           <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:justify-center">
+                            <Switch
+                              checked={slot.allow_section_selection}
+                              onCheckedChange={(checked) => updateSlot(activeBlock, slot.time, 'allow_section_selection', checked)}
+                              aria-label={`Permitir escolher ambiente às ${slot.time}`}
+                            />
+                            <span className="sm:sr-only">Cliente escolhe o ambiente</span>
+                          </label>
+                          <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm sm:justify-center">
                             <Checkbox
                               checked={slot.is_full}
                               onCheckedChange={(checked) => updateSlot(activeBlock, slot.time, 'is_full', checked === true)}
@@ -1167,6 +1207,45 @@ function RuleDialog({ companyId, rule, open, onOpenChange }: RuleDialogProps) {
                           >
                             <X className="h-4 w-4" />
                           </button>
+                          {slot.allow_section_selection && (
+                            <div className="space-y-3 rounded-lg border border-primary/15 bg-primary/[0.025] p-3 sm:col-span-8">
+                              <div className="space-y-1">
+                                <p className="text-sm font-semibold">Ambientes disponíveis às {slot.time}</p>
+                                <p className="text-xs leading-relaxed text-muted-foreground">
+                                  A escolha funciona com ou sem pagamento. {activeBlock.availability_mode === 'capacity'
+                                    ? 'Defina o limite de pessoas de cada ambiente; a capacidade total do horário também será respeitada.'
+                                    : 'As vagas seguem as mesas do mapa vigente. Você também pode limitar pessoas por ambiente.'}
+                                </p>
+                              </div>
+                              {sectionsQuery.isLoading && <p role="status" className="text-sm text-muted-foreground">Carregando ambientes...</p>}
+                              {sectionsQuery.isError && <p role="alert" className="text-sm text-destructive">Não foi possível carregar os ambientes. <button type="button" className="underline" onClick={() => void sectionsQuery.refetch()}>Tentar novamente</button></p>}
+                              {!sectionsQuery.isLoading && !sectionsQuery.isError && tableSections.length === 0 && <p className="text-sm text-muted-foreground">Cadastre os ambientes na área de mapas para permitir a escolha.</p>}
+                              <div className="grid gap-2 md:grid-cols-2">
+                                {tableSections.map((section) => {
+                                  const config = slot.sections.find((entry) => entry.section_id === section.id);
+                                  return <div key={section.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-white p-2.5">
+                                    <label className="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm font-medium">
+                                      <Checkbox
+                                        checked={!!config}
+                                        aria-label={`Oferecer ${section.name} às ${slot.time}`}
+                                        onCheckedChange={(checked) => updateSlot(activeBlock, slot.time, 'sections', checked
+                                          ? [...slot.sections.filter((entry) => entry.section_id !== section.id), { section_id: section.id, capacity_guests: '' }]
+                                          : slot.sections.filter((entry) => entry.section_id !== section.id))}
+                                      />
+                                      <span className="break-words">{section.name}</span>
+                                    </label>
+                                    {config && <Input
+                                      type="number" min={1} max={10000} className="h-10 w-32 shrink-0 text-sm"
+                                      value={config.capacity_guests}
+                                      placeholder={activeBlock.availability_mode === 'capacity' ? 'Capacidade' : 'Pelas mesas'}
+                                      aria-label={`Capacidade de ${section.name} às ${slot.time}`}
+                                      onChange={(event) => updateSlot(activeBlock, slot.time, 'sections', slot.sections.map((entry) => entry.section_id === section.id ? { ...entry, capacity_guests: event.target.value } : entry))}
+                                    />}
+                                  </div>;
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1269,6 +1348,7 @@ function SlotChips({ slots, showDetails, className }: {
         >
           {slot.time.slice(0, 5)}
           {slot.is_full && ' · Lotado'}
+          {slot.allow_section_selection && ' · Escolha de ambiente'}
           {showDetails && formatScheduleSlotLimitsDetail(slot)}
         </span>
       ))}
@@ -1299,6 +1379,10 @@ function RuleCard({ rule, onEdit, onDuplicate, onArchive }: {
           block_id: block.clientId,
           time: slot.time,
           is_full: slot.is_full,
+          allow_section_selection: slot.allow_section_selection,
+          reservation_schedule_rule_slot_sections: slot.sections.map((section, index) => ({
+            section_id: section.section_id, capacity_guests: toNumberOrNull(section.capacity_guests), enabled: true, sort_order: index * 10,
+          })),
           sort_order: (slotIndex + 1) * 10,
           duration_minutes: toNumberOrNull(slot.duration_minutes),
           max_party_size_per_reservation: toNumberOrNull(slot.max_party_size_per_reservation),

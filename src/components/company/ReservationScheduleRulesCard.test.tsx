@@ -15,6 +15,7 @@ const hooks = vi.hoisted(() => ({
   restore: vi.fn(),
   remove: vi.fn(),
   save: vi.fn(),
+  sections: [{ id: 'salao', name: 'Salão principal' }, { id: 'sacada', name: 'Sacada' }],
 }));
 
 vi.mock('@/hooks/useReservationScheduleRules', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/hooks/useReservationScheduleRules', () => ({
   useArchivedReservationScheduleRules: () => ({ data: hooks.archivedRules, isLoading: false }),
   useReservationScheduleRuleUsage: () => ({ data: hooks.usage }),
   useSaveReservationScheduleRule: () => ({ mutate: vi.fn(), mutateAsync: hooks.save, isPending: false }),
+  useReservationTableSections: () => ({ data: hooks.sections, isLoading: false, isError: false, refetch: vi.fn() }),
   useArchiveReservationScheduleRule: () => ({ mutate: hooks.archive, isPending: false, variables: undefined }),
   useRestoreReservationScheduleRule: () => ({ mutate: hooks.restore, isPending: false, variables: undefined }),
   useDeleteReservationScheduleRule: () => ({ mutate: hooks.remove, isPending: false, variables: undefined }),
@@ -131,6 +133,37 @@ describe('ReservationScheduleRulesCard', () => {
         ],
       })],
     }));
+  });
+
+  it('configura a escolha de ambiente por horário sem depender de pagamento', async () => {
+    hooks.rules = [makeSlottedRule()];
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Permitir escolher ambiente às 19:00' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Oferecer Sacada às 19:00' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({ blocks: [expect.objectContaining({
+      slots: [
+        expect.objectContaining({ time: '18:00', allow_section_selection: false, sections: [] }),
+        expect.objectContaining({ time: '19:00', allow_section_selection: true, sections: [{ section_id: 'sacada', capacity_guests: null, enabled: true, sort_order: 0 }] }),
+      ],
+    })] }));
+  });
+
+  it('exige capacidade própria dos ambientes no modo por capacidade', async () => {
+    hooks.rules = [makeSlottedRule('capacity')];
+    render(<ReservationScheduleRulesCard companyId={COMPANY_ID} />);
+    fireEvent.click(screen.getByLabelText('Editar Noite'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Permitir escolher ambiente às 19:00' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Oferecer Sacada às 19:00' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+    expect(hooks.save).not.toHaveBeenCalled();
+    expect(screen.getByText('Informe uma capacidade de 1 a 10000 pessoas por ambiente às 19:00.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Capacidade de Sacada às 19:00'), { target: { value: '8' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Salvar regra' })));
+    expect(hooks.save).toHaveBeenCalledWith(expect.objectContaining({ blocks: [expect.objectContaining({
+      slots: [expect.anything(), expect.objectContaining({ sections: [{ section_id: 'sacada', capacity_guests: 8, enabled: true, sort_order: 0 }] })],
+    })] }));
   });
 
   it('preserva os horarios lotados ao duplicar a regra', async () => {

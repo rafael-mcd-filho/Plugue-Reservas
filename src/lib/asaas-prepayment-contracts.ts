@@ -2,6 +2,7 @@ export const RESERVATION_PREPAYMENT_FEATURE_KEY = 'reservation_prepayment' as co
 
 export type ReservationPrepaymentAmountType = 'fixed_per_reservation' | 'per_person';
 export type ReservationPrepaymentBillingType = 'PIX' | 'CREDIT_CARD';
+export type ReservationPaymentPricingMode = 'single' | 'by_section';
 export type AsaasConfigStatus = 'not_configured' | 'configured' | 'error';
 
 export type ReservationPaymentStatus =
@@ -48,6 +49,45 @@ export interface ReservationPaymentRuleDraft {
   archived_at: string | null;
   archived_by: string | null;
   archived_reason: string | null;
+  pricing_mode?: ReservationPaymentPricingMode;
+  sections?: ReservationPaymentRuleSection[];
+}
+
+export interface ReservationPaymentRuleSection {
+  id: string;
+  section_id: string;
+  public_name: string;
+  description: string | null;
+  base_amount: number;
+  pix_amount: number | null;
+  credit_card_amount: number | null;
+  enabled: boolean;
+  sort_order: number;
+  section_name?: string;
+}
+
+export interface PublicReservationSectionOption {
+  id: string;
+  section_id: string;
+  payment_rule_section_id?: string | null;
+  section_name: string;
+  public_name: string;
+  description: string | null;
+  amount_type: ReservationPrepaymentAmountType | null;
+  /** Unit prices: multiply by party size for per-person rules. */
+  base_amount: number | null;
+  pix_amount: number | null;
+  credit_card_amount: number | null;
+  available: boolean;
+  capacity_guests?: number | null;
+}
+
+export interface PublicReservationSectionOptions {
+  enabled: boolean;
+  rule_id?: string | null;
+  configuration_error?: string | null;
+  automatic_allocation_available?: boolean;
+  options: PublicReservationSectionOption[];
 }
 
 export interface CreateReservationPaymentRequest {
@@ -58,6 +98,8 @@ export interface CreateReservationPaymentRequest {
     id?: string;
     table_id: string | null;
     table_map_id: string | null;
+    section_option_id?: string | null;
+    selected_section_id?: string | null;
     guest_name: string;
     guest_phone: string;
     guest_email: string | null;
@@ -135,6 +177,8 @@ export interface PublicReservationPaymentSummary {
     party_size: number;
     status: string;
     public_tracking_code: string | null;
+    selected_section_id?: string | null;
+    selected_section_name?: string | null;
   };
   company: {
     name: string;

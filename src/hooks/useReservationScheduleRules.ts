@@ -6,12 +6,22 @@ import { toast } from 'sonner';
 export type ReservationScheduleRuleScope = 'weekly' | 'date_specific' | 'date_range';
 export type ReservationAvailabilityMode = 'tables' | 'capacity';
 
+export interface ReservationScheduleSlotSection {
+  id?: string;
+  section_id: string;
+  capacity_guests: number | null;
+  enabled: boolean;
+  sort_order: number;
+}
+
 export interface ReservationScheduleRuleSlot {
   id: string;
   rule_id: string;
   block_id: string;
   time: string;
   is_full?: boolean;
+  allow_section_selection?: boolean;
+  reservation_schedule_rule_slot_sections?: ReservationScheduleSlotSection[];
   sort_order: number;
   duration_minutes: number | null;
   max_party_size_per_reservation: number | null;
@@ -79,6 +89,8 @@ export interface ReservationScheduleRuleDraft {
     slots: Array<{
       time: string;
       is_full: boolean;
+      allow_section_selection?: boolean;
+      sections?: ReservationScheduleSlotSection[];
       duration_minutes: number | null;
       max_party_size_per_reservation: number | null;
       max_reservations_per_slot: number | null;
@@ -101,6 +113,8 @@ function invalidateScheduleRuleQueries(queryClient: ReturnType<typeof useQueryCl
   queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-preview', companyId] });
   queryClient.invalidateQueries({ queryKey: ['public-reservation-schedules-calendar-preview', companyId] });
   queryClient.invalidateQueries({ queryKey: ['public-reservation-booking-context', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['public-reservation-section-options', companyId] });
+  queryClient.invalidateQueries({ queryKey: ['reservation-pricing-sections', companyId] });
   queryClient.invalidateQueries({ queryKey: ['calendar-public-schedule', companyId] });
   queryClient.invalidateQueries({ queryKey: ['calendar-day-capacity', companyId] });
   queryClient.invalidateQueries({ queryKey: ['calendar-slot-tables', companyId] });
@@ -112,14 +126,18 @@ export function useReservationScheduleRules(companyId: string | null | undefined
   return useQuery({
     queryKey: ['reservation-schedule-rules', companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const loadRules = (selection: string) => supabase
         .from('reservation_schedule_rules' as any)
-        .select('*, reservation_schedule_rule_blocks(*, reservation_schedule_rule_slots(*)), reservation_schedule_rule_slots(*)')
+        .select(selection)
         .eq('company_id', companyId)
         .is('archived_at', null)
         .order('priority', { ascending: true })
         .order('created_at', { ascending: false });
-
+      let { data, error } = await loadRules('*, reservation_schedule_rule_blocks(*, reservation_schedule_rule_slots(*, reservation_schedule_rule_slot_sections(*))), reservation_schedule_rule_slots(*, reservation_schedule_rule_slot_sections(*))');
+      if (error && ['PGRST200', 'PGRST205', '42P01'].includes(error.code)
+        && /reservation_schedule_rule_slot_sections/.test([error.message, error.details, error.hint].join(' '))) {
+        ({ data, error } = await loadRules('*, reservation_schedule_rule_blocks(*, reservation_schedule_rule_slots(*)), reservation_schedule_rule_slots(*)'));
+      }
       if (error) throw error;
 
       return ((data ?? []) as unknown as ReservationScheduleRule[]).map((rule) => ({
@@ -136,6 +154,19 @@ export function useReservationScheduleRules(companyId: string | null | undefined
       }));
     },
     enabled: !!companyId,
+  });
+}
+
+export function useReservationTableSections(companyId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['reservation-table-sections', companyId],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)('table_sections')
+        .select('id, name').eq('company_id', companyId).order('sort_order').order('name');
+      if (error) throw error;
+      return (data ?? []) as Array<{ id: string; name: string }>;
+    },
+    enabled: enabled && !!companyId,
   });
 }
 
@@ -185,6 +216,10 @@ export function useSaveReservationScheduleRule() {
 
   return useMutation({
     mutationFn: async (draft: ReservationScheduleRuleDraft) => {
+      if (draft.blocks.some((block) => block.slots.some((slot) => slot.allow_section_selection))) {
+        const capability = await (supabase.from as any)('reservation_schedule_rule_slot_sections').select('id').limit(0);
+        if (capability.error) throw new Error('A escolha de ambientes ainda não está disponível. Atualize o sistema antes de ativar essa opção.');
+      }
       const { data, error } = await (supabase.rpc as any)('upsert_reservation_schedule_rule', {
         _company_id: draft.company_id,
         _rule_id: draft.id ?? null,

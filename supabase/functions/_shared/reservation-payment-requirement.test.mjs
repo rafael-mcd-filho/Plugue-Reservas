@@ -43,9 +43,10 @@ function harness(options = {}) {
     async rpc(name, args) {
       reads.push({ name, args });
       if (name === 'company_feature_enabled') return { data: state.feature, error: null };
+      if (name === 'get_public_reservation_section_options') return { data: state.sectionOptions, error: null };
       assert.equal(name, 'create_public_reservation');
       writes.push({ table: 'reservations', operation: 'rpc', status: args._status });
-      return { data: { ...reservation, ...args._reservation }, error: null };
+      return { data: { ...reservation, ...args._reservation, ...state.createdReservation }, error: null };
     },
     from(table) {
       let operation = 'select';
@@ -65,6 +66,7 @@ function harness(options = {}) {
           if (operation !== 'select') writes.push({ table, operation, patch });
           let data = null;
           if (table === 'reservation_payment_rules') data = state.rule;
+          if (table === 'reservation_payment_rule_sections') data = state.sectionOption;
           if (table === 'reservation_payments') data = { id: 'payment-one', ...patch };
           return Promise.resolve({ data, error: table === 'reservation_payment_rules' ? state.ruleError ?? null : null }).then(resolve);
         },
@@ -153,4 +155,135 @@ test('legacy dry-run and non-payment completion retain their existing contracts'
   const free = harness({ feature: false });
   assert.equal((await free.request({ company_id: companyId, reservation, complete_without_payment: true })).status, 200);
   assert.deepEqual(free.writes, [{ table: 'reservations', operation: 'rpc', status: 'confirmed' }]);
+});
+
+const premiumOption = {
+  id: 'option-premium', company_id: companyId, rule_id: rule.id, section_id: 'section-balcony',
+  public_name: 'Sacada Premium', enabled: true, base_amount: 50, pix_amount: 48, credit_card_amount: 52,
+};
+const premiumRule = { ...rule, pricing_mode: 'by_section', credit_card_enabled: true, credit_card_amount: 26 };
+const offeredPremium = { enabled: true, rule_id: rule.id, options: [
+  { id: premiumOption.section_id, section_id: premiumOption.section_id,
+    payment_rule_section_id: premiumOption.id, section_name: 'Sacada', public_name: 'Sacada Premium', available: true },
+] };
+
+test('selected environment freezes authoritative prices and name, ignoring browser amounts and table', async () => {
+  const context = harness({ rule: premiumRule, sectionOption: premiumOption, sectionOptions: offeredPremium });
+  const response = await context.request({ company_id: companyId, reservation: {
+    ...reservation, section_option_id: premiumOption.id, base_amount: 1, pix_amount: 1,
+    selected_section_id: premiumOption.section_id, selected_section_name: 'Forged name', table_id: 'forged-table',
+  } });
+  assert.equal(response.status, 200);
+  const created = context.reads.find(row => row.name === 'create_public_reservation').args._reservation;
+  assert.equal(created.selected_section_id, premiumOption.section_id);
+  assert.equal(created.selected_section_name, premiumOption.public_name);
+  assert.equal(created.section_option_id, premiumOption.id);
+  assert.equal(created.table_id, null);
+  const payment = context.writes.find(row => row.table === 'reservation_payments').patch;
+  assert.equal(payment.base_amount, 150);
+  assert.equal(payment.rule_snapshot.pix_amount_total, 144);
+  assert.equal(payment.rule_snapshot.credit_card_amount_total, 156);
+  assert.equal(payment.rule_snapshot.selected_section_name, 'Sacada Premium');
+  assert.equal(payments.calculateMethodAmount(payment, reservation, 'PIX'), 144);
+  assert.equal(payments.calculateMethodAmount(payment, reservation, 'CREDIT_CARD'), 156);
+  premiumOption.public_name = 'Changed after creation';
+  assert.equal(payment.rule_snapshot.selected_section_name, 'Sacada Premium');
+  premiumOption.public_name = 'Sacada Premium';
+});
+
+test('fixed-per-reservation section prices are charged once and summary preserves contracted environment', async () => {
+  const context = harness({ rule: { ...premiumRule, amount_type: 'fixed_per_reservation' }, sectionOption: premiumOption, sectionOptions: offeredPremium });
+  assert.equal((await context.request({ company_id: companyId, reservation: { ...reservation,
+    selected_section_id: premiumOption.section_id, section_option_id: premiumOption.id } })).status, 200);
+  const payment = context.writes.find(row => row.table === 'reservation_payments').patch;
+  assert.equal(payment.base_amount, 50);
+  assert.equal(payments.calculateMethodAmount(payment, reservation, 'PIX'), 48);
+  const summary = payments.toPublicPaymentSummary(payment, { ...reservation, selected_section_name: 'Renamed operational area' }, { name: 'Restaurant' });
+  assert.equal(summary.reservation.selected_section_name, 'Sacada Premium');
+  assert.equal(summary.reservation.selected_section_id, premiumOption.section_id);
+  const description = payments.buildPaymentLinkDescription(payment, reservation, { name: 'Restaurant' });
+  assert.ok(description.includes('Ambiente Sacada Premium'));
+  assert.ok(description.includes(`Empresa ${companyId}`));
+  assert.ok(description.includes(`Reserva ${reservation.id}`));
+});
+
+test('invalid, cross-company, disabled, full and stale environments fail before reserving or charging', async () => {
+  const cases = [
+    { sectionOption: null },
+    { sectionOption: { ...premiumOption, company_id: 'other-company' } },
+    { sectionOption: { ...premiumOption, rule_id: 'other-rule' } },
+    { sectionOption: { ...premiumOption, enabled: false } },
+    { sectionOption: { ...premiumOption, section_id: 'forged-section' } },
+    { sectionOption: { ...premiumOption, pix_amount: 0 } },
+    { sectionOptions: { ...offeredPremium, rule_id: 'stale-rule' } },
+    { sectionOptions: { ...offeredPremium, options: [{ ...offeredPremium.options[0], available: false }] } },
+    { sectionOptions: { ...offeredPremium, options: [{ ...offeredPremium.options[0], section_id: 'other-section' }] } },
+  ];
+  for (const change of cases) {
+    const context = harness({ rule: premiumRule, sectionOption: premiumOption, sectionOptions: offeredPremium, ...change });
+    assert.equal((await context.request({ company_id: companyId, reservation: { ...reservation,
+      selected_section_id: premiumOption.section_id, section_option_id: premiumOption.id } })).status, 409);
+    assert.equal(context.writes.length, 0);
+    assert.equal(context.configReads(), 0);
+  }
+  const missing = harness({ rule: premiumRule });
+  assert.equal((await missing.request({ company_id: companyId, reservation })).status, 400);
+  assert.equal(missing.writes.length, 0);
+  for (const settings of [{}, { feature: false }, { rule: null }]) {
+    const context = harness(settings);
+    assert.equal((await context.request({ company_id: companyId, reservation: { ...reservation, section_option_id: premiumOption.id } })).status, 409);
+    assert.equal(context.writes.length, 0);
+  }
+});
+
+test('environment selection is preserved for free bookings with payment disabled or no active rule', async () => {
+  for (const settings of [{ feature: false }, { rule: null }]) {
+    const context = harness(settings);
+    const response = await context.request({ company_id: companyId, complete_without_payment: true,
+      reservation: { ...reservation, selected_section_id: premiumOption.section_id,
+        selected_section_name: 'Untrusted name', table_id: 'wrong-table' } });
+    assert.equal(response.status, 200);
+    const created = context.reads.find(row => row.name === 'create_public_reservation').args._reservation;
+    assert.equal(created.selected_section_id, premiumOption.section_id);
+    assert.equal(created.selected_section_name, undefined, 'SQL resolves the section name');
+    assert.equal(created.table_id, null, 'SQL chooses a table inside the selected environment');
+    assert.deepEqual(context.writes, [{ table: 'reservations', operation: 'rpc', status: 'confirmed' }]);
+    assert.equal(context.configReads(), 0);
+  }
+});
+
+test('single-price paid bookings snapshot the automatically assigned environment without a guest choice', async () => {
+  const context = harness({ createdReservation: {
+    selected_section_id: premiumOption.section_id, selected_section_name: 'Sacada',
+  } });
+  assert.equal((await context.request({ company_id: companyId, reservation })).status, 200);
+  const created = context.reads.find(row => row.name === 'create_public_reservation').args._reservation;
+  assert.equal(created.selected_section_id, undefined);
+  assert.equal(created.selected_section_name, undefined);
+  assert.equal(created.section_option_id, undefined);
+  const payment = context.writes.find(row => row.table === 'reservation_payments').patch;
+  assert.equal(payment.base_amount, 75, 'The original single price is retained');
+  assert.equal(payment.rule_snapshot.selected_section_name, 'Sacada');
+  assert.equal(payments.calculateMethodAmount(payment, reservation, 'PIX'), 69);
+  assert.equal(context.reads.some(row => row.name === 'get_public_reservation_section_options'), false);
+});
+
+test('single-price paid bookings reject a stale explicit environment choice before writes', async () => {
+  const context = harness();
+  const response = await context.request({ company_id: companyId,
+    reservation: { ...reservation, selected_section_id: premiumOption.section_id } });
+  assert.equal(response.status, 409);
+  assert.equal(context.writes.length, 0);
+  assert.equal(context.configReads(), 0);
+});
+
+test('section pricing can resolve the commercial option from the selected section alone', async () => {
+  const context = harness({ rule: premiumRule, sectionOption: premiumOption, sectionOptions: offeredPremium });
+  assert.equal((await context.request({ company_id: companyId,
+    reservation: { ...reservation, selected_section_id: premiumOption.section_id } })).status, 200);
+  const lookup = context.reads.find(row => row.table === 'reservation_payment_rule_sections');
+  assert.ok(lookup.filters.some(([op, key, value]) => op === 'eq' && key === 'section_id' && value === premiumOption.section_id));
+  assert.ok(lookup.filters.some(([op, key, value]) => op === 'eq' && key === 'company_id' && value === companyId));
+  assert.ok(lookup.filters.some(([op, key, value]) => op === 'eq' && key === 'rule_id' && value === rule.id));
+  assert.equal(context.writes.find(row => row.table === 'reservation_payments').patch.base_amount, 150);
 });

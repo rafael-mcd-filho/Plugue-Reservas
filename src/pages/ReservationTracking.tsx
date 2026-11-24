@@ -55,6 +55,7 @@ interface ReservationEntry {
   date: string;
   time: string;
   party_size: number;
+  selected_section_name?: string | null;
   status: string;
   occasion: string | null;
   notes: string | null;
@@ -478,6 +479,12 @@ export default function ReservationTracking() {
                   <span className="text-muted-foreground">Pessoas</span>
                   <span className="font-medium">{entry.party_size}</span>
                 </div>
+                {entry.selected_section_name && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Ambiente</span>
+                    <span className="text-right font-medium">{entry.selected_section_name}</span>
+                  </div>
+                )}
                 {entry.occasion && (
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">Ocasião</span>

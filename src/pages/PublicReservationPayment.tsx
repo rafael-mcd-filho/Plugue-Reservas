@@ -817,6 +817,7 @@ function PaymentSummary({
             <SummaryLine label="Cliente" value={payment.reservation.guest_name} />
             <SummaryLine label="Data" value={formatReservationDate(payment.reservation.date, payment.reservation.time)} />
             <SummaryLine label="Pessoas" value={String(payment.reservation.party_size)} />
+            {payment.reservation.selected_section_name && <SummaryLine label="Ambiente" value={payment.reservation.selected_section_name} />}
           </div>
         </CardContent>
       </Card>

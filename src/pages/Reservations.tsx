@@ -109,6 +109,8 @@ interface Reservation {
   table_id: string | null;
   table_map_id: string | null;
   created_in_mode?: string | null;
+  selected_section_id?: string | null;
+  selected_section_name?: string | null;
   source: string | null;
   origin_tracking_session_id?: string | null;
   origin_anonymous_id?: string | null;
@@ -1426,6 +1428,7 @@ export default function Reservations({ view }: ReservationsProps) {
 
                         <TableCell className="px-4 py-3">
                           <div className="text-sm font-medium text-foreground">{reservation.guest_name}</div>
+                          {reservation.selected_section_name && <p className="mt-1 text-xs font-medium text-primary">{reservation.selected_section_name}</p>}
                           <PhoneWhatsAppLink
                             phone={reservation.guest_phone}
                             companyId={reservation.company_id}
@@ -2254,6 +2257,7 @@ export default function Reservations({ view }: ReservationsProps) {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5">
+                            {reservation.selected_section_name && <span className="text-xs font-medium text-primary">{reservation.selected_section_name}</span>}
                             {tableBadge && <ReservationTableBadge badge={tableBadge} />}
                             {paidPayment && <ReservationPaymentPaidBadge payment={paidPayment} />}
                           </div>
@@ -2276,6 +2280,7 @@ export default function Reservations({ view }: ReservationsProps) {
                           <p className="truncate text-sm font-semibold text-foreground" title={reservation.guest_name}>
                             {reservation.guest_name}
                           </p>
+                          {reservation.selected_section_name && <p className="mt-1 text-xs font-medium text-primary">{reservation.selected_section_name}</p>}
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                             {metaLine}
                             <span className="flex items-center gap-1.5 lg:hidden">

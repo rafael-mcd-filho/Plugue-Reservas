@@ -37,6 +37,8 @@ export interface ReservationRecord {
   company_id: string;
   table_id: string | null;
   table_map_id?: string | null;
+  selected_section_id?: string | null;
+  selected_section_name?: string | null;
   guest_name: string;
   guest_phone: string;
   guest_email: string | null;
@@ -85,6 +87,41 @@ export function toMoney(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return Math.round(parsed * 100) / 100;
+}
+
+/** Resolve commercial prices from trusted records; the browser never supplies amounts. */
+export function resolveReservationSectionPricing(
+  rule: Record<string, any>,
+  option: Record<string, any> | null,
+  scope: { companyId: string; sectionId: string | null; optionId?: string | null; sectionName?: string },
+) {
+  if (rule.pricing_mode !== "by_section") {
+    if (scope.optionId || scope.sectionId) throw new Error("Os ambientes desta reserva foram alterados. Revise sua escolha.");
+    return rule;
+  }
+  if (!scope.sectionId || !option || option.section_id !== scope.sectionId
+    || (scope.optionId && option.id !== scope.optionId)
+    || option.company_id !== scope.companyId || option.rule_id !== rule.id
+    || option.enabled !== true || typeof option.section_id !== "string" || !option.section_id) {
+    throw new Error("Escolha um ambiente disponível para esta reserva.");
+  }
+  const validAmount = (value: unknown) => Number.isFinite(Number(value)) && toMoney(value) > 0;
+  if (!validAmount(option.base_amount)
+    || (rule.pix_enabled && !validAmount(option.pix_amount))
+    || (rule.credit_card_enabled && !validAmount(option.credit_card_amount))) {
+    throw new Error("Os valores deste ambiente estão indisponíveis. Fale com o estabelecimento.");
+  }
+  const name = String(option.public_name || scope.sectionName || "").trim();
+  if (!name) throw new Error("Ambiente indisponível para esta reserva.");
+  return {
+    ...rule,
+    base_amount: toMoney(option.base_amount),
+    pix_amount: rule.pix_enabled ? toMoney(option.pix_amount) : null,
+    credit_card_amount: rule.credit_card_enabled ? toMoney(option.credit_card_amount) : null,
+    section_option_id: option.id,
+    selected_section_id: option.section_id,
+    selected_section_name: name,
+  };
 }
 
 export function dateOnlyInTimeZone(date = new Date(), timeZone = "America/Fortaleza") {
@@ -256,9 +293,11 @@ export function buildPaymentLinkDescription(
   const reference = reservation.public_tracking_code || payment.payment_token.slice(0, 10);
   const ruleName = String(snapshot.name || "Regra de reserva").trim();
   const companyName = String(company.name || "Empresa").trim();
+  const section = snapshot.selected_section_name
+    ? ` | Ambiente ${String(snapshot.selected_section_name).slice(0, 80)}` : "";
   // Keep stable reconciliation identifiers before customer-supplied text, and
   // fit both the payment and payment-link description limits.
-  return `Sinal de reserva | Empresa ${payment.company_id} | Reserva ${payment.reservation_id} | ${companyName.slice(0, 80)} | Ref ${String(reference).slice(0, 64)} | ${formatReservationDateTime(reservation)} | ${reservation.party_size} pessoas | ${String(reservation.guest_name).slice(0, 80)} | ${ruleName.slice(0, 80)}`.slice(0, 500);
+  return `Sinal de reserva | Empresa ${payment.company_id} | Reserva ${payment.reservation_id} | ${companyName.slice(0, 80)} | Ref ${String(reference).slice(0, 64)} | ${formatReservationDateTime(reservation)}${section} | ${reservation.party_size} pessoas | ${String(reservation.guest_name).slice(0, 80)} | ${ruleName.slice(0, 80)}`.slice(0, 500);
 }
 
 export function paymentIsExpired(payment: Pick<ReservationPaymentRecord, "expires_at">) {
@@ -556,6 +595,8 @@ export function toPublicPaymentSummary(
       party_size: reservation.party_size,
       status: reservation.status,
       public_tracking_code: reservation.public_tracking_code ?? null,
+      selected_section_id: snapshot.selected_section_id ?? reservation.selected_section_id ?? null,
+      selected_section_name: snapshot.selected_section_name ?? reservation.selected_section_name ?? null,
     },
     company: {
       id: company.id,

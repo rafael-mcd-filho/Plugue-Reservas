@@ -3,14 +3,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyPrepayments from '@/pages/CompanyPrepayments';
 
-const mock = vi.hoisted(() => ({ payments: vi.fn(), config: vi.fn(), check: vi.fn(), refund: vi.fn(), download: vi.fn(), from: vi.fn() }));
-vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: mock.from } }));
+const mock = vi.hoisted(() => ({ payments: vi.fn(), usage: vi.fn(), config: vi.fn(), check: vi.fn(), refund: vi.fn(), download: vi.fn(), from: vi.fn(), rpc: vi.fn(), toastError: vi.fn() }));
+vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: mock.from, rpc: mock.rpc } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: mock.toastError } }));
 vi.mock('@/contexts/CompanySlugContext', () => ({ useCompanySlug: () => ({ companyId: 'company-a', slug: 'casa' }) }));
 vi.mock('@/hooks/useCompanyFeatures', () => ({ useCompanyFeatureFlags: () => ({ data: { features: { reservation_prepayment: true } }, isLoading: false }) }));
 vi.mock('@/lib/asaas-prepayment-api', () => ({
   getAsaasConfig: mock.config, checkReservationPayment: mock.check, refundReservationPayment: mock.refund,
 }));
-vi.mock('@/lib/asaas-prepayment-queries', () => ({ fetchCompanyReservationPayments: mock.payments, fetchCompanyReservationPaymentUsage: vi.fn() }));
+vi.mock('@/lib/asaas-prepayment-queries', () => ({ fetchCompanyReservationPayments: mock.payments, fetchCompanyReservationPaymentUsage: mock.usage }));
 vi.mock('@/lib/export-utils', () => ({ downloadSpreadsheet: mock.download }));
 vi.mock('@/components/billing/CompanySettlements', () => ({ default: () => <div>Fluxo de saques</div>, CompanySettlementBalance: () => <div>Saldo calculado no servidor</div> }));
 vi.mock('@/components/billing/PrepaymentBalanceDashboard', () => ({ default: ({ companyId, onOpenWithdrawals }: { companyId: string; onOpenWithdrawals: () => void }) => <section aria-label="Saldo acumulado" data-company={companyId}><p>Saldo calculado no servidor</p><button onClick={onOpenWithdrawals}>Solicitar saque</button></section> }));
@@ -47,11 +48,132 @@ beforeEach(() => {
   mock.config.mockResolvedValue({ status: 'configured', managed_by_platform: true, from_company_account: false, last_validated_at: null, last_error: null, has_api_token: true, webhook_auth_token: null, webhook_url: null });
   mock.from.mockReturnValue({ select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) });
   mock.payments.mockResolvedValue([]);
+  mock.usage.mockResolvedValue([]);
+  mock.rpc.mockResolvedValue({ data: [], error: null });
   mock.download.mockResolvedValue(undefined);
   mock.check.mockResolvedValue({ status: 'paid' });
   mock.refund.mockResolvedValue({ status: 'refund_pending' });
 });
 afterEach(() => cleanup());
+
+describe('CompanyPrepayments section pricing', () => {
+  async function openRuleDialog() {
+    openTab('Regras');
+    fireEvent.click(screen.getByRole('button', { name: 'Nova regra' }));
+    return screen.getByRole('dialog', { name: 'Nova regra de antecipação' });
+  }
+
+  function mockSections() {
+    mock.rpc.mockImplementation(async (name: string) => ({
+      data: name === 'list_reservation_pricing_sections'
+        ? [{ id: 'section-hall', name: 'Salão' }, { id: 'section-balcony', name: 'Sacada' }]
+        : null,
+      error: null,
+    }));
+  }
+
+  it('creates one inactive rule with independently priced environments in an atomic call', async () => {
+    mockSections();
+    renderPage();
+    const dialog = await openRuleDialog();
+    fireEvent.change(within(dialog).getByLabelText('Nome da regra'), { target: { value: 'Réveillon' } });
+    fireEvent.change(within(dialog).getByLabelText('Início'), { target: { value: '2027-12-31' } });
+    fireEvent.change(within(dialog).getByLabelText('Fim'), { target: { value: '2027-12-31' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Por ambiente' }));
+    fireEvent.click(await within(dialog).findByRole('switch', { name: 'Oferecer Salão' }));
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Oferecer Sacada' }));
+    fireEvent.change(within(dialog).getByLabelText('Nome exibido para Salão'), { target: { value: 'Reserva normal' } });
+    fireEvent.change(within(dialog).getByLabelText('Sinal em Salão'), { target: { value: '50,00' } });
+    fireEvent.change(within(dialog).getByLabelText('Pix em Salão'), { target: { value: '50,00' } });
+    fireEvent.change(within(dialog).getByLabelText('Cartão em Salão'), { target: { value: '55,00' } });
+    fireEvent.change(within(dialog).getByLabelText('Nome exibido para Sacada'), { target: { value: 'Sacada Premium' } });
+    fireEvent.change(within(dialog).getByLabelText('Sinal em Sacada'), { target: { value: '100,00' } });
+    fireEvent.change(within(dialog).getByLabelText('Pix em Sacada'), { target: { value: '100,00' } });
+    fireEvent.change(within(dialog).getByLabelText('Cartão em Sacada'), { target: { value: '110,00' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Adicionar regra' }));
+    await waitFor(() => expect(mock.rpc).toHaveBeenCalledWith('create_reservation_payment_rule', {
+      _rule: expect.objectContaining({ name: 'Réveillon', pricing_mode: 'by_section', amount_type: 'per_person', enabled: false, base_amount: 50 }),
+      _sections: [
+        expect.objectContaining({ section_id: 'section-hall', public_name: 'Reserva normal', base_amount: 50, pix_amount: 50, credit_card_amount: 55, enabled: true }),
+        expect.objectContaining({ section_id: 'section-balcony', public_name: 'Sacada Premium', base_amount: 100, pix_amount: 100, credit_card_amount: 110, enabled: true }),
+      ],
+    }));
+    expect(mock.rpc).toHaveBeenCalledWith('list_reservation_pricing_sections', {
+      _company_id: 'company-a', _date_start: '2027-12-31', _date_end: '2027-12-31',
+    });
+  });
+
+  it('requires an enabled environment and positive method prices before saving', async () => {
+    mockSections();
+    renderPage();
+    const dialog = await openRuleDialog();
+    fireEvent.change(within(dialog).getByLabelText('Nome da regra'), { target: { value: 'Dia especial' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Por ambiente' }));
+    await within(dialog).findByRole('switch', { name: 'Oferecer Sacada' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Adicionar regra' }));
+    expect(mock.toastError).toHaveBeenCalledWith('Selecione pelo menos um ambiente para oferecer ao cliente.');
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Oferecer Sacada' }));
+    fireEvent.change(within(dialog).getByLabelText('Pix em Sacada'), { target: { value: '0' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Adicionar regra' }));
+    expect(mock.toastError).toHaveBeenCalledWith('Informe valores maiores que zero em todos os ambientes e formas de pagamento habilitadas.');
+    expect(mock.rpc.mock.calls.some(([name]) => name === 'create_reservation_payment_rule')).toBe(false);
+  });
+
+  it('explains when the period has no environments enabled in availability', async () => {
+    renderPage();
+    const dialog = await openRuleDialog();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Por ambiente' }));
+    expect(await within(dialog).findByText(/Nenhum ambiente está habilitado para escolha neste período/)).toBeInTheDocument();
+  });
+
+  it('keeps legacy rule listing available when only the new sections relation is missing', async () => {
+    const select = vi.fn((columns: string) => ({ eq: () => ({ order: async () => columns === '*'
+      ? { data: [], error: null }
+      : { data: null, error: { code: 'PGRST200', message: "Could not find relationship for reservation_payment_rule_sections" } } }) }));
+    mock.from.mockReturnValue({ select });
+    renderPage();
+    openTab('Regras');
+    expect(await screen.findByText('Nenhuma regra ativa')).toBeInTheDocument();
+    expect(select).toHaveBeenCalledWith('*');
+    expect(screen.queryByText(/Não foi possível carregar as regras/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Nova regra' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Por ambiente' }));
+    expect(within(dialog).getByText('Valores por ambiente ainda não disponíveis')).toBeInTheDocument();
+    expect(mock.rpc).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('radio', { name: 'Valor único' })).toBeEnabled();
+  });
+
+  it('does not hide unrelated relation or permission failures with the legacy fallback', async () => {
+    const select = vi.fn(() => ({ eq: () => ({ order: async () => ({ data: null, error: { code: 'PGRST200', message: 'Relationship other_missing_relation not found' } }) }) }));
+    mock.from.mockReturnValue({ select });
+    renderPage();
+    openTab('Regras');
+    expect(await screen.findByText(/Não foi possível carregar as regras/)).toBeInTheDocument();
+    expect(select).not.toHaveBeenCalledWith('*');
+  });
+
+  it('preserves environment names and prices when cloning a rule', async () => {
+    mockSections();
+    mock.from.mockReturnValue({ select: () => ({ eq: () => ({ order: async () => ({ data: [{
+      id: 'rule-special', name: 'Evento', enabled: false, pricing_mode: 'by_section',
+      date_start: '2027-12-31', date_end: '2027-12-31', amount_type: 'per_person', base_amount: 100,
+      pix_enabled: true, pix_amount: 100, credit_card_enabled: true, credit_card_amount: 110,
+      payment_deadline_minutes: 10,
+      sections: [{ id: 'option-balcony', section_id: 'section-balcony', public_name: 'Sacada Premium', description: 'Vista para o palco', base_amount: 100, pix_amount: 100, credit_card_amount: 110, enabled: true, sort_order: 0, section: { name: 'Sacada' } }],
+    }], error: null }) }) }) });
+    renderPage();
+    openTab('Regras');
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: /Desativadas 1/ }), { button: 0, ctrlKey: false });
+    expect(await screen.findByText('Sacada Premium')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clonar' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Nome da regra')).toHaveValue('Evento cópia');
+    expect(within(dialog).getByRole('radio', { name: 'Por ambiente' })).toBeChecked();
+    expect(await within(dialog).findByLabelText('Nome exibido para Sacada')).toHaveValue('Sacada Premium');
+    expect(within(dialog).getByLabelText('Cartão em Sacada')).toHaveValue('110,00');
+  });
+});
 
 describe('CompanyPrepayments financial reliability', () => {
   it('opens the financial summary with workflows ordered by financial priority without querying integration settings', async () => {
@@ -106,6 +228,7 @@ describe('CompanyPrepayments financial reliability', () => {
     await waitFor(() => expect(insert).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Dia especial', credit_card_enabled: true, max_credit_card_installments: 1, enabled: false,
     })));
+    expect(insert.mock.calls[0][0]).not.toHaveProperty('pricing_mode');
   });
 
   it('reports a list failure instead of claiming there are no payments and lets the user retry', async () => {
