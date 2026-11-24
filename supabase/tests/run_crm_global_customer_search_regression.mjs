@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { PGlite } from '@electric-sql/pglite';
 
-// Busca de clientes da busca global (search_crm_leads) e ficha do cliente contra o
-// cálculo completo da tela Clientes, com as definições de produção de 23/11/2026
-// (migrações 20261123140000 e 20261123150000). Banco em memória, sem rede, chaves
-// ou acesso a banco externo.
+// Busca de clientes da busca global (search_crm_leads), ficha do cliente e tela
+// Clientes contra o cálculo completo, com as definições de produção de 23/11/2026
+// (migrações 20261123140000, 20261123150000 e 20261123160000). Banco em memória,
+// sem rede, chaves ou acesso a banco externo.
 const db = new PGlite();
 const load = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 const companyA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -130,6 +130,69 @@ async function profileSnapshots(companyId, keys) {
   }
   await owner();
   return snapshots;
+}
+
+// Tela Clientes, fichas, contatos e busca, para comparar antes e depois da 20261123160000.
+const PAGE_FILTERS = [
+  [1, 25, null, null, null, null, null, null, null],
+  [2, 25, null, null, null, null, null, null, null],
+  [1, 100, null, null, null, null, null, null, null],
+  [1, 25, 'ana', null, null, null, null, null, null],
+  [1, 25, '62', null, null, null, null, null, null],
+  [1, 25, null, null, null, 'GO', null, null, null],
+  [1, 25, null, null, null, 'UNKNOWN', null, null, null],
+  [1, 25, null, null, null, null, null, 1, null],
+  [1, 25, null, '2026-06-01', '2026-10-31', null, null, null, 2],
+];
+const STATE_CODE_SQL = 'public.test_original_crm_phone_state_code(x.v)';
+const STATE_NAME_SQL = 'public.test_original_crm_state_name(x.v)';
+function withoutGeneratedAt(result) {
+  const { generated_at: _generated, ...meta } = result.meta;
+  return { ...result, meta };
+}
+async function saveOriginalStateFunctions() {
+  await owner();
+  for (const [signature, name] of [['_crm_phone_state_code(text)', 'test_original_crm_phone_state_code'], ['_crm_state_name(text)', 'test_original_crm_state_name']]) {
+    const definition = (await one('SELECT pg_get_functiondef($1::regprocedure) AS definition', [`public.${signature}`])).definition;
+    await db.exec(definition.replace(`FUNCTION public.${signature.split('(')[0]}(`, `FUNCTION public.${name}(`));
+  }
+}
+async function phoneDefinitions() {
+  await owner();
+  return one(`SELECT ${['phone_customer_identity_digits(text,text,text)', 'phone_identity_digits(text,text,text)', 'phone_stored_identity_digits(text,text,text)', 'phone_to_e164(text,text)', 'is_valid_phone_e164(text)', '_phone_numbering_plans(text)']
+    .map((signature, index) => `md5(pg_get_functiondef('public.${signature}'::regprocedure)) AS f${index}`).join(', ')}`);
+}
+async function screenSnapshot() {
+  await owner();
+  const companies = {};
+  for (const companyId of [companyA, companyB, companyBig]) {
+    const contacts = await rows('SELECT * FROM public._get_crm_contact_records($1) ORDER BY contact_record_key, customer_key', [companyId]);
+    const profiles = await rows('SELECT * FROM public._get_crm_lead_profiles($1) ORDER BY customer_key', [companyId]);
+    const sampleKeys = profiles.map((profile) => profile.customer_key).filter((_, index) => index % 5 === 0).concat(['phone:5562900000000']);
+    companies[companyId] = {
+      contacts,
+      profiles,
+      contactsForKeys: await rows('SELECT * FROM public._get_crm_contact_records_for_keys($1,$2) ORDER BY contact_record_key, customer_key', [companyId, sampleKeys]),
+      profilesForKeys: await rows('SELECT * FROM public._get_crm_lead_profiles_for_keys($1,$2) ORDER BY customer_key', [companyId, sampleKeys]),
+    };
+  }
+  await actor();
+  for (const companyId of [companyA, companyBig]) {
+    const pages = [];
+    for (const args of PAGE_FILTERS) {
+      pages.push(withoutGeneratedAt((await one('SELECT public.get_crm_leads_page($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS result', [companyId, ...args])).result));
+    }
+    const searches = {};
+    for (const term of ['ana', 'rafael', '62', '9913', 'silva', '(62) 9', '+55', 'mail']) {
+      searches[term] = withoutGeneratedAt(await search(companyId, term, 1, 50));
+    }
+    Object.assign(companies[companyId], { pages, searches });
+  }
+  const started = performance.now();
+  await one('SELECT public.get_crm_leads_page($1,1,25) AS result', [companyBig]);
+  const pageMs = performance.now() - started;
+  await owner();
+  return { companies, pageMs };
 }
 
 const FIRST = ['Rafael', 'Rafaela', 'Ana', 'Mariana', 'Juliana', 'Bruno', 'Gabriel', 'Luana', 'Carlos', 'Fernanda', 'João', 'Lúcia', 'Pedro', 'Sofia', 'Thiago', 'Bianca'];
@@ -520,6 +583,135 @@ try {
     assert.ok(byPhone.leads.length >= 1);
     assert.ok(searchMs * 4 < fullMs, `busca nova não foi bem mais rápida (${searchMs.toFixed(0)} x ${fullMs.toFixed(0)} ms)`);
     assert.ok(phoneMs * 4 < fullMs, `busca por telefone não foi bem mais rápida (${phoneMs.toFixed(0)} x ${fullMs.toFixed(0)} ms)`);
+  });
+
+  // 20261123160000: telefone e estado calculados por cópias em plpgsql.
+  await saveOriginalStateFunctions();
+  const originalPhoneDefinitions = await phoneDefinitions();
+  const screenBefore = await screenSnapshot();
+  await test('20261123160000 aplica sobre as definições em vigor', async () => {
+    await owner();
+    await db.exec(await load('../migrations/20261123160000_crm_fast_phone_identity.sql'));
+  });
+
+  await test('tela Clientes, fichas, contatos e busca iguais depois da 20261123160000, e mais rápidas', async () => {
+    const screenAfter = await screenSnapshot();
+    for (const [companyId, before] of Object.entries(screenBefore.companies)) {
+      const after = screenAfter.companies[companyId];
+      assert.ok(before.contacts.length > 0 && before.profiles.length > 0, `unidade ${companyId} vazia`);
+      for (const part of Object.keys(before)) {
+        assert.deepEqual(after[part], before[part], `${part} da unidade ${companyId}`);
+      }
+    }
+    console.log(`# tela Clientes em volume: ${screenBefore.pageMs.toFixed(0)} ms antes, ${screenAfter.pageMs.toFixed(0)} ms depois`);
+    assert.ok(screenAfter.pageMs * 2 < screenBefore.pageMs, `tela Clientes não ficou mais rápida (${screenAfter.pageMs.toFixed(0)} x ${screenBefore.pageMs.toFixed(0)} ms)`);
+  });
+
+  await test('telefones: as cópias dão o mesmo resultado das funções originais', async () => {
+    await owner();
+    const codes = (await rows(`SELECT jsonb_object_keys(substring(pg_get_functiondef('public._phone_numbering_plans(text)'::regprocedure)
+      FROM '\\$metadata\\$(.*)\\$metadata\\$')::jsonb) AS code`)).map((row) => row.code);
+    assert.ok(codes.length > 200, `poucos códigos de país: ${codes.length}`);
+    const e164s = [];
+    for (const code of codes) {
+      for (let size = 4; size <= 13; size += 3) e164s.push(`+${code}${digits(size)}`);
+    }
+    e164s.push('+5562991312333', '+556232411234', '+5511912345678', '+558440041234', '+5508001234567', '+12025550123',
+      '+14155550100', '+351912345678', '+447911123456', '+34612345678', '+6281234567890', '+5500000000', '+0123', '+55', '');
+    const validity = await rows(`SELECT x.phone, public.is_valid_phone_e164(x.phone) AS original, public._crm_is_valid_phone_e164(x.phone) AS copy
+      FROM unnest($1::text[]) AS x(phone)`, [[...e164s, null]]);
+    assert.deepEqual(validity.filter((row) => row.original !== row.copy), []);
+    assert.ok(validity.filter((row) => row.original).length > 15, 'poucos telefones válidos na amostra');
+
+    const raws = ['', ' ', null, '+', 'abc', '62', '(62) 99131-2333', '62 99131-2333', '062991312333', '5562991312333',
+      '+55 62 99131 2333', '+55 (62) 3241-1234', '99131-2333', '9131-2333', '+1 (202) 555-0123', '202-555-0123',
+      '+351 912 345 678', '912 345 678', '+44 7911 123456', '62-99131-2333 r2', '+55621234', '55 11 91234-5678',
+      '(11) 1234-5678', '+5500991312333', '0800 123 4567', '+5508001234567', '4004-1234', '+55 4004-1234',
+      '+62 812 3456 7890', '+34 612 34 56 78', '5562 99131 2333', '+55 62 99131-2333 ', '12345', '+5562991312333'];
+    for (const ddd of ['20', '23', '25', '26', '29', '30', '36', '39', '40', '50', '52', '56', '60', '70', '72', '76', '78', '80', '90', '10', '00']) {
+      raws.push(`(${ddd}) 99131-2333`, `${ddd}32411234`, `+55${ddd}991312333`, `55${ddd}91312333`);
+    }
+    for (let index = 0; index < 300; index += 1) {
+      const kind = Math.floor(random() * 6);
+      const number = digits(4 + Math.floor(random() * 12));
+      raws.push(kind === 0 ? `+${number}` : kind === 1 ? number : kind === 2 ? `(${number.slice(0, 2)}) ${number.slice(2)}`
+        : kind === 3 ? `+55${pick(DDD)}9${digits(8)}` : kind === 4 ? `${pick(DDD)}${digits(8)}` : ` +${pick(codes)}${digits(5 + Math.floor(random() * 9))} `);
+    }
+    const countries = ['BR', 'br', 'US', 'PT', 'ZZ', '', null, 'GB'];
+    const cases = [];
+    for (const raw of raws) {
+      const rawDigits = (raw ?? '').replace(/\D/g, '');
+      cases.push([null, raw, 'BR'], [raw, raw, pick(countries)], [rawDigits ? `+${rawDigits}` : null, raw, pick(countries)],
+        [pick(e164s), raw, pick(countries)], [pick(['', ' ', '+5562991312333', 'abc']), raw, pick(countries)]);
+    }
+    const results = await rows(`SELECT x.e, x.p, x.c,
+        public.phone_customer_identity_digits(x.e, x.p, x.c) AS customer, public._crm_phone_customer_identity_digits(x.e, x.p, x.c) AS customer_copy,
+        public.phone_identity_digits(x.e, x.p, x.c) AS identity, public._crm_phone_identity_digits(x.e, x.p, x.c) AS identity_copy,
+        public.phone_to_e164(x.p, x.c) AS raw_e164, public._crm_phone_to_e164(x.p, x.c) AS raw_e164_copy,
+        public.phone_to_e164(x.e, 'ZZ') AS e164, public._crm_phone_to_e164(x.e, 'ZZ') AS e164_copy
+      FROM unnest($1::text[], $2::text[], $3::text[]) AS x(e, p, c)`,
+    [cases.map((item) => item[0]), cases.map((item) => item[1]), cases.map((item) => item[2])]);
+    const different = results.filter((row) => row.customer !== row.customer_copy || row.identity !== row.identity_copy
+      || row.raw_e164 !== row.raw_e164_copy || row.e164 !== row.e164_copy);
+    assert.deepEqual(different.slice(0, 5), []);
+    // Cada caminho das regras aparece na amostra.
+    assert.ok(results.some((row) => row.identity && row.e164), 'sem telefone salvo válido');
+    assert.ok(results.some((row) => row.identity && !row.e164 && row.raw_e164), 'sem telefone digitado válido');
+    assert.ok(results.some((row) => row.identity && !row.e164 && !row.raw_e164), 'sem número brasileiro fora do plano');
+    assert.ok(results.some((row) => row.customer && !row.identity), 'sem número só com dígitos');
+    assert.ok(results.some((row) => !row.customer), 'sem telefone vazio');
+    assert.ok(results.length > 2000, `poucos casos: ${results.length}`);
+    assert.deepEqual(await phoneDefinitions(), originalPhoneDefinitions, 'funções originais de telefone mudaram');
+  });
+
+  await test('estado pelo DDD e nome do estado iguais aos de antes, para todos os DDDs', async () => {
+    await owner();
+    const inputs = [null, '', 'abc', '+55 (62) 99131-2333'];
+    for (const prefix of ['55', '+55', '5', '', '54', '055', ' 55']) {
+      for (let ddd = 0; ddd <= 99; ddd += 1) {
+        for (let size = 0; size <= 12; size += 1) inputs.push(`${prefix}${String(ddd).padStart(2, '0')}${'9'.repeat(size)}`);
+      }
+    }
+    const letters = [null, '', ' go', 'xyz'];
+    for (let first = 65; first <= 90; first += 1) {
+      for (let second = 65; second <= 90; second += 1) {
+        const code = String.fromCharCode(first, second);
+        letters.push(code, code.toLowerCase());
+      }
+    }
+    const states = await one(`SELECT
+        (SELECT count(*) FROM unnest($1::text[]) x(v) WHERE public._crm_phone_state_code(x.v) IS DISTINCT FROM ${STATE_CODE_SQL}) AS state_diffs,
+        (SELECT count(DISTINCT public._crm_phone_state_code(x.v)) FROM unnest($1::text[]) x(v)) AS states,
+        (SELECT count(*) FROM unnest($2::text[]) x(v) WHERE public._crm_state_name(x.v) IS DISTINCT FROM ${STATE_NAME_SQL}) AS name_diffs,
+        (SELECT count(DISTINCT public._crm_state_name(x.v)) FROM unnest($2::text[]) x(v)) AS names,
+        (SELECT string_agg(l.lanname, ',' ORDER BY p.proname) FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+          WHERE p.oid IN ('public._crm_phone_state_code(text)'::regprocedure, 'public._crm_state_name(text)'::regprocedure)) AS languages`,
+    [inputs, letters]);
+    assert.deepEqual(states, { state_diffs: 0, states: 27, name_diffs: 0, names: 27, languages: 'plpgsql,plpgsql' });
+  });
+
+  await test('cópias de telefone são internas e as funções do CRM usam as cópias', async () => {
+    await owner();
+    for (const signature of ['_crm_is_valid_phone_e164(text)', '_crm_phone_to_e164(text,text)', '_crm_phone_identity_digits(text,text,text)', '_crm_phone_customer_identity_digits(text,text,text)']) {
+      const grants = await one(`SELECT has_function_privilege('anon', $1, 'EXECUTE') AS anon,
+        has_function_privilege('authenticated', $1, 'EXECUTE') AS authenticated,
+        has_function_privilege('service_role', $1, 'EXECUTE') AS service_role`, [`public.${signature}`]);
+      assert.deepEqual(grants, { anon: false, authenticated: false, service_role: false }, signature);
+    }
+    await actor();
+    await assert.rejects(db.query("SELECT public._crm_phone_customer_identity_digits(NULL, '62991312333', 'BR')"), (error) => error.code === '42501');
+    await owner();
+    const definitions = await one(`SELECT
+      pg_get_functiondef('public._get_crm_contact_records(uuid)'::regprocedure) AS contacts,
+      pg_get_functiondef('public._get_crm_contact_records_for_keys(uuid,text[])'::regprocedure) AS contacts_for_keys,
+      pg_get_functiondef('public._crm_search_customer_keys(uuid,text,text)'::regprocedure) AS search_keys`);
+    const count = (text, needle) => text.split(needle).length - 1;
+    assert.equal(count(definitions.contacts, 'public._crm_phone_customer_identity_digits('), 4);
+    assert.equal(count(definitions.contacts, 'public.phone_customer_identity_digits('), 0);
+    assert.equal(count(definitions.contacts_for_keys, 'public._crm_phone_customer_identity_digits('), 4);
+    assert.equal(count(definitions.contacts_for_keys, 'public.phone_customer_identity_digits('), 0);
+    assert.equal(count(definitions.search_keys, 'public._crm_phone_customer_identity_digits('), 1);
+    assert.equal(count(definitions.search_keys, 'public.phone_customer_identity_digits('), 2);
   });
 
   console.log(`\n${passed} testes da busca global de clientes passaram.`);

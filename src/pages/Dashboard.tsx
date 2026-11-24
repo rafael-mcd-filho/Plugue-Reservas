@@ -1334,17 +1334,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {!isCompanyContext && (
-            <CompanyReservationChart
-              companies={companyId === 'all' ? companies : companies.filter((company) => company.id === companyId)}
-              startDate={startDate}
-              endDate={endDate}
-              companiesLoading={companiesLoading}
-              companiesError={companiesError}
-              onRetryCompanies={() => void refetchCompanies()}
-            />
-          )}
-
           {showCompanyReportOverview && companyContext && (
             dashboardReportOverviewIsError ? (
               <Card className="border border-destructive/20 bg-destructive/5 shadow-sm" role="alert">
@@ -1415,6 +1404,18 @@ export default function Dashboard() {
             )
           )}
         </>
+      )}
+
+      {/* Fora da espera dos indicadores: o gráfico tem consulta própria e carrega ao mesmo tempo. */}
+      {!isCompanyContext && (
+        <CompanyReservationChart
+          companies={companyId === 'all' ? companies : companies.filter((company) => company.id === companyId)}
+          startDate={startDate}
+          endDate={endDate}
+          companiesLoading={companiesLoading}
+          companiesError={companiesError}
+          onRetryCompanies={() => void refetchCompanies()}
+        />
       )}
     </div>
   );
