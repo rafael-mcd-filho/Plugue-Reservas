@@ -428,6 +428,91 @@ describe('ReservationModal', () => {
     expect(screen.queryByText(/Confirmando disponibilidade/)).not.toBeInTheDocument();
   });
 
+  describe('combinação de mesas informada pelo servidor', () => {
+    function mockCombination(available = true) {
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation(async (name: string, ...args: unknown[]) => {
+        const result = await defaultRpc(name, ...args);
+        if (name !== 'get_public_reservation_booking_context') return result;
+        return {
+          ...result,
+          data: result.data.map((row: Record<string, unknown>) => ({
+            ...row,
+            schedule_max_party_size_per_reservation: 20,
+            max_party_size_per_reservation: 20,
+            max_reservations_per_slot: null,
+            total_tables: 2,
+            available_tables: 2,
+            available,
+            unavailable_reason: available ? null : 'no_table',
+            // This is the total capacity of the server's combination. Its
+            // primary physical table still has four seats (the REST fixture).
+            recommended_table_id: available ? 'table-1' : null,
+            recommended_table_capacity: available ? 8 : null,
+          })),
+        };
+      });
+    }
+
+    it('reserva oito pessoas com a combinação recomendada sem exigir uma mesa individual de oito', async () => {
+      mockCombination();
+      mockKnownCustomerPrefill();
+      renderModal(null, { initialPartySize: 8, largePartyThreshold: 20 });
+      await selectTomorrow();
+      await confirmPartySize(8);
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      await fillKnownCustomer();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirmar Reserva' }));
+
+      await waitFor(() => expect(reservationCreationCalls()).toHaveLength(1));
+      expect(reservationCreationCalls()[0][1].body.reservation).toEqual(expect.objectContaining({
+        party_size: 8, table_id: 'table-1', table_map_id: 'map-1',
+      }));
+      expect(supabaseMocks.from.mock.calls.some(([table]) => table === 'restaurant_tables')).toBe(false);
+      expect(supabaseMocks.rpc.mock.calls.some(([name]) => name === 'get_occupied_table_ids')).toBe(false);
+      expect(await screen.findByText(/está tudo pronto para você/)).toBeInTheDocument();
+    });
+
+    it.each([false, true])('permite confirmar o ambiente para oito pessoas com combinação disponível (pagamento: %s)', async (requiresPayment) => {
+      mockCombination();
+      const defaultRpc = supabaseMocks.rpc.getMockImplementation()!;
+      supabaseMocks.rpc.mockImplementation((name: string, ...args: unknown[]) => name === 'get_public_reservation_section_options'
+        ? queryResult({ enabled: true, rule_id: null, options: [{
+          id: 'section-normal', section_id: 'section-normal', payment_rule_section_id: null,
+          section_name: 'Normal', public_name: 'Normal', description: null, available: true,
+          amount_type: null, base_amount: null, pix_amount: null, credit_card_amount: null,
+        }] })
+        : defaultRpc(name, ...args));
+      const defaultInvoke = supabaseMocks.invoke.getMockImplementation()!;
+      supabaseMocks.invoke.mockImplementation((name: string, options: { body: Record<string, unknown> }) => options.body.action === 'preview'
+        ? Promise.resolve({ data: paymentRequirement(String(options.body.date), requiresPayment), error: null })
+        : defaultInvoke(name, options));
+      renderModal(null, { initialPartySize: 8, largePartyThreshold: 20 });
+      await selectTomorrow();
+      await confirmPartySize(8);
+      fireEvent.click(await screen.findByRole('button', { name: /^18:00/ }));
+      fireEvent.click(await screen.findByRole('radio', { name: /Normal/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Continuar com este ambiente' }));
+
+      expect(await screen.findByLabelText('WhatsApp')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: requiresPayment ? 'Continuar para pagamento' : 'Confirmar Reserva' })).toBeEnabled();
+      expect(supabaseMocks.from.mock.calls.some(([table]) => table === 'restaurant_tables')).toBe(false);
+      expect(reservationCreationCalls()).toHaveLength(0);
+    });
+
+    it('mantém o horário indisponível para nove quando o servidor não encontra lugares suficientes', async () => {
+      mockCombination(false);
+      renderModal(null, { initialPartySize: 9, largePartyThreshold: 20 });
+      await selectTomorrow();
+      await confirmPartySize(9);
+      const slot = await screen.findByRole('button', { name: /^18:00.*Lotado/ });
+      expect(slot).toBeDisabled();
+      fireEvent.click(slot);
+      expect(screen.queryByLabelText('WhatsApp')).not.toBeInTheDocument();
+      expect(reservationCreationCalls()).toHaveLength(0);
+    });
+  });
+
   it.each([
     { mode: 'tables', legacy: false },
     { mode: 'capacity', legacy: false },

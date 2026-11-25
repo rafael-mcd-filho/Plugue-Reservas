@@ -326,6 +326,11 @@ try {
       }
     });
   }
+  if (process.argv.includes('--auto-table-combinations')) {
+    const { runAutoTableCombinationChangeScenarios } = await import('./auto-table-combination-change-scenarios.mjs');
+    await runAutoTableCombinationChangeScenarios({ db, company, actorId, map, tableA, tableB, tableC,
+      owner, anon, add, configure, rule, test, change, options, one, load });
+  }
   console.log(`\n${passed} customer reservation change PostgreSQL cases passed; no network or external database used.`);
 } catch(error) {
   console.error(JSON.stringify({message:error.message,code:error.code,detail:error.detail,hint:error.hint,position:error.position,where:error.where},null,2));process.exitCode=1;

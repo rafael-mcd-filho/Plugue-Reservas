@@ -514,6 +514,10 @@ try {
   await assert.rejects(db.query(`SELECT create_panel_reservation($1,$2,'19:00',1,'Manual em outro horario','+5511999999999')`,[company,'2030-01-10']),
     /Capacidade do ambiente/,'a slot with selection off cannot overfill an overlapping selected environment');
   assert.equal(await scalar("SELECT has_function_privilege('anon','public.resolve_public_reservation_section(jsonb,uuid,date,time,integer,integer,text)','EXECUTE') value"), false);
+  if (process.argv.includes('--auto-table-combinations')) {
+    const { runAutoTableCombinationScenarios } = await import('./auto-table-combinations-scenarios.mjs');
+    await runAutoTableCombinationScenarios({ db, company, otherCompany, admin, operator, outsider, salon, premium, actor, loadFunction, migration });
+  }
   console.log('Reservation section pricing SQL regressions passed: atomic rules/RLS, prices, maps, best-fit, holds, history and manual assignment guards.');
 } catch (error) {
   console.error({ message: error.message, code: error.code, where: error.where, stack: error.stack });
