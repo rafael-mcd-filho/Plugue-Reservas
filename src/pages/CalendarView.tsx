@@ -22,6 +22,8 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Eye,
+  LayoutGrid,
+  List,
   Loader2,
   Plus,
   Table2,
@@ -29,6 +31,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import CalendarSlotAvailability from '@/components/CalendarSlotAvailability';
+import CalendarTableMap from '@/components/CalendarTableMap';
 import ManualReservationDialog, { type ManualReservationPreset } from '@/components/ManualReservationDialog';
 import PhoneWhatsAppLink from '@/components/PhoneWhatsAppLink';
 import ReservationDetailsDialog from '@/components/ReservationDetailsDialog';
@@ -597,6 +600,8 @@ export default function CalendarView() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [calendarMetricMode, setCalendarMetricMode] = useState<CalendarMetricMode>('guests');
+  const [dayView, setDayView] = useState<'slots' | 'map'>('slots');
+  const [mapSlotSelection, setMapSlotSelection] = useState<{ date: string; time: string } | null>(null);
   const [expandedSlotTimes, setExpandedSlotTimes] = useState<Set<string>>(() => new Set());
   const [hideEmptyCapacitySlots, setHideEmptyCapacitySlots] = useState(true);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -791,6 +796,18 @@ export default function CalendarView() {
     const offScheduleRow = capacityRows.find((row) => row.time_slot === null);
     return (offScheduleRow?.reservations ?? []).map(mapCapacityReservation);
   }, [capacityRows]);
+
+  const mapSlot = (mapSlotSelection?.date === selectedDateStr
+    ? daySlots.find((slot) => slot.time === mapSlotSelection.time)
+    : undefined)
+    ?? daySlots.find((slot) => isNowWithinCalendarSlot(slot, selectedDate))
+    ?? daySlots.find((slot) => slot.arrivalReservationCount > 0)
+    ?? daySlots[0];
+
+  const mapReservations = useMemo(() => Array.from(new Map([
+    ...daySlots.flatMap((slot) => slot.reservations.map(({ reservation }) => reservation)),
+    ...offScheduleReservations,
+  ].map((reservation) => [reservation.id, reservation])).values()), [daySlots, offScheduleReservations]);
 
   const daySummary = useMemo(() => {
     const reservationCount = daySlots.reduce((sum, slot) => sum + slot.arrivalReservationCount, 0)
@@ -1193,7 +1210,7 @@ export default function CalendarView() {
             </Card>
           </div>
 
-          <Card className="rounded-md border-0 bg-card/95 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ring-1 ring-black/[0.04]">
+          <Card className="min-w-0 rounded-md border-0 bg-card/95 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ring-1 ring-black/[0.04]">
             <CardHeader className="space-y-0 px-4 pb-3 pt-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1 space-y-1">
@@ -1203,7 +1220,7 @@ export default function CalendarView() {
                         ? `Capacidade em ${format(selectedDate, 'EEEE, dd/MM', { locale: ptBR })}`
                         : 'Selecione uma data'}
                     </CardTitle>
-                    <div className="inline-flex shrink-0 items-center gap-2">
+                    {dayView === 'slots' && <div className="inline-flex shrink-0 items-center gap-2">
                       <div className="flex h-7 items-center gap-1.5 rounded bg-muted/20 px-2">
                         <Switch
                           id="hide-empty-capacity-slots"
@@ -1229,10 +1246,12 @@ export default function CalendarView() {
                         {allSlotsExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden="true" />}
                         {allSlotsExpanded ? 'Recolher todas' : 'Expandir todas'}
                       </Button>
-                    </div>
+                    </div>}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Horários ativos do dia com ocupação e reservas relacionadas.
+                    {dayView === 'map'
+                      ? 'Escolha um horário para consultar as mesas e suas reservas.'
+                      : 'Horários ativos do dia com ocupação e reservas relacionadas.'}
                   </p>
                 </div>
 
@@ -1252,6 +1271,27 @@ export default function CalendarView() {
                       <span className="text-xs font-semibold tabular-nums">{daySummary.offScheduleGuests}</span>
                     </div>
                   )}
+                </div>
+              </div>
+              <div className="pt-4">
+                <div role="group" aria-label="Visualização do dia" className="inline-flex rounded-lg bg-muted p-1">
+                  {(['slots', 'map'] as const).map((view) => {
+                    const Icon = view === 'slots' ? List : LayoutGrid;
+                    return (
+                      <Button
+                        key={view}
+                        type="button"
+                        size="sm"
+                        variant={dayView === view ? 'secondary' : 'ghost'}
+                        className="h-8 gap-1.5"
+                        aria-pressed={dayView === view}
+                        onClick={() => setDayView(view)}
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                        {view === 'slots' ? 'Horários' : 'Mapa'}
+                      </Button>
+                    );
+                  })}
                 </div>
               </div>
             </CardHeader>
@@ -1283,6 +1323,93 @@ export default function CalendarView() {
                 <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center">
                   <p className="font-medium text-foreground">{dayEmptyMessage}</p>
                   <p className="mt-1 text-sm text-muted-foreground">Quando houver horários configurados ou reservas, eles aparecem aqui.</p>
+                </div>
+              ) : dayView === 'map' && mapSlot ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-map-time" className="text-sm">Horário do mapa</Label>
+                      <Select
+                        value={mapSlot.time}
+                        onValueChange={(time) => setMapSlotSelection({ date: selectedDateStr, time })}
+                      >
+                        <SelectTrigger id="calendar-map-time" aria-label="Horário do mapa" className="w-44 bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {daySlots.map((slot) => (
+                            <SelectItem key={slot.time} value={slot.time}>{slot.time} - {slot.endTime}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="text-right text-sm">
+                      <p className="font-medium tabular-nums">{formatReservationCountLabel(mapSlot.occupyingReservationCount)} / {formatGuestCountLabel(mapSlot.occupiedGuests)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{formatCapacity(mapSlot.remainingCapacity)} vagas na faixa</p>
+                    </div>
+                  </div>
+
+                  {offScheduleReservations.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <p>{formatReservationCountLabel(offScheduleReservations.length)} fora dos horários configurados.</p>
+                      <Button type="button" size="sm" variant="outline" onClick={() => {
+                        setExpandedSlotTimes((current) => new Set(current).add('off-schedule'));
+                        setDayView('slots');
+                      }}>Ver reservas fora dos horários</Button>
+                    </div>
+                  )}
+
+                  {mapSlot.availabilityMode === 'capacity' ? (
+                    <>
+                      <p className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                        Esta data usa reservas por capacidade. A disponibilidade é apresentada em pessoas.
+                      </p>
+                      <CalendarSlotAvailability
+                        key={`${companyId}-${selectedDateStr}-${mapSlot.time}`}
+                        companyId={companyId ?? ''}
+                        canCreateReservation={canCreateReservations}
+                        date={selectedDateStr}
+                        slot={mapSlot}
+                        showOccupied={availabilityShowOccupied}
+                        onShowOccupiedChange={setAvailabilityShowOccupied}
+                        minSeats={availabilityMinSeats}
+                        onMinSeatsChange={setAvailabilityMinSeats}
+                        reservationTimeRanges={getSlotReservationTimeRanges(mapSlot)}
+                        onReserve={openManualReservation}
+                        onOpenReservation={(id) => openSlotReservationDetails(mapSlot, id)}
+                      />
+                    </>
+                  ) : (
+                    <CalendarTableMap
+                      key={`${companyId}-${selectedDateStr}-${mapSlot.time}`}
+                      companyId={companyId ?? ''}
+                      date={selectedDateStr}
+                      slot={mapSlot}
+                      mapName={mapSlot.activeTableMap?.name ?? null}
+                      canCreateReservation={canCreateReservations}
+                      reservations={mapReservations.map((reservation) => ({ ...reservation, timeRange: getReservationTimeRange(reservation) }))}
+                      onReserve={openManualReservation}
+                      onOpenReservation={(id) => {
+                        const reservation = mapReservations.find((row) => row.id === id);
+                        if (reservation) openDetails(reservation);
+                      }}
+                    />
+                  )}
+
+                  {mapSlot.reservations.some(({ table }) => !table || mapSlot.availabilityMode === 'capacity') && (
+                    <div className="space-y-2 border-t border-border pt-4">
+                      <h2 className="text-sm font-semibold">{mapSlot.availabilityMode === 'capacity' ? 'Reservas na faixa' : 'Reservas sem mesa definida'}</h2>
+                      {mapSlot.reservations.filter(({ table }) => !table || mapSlot.availabilityMode === 'capacity').map(({ reservation }) => (
+                        <div key={reservation.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-medium">{reservation.guest_name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{getReservationTimeRange(reservation)} · {formatGuestCountLabel(getReservationOccupancyGuests(reservation))}</p>
+                          </div>
+                          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => openDetails(reservation)}>Detalhes</Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">
